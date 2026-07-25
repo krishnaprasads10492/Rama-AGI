@@ -28,6 +28,7 @@ const Intelligence = React.lazy(() => import('@pages/Intelligence/Intelligence.j
 const IDE          = React.lazy(() => import('@pages/IDE/IDE.jsx'));
 const Evolution    = React.lazy(() => import('@pages/Evolution/Evolution.jsx'));
 const Resources    = React.lazy(() => import('@pages/Resources/Resources.jsx'));
+const Settings     = React.lazy(() => import('@pages/Settings/Settings.jsx'));
 
 // Loading fallback
 const PageLoader = () => (
@@ -154,6 +155,7 @@ export default function App() {
               <Route path="/ide"        element={<IDE />} />
               <Route path="/evolution"  element={<Evolution />} />
               <Route path="/resources"  element={<Resources />} />
+              <Route path="/settings"   element={<Settings />} />
               {/* Catch-all → Chat */}
               <Route path="*"           element={<Chat />} />
             </Routes>

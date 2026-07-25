@@ -245,6 +245,14 @@ contextBridge.exposeInMainWorld('rama', {
     exportBackup:  (dest)                     => ipcRenderer.invoke('store:export-backup', dest),
   },
 
+  // ── App controls ──────────────────────────────────────────────────────────
+  appControl: {
+    setLoginItem: (enabled) => ipcRenderer.invoke('app:set-login-item', enabled),
+    getLoginItem: ()         => ipcRenderer.invoke('app:get-login-item'),
+    getVersion:   ()         => require('electron').app?.getVersion() ?? '1.0.0',
+    isPackaged:   ()         => !process.env.RAMA_DEV || process.env.RAMA_DEV === '0',
+  },
+
   // ── Platform info (read-only, safe to expose) ─────────────────────────────
   platform: process.platform,
   isDev:    !app?.isPackaged,

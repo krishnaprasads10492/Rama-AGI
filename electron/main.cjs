@@ -22,7 +22,8 @@ const sessionMgr   = require('./sessionManager.cjs');
 const dataStore    = require('./dataStore.cjs');
 
 // ─── Constants ──────────────────────────────────────────────────────────────
-const isDev  = !app.isPackaged;
+const isDev    = !app.isPackaged;
+const isHidden = process.argv.includes('--hidden');   // Launched by auto-start
 const VITE_URL = 'http://localhost:5173';
 const BUILD_INDEX = path.join(__dirname, '..', 'build', 'index.html');
 
@@ -84,7 +85,10 @@ function createMainWindow() {
 
   // Show once ready to avoid white flash
   mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
+    // If launched via auto-start (--hidden), start in tray only
+    if (!isHidden) {
+      mainWindow.show();
+    }
     setupAutoUpdater();
   });
 
@@ -197,6 +201,22 @@ ipcMain.handle('shell:open-external', async (_e, url) => {
   if (!safe) return { error: 'Blocked non-http URL' };
   await shell.openExternal(url);
   return { ok: true };
+});
+
+// ─── IPC: Auto-start on login ─────────────────────────────────────────────────
+ipcMain.handle('app:set-login-item', (_e, enabled) => {
+  app.setLoginItemSettings({
+    openAtLogin: enabled,
+    openAsHidden: true,
+    name: 'Rama AGI',
+    args: ['--hidden'],
+  });
+  return { ok: true, enabled };
+});
+
+ipcMain.handle('app:get-login-item', () => {
+  const settings = app.getLoginItemSettings();
+  return { ok: true, openAtLogin: settings.openAtLogin };
 });
 
 // ─── IPC: Native notification ─────────────────────────────────────────────────

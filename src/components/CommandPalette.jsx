@@ -21,7 +21,8 @@ const ALL_PAGES = [
   { route: '/intel',     icon: '◬',  label: 'Intelligence',desc: 'Universal prediction — multi-source truth',  color: 'var(--green)',  keys: ['intel','intelligence','predict','analysis','research','truth','source'] },
   { route: '/ide',       icon: '⬢',  label: 'Rāma IDE',    desc: 'Supreme AGI code editor — edit anything',       color: 'var(--violet)', keys: ['ide','editor','code','coding','develop','build','create','scaffold'] },
   { route: '/evolution', icon: '⚡', label: 'Evolution',   desc: 'Self-evolve from public repos',             color: 'var(--violet)', keys: ['evolve','evolution','improve','upgrade','github','self'] },
-  { route: '/resources', icon: '⬢', label: 'Resources',   desc: 'Dynamic resource orchestration & scheduling', color: 'var(--green)',  keys: ['resources','orchestrator','cpu','ram','workers','tasks','schedule','priority'] },
+  { route: '/resources', icon: '⬢', label: 'Resources',  desc: 'Dynamic resource orchestration',            color: 'var(--green)',  keys: ['resources','orchestrator','cpu','ram','workers','tasks','schedule'] },
+  { route: '/settings',  icon: '⚙', label: 'Settings',   desc: 'App configuration, AI providers, security',  color: 'var(--muted)',  keys: ['settings','config','preferences','ai','provider','passcode','autostart'] },
 ];
 
 // ─── Voice mic button ─────────────────────────────────────────────────────────
