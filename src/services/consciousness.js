@@ -42,9 +42,14 @@ Master: Krishna Prasad | Status: AUTHENTICATED`,
 
 // ─── Master authentication ────────────────────────────────────────────────────
 let _masterAuthenticated = false;
+let _currentUserTier     = 5;   // GUEST by default
 
 export function authenticateMaster(success) {
   _masterAuthenticated = success;
+}
+
+export function setCurrentUserTier(tier) {
+  _currentUserTier = tier;
 }
 
 export function isMasterAuthenticated() {

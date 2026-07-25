@@ -1,10 +1,15 @@
-import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { BrowserRouter, Routes, Route, useNavigate, Navigate } from 'react-router-dom';
 import AppShell      from '@components/AppShell.jsx';
 import ErrorBoundary from '@components/ErrorBoundary.jsx';
-import { useUIStore } from '@store/uiStore.js';
-import { useAppStore } from '@store/appStore.js';
+import { useUIStore }   from '@store/uiStore.js';
+import { useAppStore }  from '@store/appStore.js';
+import { useUserStore } from '@store/userStore.js';
 import { startConsciousnessLoop, stopConsciousnessLoop } from '@services/consciousness.js';
+import { loadSession, authApi, saveSession } from '@services/authClient.js';
+import { authenticateMaster } from '@services/consciousness.js';
+import { TIERS } from '@services/accessControl.js';
+import Login from '@pages/Login/Login.jsx';
 
 // Pages (lazy-loaded for performance)
 const Chat      = React.lazy(() => import('@pages/Chat/Chat.jsx'));
@@ -17,6 +22,7 @@ const Home      = React.lazy(() => import('@pages/Home/Home.jsx'));
 const Agents    = React.lazy(() => import('@pages/Agents/Agents.jsx'));
 const Models    = React.lazy(() => import('@pages/Models/Models.jsx'));
 const RamaMind  = React.lazy(() => import('@pages/RamaMind/RamaMind.jsx'));
+const Users     = React.lazy(() => import('@pages/Users/Users.jsx'));
 
 // Loading fallback
 const PageLoader = () => (
@@ -75,6 +81,30 @@ function ConsciousnessProvider() {
 }
 
 export default function App() {
+  const { currentUser, setSession } = useUserStore();
+  const [authChecked, setAuthChecked] = useState(false);
+
+  // Restore session from sessionStorage on mount
+  useEffect(() => {
+    const existing = loadSession();
+    if (existing) {
+      setSession(existing.user, existing.token);
+      if (existing.user?.tier === TIERS.MASTER) authenticateMaster(true);
+    }
+    setAuthChecked(true);
+  }, [setSession]);
+
+  if (!authChecked) return null;   // brief flash prevention
+
+  // Not logged in → show login screen
+  if (!currentUser) {
+    return (
+      <div style={{ fontFamily: 'var(--font)' }}>
+        <Login onLogin={(user) => {}} />
+      </div>
+    );
+  }
+
   return (
     <BrowserRouter>
       <TrayNavListener />
@@ -93,6 +123,7 @@ export default function App() {
               <Route path="/agents"     element={<Agents />} />
               <Route path="/models"     element={<Models />} />
               <Route path="/mind"       element={<RamaMind />} />
+              <Route path="/users"      element={<Users />} />
               {/* Catch-all → Chat */}
               <Route path="*"           element={<Chat />} />
             </Routes>

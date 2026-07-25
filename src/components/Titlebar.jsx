@@ -1,7 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useUIStore }   from '@store/uiStore.js';
 import { useRamaStore } from '@store/ramaStore.js';
+import { useUserStore } from '@store/userStore.js';
 import { isMasterAuthenticated, authenticateMaster } from '@services/consciousness.js';
+import { authApi, clearSession } from '@services/authClient.js';
+import { getTierBadge, TIERS } from '@services/accessControl.js';
 import RamaOrb from './RamaOrb.jsx';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
@@ -120,6 +123,18 @@ export default function Titlebar() {
 
   const { togglePalette, paletteOpen, voiceActive, masterAuthenticated } = useUIStore();
   const { isThinking } = useRamaStore();
+  const { currentUser, clearSession: clearUserSession, sessionToken } = useUserStore();
+
+  const handleLogout = useCallback(async () => {
+    if (sessionToken) await authApi.logout(sessionToken).catch(() => {});
+    clearSession();
+    clearUserSession();
+    authenticateMaster(false);
+    // Reload to show login screen
+    window.location.reload();
+  }, [sessionToken, clearUserSession]);
+
+  const tierBadge = currentUser ? getTierBadge(currentUser.tier) : null;
 
   useEffect(() => {
     if (!isElectron) return;
@@ -192,6 +207,19 @@ export default function Titlebar() {
             }}>
             Ctrl+K
           </div>
+
+          {/* Current user pill */}
+          {currentUser && tierBadge && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px',
+              padding: '2px 8px', background: `${tierBadge.color}12`,
+              border: `1px solid ${tierBadge.color}33`, borderRadius: '2px',
+              WebkitAppRegion: 'no-drag' }}>
+              <span style={{ fontSize: '9px', color: tierBadge.color, fontWeight: 700 }}>
+                {currentUser.tier === TIERS.MASTER ? '◈' : '◎'}
+              </span>
+              <span style={{ fontSize: '10px', color: tierBadge.color }}>{currentUser.name}</span>
+            </div>
+          )}
         </div>
 
         {/* Center — metrics + clock */}
@@ -221,6 +249,17 @@ export default function Titlebar() {
           WebkitAppRegion: 'no-drag',
           height:         '100%',
         }}>
+          {/* Logout button */}
+          {currentUser && currentUser.tier !== TIERS.GUEST && (
+            <button onClick={handleLogout} title="Sign out"
+              style={{ padding: '0 10px', height: '100%', border: 'none', background: 'transparent',
+                color: 'var(--muted)', cursor: 'pointer', fontSize: '11px', fontFamily: 'var(--font)',
+                transition: 'color 0.15s', WebkitAppRegion: 'no-drag' }}
+              onMouseEnter={e => e.currentTarget.style.color = 'var(--amber)'}
+              onMouseLeave={e => e.currentTarget.style.color = 'var(--muted)'}>
+              ⇥
+            </button>
+          )}
           <TitleBtn onClick={minimize} label="─" title="Minimize"                    color="var(--text-dim)" hoverColor="var(--amber)" />
           <TitleBtn onClick={maximize} label={maximized ? '❐' : '□'} title="Maximize" color="var(--text-dim)" hoverColor="var(--accent)" />
           <TitleBtn onClick={close}    label="✕" title="Close"                        color="var(--text-dim)" hoverColor="var(--red)" isClose />

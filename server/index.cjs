@@ -42,7 +42,10 @@ app.use((req, _res, next) => {
 const aiRoutes     = require('./routes/ai.cjs');
 const systemRoutes = require('./routes/system.cjs');
 const healthRoutes = require('./routes/health.cjs');
+const authRoutes   = require('./routes/auth.cjs');
 
+app.use('/api/auth',   authRoutes);
+app.use('/api/users',  authRoutes);   // user management under same router
 app.use('/api/ai',     aiRoutes);
 app.use('/api/system', systemRoutes);
 app.use('/api',        healthRoutes);
