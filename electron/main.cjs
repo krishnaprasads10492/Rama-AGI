@@ -15,6 +15,8 @@ const browserIPC   = require('./ipc/browserEngine.cjs');
 const vaultIPC     = require('./ipc/credentialVault.cjs');
 const modelIPC     = require('./ipc/modelRouter.cjs');
 const agentIPC     = require('./ipc/agentOrchestrator.cjs');
+const sessionMgr   = require('./sessionManager.cjs');
+const dataStore    = require('./dataStore.cjs');
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const isDev  = !app.isPackaged;
@@ -201,7 +203,11 @@ ipcMain.handle('notify', async (_e, { title, body }) => {
 });
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Initialize session manager (check first-run, etc.)
+  const dataDir = dataStore.getDataDir();
+  await sessionMgr.init(dataDir);
+
   // Register all IPC handlers
   systemIPC.register(ipcMain);
   fsIPC.register(ipcMain);
@@ -213,6 +219,8 @@ app.whenReady().then(() => {
   vaultIPC.register(ipcMain);
   modelIPC.register(ipcMain);
   agentIPC.register(ipcMain);
+  sessionMgr.register(ipcMain);
+  dataStore.register(ipcMain);
 
   createMainWindow();
   createTray();
@@ -235,6 +243,7 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
   app.isQuiting = true;
+  sessionMgr.lockSession();   // zero all key material
   aiIPC.stopAll();
   terminalIPC.destroyAll();
   browserIPC.closeBrowser();

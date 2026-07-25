@@ -9,7 +9,8 @@ import { startConsciousnessLoop, stopConsciousnessLoop } from '@services/conscio
 import { loadSession, authApi, saveSession } from '@services/authClient.js';
 import { authenticateMaster } from '@services/consciousness.js';
 import { TIERS } from '@services/accessControl.js';
-import Login from '@pages/Login/Login.jsx';
+import Login   from '@pages/Login/Login.jsx';
+import Unlock  from '@pages/Unlock/Unlock.jsx';
 
 // Pages (lazy-loaded for performance)
 const Chat      = React.lazy(() => import('@pages/Chat/Chat.jsx'));
@@ -82,9 +83,10 @@ function ConsciousnessProvider() {
 
 export default function App() {
   const { currentUser, setSession } = useUserStore();
-  const [authChecked, setAuthChecked] = useState(false);
+  const [authChecked,    setAuthChecked]    = useState(false);
+  const [cryptoUnlocked, setCryptoUnlocked] = useState(false);
 
-  // Restore session from sessionStorage on mount
+  // Step 1: Check & restore session
   useEffect(() => {
     const existing = loadSession();
     if (existing) {
@@ -94,13 +96,33 @@ export default function App() {
     setAuthChecked(true);
   }, [setSession]);
 
-  if (!authChecked) return null;   // brief flash prevention
+  if (!authChecked) return null;
 
-  // Not logged in → show login screen
+  // Step 1: Crypto unlock gate — always first
+  if (!cryptoUnlocked) {
+    return (
+      <Unlock onUnlocked={(result) => {
+        if (result.devMode) {
+          // Browser dev mode — skip crypto, show login
+          setCryptoUnlocked(true);
+          return;
+        }
+        // In Electron, session manager returned user after unlock
+        if (result.user) {
+          saveSession(result.token, result.user);
+          setSession(result.user, result.token);
+          if (result.user.tier === TIERS.MASTER) authenticateMaster(true);
+        }
+        setCryptoUnlocked(true);
+      }} />
+    );
+  }
+
+  // Step 2: User login gate (for non-master accounts)
   if (!currentUser) {
     return (
       <div style={{ fontFamily: 'var(--font)' }}>
-        <Login onLogin={(user) => {}} />
+        <Login onLogin={() => {}} />
       </div>
     );
   }

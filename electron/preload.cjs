@@ -159,6 +159,29 @@ contextBridge.exposeInMainWorld('rama', {
   // ── Native Notifications ──────────────────────────────────────────────────
   notify: (title, body) => ipcRenderer.invoke('notify', { title, body }),
 
+  // ── Session / Unlock ──────────────────────────────────────────────────────
+  session: {
+    isFirstRun:     ()           => ipcRenderer.invoke('session:is-first-run'),
+    unlock:         (passcode)   => ipcRenderer.invoke('session:unlock', passcode),
+    lock:           ()           => ipcRenderer.invoke('session:lock'),
+    validate:       (token)      => ipcRenderer.invoke('session:validate', token),
+    status:         ()           => ipcRenderer.invoke('session:status'),
+    changePasscode: (old_, new_) => ipcRenderer.invoke('session:change-passcode', old_, new_),
+  },
+
+  // ── Encrypted data store ──────────────────────────────────────────────────
+  store: {
+    get:           (domain, key)              => ipcRenderer.invoke('store:get',    domain, key),
+    set:           (domain, key, value)       => ipcRenderer.invoke('store:set',    domain, key, value),
+    push:          (domain, arrayKey, item)   => ipcRenderer.invoke('store:push',   domain, arrayKey, item),
+    update:        (domain, arrayKey, id, ch) => ipcRenderer.invoke('store:update', domain, arrayKey, id, ch),
+    remove:        (domain, arrayKey, id)     => ipcRenderer.invoke('store:remove', domain, arrayKey, id),
+    find:          (domain, arrayKey, filter) => ipcRenderer.invoke('store:find',   domain, arrayKey, filter),
+    save:          ()                         => ipcRenderer.invoke('store:save'),
+    status:        ()                         => ipcRenderer.invoke('store:status'),
+    exportBackup:  (dest)                     => ipcRenderer.invoke('store:export-backup', dest),
+  },
+
   // ── Platform info (read-only, safe to expose) ─────────────────────────────
   platform: process.platform,
   isDev:    !app?.isPackaged,
