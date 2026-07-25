@@ -162,4 +162,93 @@ contextBridge.exposeInMainWorld('rama', {
   // ── Platform info (read-only, safe to expose) ─────────────────────────────
   platform: process.platform,
   isDev:    !app?.isPackaged,
+
+  // ── Credential Vault ──────────────────────────────────────────────────────
+  vault: {
+    unlock:  (password)           => ipcRenderer.invoke('vault:unlock', password),
+    lock:    ()                   => ipcRenderer.invoke('vault:lock'),
+    status:  ()                   => ipcRenderer.invoke('vault:status'),
+    set:     (service, value, meta) => ipcRenderer.invoke('vault:set', service, value, meta),
+    get:     (service)            => ipcRenderer.invoke('vault:get', service),
+    list:    ()                   => ipcRenderer.invoke('vault:list'),
+    delete:  (service)            => ipcRenderer.invoke('vault:delete', service),
+    has:     (service)            => ipcRenderer.invoke('vault:has', service),
+  },
+
+  // ── Model Router ──────────────────────────────────────────────────────────
+  models: {
+    list:             ()           => ipcRenderer.invoke('models:list'),
+    setPrimary:       (model)      => ipcRenderer.invoke('models:set-primary', model),
+    getPrimary:       ()           => ipcRenderer.invoke('models:get-primary'),
+    route:            (taskType)   => ipcRenderer.invoke('models:route', taskType),
+    chat:             (opts)       => ipcRenderer.invoke('models:chat', opts),
+    checkCredentials: ()           => ipcRenderer.invoke('models:check-credentials'),
+    needsForTask:     (task)       => ipcRenderer.invoke('models:needs-for-task', task),
+    ollamaList:       ()           => ipcRenderer.invoke('models:ollama-list'),
+    ollamaPull:       (name, cb) => {
+      const handler = (_e, data) => cb(data);
+      ipcRenderer.on('models:ollama-pull-progress', handler);
+      const promise = ipcRenderer.invoke('models:ollama-pull', name);
+      return promise.finally(() => ipcRenderer.removeListener('models:ollama-pull-progress', handler));
+    },
+  },
+
+  // ── Agent Orchestrator ────────────────────────────────────────────────────
+  agents: {
+    spawn:        (opts)       => ipcRenderer.invoke('agents:spawn', opts),
+    kill:         (id)         => ipcRenderer.invoke('agents:kill', id),
+    killAll:      ()           => ipcRenderer.invoke('agents:kill-all'),
+    list:         ()           => ipcRenderer.invoke('agents:list'),
+    get:          (id)         => ipcRenderer.invoke('agents:get', id),
+    getAudit:     ()           => ipcRenderer.invoke('agents:get-audit'),
+    getResources: ()           => ipcRenderer.invoke('agents:get-resources'),
+    setGovernor:  (limits)     => ipcRenderer.invoke('agents:set-governor', limits),
+    onSpawned:    (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('agents:spawned', h);
+      return () => ipcRenderer.removeListener('agents:spawned', h);
+    },
+    onUpdate: (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('agents:update', h);
+      return () => ipcRenderer.removeListener('agents:update', h);
+    },
+    onStep: (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('agents:step', h);
+      return () => ipcRenderer.removeListener('agents:step', h);
+    },
+    onComplete: (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('agents:complete', h);
+      return () => ipcRenderer.removeListener('agents:complete', h);
+    },
+    onApprovalNeeded: (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('agents:approval-needed', h);
+      return () => ipcRenderer.removeListener('agents:approval-needed', h);
+    },
+  },
+
+  // ── Browser Engine ────────────────────────────────────────────────────────
+  browser: {
+    launch:      (opts)              => ipcRenderer.invoke('browser:launch', opts),
+    close:       ()                  => ipcRenderer.invoke('browser:close'),
+    openPage:    (url)               => ipcRenderer.invoke('browser:open-page', url),
+    navigate:    (id, url)           => ipcRenderer.invoke('browser:navigate', id, url),
+    getContent:  (id)                => ipcRenderer.invoke('browser:get-content', id),
+    search:      (query, engine)     => ipcRenderer.invoke('browser:search', query, engine),
+    screenshot:  (id)                => ipcRenderer.invoke('browser:screenshot', id),
+    executeJs:   (id, script)        => ipcRenderer.invoke('browser:execute-js', id, script),
+    download:    (url, dir, name)    => ipcRenderer.invoke('browser:download', url, dir, name),
+    getDownloads:()                  => ipcRenderer.invoke('browser:get-downloads'),
+    closePage:   (id)                => ipcRenderer.invoke('browser:close-page', id),
+    listPages:   ()                  => ipcRenderer.invoke('browser:list-pages'),
+    fetchUrl:    (url)               => ipcRenderer.invoke('browser:fetch-url', url),
+    onDownloadProgress: (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('browser:download-progress', h);
+      return () => ipcRenderer.removeListener('browser:download-progress', h);
+    },
+  },
 });

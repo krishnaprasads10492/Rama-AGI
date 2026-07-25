@@ -5,12 +5,16 @@ const path = require('path');
 const { autoUpdater } = require('electron-updater');
 
 // ─── IPC Handlers ───────────────────────────────────────────────────────────
-const systemIPC   = require('./ipc/system.cjs');
-const fsIPC       = require('./ipc/filesystem.cjs');
-const gitIPC      = require('./ipc/git.cjs');
-const terminalIPC = require('./ipc/terminal.cjs');
-const appsIPC     = require('./ipc/appAssimilation.cjs');
-const aiIPC       = require('./ipc/aiProcess.cjs');
+const systemIPC    = require('./ipc/system.cjs');
+const fsIPC        = require('./ipc/filesystem.cjs');
+const gitIPC       = require('./ipc/git.cjs');
+const terminalIPC  = require('./ipc/terminal.cjs');
+const appsIPC      = require('./ipc/appAssimilation.cjs');
+const aiIPC        = require('./ipc/aiProcess.cjs');
+const browserIPC   = require('./ipc/browserEngine.cjs');
+const vaultIPC     = require('./ipc/credentialVault.cjs');
+const modelIPC     = require('./ipc/modelRouter.cjs');
+const agentIPC     = require('./ipc/agentOrchestrator.cjs');
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const isDev  = !app.isPackaged;
@@ -205,6 +209,10 @@ app.whenReady().then(() => {
   terminalIPC.register(ipcMain, mainWindow);
   appsIPC.register(ipcMain);
   aiIPC.register(ipcMain);
+  browserIPC.register(ipcMain);
+  vaultIPC.register(ipcMain);
+  modelIPC.register(ipcMain);
+  agentIPC.register(ipcMain);
 
   createMainWindow();
   createTray();
@@ -229,4 +237,5 @@ app.on('before-quit', () => {
   app.isQuiting = true;
   aiIPC.stopAll();
   terminalIPC.destroyAll();
+  browserIPC.closeBrowser();
 });

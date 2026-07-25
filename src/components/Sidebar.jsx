@@ -7,6 +7,8 @@ const NAV_ITEMS = [
   { route: '/system',     icon: '⬢',  label: 'System',     color: 'var(--green)',   title: 'System Monitor' },
   { route: '/terminal',   icon: '>_', label: 'Terminal',   color: 'var(--green)',   title: 'Embedded Terminal' },
   { route: '/git',        icon: '⎇',  label: 'Git Sync',   color: 'var(--amber)',   title: 'Git Sync Bridge' },
+  { route: '/agents',     icon: '◎',  label: 'Agents',     color: 'var(--violet)',  title: 'Multi-Agent Control' },
+  { route: '/models',     icon: '⋯',  label: 'Models',     color: 'var(--accent)',  title: 'AI Model Router' },
   { route: '/stockmind',  icon: '◬',  label: 'StockMind',  color: 'var(--magenta)', title: 'StockMind AI' },
   { route: '/knowledge',  icon: '◉',  label: 'Knowledge',  color: 'var(--accent)',  title: 'Knowledge Base' },
 ];

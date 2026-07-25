@@ -11,6 +11,8 @@ const GitSync   = React.lazy(() => import('@pages/GitSync/GitSync.jsx'));
 const StockMind = React.lazy(() => import('@pages/StockMind/StockMind.jsx'));
 const Knowledge = React.lazy(() => import('@pages/Knowledge/Knowledge.jsx'));
 const Home      = React.lazy(() => import('@pages/Home/Home.jsx'));
+const Agents    = React.lazy(() => import('@pages/Agents/Agents.jsx'));
+const Models    = React.lazy(() => import('@pages/Models/Models.jsx'));
 
 // Loading fallback
 const PageLoader = () => (
@@ -64,6 +66,8 @@ export default function App() {
               <Route path="/git"        element={<GitSync />} />
               <Route path="/stockmind"  element={<StockMind />} />
               <Route path="/knowledge"  element={<Knowledge />} />
+              <Route path="/agents"     element={<Agents />} />
+              <Route path="/models"     element={<Models />} />
               {/* Catch-all → Chat */}
               <Route path="*"           element={<Chat />} />
             </Routes>

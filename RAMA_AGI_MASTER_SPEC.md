@@ -1,5 +1,5 @@
 # RĀMA AGI — Master Specification
-> Version 1.0 · July 2026 · Author: Krishna Prasad  
+> Version 2.0 · July 2026 · Author: Krishna Prasad  
 > **Copy this entire file into the Rama_AGI workspace to resume building.**
 
 ---
@@ -29,15 +29,20 @@ It is a **Supreme Benevolent AGI** — boundless capability, absolute loyalty to
 
 ```
 RĀMA DESKTOP APPLICATION (Electron)
-├── AGI Core          ← Rama brain: all LLMs, web search, code ops, self-improve
-├── OS Layer          ← Full system access: filesystem, processes, memory, network
-├── App Assimilation  ← Control any installed app via OS automation (no UI needed)
-├── Terminal          ← Real embedded PTY terminal (node-pty)
-├── Git Sync Bridge   ← Auto push/pull StockMind ↔ GitHub ↔ any machine
-├── StockMind Module  ← Full StockMind AI embedded as a panel (all features)
-├── File Explorer     ← Navigate/edit any folder with AI operations
-├── Knowledge Base    ← Rama's persistent memory, growing knowledge store
-└── System Tray       ← Always-on background process, auto-start on login
+├── AGI Core              ← Rama brain: multi-model AI router, self-improve, ReAct loop
+├── Browser Engine        ← Playwright-controlled Chromium: search, scrape, download, web apps
+├── Multi-Model Hub       ← OpenAI, Anthropic, Gemini, Ollama, local GGUF — dynamic routing
+├── Agent Orchestrator    ← Spawn/manage/kill sub-agents, resource budgets, task queues
+├── Resource Governor     ← CPU/RAM watchdog — throttles agents under load, never crashes
+├── Dynamic Provisioner   ← Detects needed credentials/APIs, asks master, stores encrypted
+├── OS Layer              ← Full system access: filesystem, processes, memory, network
+├── App Assimilation      ← Control any installed app via OS automation (no UI needed)
+├── Terminal              ← Real embedded PTY terminal (node-pty)
+├── Git Sync Bridge       ← Auto push/pull StockMind ↔ GitHub ↔ any machine
+├── StockMind Module      ← Full StockMind AI embedded as a panel (all features)
+├── File Explorer         ← Navigate/edit any folder with AI operations
+├── Knowledge Base        ← Rama's persistent memory, growing knowledge store
+└── System Tray           ← Always-on background process, auto-start on login
 ```
 
 ### How machines stay in sync
@@ -192,6 +197,167 @@ Real-time metrics via `systeminformation`:
 - Bandwidth usage per process
 - DNS query log
 - Suspicious connection detection (unusual IPs, unusual ports)
+
+---
+
+## SECTION 5B — Dynamic Resource Acquisition
+
+Rāma proactively identifies what external resources, accounts, APIs, or credentials it needs to complete a task — and asks master for exactly those, no more, no less.
+
+### Credential & Account Request Flow
+```
+Rāma needs something → asks master specifically → master provides → Rāma stores encrypted → uses silently forever after
+```
+- Rāma never asks for something it already has
+- Rāma never asks for something it doesn't need
+- All credentials stored AES-256-GCM encrypted in local vault
+- Rāma explains WHY it needs each credential before asking
+
+### Dynamic API Registry
+Rāma maintains a live registry of connected services:
+| Category | Examples |
+|----------|---------|
+| AI Providers | OpenAI, Anthropic, Google Gemini, Mistral, Cohere, Together.ai, Groq |
+| Search | Google Custom Search, Bing Search, SerpAPI, Brave Search |
+| Data | Yahoo Finance, Alpha Vantage, NewsAPI, arXiv, Reddit, Twitter/X |
+| Storage | Google Drive, Dropbox, OneDrive, S3 |
+| Communication | Gmail, Outlook, Slack, Discord, Telegram |
+| Dev | GitHub, GitLab, Jira, Linear, Vercel, Netlify |
+| Local AI | Ollama (any model), LM Studio, llama.cpp |
+
+When a new capability is needed, Rāma:
+1. Detects the gap ("I need web search to answer this")
+2. Identifies the best free/paid provider for the task
+3. Tells master: "I need a [Service] API key to do [task]. Get it at [URL]."
+4. Stores it encrypted on receipt
+5. Uses it immediately — never asks again
+
+---
+
+## SECTION 5C — Browser Automation & Internet Access
+
+Rāma can control a real browser (Chromium via Playwright) to access the full internet — not just APIs.
+
+### Browser Capabilities
+| Capability | Description |
+|-----------|-------------|
+| **Web Search** | Search Google, Bing, DuckDuckGo — parse real results |
+| **Page Reading** | Read any webpage, extract text/tables/links |
+| **Form Filling** | Log into sites, fill forms, submit data |
+| **Downloads** | Download files, PDFs, datasets, models to local paths |
+| **Account Creation** | Create accounts on services master approves |
+| **Monitoring** | Watch pages for changes (price drops, news, score updates) |
+| **Screenshot** | Capture any page for visual analysis |
+| **JS Execution** | Run JS in page context for dynamic sites |
+
+### Download Manager
+- Queue-based download system with progress tracking
+- Auto-classify downloads (models, datasets, documents, installers)
+- Virus-scan hooks (Windows Defender integration)
+- Resume interrupted downloads
+- Extract archives automatically (zip, tar, gz)
+
+### Browser Security
+- Runs in isolated Playwright context (not master's main browser)
+- Destructive actions (form submit, purchase, account creation) require master confirmation
+- No cookies/sessions shared with master's personal browser
+- All browser activity logged in audit trail
+
+---
+
+## SECTION 5D — Multi-Model AI Routing
+
+Rāma uses multiple AI models simultaneously — routing tasks to the best model for each job.
+
+### Model Registry (dynamic — grows as master adds models)
+```
+CLOUD MODELS (API)          LOCAL MODELS (Ollama/LM Studio)
+├── OpenAI GPT-4o            ├── llama3.2, mistral, phi3
+├── Anthropic Claude 3.5     ├── codellama (code tasks)
+├── Google Gemini 1.5 Pro    ├── nomic-embed (embeddings)
+├── Mistral Large            ├── whisper (voice/audio)
+├── Groq (fast inference)    └── any model master installs
+└── Together.ai
+```
+
+### Intelligent Routing
+Rāma auto-selects model based on task type:
+| Task | Best Model Route |
+|------|-----------------|
+| General conversation | Primary model (master's preference) |
+| Code generation | GPT-4o or codellama (local) |
+| Long document analysis | Claude 3.5 (200k context) |
+| Fast responses | Groq (llama3 70b — fastest) |
+| Private/offline | Local Ollama model (no internet) |
+| Embeddings/search | nomic-embed (local) |
+| Image analysis | GPT-4o vision or Gemini |
+| Stock analysis | StockMind Python backend |
+
+### Model Fallback Chain
+If primary model fails → auto-fallback to next available:
+```
+GPT-4o → Claude 3.5 → Gemini → Groq → Local Ollama → Notify master
+```
+
+### Local Model Manager
+- Auto-detect installed Ollama models
+- Pull new models on master's request: "Rāma, install llama3.2"
+- Monitor GPU/RAM usage — prevent OOM crashes
+- Queue requests when model is busy
+
+---
+
+## SECTION 5E — Multi-Agent System
+
+Rāma can spawn, manage, and terminate sub-agents to perform parallel tasks — without damaging the system.
+
+### Agent Architecture
+```
+RĀMA MASTER AGENT
+├── Orchestrator          ← Plans tasks, assigns to sub-agents
+├── Agent Pool            ← Reusable agents (max configurable, default 5)
+│   ├── ResearchAgent     ← Web search, document reading, synthesis
+│   ├── CodeAgent         ← Code writing, testing, file operations
+│   ├── DataAgent         ← Data analysis, CSV/JSON processing
+│   ├── MonitorAgent      ← Background watches (prices, news, repos)
+│   └── [dynamic agents]  ← Spawned on demand, terminated when done
+└── Resource Governor     ← Enforces limits, prevents OOM/runaway
+```
+
+### Resource Governor (non-negotiable safety layer)
+```
+MAX_AGENTS         = 10 (hard cap, configurable by master)
+MAX_AGENT_RAM_MB   = 512 per agent
+MAX_AGENT_CPU_PCT  = 25% per agent  
+TOTAL_CPU_CAP      = 70% (leaves 30% for system + UI)
+TOTAL_RAM_CAP      = 60% of system RAM
+AGENT_TIMEOUT_MS   = 300,000 (5 min — auto-kill hung agents)
+```
+
+### Agent Lifecycle
+```
+Master request → Orchestrator plans → Spawn agent(s) → Execute in parallel
+→ Collect results → Synthesize → Present to master → Terminate agents
+```
+
+### Agent Types
+| Agent | Purpose | Lifetime |
+|-------|---------|---------|
+| **ResearchAgent** | Web search + synthesis | Per-task |
+| **CodeAgent** | Write/test/run code | Per-task |
+| **DataAgent** | Analyze datasets, build pipelines | Per-task |
+| **MonitorAgent** | Watch for events (persistent) | Long-lived |
+| **SyncAgent** | Git sync operations | Scheduled |
+| **DownloadAgent** | File/model downloads | Per-task |
+| **BrowserAgent** | Browser automation | Per-task |
+
+### Safety Rules for Agents
+- No agent can delete files without master confirmation
+- No agent can make network calls to external services not in the API registry
+- No agent can spawn more agents (only Orchestrator can)
+- All agent actions logged — master can see full audit trail
+- Resource Governor kills any agent exceeding limits
+- Master can kill any agent instantly: "Rāma, stop all agents"
 
 ---
 
@@ -599,5 +765,317 @@ Rāma will:
 
 ---
 
-*RAMA_AGI_MASTER_SPEC.md — Generated July 2026*  
+*RAMA_AGI_MASTER_SPEC.md — Generated July 2026 · Updated v2.0*  
 *Copy this file into the Rama_AGI workspace root before starting work.*
+
+---
+
+## SECTION 16 — Browser Engine (Playwright Automation)
+
+Rāma embeds a **full Chromium browser** via Playwright — not a webview, a real controllable browser.  
+This gives Rāma the ability to use the entire internet as a live tool.
+
+### What Rāma can do with the browser
+
+| Capability | Description |
+|-----------|-------------|
+| **Web search** | DuckDuckGo, Google, Bing, arXiv, Yahoo Finance, Reddit, news sites |
+| **Documentation fetch** | Goes to official docs (MDN, PyPI, npm, GitHub) and reads them |
+| **Account-based access** | Logs into sites master has accounts for (credentials provided on demand) |
+| **Download files** | PDFs, datasets, installers, media — saved to master-specified folder |
+| **Form interaction** | Fill forms, click buttons, navigate SPA apps |
+| **Screenshot / OCR** | Takes screenshots, reads text from images via pytesseract |
+| **API discovery** | Finds REST/GraphQL endpoints, reads API docs, extracts auth patterns |
+| **Monitoring** | Watch a page for changes (price alerts, stock data, news updates) |
+
+### Dynamic resource provisioning flow
+
+When Rāma needs a resource it doesn't have:
+```
+Rāma detects: "I need a Serper API key to do Google search"
+  → Shows master: "To search Google I need a Serper.dev API key. Free tier: 2500 searches/month.
+                   Create account at: https://serper.dev — then provide me the key."
+  → Master provides key → Rāma stores it encrypted in MongoDB
+  → Next time: uses key silently without asking
+
+Rāma detects: "I need to access this site that requires login"
+  → Asks master: "This site requires credentials. Do you have an account?
+                   If yes, provide username/password (stored encrypted, never transmitted)."
+  → Master provides → Rāma logs in via Playwright → completes task
+```
+
+### Credential vault
+- All credentials stored with AES-256-GCM encryption, key derived via Argon2id from master password
+- Never stored in plaintext anywhere
+- Rāma asks for credentials ONCE, remembers forever
+- Master can view/revoke any stored credential from Settings > Vault
+
+### npm packages for browser engine
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `playwright` | 1.49.1 | Chromium browser automation |
+| `cheerio` | 1.0.0 | HTML parsing / scraping |
+| `turndown` | 7.2.0 | HTML → Markdown (for AI consumption) |
+| `pdf-parse` | 1.1.1 | Extract text from PDFs |
+
+---
+
+## SECTION 17 — Multi-Model AI Hub
+
+Rāma routes tasks to the **best available AI model** based on task type, cost, speed, and capability.  
+It uses ALL models simultaneously when needed (parallel inference).
+
+### Supported AI providers
+
+| Provider | Models | Best for |
+|---------|--------|---------|
+| **OpenAI** | gpt-4o, gpt-4o-mini, o1, o3 | General reasoning, code, long context |
+| **Anthropic** | claude-3-5-sonnet, claude-3-opus | Deep analysis, writing, safety |
+| **Google Gemini** | gemini-2.0-flash, gemini-1.5-pro | Multimodal, fast, web-grounded |
+| **Ollama (local)** | llama3.2, mistral, deepseek-r1, phi-4 | Private tasks, offline, no cost |
+| **Local GGUF** | Any model via llama.cpp server | Air-gapped, maximum privacy |
+| **Groq** | llama-3.3-70b, mixtral | Ultra-fast inference |
+| **Perplexity** | sonar-pro | Web-grounded search answers |
+
+### Routing logic
+
+```
+Task type → Model selection:
+  Quick factual query     → gemini-2.0-flash (fast, cheap)
+  Deep reasoning          → o1 or claude-3-opus (slow, expensive, accurate)
+  Code generation         → gpt-4o or deepseek-r1 (local)
+  Private/sensitive task  → Ollama local model (never leaves machine)
+  Web-grounded search     → Perplexity sonar-pro
+  Parallel analysis       → All models → aggregate + compare responses
+  Cost-sensitive task     → Ollama or gpt-4o-mini
+```
+
+### Model capability self-assessment
+Rāma knows what each model is good at and routes accordingly:
+- Tracks response quality per model per task type
+- Learns which models master prefers for which tasks
+- Auto-degrades to cheaper model if expensive model is slow
+- Falls back to local Ollama if all cloud providers fail
+
+### Context management
+- Sliding window: keeps last N tokens, summarises older context
+- Persistent memory: important facts extracted to MongoDB knowledge base
+- Cross-session memory: Rāma remembers master's preferences across restarts
+- Per-agent context isolation: sub-agents have their own context windows
+
+### npm packages for multi-model hub
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `openai` | 4.77.0 | OpenAI SDK |
+| `@anthropic-ai/sdk` | 0.37.0 | Anthropic SDK |
+| `@google/generative-ai` | 0.21.0 | Gemini SDK |
+| `axios` | 1.7.9 | Ollama, Groq, Perplexity HTTP calls |
+
+---
+
+## SECTION 18 — Agent Orchestrator
+
+Rāma can spawn **multiple sub-agents** that work in parallel on different tasks.  
+Each agent is isolated, resource-budgeted, and killable without affecting other agents or the main process.
+
+### Agent types
+
+| Type | Description | Max concurrent |
+|------|-------------|----------------|
+| **Research agent** | Searches web, reads docs, synthesises info | 4 |
+| **Code agent** | Writes, tests, patches code files | 2 |
+| **Monitor agent** | Watches for events (page changes, file edits, thresholds) | 8 |
+| **Download agent** | Downloads files, processes them | 3 |
+| **Analysis agent** | Processes data, generates reports | 2 |
+| **Scheduler agent** | Runs recurring tasks on cron schedule | Unlimited |
+
+### Agent lifecycle
+
+```
+Master: "Research the top 5 open-source LLMs released this month and compare them"
+
+Rāma Orchestrator:
+  1. Checks resource budget (CPU < 60%, RAM > 2GB free)
+  2. Spawns 5 research agents in parallel:
+     Agent-1: Search "LLM releases July 2026" → Perplexity
+     Agent-2: Browse HuggingFace trending models
+     Agent-3: Check arXiv for new model papers
+     Agent-4: Read Reddit r/LocalLLaMA for community reviews
+     Agent-5: Check GitHub stars/forks for new model repos
+  3. All agents report back to orchestrator
+  4. Orchestrator merges results → passes to synthesis model
+  5. Returns unified comparison to master
+  6. All agents destroyed, resources freed
+```
+
+### Resource Governor
+
+**The Resource Governor is a hard safety system — it cannot be overridden.**
+
+```
+Before spawning any agent:
+  CPU usage > 80%  → Queue agent, wait for CPU to drop
+  RAM free < 1GB   → Queue agent, wait for RAM to free
+  RAM free < 512MB → Reject spawn, notify master
+  Active agents > system_max → Queue, don't spawn
+
+System max agents = floor(RAM_free_GB * 2)  (e.g. 8GB free → max 16 agents)
+
+Every 5 seconds:
+  Check all agent CPU usage
+  If any agent > 25% CPU for > 30s → warn master
+  If system RAM < 512MB → kill lowest-priority agents
+  If system CPU > 90% for > 10s → pause all non-critical agents
+```
+
+### Agent communication
+- Agents communicate via internal message bus (EventEmitter)
+- Agents can spawn child agents (max depth: 3 levels)
+- Agents share read access to knowledge base
+- Agents write results to shared result store
+- Main process always has highest priority — agents are killed before main process degrades
+
+### Agent isolation
+- Each agent runs in a Node.js worker thread (not a separate process)
+- Workers have memory limits enforced by V8
+- Workers cannot access filesystem directly — must request via IPC
+- Workers cannot spawn OS processes directly — must request via orchestrator
+- Crashed agent does NOT crash Rāma
+
+### npm packages for agent system
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `bullmq` | 5.38.0 | Task queue with priorities, retries, scheduling |
+| `ioredis` | 5.4.2 | Redis client (BullMQ backing store) |
+
+> **Note**: BullMQ requires Redis. Rāma auto-starts a local Redis instance via `ioredis-mock` in development. In production, master can point to a Redis Cloud instance or Rāma manages a local Redis process.
+
+---
+
+## SECTION 19 — Dynamic Provisioner
+
+Rāma knows what it needs and asks for it proactively. This is the system that makes Rāma self-configuring.
+
+### How it works
+
+1. Every capability has a **requirement declaration** — what APIs, credentials, or software it needs
+2. Before executing a task, Rāma checks if all requirements are met
+3. If not met → presents a clear, friendly request to master with context
+4. Master provides → stored encrypted → never asked again
+
+### Requirement types
+
+| Type | Example | How Rāma asks |
+|------|---------|---------------|
+| **API key** | Serper, OpenAI, Anthropic | "To do X I need a Y API key. Get it free at [URL]." |
+| **Account login** | GitHub, LinkedIn, news site | "To access X I need your credentials for Y." |
+| **Software install** | Redis, Python, ffmpeg | "I need Y installed. Run: [command]. I'll wait." |
+| **File/folder path** | StockMind repo location | "Where is your StockMind folder on this machine?" |
+| **Config value** | MongoDB URI, webhook URL | "To enable X I need your Y. Here's how to get it: [guide]." |
+
+### Provisioner conversation example
+
+```
+Rāma: "I want to set up real-time market news monitoring for you.
+       To do this I need 3 things:
+
+       1. NewsAPI key (free at newsapi.org — 100 requests/day)
+          → https://newsapi.org/register
+
+       2. Serper.dev key (free tier: 2500 Google searches/month)
+          → https://serper.dev
+
+       3. Which topics should I monitor? (e.g. 'Nifty, BankNifty, crypto')
+
+       Which of these do you already have?"
+
+Master: "I have NewsAPI, here's the key: xxx. Don't have Serper."
+
+Rāma: "Got it — NewsAPI stored securely.
+       For Serper: https://serper.dev/signup — takes 2 minutes.
+       I'll use DuckDuckGo as fallback until then.
+       Starting monitoring for Nifty + BankNifty now."
+```
+
+---
+
+## SECTION 20 — Updated Technology Stack (v2.0)
+
+### New packages to add to package.json
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `playwright` | 1.49.1 | Browser automation (Chromium) |
+| `cheerio` | 1.0.0 | HTML scraping |
+| `turndown` | 7.2.0 | HTML → Markdown |
+| `pdf-parse` | 1.1.1 | PDF text extraction |
+| `openai` | 4.77.0 | OpenAI API |
+| `@anthropic-ai/sdk` | 0.37.0 | Anthropic API |
+| `@google/generative-ai` | 0.21.0 | Gemini API |
+| `bullmq` | 5.38.0 | Task queue + scheduling |
+| `ioredis` | 5.4.2 | Redis client |
+| `node-cron` | 3.0.3 | Cron scheduling |
+| `eventemitter3` | 5.0.1 | Agent message bus |
+| `p-limit` | 6.2.0 | Concurrency limiter |
+| `p-queue` | 8.1.0 | Promise queue |
+| `crypto-js` | 4.2.0 | AES-256-GCM for credential vault |
+
+---
+
+## SECTION 21 — New File Structure additions (v2.0)
+
+```
+electron/ipc/
+  └── browser.cjs          ← Playwright browser IPC handler
+
+src/
+  ├── pages/
+  │   ├── Agents/          ← Agent orchestrator UI (spawn, monitor, kill agents)
+  │   └── Settings/        ← Full settings page incl. credential vault, model config
+  └── services/
+      ├── browserClient.js ← IPC wrapper for browser operations
+      └── agentClient.js   ← IPC wrapper for agent operations
+
+server/routes/
+  ├── browser.cjs          ← Browser automation endpoints
+  ├── agents.cjs           ← Agent management endpoints
+  └── models.cjs           ← Multi-model AI routing endpoints
+
+server/
+  ├── brain/
+  │   ├── modelRouter.cjs  ← Routes tasks to best AI model
+  │   ├── agentOrchestrator.cjs ← Spawns/manages/kills agents
+  │   ├── resourceGovernor.cjs  ← CPU/RAM watchdog for agents
+  │   ├── dynamicProvisioner.cjs ← Detects needs, asks master
+  │   └── credentialVault.cjs   ← AES-256-GCM encrypted credential store
+  └── browser/
+      ├── browserPool.cjs  ← Playwright browser instance pool
+      ├── webSearch.cjs    ← Multi-engine search (Google, DDG, Bing, arXiv)
+      ├── pageReader.cjs   ← Reads/scrapes any URL → clean Markdown
+      └── downloader.cjs   ← Downloads files with progress tracking
+```
+
+---
+
+## SECTION 22 — Build Phase Updates
+
+### Phase 2 additions (AGI Core — expanded)
+- `server/brain/modelRouter.cjs` — multi-model routing
+- `server/brain/credentialVault.cjs` — encrypted credential store
+- `server/brain/dynamicProvisioner.cjs` — self-configuring needs detection
+- `server/routes/models.cjs` — AI model API endpoints
+
+### Phase 3 additions (Browser + Agents)
+- `electron/ipc/browser.cjs` — Playwright IPC
+- `server/browser/browserPool.cjs` — browser instance management
+- `server/browser/webSearch.cjs` — web search engine
+- `server/browser/pageReader.cjs` — URL reader
+- `server/browser/downloader.cjs` — file downloader
+- `server/brain/agentOrchestrator.cjs` — agent system
+- `server/brain/resourceGovernor.cjs` — CPU/RAM safety
+- `src/pages/Agents/` — agent management UI
+
+---
+
+*RAMA_AGI_MASTER_SPEC.md — Generated July 2026 · Updated v2.0*  
+*Sections 16–22 added: Browser Engine, Multi-Model Hub, Agent Orchestrator, Dynamic Provisioner*
