@@ -1,0 +1,200 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { gitClient, fsClient } from '@services/ipcClient.js';
+
+export default function GitSync() {
+  const [repoPath,  setRepoPath]  = useState('');
+  const [status,    setStatus]    = useState(null);
+  const [log,       setLog]       = useState([]);
+  const [diff,      setDiff]      = useState('');
+  const [loading,   setLoading]   = useState(false);
+  const [msg,       setMsg]       = useState('');
+  const [tab,       setTab]       = useState('status');
+  const [feedback,  setFeedback]  = useState('');
+
+  const loadRepo = useCallback(async (path) => {
+    if (!path) return;
+    setLoading(true);
+    const [sRes, lRes, dRes] = await Promise.all([
+      gitClient.status(path),
+      gitClient.log(path, 30),
+      gitClient.diff(path),
+    ]);
+    if (sRes.ok) setStatus(sRes.data);
+    if (lRes.ok) setLog(lRes.data);
+    if (dRes.ok) setDiff(dRes.data);
+    setLoading(false);
+  }, []);
+
+  const pickRepo = async () => {
+    const res = await fsClient.selectPath({ directory: true, title: 'Select Git Repository' });
+    if (!res.canceled && res.paths[0]) {
+      setRepoPath(res.paths[0]);
+      loadRepo(res.paths[0]);
+    }
+  };
+
+  const stageAll = async () => {
+    setFeedback('Staging all files...');
+    const res = await gitClient.stage(repoPath, []);
+    if (res.ok) { setFeedback('Staged.'); loadRepo(repoPath); }
+    else setFeedback(`Error: ${res.error}`);
+  };
+
+  const commit = async () => {
+    if (!msg.trim()) { setFeedback('Enter a commit message.'); return; }
+    setFeedback('Committing...');
+    const res = await gitClient.commit(repoPath, msg);
+    if (res.ok) { setMsg(''); setFeedback('Committed.'); loadRepo(repoPath); }
+    else setFeedback(`Error: ${res.error}`);
+  };
+
+  const push = async () => {
+    setFeedback('Pushing...');
+    const res = await gitClient.push(repoPath, status?.branch);
+    if (res.ok) { setFeedback('Pushed successfully.'); loadRepo(repoPath); }
+    else setFeedback(`Error: ${res.error}`);
+  };
+
+  const pull = async () => {
+    setFeedback('Pulling...');
+    const res = await gitClient.pull(repoPath);
+    if (res.ok) { setFeedback('Pulled.'); loadRepo(repoPath); }
+    else setFeedback(`Error: ${res.error}`);
+  };
+
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', background: 'var(--surface)',
+        display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+        <span style={{ fontWeight: 700, color: 'var(--amber)', letterSpacing: '0.1em' }}>GIT SYNC BRIDGE</span>
+        <span className="badge badge-amber">⎇ {status?.branch || 'no repo'}</span>
+        {status && (
+          <>
+            {status.ahead > 0  && <span className="badge badge-cyan">↑ {status.ahead} ahead</span>}
+            {status.behind > 0 && <span className="badge badge-red">↓ {status.behind} behind</span>}
+            {status.isClean    && <span className="badge badge-green">CLEAN</span>}
+          </>
+        )}
+        <div style={{ flex: 1 }} />
+        <button className="btn btn-sm btn-primary" onClick={pickRepo}>📁 Open Repo</button>
+        {repoPath && <button className="btn btn-sm" onClick={() => loadRepo(repoPath)}>↺</button>}
+      </div>
+
+      {/* Feedback bar */}
+      {feedback && (
+        <div style={{ padding: '6px 20px', background: 'rgba(0,255,255,0.05)', borderBottom: '1px solid var(--border)',
+          color: 'var(--accent)', fontSize: '11px', flexShrink: 0 }}>
+          {feedback}
+        </div>
+      )}
+
+      {!repoPath ? (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px' }}>
+          <span style={{ fontSize: '32px' }}>⎇</span>
+          <div style={{ color: 'var(--muted)', fontSize: '12px' }}>Open a git repository to start syncing</div>
+          <button className="btn btn-primary" onClick={pickRepo}>📁 Select Repository</button>
+        </div>
+      ) : (
+        <>
+          {/* Tabs */}
+          <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
+            {['status', 'log', 'diff'].map(t => (
+              <button key={t} onClick={() => setTab(t)} style={{
+                padding: '9px 18px', border: 'none', background: 'transparent',
+                color: tab === t ? 'var(--amber)' : 'var(--muted)',
+                borderBottom: tab === t ? '2px solid var(--amber)' : '2px solid transparent',
+                cursor: 'pointer', fontFamily: 'var(--font)', fontSize: '11px', textTransform: 'uppercase',
+              }}>{t}</button>
+            ))}
+          </div>
+
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>
+            {tab === 'status' && status && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {/* Changed files */}
+                <div className="hud-card" style={{ padding: '16px' }}>
+                  <div className="section-label" style={{ marginBottom: '10px' }}>CHANGED FILES</div>
+                  {[...status.modified, ...status.not_added, ...status.deleted, ...status.staged].length === 0
+                    ? <div style={{ color: 'var(--muted)', fontSize: '12px' }}>Working tree clean</div>
+                    : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {status.staged.map(f =>     <FileRow key={f} file={f} type="staged" />)}
+                        {status.modified.map(f =>   <FileRow key={f} file={f} type="modified" />)}
+                        {status.not_added.map(f =>  <FileRow key={f} file={f} type="untracked" />)}
+                        {status.deleted.map(f =>    <FileRow key={f} file={f} type="deleted" />)}
+                      </div>
+                    )
+                  }
+                </div>
+
+                {/* Commit controls */}
+                <div className="hud-card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="section-label">COMMIT & SYNC</div>
+                  <input className="input" placeholder="Commit message (feat(scope): description)"
+                    value={msg} onChange={e => setMsg(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && commit()} />
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button className="btn btn-sm" onClick={stageAll}>Stage All</button>
+                    <button className="btn btn-sm btn-primary" onClick={commit} disabled={!msg.trim()}>Commit</button>
+                    <button className="btn btn-sm btn-primary" onClick={push}>↑ Push</button>
+                    <button className="btn btn-sm" onClick={pull}>↓ Pull</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {tab === 'log' && (
+              <div className="hud-card" style={{ overflow: 'hidden' }}>
+                {log.map((entry, i) => (
+                  <div key={i} style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
+                    <span style={{ fontFamily: 'var(--font)', fontSize: '11px', color: 'var(--accent)', flexShrink: 0, minWidth: '64px' }}>
+                      {entry.hash?.slice(0, 7)}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '12px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {entry.message}
+                      </div>
+                      <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '2px' }}>
+                        {entry.author_name} · {new Date(entry.date).toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {tab === 'diff' && (
+              <div className="hud-card" style={{ padding: '0', overflow: 'hidden' }}>
+                {diff ? (
+                  <pre style={{ padding: '16px', fontSize: '11px', lineHeight: '1.7', overflow: 'auto',
+                    color: 'var(--text-dim)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '100%' }}>
+                    {diff.split('\n').map((line, i) => (
+                      <span key={i} style={{
+                        display: 'block',
+                        color: line.startsWith('+') ? 'var(--green)' : line.startsWith('-') ? 'var(--red)' : line.startsWith('@@') ? 'var(--accent)' : 'var(--text-dim)',
+                      }}>{line}</span>
+                    ))}
+                  </pre>
+                ) : (
+                  <div style={{ padding: '20px', color: 'var(--muted)', textAlign: 'center' }}>No diff — working tree clean</div>
+                )}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function FileRow({ file, type }) {
+  const colors = { staged: 'var(--green)', modified: 'var(--amber)', untracked: 'var(--accent)', deleted: 'var(--red)' };
+  const labels = { staged: 'S', modified: 'M', untracked: '?', deleted: 'D' };
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '3px 0' }}>
+      <span style={{ color: colors[type], fontSize: '11px', fontWeight: 700, minWidth: '14px' }}>{labels[type]}</span>
+      <span style={{ fontSize: '12px', color: 'var(--text)', fontFamily: 'var(--font)' }}>{file}</span>
+    </div>
+  );
+}

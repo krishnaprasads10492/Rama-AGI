@@ -1,0 +1,362 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   RĀMA AGI — Cyberpunk/Sci-Fi Design System
+   All tokens, globals, effects, and utilities
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Google Font import (fallback if preload fails) ──────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
+
+/* ── Design Tokens ───────────────────────────────────────────────────────── */
+:root {
+  /* Backgrounds */
+  --bg:          #020408;
+  --surface:     #050d15;
+  --elevated:    #0a1828;
+  --border:      #0a2840;
+  --border-glow: #00ffff33;
+
+  /* Accent Colors */
+  --accent:      #00ffff;   /* Electric cyan */
+  --magenta:     #ff00aa;   /* Neon magenta */
+  --violet:      #7700ff;   /* Deep violet — AI/Rāma */
+  --green:       #00ff41;   /* Matrix green — success/bull */
+  --red:         #ff003c;   /* Danger red — error/bear */
+  --amber:       #ffaa00;   /* Warning amber */
+
+  /* Text */
+  --text:        #e0f4ff;
+  --text-dim:    #7aa8c8;
+  --muted:       #2a5070;
+
+  /* Glow shadows */
+  --glow-cyan:   0 0 20px #00ffff55, 0 0 40px #00ffff22;
+  --glow-magenta:0 0 20px #ff00aa55, 0 0 40px #ff00aa22;
+  --glow-violet: 0 0 20px #7700ff55, 0 0 40px #7700ff22;
+  --glow-green:  0 0 20px #00ff4155, 0 0 40px #00ff4122;
+  --glow-red:    0 0 20px #ff003c55, 0 0 40px #ff003c22;
+
+  /* Typography */
+  --font:        'JetBrains Mono', 'Courier New', monospace;
+
+  /* Layout */
+  --sidebar-w:   48px;
+  --sidebar-exp: 220px;
+  --titlebar-h:  36px;
+  --radius:      4px;
+  --radius-lg:   8px;
+
+  /* Transitions */
+  --transition:  150ms ease;
+  --transition-slow: 350ms ease;
+}
+
+/* ── Reset ───────────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin:     0;
+  padding:    0;
+}
+
+html, body, #root {
+  height:      100%;
+  overflow:    hidden;
+  background:  var(--bg);
+  color:       var(--text);
+  font-family: var(--font);
+  font-size:   13px;
+  line-height: 1.5;
+  -webkit-font-smoothing:  antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar              { width: 4px; height: 4px; }
+::-webkit-scrollbar-track        { background: var(--bg); }
+::-webkit-scrollbar-thumb        { background: var(--border); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover  { background: var(--muted); }
+
+/* ── Scanline CRT overlay (entire app) ───────────────────────────────────── */
+#root::before {
+  content:  '';
+  position: fixed;
+  inset:    0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.07) 2px,
+    rgba(0, 0, 0, 0.07) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ── Cyan grid background ────────────────────────────────────────────────── */
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(0,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,255,255,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ── HUD corner brackets ─────────────────────────────────────────────────── */
+.hud-card {
+  position:   relative;
+  background: var(--elevated);
+  border:     1px solid var(--border);
+  border-radius: var(--radius);
+}
+.hud-card::before,
+.hud-card::after {
+  content:  '';
+  position: absolute;
+  width:    14px;
+  height:   14px;
+  pointer-events: none;
+}
+.hud-card::before {
+  top:    -1px;
+  left:   -1px;
+  border-top:  2px solid var(--accent);
+  border-left: 2px solid var(--accent);
+}
+.hud-card::after {
+  bottom: -1px;
+  right:  -1px;
+  border-bottom: 2px solid var(--accent);
+  border-right:  2px solid var(--accent);
+}
+
+/* ── Neon glow on hover ──────────────────────────────────────────────────── */
+.glow-hover {
+  transition: box-shadow var(--transition), border-color var(--transition);
+}
+.glow-hover:hover {
+  box-shadow:   var(--glow-cyan);
+  border-color: var(--accent);
+}
+
+/* ── Neon text ───────────────────────────────────────────────────────────── */
+.text-accent  { color: var(--accent);  }
+.text-magenta { color: var(--magenta); }
+.text-violet  { color: var(--violet);  }
+.text-green   { color: var(--green);   }
+.text-red     { color: var(--red);     }
+.text-amber   { color: var(--amber);   }
+.text-muted   { color: var(--muted);   }
+.text-dim     { color: var(--text-dim);}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+.btn {
+  display:     inline-flex;
+  align-items: center;
+  gap:         6px;
+  padding:     6px 14px;
+  border:      1px solid var(--border);
+  border-radius: var(--radius);
+  background:  transparent;
+  color:       var(--text);
+  font-family: var(--font);
+  font-size:   12px;
+  cursor:      pointer;
+  transition:  all var(--transition);
+  user-select: none;
+  white-space: nowrap;
+}
+.btn:hover {
+  border-color: var(--accent);
+  color:        var(--accent);
+  box-shadow:   var(--glow-cyan);
+}
+.btn:active { transform: scale(0.97); }
+
+.btn-primary {
+  background:   rgba(0,255,255,0.08);
+  border-color: var(--accent);
+  color:        var(--accent);
+}
+.btn-primary:hover {
+  background: rgba(0,255,255,0.15);
+}
+
+.btn-danger {
+  border-color: var(--red);
+  color:        var(--red);
+}
+.btn-danger:hover {
+  background:  rgba(255,0,60,0.1);
+  box-shadow:  var(--glow-red);
+}
+
+.btn-sm {
+  padding:   4px 10px;
+  font-size: 11px;
+}
+
+.btn:disabled {
+  opacity: 0.35;
+  cursor:  not-allowed;
+  pointer-events: none;
+}
+
+/* ── Input / Textarea ────────────────────────────────────────────────────── */
+.input {
+  width:        100%;
+  padding:      8px 12px;
+  background:   var(--surface);
+  border:       1px solid var(--border);
+  border-radius: var(--radius);
+  color:        var(--text);
+  font-family:  var(--font);
+  font-size:    13px;
+  outline:      none;
+  transition:   border-color var(--transition), box-shadow var(--transition);
+}
+.input:focus {
+  border-color: var(--accent);
+  box-shadow:   0 0 0 2px rgba(0,255,255,0.1);
+}
+.input::placeholder { color: var(--muted); }
+
+textarea.input {
+  resize:  vertical;
+  min-height: 80px;
+}
+
+/* ── Badges ──────────────────────────────────────────────────────────────── */
+.badge {
+  display:       inline-flex;
+  align-items:   center;
+  padding:       2px 8px;
+  border-radius: 2px;
+  font-size:     10px;
+  font-weight:   700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.badge-cyan    { background: rgba(0,255,255,0.12);  color: var(--accent);  border: 1px solid rgba(0,255,255,0.3);  }
+.badge-green   { background: rgba(0,255,65,0.12);   color: var(--green);   border: 1px solid rgba(0,255,65,0.3);   }
+.badge-red     { background: rgba(255,0,60,0.12);   color: var(--red);     border: 1px solid rgba(255,0,60,0.3);   }
+.badge-amber   { background: rgba(255,170,0,0.12);  color: var(--amber);   border: 1px solid rgba(255,170,0,0.3);  }
+.badge-violet  { background: rgba(119,0,255,0.12);  color: var(--violet);  border: 1px solid rgba(119,0,255,0.3);  }
+.badge-magenta { background: rgba(255,0,170,0.12);  color: var(--magenta); border: 1px solid rgba(255,0,170,0.3);  }
+
+/* ── Metric pill (used in titlebar) ──────────────────────────────────────── */
+.metric-pill {
+  display:     inline-flex;
+  align-items: center;
+  gap:         4px;
+  padding:     2px 8px;
+  background:  var(--surface);
+  border:      1px solid var(--border);
+  border-radius: 2px;
+  font-size:   11px;
+  color:       var(--text-dim);
+}
+
+/* ── Divider ─────────────────────────────────────────────────────────────── */
+.divider {
+  width:      100%;
+  height:     1px;
+  background: var(--border);
+  margin:     8px 0;
+}
+
+/* ── Section label ───────────────────────────────────────────────────────── */
+.section-label {
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color:          var(--muted);
+  padding:        4px 0;
+}
+
+/* ── Glitch animation (error states only) ────────────────────────────────── */
+@keyframes glitch {
+  0%   { clip-path: inset(0 0 95% 0); transform: translateX(-4px); }
+  20%  { clip-path: inset(30% 0 50% 0); transform: translateX(4px); }
+  40%  { clip-path: inset(60% 0 20% 0); transform: translateX(-2px); }
+  60%  { clip-path: inset(10% 0 80% 0); transform: translateX(2px); }
+  80%  { clip-path: inset(70% 0 10% 0); transform: translateX(-4px); }
+  100% { clip-path: inset(0 0 95% 0); transform: translateX(0); }
+}
+.glitch {
+  position: relative;
+  animation: glitch 0.4s steps(1) infinite;
+  color: var(--red);
+}
+
+/* ── Pulse animation (Rāma orb) ──────────────────────────────────────────── */
+@keyframes pulse-ring {
+  0%   { transform: scale(0.8); opacity: 0.8; }
+  50%  { transform: scale(1.2); opacity: 0.3; }
+  100% { transform: scale(0.8); opacity: 0.8; }
+}
+@keyframes orb-rotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes data-stream {
+  0%   { opacity: 0; transform: translateY(-10px); }
+  50%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(10px); }
+}
+
+/* ── Fade-in ─────────────────────────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fadeIn 0.2s ease forwards; }
+
+/* ── Scan animation (loading) ────────────────────────────────────────────── */
+@keyframes scan {
+  0%   { background-position: 0% 0%; }
+  100% { background-position: 0% 100%; }
+}
+.scanning {
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(0,255,255,0.15) 50%,
+    transparent 100%
+  );
+  background-size: 100% 30%;
+  animation: scan 1.5s linear infinite;
+}
+
+/* ── Utility ─────────────────────────────────────────────────────────────── */
+.flex          { display: flex; }
+.flex-col      { display: flex; flex-direction: column; }
+.flex-1        { flex: 1; }
+.items-center  { align-items: center; }
+.justify-between { justify-content: space-between; }
+.gap-1         { gap: 4px; }
+.gap-2         { gap: 8px; }
+.gap-3         { gap: 12px; }
+.gap-4         { gap: 16px; }
+.p-2           { padding: 8px; }
+.p-3           { padding: 12px; }
+.p-4           { padding: 16px; }
+.px-3          { padding-left: 12px; padding-right: 12px; }
+.py-2          { padding-top: 8px; padding-bottom: 8px; }
+.truncate      { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.w-full        { width: 100%; }
+.h-full        { height: 100%; }
+.relative      { position: relative; }
+.absolute      { position: absolute; }
+.overflow-hidden { overflow: hidden; }
+.cursor-pointer  { cursor: pointer; }
+.select-none     { user-select: none; }
+.font-bold       { font-weight: 700; }
+.text-xs         { font-size: 11px; }
+.text-sm         { font-size: 12px; }
+.text-base       { font-size: 13px; }
+.text-lg         { font-size: 15px; }
+.text-xl         { font-size: 18px; }
+.uppercase       { text-transform: uppercase; letter-spacing: 0.08em; }
+.rounded         { border-radius: var(--radius); }
+.border          { border: 1px solid var(--border); }
+.no-drag         { -webkit-app-region: no-drag; }
+.drag-region     { -webkit-app-region: drag; }

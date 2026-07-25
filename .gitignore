@@ -1,0 +1,30 @@
+node_modules/
+dist-electron/
+build/
+.env
+*.log
+.DS_Store
+Thumbs.db
+
+# Electron build artifacts
+out/
+release/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+ai_backend/__pycache__/
+ai_backend/*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# Keys and secrets
+*.pem
+*.key
+*.enc
+secrets/
