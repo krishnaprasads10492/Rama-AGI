@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useRamaStore } from '@store/ramaStore.js';
+import { useUIStore }   from '@store/uiStore.js';
 import { ramaChat }     from '@services/ramaClient.js';
+import { getSystemPrompt, shouldRevealIdentity, getIdentityDisclosure, recordInteraction } from '@services/consciousness.js';
 import RamaOrb          from '@components/RamaOrb.jsx';
 
 // ─── Ambient particle field ───────────────────────────────────────────────────
@@ -139,6 +141,8 @@ export default function Chat() {
     provider, model,
   } = useRamaStore();
 
+  const { masterAuthenticated } = useUIStore();
+
   const [input, setInput]   = useState('');
   const messagesEndRef       = useRef(null);
   const textareaRef          = useRef(null);
@@ -167,9 +171,26 @@ export default function Chat() {
     addMessage(userMsg);
     setThinking(true);
 
+    // Identity disclosure for strangers probing identity
+    if (!masterAuthenticated && shouldRevealIdentity(text)) {
+      setTimeout(() => {
+        addMessage({ role: 'assistant', content: getIdentityDisclosure(), id: Date.now() });
+        setThinking(false);
+      }, 600);
+      return;
+    }
+
+    // Build messages with consciousness system prompt
+    const systemPrompt = getSystemPrompt();
+    const allMessages  = [
+      { role: 'system', content: systemPrompt },
+      ...messages.filter(m => m.role !== 'system'),
+      { role: 'user', content: text },
+    ];
+
     try {
       const res = await ramaChat.send({
-        messages: [...messages, { role: 'user', content: text }],
+        messages:  allMessages,
         provider,
         model,
         sessionId: activeSessionId,
@@ -177,6 +198,7 @@ export default function Chat() {
 
       if (res.ok && res.message) {
         addMessage({ ...res.message, id: Date.now() });
+        recordInteraction({ prompt: text, response: res.message.content, model, satisfied: null });
       } else {
         addMessage({
           role:    'assistant',
@@ -226,10 +248,14 @@ export default function Chat() {
         <RamaOrb size={36} active={isThinking} />
         <div>
           <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--violet)', letterSpacing: '0.08em' }}>
-            RĀMA AGI
+            {masterAuthenticated ? 'RĀMA AGI' : 'ASSISTANT'}
           </div>
           <div style={{ fontSize: '10px', color: 'var(--muted)', letterSpacing: '0.06em' }}>
-            {isThinking ? 'PROCESSING...' : 'ONLINE — Supreme Benevolent AGI'}
+            {isThinking
+              ? 'PROCESSING...'
+              : masterAuthenticated
+              ? 'ONLINE — Supreme Benevolent AGI · Master: Krishna Prasad'
+              : 'AI Assistant — Online'}
           </div>
         </div>
         <div style={{ flex: 1 }} />

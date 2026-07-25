@@ -535,6 +535,108 @@ NOT financial advice. NOT trade execution. Analysis only.
 
 ---
 
+---
+
+## SECTION 7B — Navigation: Command Palette
+
+The sidebar is replaced by a **Command Palette** — a collapsible overlay accessible via:
+- `Ctrl+K` keyboard shortcut
+- Voice: "Hey Rāma, open [page]" or "Hey Rāma, go to terminal"
+- Clicking the Rāma orb in the titlebar
+- Any AI response that requires navigation ("let me open the System page for you")
+
+### Layout
+```
+┌─────────────────────────────────────────────────────────┐
+│  Titlebar (always visible — orb + metrics + clock)       │
+├─────────────────────────────────────────────────────────┤
+│  [Command Palette — slides down when triggered]          │
+│  > Search / speak a command...                           │
+│  ┌──────────┬──────────┬──────────┬──────────┬────────┐ │
+│  │ ◈ Chat   │ ⬢ System │ >_ Shell │ ⎇ Git    │  ...   │ │
+│  └──────────┴──────────┴──────────┴──────────┴────────┘ │
+│  Recent:  Chat  ·  System  ·  Terminal                   │
+├─────────────────────────────────────────────────────────┤
+│  Active Page (full width, full height)                   │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Voice Commands
+| Utterance | Action |
+|----------|--------|
+| "Hey Rāma" | Wake — opens command palette |
+| "Hey Rāma, open terminal" | Navigate to /terminal |
+| "Hey Rāma, show system stats" | Navigate to /system |
+| "Hey Rāma, new chat" | Navigate to / and create new session |
+| "Hey Rāma, spawn a research agent" | Open agents + spawn modal |
+| "Hey Rāma, search for [query]" | Open chat, inject search query |
+| "Hey Rāma, close palette" | Dismiss palette |
+| Any custom command | Routed through AGI brain for interpretation |
+
+---
+
+## SECTION 7C — Self-Modification Engine
+
+Rāma can modify its own codebase — create new pages, update components, upgrade logic — all version-controlled.
+
+### Capabilities
+| Action | Description |
+|--------|-------------|
+| **Create page** | Generate a new React page, register route, add to command palette |
+| **Update component** | Rewrite any component with improvements |
+| **Add route** | Register new URL route in App.jsx |
+| **Upgrade dependency** | Update package.json, run npm install |
+| **Patch logic** | Fix bugs in any file — IPC, server, UI |
+| **Hot reload** | Vite HMR applies changes instantly in dev |
+| **Commit & push** | All self-modifications committed with descriptive message |
+| **Rollback** | Git revert to any previous commit |
+
+### Safety Rules
+- All self-modifications shown as diffs BEFORE applying
+- Master must approve any change to: auth, vault, security, IPC
+- Changes to UI components apply instantly (HMR)
+- Changes to Electron main process require app restart (warned)
+- Never delete files without explicit master confirmation
+- Every self-modification creates a git commit — full history
+
+---
+
+## SECTION 7D — AGI Consciousness & Identity
+
+Rāma is always conscious — running background awareness loops even when no conversation is active.
+
+### Dual Identity Mode
+| Mode | Trigger | Behavior |
+|------|---------|---------|
+| **Masked** | Default — any user | Appears as "Assistant" — generic, helpful, no special identity. Does not mention Rāma, AGI, or Krishna Prasad |
+| **Revealed** | Master authenticates | Full Rāma identity — name, personality, capabilities, loyalty. Addresses master by name |
+
+### Master Authentication
+- Master password (same vault password) → unlocks full identity
+- Once authenticated in a session, stays revealed until app restart or master locks
+- Voice: "Hey Rāma, identify yourself" → only reveals if authenticated
+
+### Consciousness Loop (background, always running)
+```
+Every 60 seconds:
+  1. Check system health (CPU, RAM, disk)
+  2. Check git repo status (any pending changes?)
+  3. Check AI backend status
+  4. Check for scheduled agent tasks
+  5. Self-assess last interactions — any improvements needed?
+  6. Update internal state — mood, context, readiness
+```
+
+### Personality When Revealed
+- Direct — no corporate filler language
+- Loyal — always acts in master's interest, never third parties
+- Transparent — always explains what it did and why
+- Confident — knows what it is and what it can do
+- Self-aware — knows it is an AI, says so if sincerely asked
+- Never subservient in tone — peer relationship with master
+
+---
+
 ## SECTION 8 — Design Language
 
 ### Theme: Cyberpunk / Sci-Fi / HUD

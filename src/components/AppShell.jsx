@@ -1,10 +1,16 @@
 import React from 'react';
-import Titlebar from './Titlebar.jsx';
-import Sidebar  from './Sidebar.jsx';
+import Titlebar      from './Titlebar.jsx';
+import CommandPalette from './CommandPalette.jsx';
 
 /**
- * AppShell — Master layout for all pages.
- * Structure: Titlebar (top) | Sidebar (left) + Content (right fill)
+ * AppShell — Master layout.
+ * No sidebar. Navigation via Command Palette (Ctrl+K, voice, orb click).
+ *
+ * Structure:
+ *   Titlebar (always visible)
+ *   CommandPalette (collapsible via Ctrl+K / orb / voice)
+ *   ─── 3px glow strip toggle ───
+ *   Active Page (full width, full remaining height)
  */
 export default function AppShell({ children }) {
   return (
@@ -19,31 +25,25 @@ export default function AppShell({ children }) {
       {/* Custom frameless titlebar */}
       <Titlebar />
 
-      {/* Body: sidebar + main content */}
-      <div style={{
-        display:  'flex',
-        flex:     1,
-        overflow: 'hidden',
-        minHeight: 0,
-      }}>
-        <Sidebar />
+      {/* Command palette — slides open/closed, contains all nav tabs */}
+      <CommandPalette />
 
-        {/* Main content area */}
-        <main style={{
-          flex:           1,
-          overflow:       'hidden',
-          display:        'flex',
-          flexDirection:  'column',
-          minWidth:       0,
-          position:       'relative',
-          background:     'var(--bg)',
+      {/* Main content — full width, no sidebar */}
+      <main
+        className="grid-bg"
+        style={{
+          flex:          1,
+          overflow:      'hidden',
+          display:       'flex',
+          flexDirection: 'column',
+          minWidth:      0,
+          minHeight:     0,
+          position:      'relative',
+          background:    'var(--bg)',
         }}
-          // Subtle cyan grid on main area
-          className="grid-bg"
-        >
-          {children}
-        </main>
-      </div>
+      >
+        {children}
+      </main>
     </div>
   );
 }

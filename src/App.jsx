@@ -1,7 +1,10 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
-import AppShell   from '@components/AppShell.jsx';
+import AppShell      from '@components/AppShell.jsx';
 import ErrorBoundary from '@components/ErrorBoundary.jsx';
+import { useUIStore } from '@store/uiStore.js';
+import { useAppStore } from '@store/appStore.js';
+import { startConsciousnessLoop, stopConsciousnessLoop } from '@services/consciousness.js';
 
 // Pages (lazy-loaded for performance)
 const Chat      = React.lazy(() => import('@pages/Chat/Chat.jsx'));
@@ -51,10 +54,30 @@ function TrayNavListener() {
   return null;
 }
 
+// Consciousness loop — starts on app load
+function ConsciousnessProvider() {
+  const { setLastHealthCheck, pushNotification } = useAppStore();
+
+  useEffect(() => {
+    startConsciousnessLoop({
+      onHealth: (health) => setLastHealthCheck(health),
+      onAlert:  (alert)  => pushNotification({
+        type:    alert.level,
+        message: alert.msg,
+        duration: 8000,
+      }),
+    });
+    return () => stopConsciousnessLoop();
+  }, []);
+
+  return null;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <TrayNavListener />
+      <ConsciousnessProvider />
       <ErrorBoundary>
         <AppShell>
           <React.Suspense fallback={<PageLoader />}>
