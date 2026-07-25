@@ -29,10 +29,21 @@ node start.cjs
 - **All platforms**: Node.js 18+
 
 ### Add your icon (required before distributing)
-Place these files in the `assets/` folder:
-- `assets/icon.ico`  — Windows (256x256 minimum, ideally multi-size)
-- `assets/icon.icns` — macOS (512x512)
-- `assets/icon.png`  — Linux (512x512)
+Place the Rāma logo PNG in the `assets/` folder:
+```
+assets/logo-source.png   ← master logo (any resolution, 1024px+ recommended)
+```
+Then run the icon generator — it creates all formats automatically:
+```bash
+npm install sharp png-to-ico png2icons --save-dev
+npm run icons
+```
+This generates:
+- `assets/icon.ico`   — Windows (multi-size: 256/128/64/48/32/16px)
+- `assets/icon.icns`  — macOS
+- `assets/icon.png`   — Linux (512×512)
+- `public/icon.png`   — Electron tray icon
+- `public/favicon.ico`— Browser tab favicon
 
 ### Build commands
 ```bash

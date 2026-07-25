@@ -23,6 +23,19 @@ module.exports = async function(context) {
   const assetsDir = path.join(root, 'assets');
   mkdirSync(assetsDir, { recursive: true });
 
+  // If source logo exists but icons haven't been generated yet, generate them
+  const sourceLogo = path.join(assetsDir, 'logo-source.png');
+  const iconPng    = path.join(assetsDir, 'icon.png');
+  if (existsSync(sourceLogo) && !existsSync(iconPng)) {
+    console.log('  ⬢ logo-source.png found — auto-generating icons...');
+    try {
+      execSync('node scripts/generateIcons.cjs', { cwd: root, stdio: 'inherit' });
+    } catch (e) {
+      console.warn(`  ⚠ Icon auto-generation failed: ${e.message}`);
+      console.warn('  ⚠ Run: npm install sharp png-to-ico png2icons --save-dev && npm run icons');
+    }
+  }
+
   const needed = {
     win32:  ['icon.ico'],
     darwin: ['icon.icns', 'icon.png'],
