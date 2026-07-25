@@ -23,6 +23,10 @@ const vectorMemoryIPC  = require('./ipc/vectorMemory.cjs');
 const sandboxIPC       = require('./ipc/sandboxEngine.cjs');
 const graphIPC         = require('./ipc/graphReasoner.cjs');
 const selfCareIPC      = require('./ipc/selfCare.cjs');
+// ─── Neural Lattice Nexus + Code Intelligence ─────────────────────────────────
+const eventBus         = require('./ramaEventBus.cjs');
+const astIPC           = require('./ipc/astEngine.cjs');
+const codeRegenIPC     = require('./ipc/codeRegenEngine.cjs');
 const sessionMgr   = require('./sessionManager.cjs');
 const dataStore    = require('./dataStore.cjs');
 
@@ -255,6 +259,9 @@ app.whenReady().then(async () => {
   sandboxIPC.register(ipcMain);
   graphIPC.register(ipcMain);
   selfCareIPC.register(ipcMain);
+  eventBus.register(ipcMain);
+  astIPC.register(ipcMain);
+  codeRegenIPC.register(ipcMain);
   sessionMgr.register(ipcMain);
   dataStore.register(ipcMain);
 

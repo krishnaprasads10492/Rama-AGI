@@ -245,6 +245,49 @@ contextBridge.exposeInMainWorld('rama', {
     exportBackup:  (dest)                     => ipcRenderer.invoke('store:export-backup', dest),
   },
 
+  // ── Event Bus ─────────────────────────────────────────────────────────────
+  bus: {
+    emit:    (event, data) => ipcRenderer.invoke('bus:emit',    event, data),
+    status:  ()            => ipcRenderer.invoke('bus:status'),
+    history: (limit)       => ipcRenderer.invoke('bus:history', limit),
+    onEvent: (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('bus:event', h);
+      return () => ipcRenderer.removeListener('bus:event', h);
+    },
+    onCapabilityRegression: (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('capability:regression', h);
+      return () => ipcRenderer.removeListener('capability:regression', h);
+    },
+  },
+
+  // ── AST Engine ────────────────────────────────────────────────────────────
+  ast: {
+    analyzeFile:    (filePath)             => ipcRenderer.invoke('ast:analyze-file',    filePath),
+    analyzeRepo:    (repoPath, maxFiles)   => ipcRenderer.invoke('ast:analyze-repo',    repoPath, maxFiles),
+    impactAnalysis: (opts)                 => ipcRenderer.invoke('ast:impact-analysis', opts),
+    clearCache:     ()                     => ipcRenderer.invoke('ast:cache-clear'),
+  },
+
+  // ── Code Regen Engine ─────────────────────────────────────────────────────
+  regen: {
+    queue:       (item)         => ipcRenderer.invoke('regen:queue',        item),
+    getProposal: (id)           => ipcRenderer.invoke('regen:get-proposal', id),
+    listProposals: ()           => ipcRenderer.invoke('regen:list-proposals'),
+    setFix:      (opts)         => ipcRenderer.invoke('regen:set-fix',      opts),
+    apply:       (opts)         => ipcRenderer.invoke('regen:apply',        opts),
+    approve:     (id)           => ipcRenderer.invoke('regen:approve',      id),
+    reject:      (id)           => ipcRenderer.invoke('regen:reject',       id),
+    research:    (opts)         => ipcRenderer.invoke('regen:research',     opts),
+    getPrompt:   (opts)         => ipcRenderer.invoke('regen:get-prompt',   opts),
+    onProposalReady: (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('regen:proposal-ready', h);
+      return () => ipcRenderer.removeListener('regen:proposal-ready', h);
+    },
+  },
+
   // ── Vector Memory (semantic search — upgrade, keyword fallback always active) ──
   vector: {
     store:       (text, meta)       => ipcRenderer.invoke('vector:store',        text, meta),
