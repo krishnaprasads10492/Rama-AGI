@@ -154,15 +154,14 @@ function express(id, geneId, user = null) {
   if (!gene) return { ok: false, error: `Unknown gene: ${geneId}` };
   if (inst.expressed.includes(geneId)) return { ok: true, data: strip(inst), note: 'already expressed' };
 
-  // Tier gate — an instance may never exceed the authority of who asked for it
+  // Tier gate — an instance may never exceed the authority of whoever asked for
+  // it. Checked against shared/capabilities.json, the same matrix the renderer
+  // and the Express server use.
   if (user && gene.cap) {
-    let allowed = true;
-    try {
-      const { can } = require('../lib/capability.cjs');
-      allowed = can(user, gene.cap);
-    } catch { allowed = true; }   // no matrix available in main — server still enforces
-    if (!allowed) {
-      return { ok: false, error: `Tier ${user.tier} may not express ${geneId} (needs ${gene.cap})` };
+    const { can, TIER_LABELS } = require('../lib/capability.cjs');
+    if (!can(user, gene.cap)) {
+      const who = TIER_LABELS[String(user.tier)] ?? 'unauthenticated';
+      return { ok: false, error: `${who} may not express ${geneId} (requires "${gene.cap}")` };
     }
   }
 

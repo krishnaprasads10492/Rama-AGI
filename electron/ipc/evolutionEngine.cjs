@@ -150,7 +150,7 @@ function register(ipcMain) {
 
   // ── Get evolution log ─────────────────────────────────────────────────────
   ipcMain.handle('evolution:get-log', async () => {
-    return { ok: true, data: evolutionLog.slice(0, 100) };
+    return { ok: true, data: evolutionLog.slice(0, 100).map(flattenProposal) };
   });
 
   // ── Get scout session ─────────────────────────────────────────────────────
@@ -381,11 +381,21 @@ async function buildEvolutionProposal(finding, targetCapability, sender) {
     },
   });
 
-  // Local log kept for the Evolution page's history view
+  // Local log holds the ledger object itself, so `status` stays live as the
+  // proposal moves pending → approved → applied.
   evolutionLog.unshift(proposal);
   if (evolutionLog.length > 200) evolutionLog.pop();
 
-  return proposal;
+  return flattenProposal(proposal);
+}
+
+/**
+ * UI view of a proposal: ledger metadata lifted to the top level so the
+ * Evolution page reads `licenseNote`/`improvementAxes` directly. The ledger
+ * object stays canonical — this is a projection, not a second copy.
+ */
+function flattenProposal(p) {
+  return { ...p, ...(p.meta || {}) };
 }
 
 // ─── Evolution applier ────────────────────────────────────────────────────────
