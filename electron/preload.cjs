@@ -309,6 +309,74 @@ contextBridge.exposeInMainWorld('rama', {
     },
   },
 
+  // ── Genome (complete capability blueprint carried by every instance) ───────
+  genome: {
+    get:       ()        => ipcRenderer.invoke('genome:get'),
+    verify:    ()        => ipcRenderer.invoke('genome:verify'),
+    roles:     ()        => ipcRenderer.invoke('genome:roles'),
+    genes:     (domain)  => ipcRenderer.invoke('genome:genes', domain),
+    expressed: (role)    => ipcRenderer.invoke('genome:expressed', role),
+    proposeChange: (c)   => ipcRenderer.invoke('genome:propose-change', c),
+  },
+
+  // ── Instances (holonic — each carries the full genome, expresses a subset) ──
+  instance: {
+    spawn:       (opts)            => ipcRenderer.invoke('instance:spawn',     opts),
+    list:        (filter)          => ipcRenderer.invoke('instance:list',      filter),
+    get:         (id)              => ipcRenderer.invoke('instance:get',       id),
+    express:     (id, gene, user)  => ipcRenderer.invoke('instance:express',   id, gene, user),
+    suspend:     (id)              => ipcRenderer.invoke('instance:suspend',   id),
+    resume:      (id)              => ipcRenderer.invoke('instance:resume',    id),
+    terminate:   (id)              => ipcRenderer.invoke('instance:terminate', id),
+    record:      (id, work)        => ipcRenderer.invoke('instance:record',    id, work),
+    stats:       ()                => ipcRenderer.invoke('instance:stats'),
+    audit:       (limit)           => ipcRenderer.invoke('instance:audit',     limit),
+    failover:    (role)            => ipcRenderer.invoke('instance:failover',  role),
+    restore:     ()                => ipcRenderer.invoke('instance:restore'),
+    ensurePrime: ()                => ipcRenderer.invoke('instance:ensure-prime'),
+    on: (event, cb) => {
+      const channel = `instance:${event}`;
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on(channel, h);
+      return () => ipcRenderer.removeListener(channel, h);
+    },
+  },
+
+  // ── Meta-cognition (self-audit nexus + experiential dataset) ───────────────
+  meta: {
+    record:      (rec)    => ipcRenderer.invoke('meta:record',      rec),
+    audit:       ()       => ipcRenderer.invoke('meta:audit'),
+    audits:      (limit)  => ipcRenderer.invoke('meta:audits',      limit),
+    vectors:     ()       => ipcRenderer.invoke('meta:vectors'),
+    profiles:    ()       => ipcRenderer.invoke('meta:profiles'),
+    profile:     (action) => ipcRenderer.invoke('meta:profile',     action),
+    regressions: (limit)  => ipcRenderer.invoke('meta:regressions', limit),
+    outcomes:    (filter) => ipcRenderer.invoke('meta:outcomes',    filter),
+    summary:     ()       => ipcRenderer.invoke('meta:summary'),
+    resetBaseline: ()     => ipcRenderer.invoke('meta:reset-baseline'),
+    onAudit: (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('meta:audit', h);
+      return () => ipcRenderer.removeListener('meta:audit', h);
+    },
+    onRegression: (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('meta:regression', h);
+      return () => ipcRenderer.removeListener('meta:regression', h);
+    },
+  },
+
+  // ── Timeline (git-backed flashbacks & state replay) ────────────────────────
+  timeline: {
+    get:            (opts) => ipcRenderer.invoke('timeline:get',             opts),
+    flashback:      (opts) => ipcRenderer.invoke('timeline:flashback',       opts),
+    compare:        (opts) => ipcRenderer.invoke('timeline:compare',         opts),
+    fileHistory:    (opts) => ipcRenderer.invoke('timeline:file-history',    opts),
+    proposeRestore: (opts) => ipcRenderer.invoke('timeline:propose-restore', opts),
+    markers:        (limit)=> ipcRenderer.invoke('timeline:markers',         limit),
+    mark:           (m)    => ipcRenderer.invoke('timeline:mark',            m),
+  },
+
   // ── Proposal Ledger (single approve→apply gate for every self-change) ──────
   proposals: {
     list:    (filter)         => ipcRenderer.invoke('proposals:list',    filter),
@@ -510,7 +578,7 @@ const ALLOWED_PREFIXES = [
   'session:', 'store:', 'nucleus:', 'ipc-enc:', 'bus:', 'ast:', 'regen:',
   'vector:', 'sandbox:', 'graph:', 'selfcare:', 'vault:', 'models:',
   'agents:', 'browser:', 'app:', 'capability:', 'genome:', 'instance:',
-  'proposals:',
+  'proposals:', 'meta:', 'timeline:',
 ];
 
 function isAllowed(channel) {

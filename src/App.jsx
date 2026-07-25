@@ -114,6 +114,39 @@ function ConsciousnessProvider() {
   return null;
 }
 
+/**
+ * Instance lattice bootstrap. Runs once the encrypted store is unlocked and a
+ * user is present: restores persisted instances, then guarantees a prime
+ * instance exists so Rāma is always available to its master.
+ */
+function InstanceProvider() {
+  const { pushNotification } = useAppStore();
+
+  useEffect(() => {
+    if (!window.rama?.instance) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        await window.rama.instance.restore();
+        const res = await window.rama.instance.ensurePrime();
+        if (cancelled) return;
+        if (res?.created) {
+          pushNotification({ type: 'info', message: 'Prime instance active — full genome expressed', duration: 5000 });
+        } else if (res?.ok === false) {
+          pushNotification({ type: 'warn', message: `Instance bootstrap: ${res.error}`, duration: 8000 });
+        }
+      } catch (err) {
+        console.warn('[instances] bootstrap failed:', err.message);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [pushNotification]);
+
+  return null;
+}
+
 export default function App() {
   const { currentUser, setSession } = useUserStore();
   const [authChecked,    setAuthChecked]    = useState(false);
@@ -170,6 +203,7 @@ export default function App() {
     <BrowserRouter>
       <TrayNavListener />
       <ConsciousnessProvider />
+      <InstanceProvider />
       <ErrorBoundary>
         <AppShell>
           <React.Suspense fallback={<PageLoader />}>

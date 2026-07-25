@@ -22,8 +22,9 @@ const express  = require('express');
 const crypto   = require('crypto');
 const router   = express.Router();
 
-// Tiers mirror client-side accessControl.js
-const TIERS = { MASTER: 0, SUPERADMIN: 1, ADMIN: 2, OPERATOR: 3, VIEWER: 4, GUEST: 5 };
+// Tiers come from shared/capabilities.json — the same file the renderer and the
+// Electron main process read. Previously this was a hand-kept mirror.
+const { TIERS, can } = require('../../electron/lib/capability.cjs');
 
 // ─── In-memory stores (Phase 5: migrate to MongoDB) ───────────────────────────
 // Users: { id, name, email, passwordHash, tier, suspended, createdAt, lastLogin }

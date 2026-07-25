@@ -88,6 +88,26 @@ async function checkVectorMemory() {
   } catch { return { status: 'unavailable' }; }
 }
 
+/**
+ * Verify Rāma's genome — every gene must resolve to a real engine on this
+ * machine. This is the concrete answer to "have I lost a capability?", measured
+ * rather than assumed.
+ */
+function checkGenome() {
+  try {
+    const v = require('../genome.cjs').verify();
+    return {
+      total:     v.total,
+      live:      v.live,
+      degraded:  v.degraded,
+      healthy:   v.healthy,
+      deadGenes: v.genes.filter(g => !g.live).map(g => g.id),
+    };
+  } catch (err) {
+    return { total: 0, live: 0, degraded: 0, healthy: false, deadGenes: [], error: err.message };
+  }
+}
+
 async function checkSandbox() {
   try {
     const si2 = require('./sandboxEngine.cjs');
@@ -123,6 +143,18 @@ async function runHealthSweep() {
   sweep.components.vectorMemory  = await checkVectorMemory();
   sweep.components.graphReasoner = await checkGraphReasoner();
   sweep.components.sandbox       = await checkSandbox();
+  sweep.genome                   = checkGenome();
+
+  // A missing gene is real capability loss — surface it, never absorb it silently
+  if (sweep.genome.degraded > 0) {
+    sweep.overallStatus = 'degraded';
+    sweep.alerts.push({
+      severity:  'warn',
+      component: 'genome',
+      message:   `${sweep.genome.degraded} of ${sweep.genome.total} genes not resolvable: ${sweep.genome.deadGenes.join(', ')}`,
+      ts,
+    });
+  }
 
   // Aggregate resource alerts
   for (const issue of sweep.system.issues) {
@@ -295,4 +327,4 @@ function register(ipcMain) {
   monitoring = true;
 }
 
-module.exports = { register, runHealthSweep, trackCapabilityScore, broadcast };
+module.exports = { register, runHealthSweep, trackCapabilityScore, checkGenome, broadcast };

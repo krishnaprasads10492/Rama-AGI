@@ -1258,3 +1258,164 @@ server/
 
 *RAMA_AGI_MASTER_SPEC.md — Version 2.0 · July 2026 · Krishna Prasad*
 *Content was rephrased for compliance with licensing restrictions where external sources were referenced.*
+
+---
+
+## SECTION 23 — Single Sources of Truth (Consolidation Layer)
+
+Rāma grew by addition: each capability arrived as its own engine with its own
+helpers. That produced nineteen places where the same decision was made twice.
+Duplication in a system that edits its own source is not a tidiness problem — it
+is a correctness problem, because a rule tightened in one copy stays loose in the
+other. This section records what is now canonical.
+
+| Concern | Single source | Consumers rewired |
+|---|---|---|
+| Pages, routes, nav, voice, per-page tier | `src/config/registry.js` | `App.jsx`, `CommandPalette.jsx`, `voiceEngine.js`, `userStore.js` (`Sidebar.jsx` deleted) |
+| Access tiers + capability matrix | `shared/capabilities.json` | `src/services/accessControl.js`, `electron/lib/capability.cjs`, `server/routes/auth.cjs` |
+| Main-process HTTP | `electron/lib/http.cjs` | `modelRouter`, `evolutionEngine`, `codeRegenEngine`, `intelligenceEngine`, `vectorMemory`, `browserEngine` |
+| Renderer → server HTTP | `apiClient.serverJson` | `authClient.js`, `ramaClient.js` |
+| Resource admission (CPU/RAM/thermal) | `resourceOrchestrator.admit()` | `agentOrchestrator`, `sandboxEngine`, `instanceManager`, `selfCare` |
+| Change approval (propose → approve → apply) | `electron/lib/proposals.cjs` | `evolutionEngine`, `codeRegenEngine`, `selfModify.js`, `timeline` restore |
+| Tool → capability gating | `ramaCore.TOOL_REGISTRY[].cap` → matrix | `routeToTools(task, user)` |
+
+### The approval invariant
+
+`proposals.apply()` refuses any proposal not in `approved` state. Every path that
+writes to Rāma's own source — absorbed capability, AI-generated fix, self-created
+page, timeline rollback — goes through it. There is one gate and one audit trail.
+
+### Registration cost of a new page
+
+Adding a page used to mean editing four files, with a real chance of a
+half-registered page. It is now two insertions in one file (`registry.js`): a
+`PageDef` and a loader entry. `selfModify.generateRegistryUpdate()` performs both,
+so Rāma creating its own page produces a complete registration or none.
+
+### Bugs found while consolidating
+
+- `vectorMemory.embed()` called Ollama over `https` on a plain-HTTP port. Every
+  local embedding attempt failed silently and the TF-IDF fallback was the only
+  live path. Semantic memory was never actually semantic.
+- `routeToTools()` ignored the session tier entirely, so a Viewer's task could
+  plan a `terminal.run` step that execution would then reject.
+- `agents:set-governor` assigned to `TOTAL_CPU_CAP`, which is now a getter —
+  under `'use strict'` that would have thrown. The handler forwards to the
+  orchestrator's thresholds instead.
+
+---
+
+## SECTION 24 — Genome / Instance Architecture (Holonic)
+
+### The principle
+
+Every Rāma instance carries the **complete genome** — the full set of genes for
+every capability the system has. An instance's role decides only which genes are
+*expressed*; the rest remain present but dormant.
+
+Three properties follow, and each is queryable rather than aspirational:
+
+1. **No instance is a reduced Rāma.** `instance:express` activates any dormant
+   gene at runtime, pulling in its dependency closure.
+2. **Losing an instance loses no capability.** `instance:failover` answers which
+   running instances could take over a given role, and what they would need to
+   express to do it.
+3. **A capability is added once.** A new gene in `electron/genome.cjs` is
+   immediately reachable by every instance.
+
+### Layout
+
+| Layer | File | Responsibility |
+|---|---|---|
+| Identity, loyalty, ethics | `electron/nucleusSealer.cjs` | Encrypted, master-only. Genome reports masked identity when locked. |
+| Gene definitions | `electron/genome.cjs` | 30 genes across 8 domains, each naming the engine that implements it |
+| Instance lifecycle | `electron/ipc/instanceManager.cjs` | spawn / express / suspend / resume / terminate / failover |
+| Persistence | `electron/dataStore.cjs` (`instances` domain) | Encrypted; never plaintext |
+| Coordination | `electron/ramaEventBus.cjs` | Lifecycle events fan out to every engine |
+| Genome changes | `electron/lib/proposals.cjs` (`GENOME` kind) | High risk, restart required, master approval |
+
+### Domains
+
+`perception · reasoning · action · memory · coordination · security · self-evolution · governance`
+
+### Roles
+
+| Role | Expressed / 30 | Purpose |
+|---|---|---|
+| `prime` | 30 | Master-facing Rāma — everything expressed |
+| `rnd` | 23 | Research, prototype, propose code |
+| `strategic-optimizer` | 21 | Signals → options → strategy |
+| `cyber-sentinel` | 20 | Threats to master, data, and Rāma itself |
+| `wellness-advisor` | 18 | Master context and wellbeing |
+| `sentinel-lite` | 15 | Minimal-footprint watcher (core genes only) |
+
+Core genes (loyalty, ethics, approval gate, crypto, IPC seal, event bus, resource
+orchestration, instance lifecycle, meta-cognition, experiential memory, system
+sensing, model routing, data store, self-care) are expressed by **every** role.
+Loyalty is not optional in any expression of Rāma.
+
+### Honest verification
+
+`genome:verify` resolves each gene's engine module on the running machine. It
+reports what is actually live, not what the manifest claims. `selfCare`'s health
+sweep folds this in, so a lost engine surfaces as a degraded sweep with the dead
+gene ids named — capability loss is reported, never absorbed.
+
+---
+
+## SECTION 25 — Meta-Cognitive Self-Audit + Experiential Learning
+
+### Experiential dataset
+
+Every action Rāma takes is recorded as an `(action, context, outcome)` triple.
+This is Rāma's own lived record. From it come **optimization vectors**: concrete
+"prefer X over Y for action Z" conclusions with sample counts and confidence.
+
+A vector is only emitted where the evidence supports it — at least two tools with
+five or more runs each. Ranking is success rate first, latency second:
+correctness before speed.
+
+### Self-audit nexus
+
+Every 10 minutes (and skipped entirely when nothing has happened), Rāma compares
+current per-action aggregates against the last **healthy** baseline and reports:
+
+- `accuracy-regression` — success rate down ≥15 points
+- `latency-regression` — average duration up ≥75% and ≥500ms
+- `capability-silent` — an action that used to run has gone quiet for 24h
+
+The baseline only advances from a healthy audit. Otherwise a slow decline would
+be normalised one audit at a time and never reported.
+
+### Timeline flashbacks
+
+Rāma's git history becomes a navigable timeline, with markers correlating commits
+to what Rāma was doing (proposal applied, capability absorbed, regression found).
+
+- `timeline:flashback` reads a file as it existed at any commit — pure inspection,
+  the working tree is never touched
+- `timeline:compare` shows what changed between two points
+- `timeline:propose-restore` files a rollback through the proposal ledger
+
+No destructive git operation is exposed. A rollback is a change to Rāma's source
+like any other and is approved like any other.
+
+### Bounded by design
+
+| Collection | Cap |
+|---|---|
+| Recorded outcomes | 2,000 |
+| Audit reports | 200 |
+| Regressions | 100 |
+| Timeline markers | 300 |
+| Context per outcome | primitives only, strings truncated at 200 chars |
+
+Persistence is best-effort into the encrypted store. If the store is locked the
+dataset stays in memory and is never written in plaintext.
+
+### New pages
+
+| Route | Page | Tier | Shows |
+|---|---|---|---|
+| `/genome` | Genome | Master | Gene map, measured gene health, instances, expression, failover |
+| `/introspect` | Introspect | Master | Success rates, optimization vectors, regressions, timeline |

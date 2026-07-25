@@ -67,6 +67,7 @@
       "build/**/*",
       "electron/**/*",
       "server/**/*",
+      "shared/**/*",
       "package.json",
       "!node_modules/**/*",
       "node_modules/argon2/**/*",

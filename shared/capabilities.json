@@ -1,0 +1,115 @@
+{
+  "_comment": "SINGLE SOURCE OF TRUTH for access tiers and the capability matrix. Read by the renderer (src/services/accessControl.js), the Electron main process (electron/lib/capability.cjs) and the Express server (server/routes/auth.cjs). JSON so all three runtimes can consume it without a build step. Lower tier number = higher privilege; a capability's value is the LOWEST-privileged tier still allowed to use it.",
+  "version": 1,
+  "tiers": {
+    "MASTER": 0,
+    "SUPERADMIN": 1,
+    "ADMIN": 2,
+    "OPERATOR": 3,
+    "VIEWER": 4,
+    "GUEST": 5
+  },
+  "tierLabels": {
+    "0": "Master",
+    "1": "SuperAdmin",
+    "2": "Admin",
+    "3": "Operator",
+    "4": "Viewer",
+    "5": "Guest"
+  },
+  "tierColors": {
+    "0": "var(--violet)",
+    "1": "var(--magenta)",
+    "2": "var(--accent)",
+    "3": "var(--green)",
+    "4": "var(--amber)",
+    "5": "var(--muted)"
+  },
+  "capabilities": {
+    "identity.reveal": 0,
+    "identity.voice-wake": 0,
+    "identity.master-address": 0,
+
+    "chat.send": 5,
+    "chat.history.own": 3,
+    "chat.history.all": 2,
+    "chat.unrestricted": 0,
+    "chat.model-select": 3,
+    "chat.system-prompt": 1,
+
+    "agents.spawn": 3,
+    "agents.kill-own": 3,
+    "agents.kill-all": 2,
+    "agents.governor-config": 0,
+    "agents.persistent": 2,
+
+    "os.metrics-read": 3,
+    "os.process-list": 2,
+    "os.process-kill": 1,
+    "os.temp-clean": 1,
+    "os.filesystem-read": 2,
+    "os.filesystem-write": 1,
+    "os.filesystem-delete": 0,
+
+    "terminal.open": 1,
+    "terminal.unrestricted": 0,
+
+    "git.read": 3,
+    "git.commit": 2,
+    "git.push": 1,
+    "git.force": 0,
+
+    "browser.search": 3,
+    "browser.read": 3,
+    "browser.download": 2,
+    "browser.forms": 1,
+    "browser.accounts": 0,
+
+    "models.use": 3,
+    "models.add-key": 1,
+    "models.ollama-pull": 1,
+
+    "vault.read": 0,
+    "vault.write": 0,
+    "vault.unlock": 0,
+
+    "stockmind.view": 4,
+    "stockmind.request": 3,
+    "stockmind.config": 2,
+
+    "knowledge.read": 4,
+    "knowledge.write": 3,
+    "knowledge.delete": 2,
+
+    "self-modify.view": 1,
+    "self-modify.apply": 0,
+
+    "users.view": 2,
+    "users.create": 0,
+    "users.edit": 0,
+    "users.delete": 0,
+    "users.suspend": 2,
+
+    "mind.view": 0,
+    "mind.edit": 0,
+    "mind.proactive": 0,
+
+    "apps.view": 2,
+    "apps.execute-safe": 2,
+    "apps.execute-all": 0,
+
+    "audit.own": 3,
+    "audit.all": 2,
+
+    "genome.view": 0,
+    "genome.propose": 0,
+    "instances.view": 2,
+    "instances.spawn": 1,
+    "instances.express": 0,
+    "instances.terminate": 1,
+    "meta.view": 0,
+    "meta.audit": 0,
+    "timeline.view": 2,
+    "timeline.restore": 0
+  }
+}

@@ -39,7 +39,7 @@ const cache  = {};
 const dirty  = new Set();
 let autoSaveTimer = null;
 
-const DOMAINS = ['users', 'conversations', 'knowledge', 'memory', 'worldmodel', 'agents', 'config'];
+const DOMAINS = ['users', 'conversations', 'knowledge', 'memory', 'worldmodel', 'agents', 'config', 'instances'];
 
 // ─── Load all domains on unlock ───────────────────────────────────────────────
 function loadAll() {
@@ -170,6 +170,10 @@ function getDefaultData(domain) {
       theme:         'cyberpunk',
       vaultCreatedAt: null,
       version:       '1.0.0',
+    },
+    instances: {
+      registry:   [],   // Rāma instances — each carries the full genome
+      genomeHash: null, // hash of the genome the instances were created against
     },
   };
   return defaults[domain] || {};

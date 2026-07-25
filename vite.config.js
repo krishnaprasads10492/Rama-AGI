@@ -22,6 +22,8 @@ export default defineConfig({
       '@config':     path.resolve(__dirname, './src/config'),
       '@hooks':      path.resolve(__dirname, './src/hooks'),
       '@utils':      path.resolve(__dirname, './src/utils'),
+      // Definitions shared with the Electron main process and Express server
+      '@shared':     path.resolve(__dirname, './shared'),
     },
   },
 

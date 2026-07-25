@@ -32,6 +32,11 @@ const nucleusSealer    = require('./nucleusSealer.cjs');
 const ipcEncryption    = require('./ipcEncryption.cjs');
 // ─── Shared foundations (one HTTP client, one approval ledger) ────────────────
 const proposalLedger   = require('./lib/proposals.cjs');
+// ─── Genome / Instance layer (holonic architecture) ───────────────────────────
+const genomeIPC        = require('./genome.cjs');
+const instanceIPC      = require('./ipc/instanceManager.cjs');
+const metaCognitionIPC = require('./ipc/metaCognition.cjs');
+const timelineIPC      = require('./ipc/timeline.cjs');
 const sessionMgr   = require('./sessionManager.cjs');
 const dataStore    = require('./dataStore.cjs');
 
@@ -272,6 +277,11 @@ app.whenReady().then(async () => {
   nucleusSealer.register(ipcMain);
   ipcEncryption.register(ipcMain);
   proposalLedger.register(ipcMain);
+  // Genome layer — registered after the engines it describes so verify() is honest
+  genomeIPC.register(ipcMain);
+  instanceIPC.register(ipcMain);
+  metaCognitionIPC.register(ipcMain);
+  timelineIPC.register(ipcMain);
   sessionMgr.register(ipcMain);
   dataStore.register(ipcMain);
 

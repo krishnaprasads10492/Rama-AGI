@@ -22,7 +22,20 @@
 | selfCare health sweep | ~5MB | <0.3% | 120s | ✅ Only when active |
 | consciousness loop | ~3MB | <0.2% | 60s (staggered +15s) | ✅ Only if master auth |
 | dataStore auto-save | negligible | <0.1% | 60s | — |
-| **Total background** | **~16MB extra** | **<1%** | — | — |
+| metaCognition self-audit | ~3MB | <0.1% | 600s | ✅ Skips entirely when no outcomes recorded |
+| **Total background** | **~19MB extra** | **<1%** | — | — |
+
+### Consolidation savings (measured as removed work, not estimates)
+
+The single-source-of-truth refactor removed duplicated polling and state:
+
+| Removed duplicate | Saving |
+|---|---|
+| `selfCare` polled `systeminformation` separately from `resourceOrchestrator` | one CPU/RAM sampler instead of two, every 120s |
+| `agentOrchestrator` read `os.freemem()` on every spawn + every 2s watchdog tick | resource math now happens once, in the orchestrator's cached snapshot |
+| 5 copies of `httpsGet`/`httpsPost` in main process | one connection policy, one circuit-breaker map instead of five independent ones |
+| 3 renderer HTTP clients (`apiClient`, `authClient`, `ramaClient`) | one breaker; a failing server now trips once instead of three times |
+| 5 route/nav/voice tables | ~4KB less bundled JS and no chance of divergence |
 
 ## On-demand engines (only activate when used, release when idle)
 
@@ -35,6 +48,10 @@
 | astEngine | +15MB cache | low | — (LRU cache) |
 | modelRouter AI calls | 0 (network only) | near-zero | — |
 | evolutionEngine scouts | 0 (network only) | low | — |
+| genome (gene manifest + verify) | ~1MB | negligible | — (pure data, verify is a resolve check) |
+| instanceManager | ~2MB + ~96MB per instance | low | ✅ Suspend/terminate releases |
+| metaCognition dataset | ~3MB | negligible | — (hard caps: 2000 outcomes, 200 audits) |
+| timeline flashbacks | ~2MB | low burst | ✅ Per-query, nothing retained but markers (300 cap) |
 
 ## Performance principles
 
@@ -64,12 +81,18 @@ Worst case: Electron + UI + server + all engines + 1 agent + browser open
 | Layer | RAM |
 |---|---|
 | Base (always) | ~176MB |
-| Background loops | ~16MB |
+| Background loops | ~19MB |
 | browserEngine active | +200MB |
 | 1 agent active | +512MB |
 | vectorMemory | +100MB |
+| Genome + 2 instances | +200MB |
 | Other caches | +50MB |
-| **TOTAL PEAK** | **~1.05GB** |
+| **TOTAL PEAK** | **~1.25GB** |
+
+Instances are coordinators, not workers — they hold a genome reference and
+delegate real work to agents. The `instance:spawn` path goes through
+`resourceOrchestrator.admit()`, so under critical pressure a spawn is refused
+with a reason rather than accepted and then starved. Cap is 8 instances.
 
 This is well within what modern machines handle. VS Code itself uses 500MB–1GB.
 On a machine with 8GB+ RAM, Rāma at full load uses ~13% of memory.

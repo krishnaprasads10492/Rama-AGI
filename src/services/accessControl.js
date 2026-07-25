@@ -14,129 +14,22 @@
  *   5 — GUEST       Single-session chat only, masked AGI, no persistence
  */
 
+// Tiers and the capability matrix are defined ONCE in shared/capabilities.json
+// so the renderer, Electron main (electron/lib/capability.cjs) and the Express
+// server all enforce the same rules. Editing the matrix in one runtime used to
+// leave the other two unchanged.
+import spec from '@shared/capabilities.json';
+
 // ─── Tier definitions ────────────────────────────────────────────────────────
-export const TIERS = {
-  MASTER:     0,
-  SUPERADMIN: 1,
-  ADMIN:      2,
-  OPERATOR:   3,
-  VIEWER:     4,
-  GUEST:      5,
-};
-
-export const TIER_LABELS = {
-  0: 'Master',
-  1: 'SuperAdmin',
-  2: 'Admin',
-  3: 'Operator',
-  4: 'Viewer',
-  5: 'Guest',
-};
-
-export const TIER_COLORS = {
-  0: 'var(--violet)',
-  1: 'var(--magenta)',
-  2: 'var(--accent)',
-  3: 'var(--green)',
-  4: 'var(--amber)',
-  5: 'var(--muted)',
-};
+export const TIERS       = spec.tiers;
+export const TIER_LABELS = spec.tierLabels;
+export const TIER_COLORS = spec.tierColors;
 
 // ─── Capability matrix ────────────────────────────────────────────────────────
-// Each capability maps to the MINIMUM tier required to use it.
-// Lower number = higher privilege.
-export const CAPABILITY_MATRIX = {
-  // Identity
-  'identity.reveal':          TIERS.MASTER,       // See Rāma's true identity
-  'identity.voice-wake':      TIERS.MASTER,       // "Hey Rāma" wake word
-  'identity.master-address':  TIERS.MASTER,       // Rāma calls user "master"
-
-  // Chat
-  'chat.send':                TIERS.GUEST,        // Send messages
-  'chat.history.own':         TIERS.OPERATOR,     // See own chat history
-  'chat.history.all':         TIERS.ADMIN,        // See all users' history
-  'chat.unrestricted':        TIERS.MASTER,       // No topic limits
-  'chat.model-select':        TIERS.OPERATOR,     // Choose AI model
-  'chat.system-prompt':       TIERS.SUPERADMIN,   // Override system prompt
-
-  // Agents
-  'agents.spawn':             TIERS.OPERATOR,     // Create agents
-  'agents.kill-own':          TIERS.OPERATOR,     // Kill own agents
-  'agents.kill-all':          TIERS.ADMIN,        // Kill any agent
-  'agents.governor-config':   TIERS.MASTER,       // Change resource limits
-  'agents.persistent':        TIERS.ADMIN,        // Create persistent agents
-
-  // OS / System
-  'os.metrics-read':          TIERS.OPERATOR,     // View CPU/RAM/disk
-  'os.process-list':          TIERS.ADMIN,        // List processes
-  'os.process-kill':          TIERS.SUPERADMIN,   // Kill processes
-  'os.temp-clean':            TIERS.SUPERADMIN,   // Clean temp files
-  'os.filesystem-read':       TIERS.ADMIN,        // Read any file
-  'os.filesystem-write':      TIERS.SUPERADMIN,   // Write any file
-  'os.filesystem-delete':     TIERS.MASTER,       // Delete files
-
-  // Terminal
-  'terminal.open':            TIERS.SUPERADMIN,   // Open PTY terminal
-  'terminal.unrestricted':    TIERS.MASTER,       // No command restrictions
-
-  // Git
-  'git.read':                 TIERS.OPERATOR,     // Read repo status/log
-  'git.commit':               TIERS.ADMIN,        // Commit changes
-  'git.push':                 TIERS.SUPERADMIN,   // Push to remote
-  'git.force':                TIERS.MASTER,       // Force push / destructive
-
-  // Browser / Internet
-  'browser.search':           TIERS.OPERATOR,     // Web search
-  'browser.read':             TIERS.OPERATOR,     // Read webpages
-  'browser.download':         TIERS.ADMIN,        // Download files
-  'browser.forms':            TIERS.SUPERADMIN,   // Fill/submit forms
-  'browser.accounts':         TIERS.MASTER,       // Create accounts
-
-  // Models
-  'models.use':               TIERS.OPERATOR,     // Use any AI model
-  'models.add-key':           TIERS.SUPERADMIN,   // Add API keys
-  'models.ollama-pull':       TIERS.SUPERADMIN,   // Pull new models
-
-  // Vault
-  'vault.read':               TIERS.MASTER,       // Read credentials
-  'vault.write':              TIERS.MASTER,       // Write credentials
-  'vault.unlock':             TIERS.MASTER,       // Unlock vault
-
-  // StockMind
-  'stockmind.view':           TIERS.VIEWER,       // View predictions
-  'stockmind.request':        TIERS.OPERATOR,     // Request predictions
-  'stockmind.config':         TIERS.ADMIN,        // Configure stockmind
-
-  // Knowledge Base
-  'knowledge.read':           TIERS.VIEWER,       // Read knowledge entries
-  'knowledge.write':          TIERS.OPERATOR,     // Add entries
-  'knowledge.delete':         TIERS.ADMIN,        // Delete entries
-
-  // Self-modification
-  'self-modify.view':         TIERS.SUPERADMIN,   // See modification proposals
-  'self-modify.apply':        TIERS.MASTER,       // Apply code changes
-
-  // User management
-  'users.view':               TIERS.ADMIN,        // List users
-  'users.create':             TIERS.MASTER,       // Create users
-  'users.edit':               TIERS.MASTER,       // Edit users
-  'users.delete':             TIERS.MASTER,       // Delete users
-  'users.suspend':            TIERS.ADMIN,        // Suspend users
-
-  // Rāma Mind / AGI Dashboard
-  'mind.view':                TIERS.MASTER,       // View AGI internals
-  'mind.edit':                TIERS.MASTER,       // Edit world model/memory
-  'mind.proactive':           TIERS.MASTER,       // Configure proactive triggers
-
-  // App Assimilation
-  'apps.view':                TIERS.ADMIN,        // View app registry
-  'apps.execute-safe':        TIERS.ADMIN,        // Run safe app actions
-  'apps.execute-all':         TIERS.MASTER,       // Run any app action
-
-  // Audit
-  'audit.own':                TIERS.OPERATOR,     // See own actions
-  'audit.all':                TIERS.ADMIN,        // See all actions
-};
+// Sourced from shared/capabilities.json — the one definition all three runtimes
+// read. Each capability maps to the LOWEST-privileged tier still allowed to use
+// it (lower number = higher privilege).
+export const CAPABILITY_MATRIX = spec.capabilities;
 
 // ─── Permission check ─────────────────────────────────────────────────────────
 /**
