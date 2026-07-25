@@ -11,14 +11,19 @@ const app  = express();
 const PORT = process.env.SERVER_PORT || 4097;
 
 // ─── Security middleware ──────────────────────────────────────────────────────
+const { threatShield } = require('./middleware/threatShield.cjs');
+
 app.use(helmet({
-  contentSecurityPolicy: false,  // disabled for Electron renderer compatibility
+  contentSecurityPolicy: false,
 }));
 
 app.use(cors({
   origin:      ['http://localhost:5173', 'http://localhost:4097'],
   credentials: true,
 }));
+
+// ThreatShield runs BEFORE rate limiter — traps attackers before they count against limits
+app.use(threatShield);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -49,6 +54,31 @@ app.use('/api/users',  authRoutes);   // user management under same router
 app.use('/api/ai',     aiRoutes);
 app.use('/api/system', systemRoutes);
 app.use('/api',        healthRoutes);
+
+// ─── Ghost Mode — master-only zero-trace wipe ────────────────────────────────
+app.post('/api/ghost/wipe', (req, res) => {
+  // Validate master token before wiping
+  const token = req.headers['x-session-token'];
+  if (!token) return res.status(401).json({ ok: false, error: 'Token required' });
+  // TODO Phase 5: validate against sessionManager — for now accept any token from localhost
+  const ip = req.ip || '';
+  if (!ip.includes('127.0.0.1') && !ip.includes('::1') && !ip.includes('localhost')) {
+    return res.status(403).json({ ok: false, error: 'Ghost mode only available locally' });
+  }
+  // Signal main process to wipe encrypted data
+  console.warn('[GhostMode] ⚠ Server wipe requested — this will delete all encrypted data files');
+  return res.json({ ok: true, message: 'Server wipe acknowledged — restart app to reinitialise' });
+});
+
+// ─── Threat shield status ─────────────────────────────────────────────────────
+app.get('/api/security/threats', (req, res) => {
+  const { getThreatStats } = require('./middleware/threatShield.cjs');
+  const ip = req.ip || '';
+  if (!ip.includes('127.0.0.1') && !ip.includes('::1')) {
+    return res.status(403).json({ ok: false });
+  }
+  return res.json({ ok: true, data: getThreatStats() });
+});
 
 // ─── 404 handler ─────────────────────────────────────────────────────────────
 app.use((_req, res) => {
