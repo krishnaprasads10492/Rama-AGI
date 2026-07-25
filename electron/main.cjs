@@ -27,6 +27,9 @@ const selfCareIPC      = require('./ipc/selfCare.cjs');
 const eventBus         = require('./ramaEventBus.cjs');
 const astIPC           = require('./ipc/astEngine.cjs');
 const codeRegenIPC     = require('./ipc/codeRegenEngine.cjs');
+// ─── Immutable Encryption Foundry ────────────────────────────────────────────
+const nucleusSealer    = require('./nucleusSealer.cjs');
+const ipcEncryption    = require('./ipcEncryption.cjs');
 const sessionMgr   = require('./sessionManager.cjs');
 const dataStore    = require('./dataStore.cjs');
 
@@ -262,6 +265,8 @@ app.whenReady().then(async () => {
   eventBus.register(ipcMain);
   astIPC.register(ipcMain);
   codeRegenIPC.register(ipcMain);
+  nucleusSealer.register(ipcMain);
+  ipcEncryption.register(ipcMain);
   sessionMgr.register(ipcMain);
   dataStore.register(ipcMain);
 
@@ -287,6 +292,8 @@ app.on('activate', () => {
 app.on('before-quit', () => {
   app.isQuiting = true;
   sessionMgr.lockSession();   // zero all key material
+  nucleusSealer.lock();        // zero nucleus key
+  ipcEncryption.clearSession(); // zero IPC session key
   aiIPC.stopAll();
   terminalIPC.destroyAll();
   browserIPC.closeBrowser();

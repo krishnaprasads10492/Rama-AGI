@@ -82,6 +82,21 @@ async function masterUnlock(passcode, dataDir, userAgent = '') {
     // 5. Generate session
     _sessionKey   = crypto.randomBytes(32);
     _sessionToken = generateSessionToken(master.id, userAgent);
+
+    // 6. Unseal nucleus (identity becomes live in memory)
+    try {
+      const nucleusSealer = require('./nucleusSealer.cjs');
+      await nucleusSealer.unseal(passcode);
+    } catch (err) {
+      console.warn('[Session] Nucleus unseal warning:', err.message);
+      // Non-fatal — Rāma can still run with template identity
+    }
+
+    // 7. Initialize IPC encryption session key
+    try {
+      const ipcEnc = require('./ipcEncryption.cjs');
+      ipcEnc.initSession();
+    } catch { /* non-fatal */ }
     _sessionData  = {
       userId:      master.id,
       userName:    master.name,
@@ -123,6 +138,10 @@ function lockSession() {
   if (_sessionKey) { _sessionKey.fill(0); _sessionKey = null; }
   _sessionToken = null;
   _sessionData  = null;
+
+  // Lock nucleus and IPC encryption
+  try { require('./nucleusSealer.cjs').lock(); }         catch { /* ignore */ }
+  try { require('./ipcEncryption.cjs').clearSession(); }  catch { /* ignore */ }
 
   // Delete temp session file
   deleteSessionFile();

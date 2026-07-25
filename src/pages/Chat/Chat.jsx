@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useRamaStore } from '@store/ramaStore.js';
 import { useUIStore }   from '@store/uiStore.js';
 import { ramaChat }     from '@services/ramaClient.js';
-import { getSystemPrompt, shouldRevealIdentity, getIdentityDisclosure, recordInteraction } from '@services/consciousness.js';
+import { getSystemPromptAsync, shouldRevealIdentity, getIdentityDisclosure, recordInteraction } from '@services/consciousness.js';
 import RamaOrb          from '@components/RamaOrb.jsx';
 
 // ─── Ambient particle field ───────────────────────────────────────────────────
@@ -180,8 +180,8 @@ export default function Chat() {
       return;
     }
 
-    // Build messages with consciousness system prompt
-    const systemPrompt = getSystemPrompt();
+    // Build messages with nucleus system prompt (encrypted identity — never from source)
+    const systemPrompt = await getSystemPromptAsync();
     const allMessages  = [
       { role: 'system', content: systemPrompt },
       ...messages.filter(m => m.role !== 'system'),

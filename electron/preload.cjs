@@ -245,6 +245,27 @@ contextBridge.exposeInMainWorld('rama', {
     exportBackup:  (dest)                     => ipcRenderer.invoke('store:export-backup', dest),
   },
 
+  // ── Nucleus (Immutable Encryption Foundry) ────────────────────────────────
+  nucleus: {
+    seal:        (passcode)    => ipcRenderer.invoke('nucleus:seal',            passcode),
+    unseal:      (passcode)    => ipcRenderer.invoke('nucleus:unseal',          passcode),
+    status:      ()            => ipcRenderer.invoke('nucleus:status'),
+    getPrompt:   (extra)       => ipcRenderer.invoke('nucleus:get-prompt',      extra),
+    patch:       (patches)     => ipcRenderer.invoke('nucleus:patch',           patches),
+    lock:        ()            => ipcRenderer.invoke('nucleus:lock'),
+    getIdentity: ()            => ipcRenderer.invoke('nucleus:get-identity'),
+  },
+
+  // ── IPC Encryption (Pervasive Flow Encryption) ────────────────────────────
+  ipcSec: {
+    init:               ()      => ipcRenderer.invoke('ipc-enc:init'),
+    clear:              ()      => ipcRenderer.invoke('ipc-enc:clear'),
+    status:             ()      => ipcRenderer.invoke('ipc-enc:status'),
+    verify:             (msg)   => ipcRenderer.invoke('ipc-enc:verify',             msg),
+    encryptForState:    (val)   => ipcRenderer.invoke('ipc-enc:encrypt-for-state',  val),
+    decryptFromState:   (packed)=> ipcRenderer.invoke('ipc-enc:decrypt-from-state', packed),
+  },
+
   // ── Event Bus ─────────────────────────────────────────────────────────────
   bus: {
     emit:    (event, data) => ipcRenderer.invoke('bus:emit',    event, data),

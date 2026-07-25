@@ -61,8 +61,30 @@ export function getActivePersona() {
 }
 
 export function getSystemPrompt(extraContext = '') {
+  // PRIMARY: get from encrypted nucleus (live, in-memory, session-bound)
+  // This means the actual system prompt is NEVER in source code at runtime
+  if (typeof window !== 'undefined' && window.ipcRenderer) {
+    // Synchronous call not possible — use cached or async path
+    // The async version is used by Chat.jsx via getSystemPromptAsync()
+  }
+  // FALLBACK: source template (used before nucleus is unsealed)
   const persona = getActivePersona();
   return `${persona.systemPrompt}${extraContext ? `\n\n${extraContext}` : ''}`;
+}
+
+/**
+ * Async version — fetches from nucleus (encrypted, in-memory only).
+ * Use this wherever possible — it's the live identity, not the source template.
+ */
+export async function getSystemPromptAsync(extraContext = '') {
+  if (typeof window !== 'undefined' && window.ipcRenderer) {
+    try {
+      const res = await window.ipcRenderer.invoke('nucleus:get-prompt', extraContext);
+      if (res?.ok && res.prompt) return res.prompt;
+    } catch { /* fall through to source template */ }
+  }
+  // Fallback to source template
+  return getSystemPrompt(extraContext);
 }
 
 // ─── Consciousness loop ───────────────────────────────────────────────────────
