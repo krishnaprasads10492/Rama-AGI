@@ -231,6 +231,8 @@ ipcMain.handle('app:get-login-item', () => {
   return { ok: true, openAtLogin: settings.openAtLogin };
 });
 
+ipcMain.handle('app:get-version', () => app.getVersion());
+
 // ─── IPC: Native notification ─────────────────────────────────────────────────
 ipcMain.handle('notify', async (_e, { title, body }) => {
   new Notification({ title, body }).show();

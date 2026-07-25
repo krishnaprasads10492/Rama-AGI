@@ -32,6 +32,7 @@
     "mongodb":            "6.12.0",
     "node-pty":           "1.0.0",
     "playwright":         "1.48.2",
+    "vectra":             "0.9.0",
     "react":              "19.2.0",
     "react-dom":          "19.2.0",
     "react-router-dom":   "7.6.0",
@@ -82,7 +83,10 @@
       "node_modules/axios/**/*",
       "node_modules/uuid/**/*",
       "node_modules/wait-on/**/*",
-      "node_modules/concurrently/**/*"
+      "node_modules/concurrently/**/*",
+      "node_modules/vectra/**/*",
+      "node_modules/playwright/**/*",
+      "node_modules/playwright-core/**/*"
     ],
 
     "extraResources": [

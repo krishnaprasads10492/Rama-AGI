@@ -374,13 +374,23 @@ contextBridge.exposeInMainWorld('rama', {
   appControl: {
     setLoginItem: (enabled) => ipcRenderer.invoke('app:set-login-item', enabled),
     getLoginItem: ()         => ipcRenderer.invoke('app:get-login-item'),
-    getVersion:   ()         => require('electron').app?.getVersion() ?? '1.0.0',
+    getVersion:   ()         => ipcRenderer.invoke('app:get-version'),
     isPackaged:   ()         => !process.env.RAMA_DEV || process.env.RAMA_DEV === '0',
   },
 
   // ── Platform info (read-only, safe to expose) ─────────────────────────────
   platform: process.platform,
-  isDev:    !app?.isPackaged,
+  isDev:    process.env.RAMA_DEV === '1',
+
+  // ── Generic invoke — allows any registered channel (replaces window.ipcRenderer) ──
+  // This is the escape hatch so pages calling window.ipcRenderer.invoke() work.
+  invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+  on: (channel, cb) => {
+    const handler = (_e, ...args) => cb(...args);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+  removeListener: (channel, cb) => ipcRenderer.removeListener(channel, cb),
 
   // ── Credential Vault ──────────────────────────────────────────────────────
   vault: {
@@ -469,5 +479,51 @@ contextBridge.exposeInMainWorld('rama', {
       ipcRenderer.on('browser:download-progress', h);
       return () => ipcRenderer.removeListener('browser:download-progress', h);
     },
+  },
+});
+
+// ─── Compatibility shim ───────────────────────────────────────────────────────
+// Several pages were written against window.ipcRenderer directly.
+// This exposes a SAFE, allow-listed subset — not the raw ipcRenderer object.
+// Only channels registered by our own IPC modules can be invoked.
+const ALLOWED_PREFIXES = [
+  'window:', 'nav:', 'system:', 'fs:', 'git:', 'terminal:', 'apps:', 'ai:',
+  'updater:', 'shell:', 'notify', 'orchestrator:', 'evolution:', 'intel:',
+  'session:', 'store:', 'nucleus:', 'ipc-enc:', 'bus:', 'ast:', 'regen:',
+  'vector:', 'sandbox:', 'graph:', 'selfcare:', 'vault:', 'models:',
+  'agents:', 'browser:', 'app:', 'capability:', 'genome:', 'instance:',
+];
+
+function isAllowed(channel) {
+  return typeof channel === 'string' && ALLOWED_PREFIXES.some(p => channel.startsWith(p));
+}
+
+contextBridge.exposeInMainWorld('ipcRenderer', {
+  invoke: (channel, ...args) => {
+    if (!isAllowed(channel)) {
+      console.error(`[preload] Blocked invoke on unregistered channel: ${channel}`);
+      return Promise.resolve({ ok: false, error: `Channel not allowed: ${channel}` });
+    }
+    return ipcRenderer.invoke(channel, ...args);
+  },
+  send: (channel, ...args) => {
+    if (!isAllowed(channel)) {
+      console.error(`[preload] Blocked send on unregistered channel: ${channel}`);
+      return;
+    }
+    ipcRenderer.send(channel, ...args);
+  },
+  on: (channel, cb) => {
+    if (!isAllowed(channel)) {
+      console.error(`[preload] Blocked listener on unregistered channel: ${channel}`);
+      return () => {};
+    }
+    const handler = (event, ...args) => cb(event, ...args);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+  removeListener: (channel, handler) => {
+    if (!isAllowed(channel)) return;
+    ipcRenderer.removeListener(channel, handler);
   },
 });

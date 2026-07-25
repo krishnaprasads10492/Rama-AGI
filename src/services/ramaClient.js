@@ -33,12 +33,37 @@ export const health = {
 };
 
 // ─── AI Chat ──────────────────────────────────────────────────────────────────
+// PRIMARY PATH: window.rama.models.chat() → modelRouter (main process, vault access)
+// FALLBACK:     HTTP /api/ai/chat (browser dev mode only — no vault access)
 export const ramaChat = {
-  send: ({ messages, provider, model, sessionId }) =>
-    apiFetch('/api/ai/chat', {
+  send: async ({ messages, provider, model, sessionId, taskType }) => {
+    // Real path — IPC to modelRouter which has credential vault access
+    if (typeof window !== 'undefined' && window.rama?.models?.chat) {
+      try {
+        const res = await window.rama.models.chat({ messages, model, taskType: taskType || 'general' });
+        if (res?.ok) {
+          return {
+            ok:        true,
+            sessionId: sessionId || `s_${Date.now()}`,
+            message:   { role: 'assistant', content: res.content },
+            model:     res.model,
+            fallbackFrom: res.fallbackFrom,
+            usage:     res.usage,
+          };
+        }
+        // modelRouter returned an error — surface it, don't silently fall back
+        return { ok: false, error: res?.error || 'Model router returned no content' };
+      } catch (err) {
+        return { ok: false, error: `IPC error: ${err.message}` };
+      }
+    }
+
+    // Browser dev-mode fallback
+    return apiFetch('/api/ai/chat', {
       method: 'POST',
       body:   JSON.stringify({ messages, provider, model, sessionId }),
-    }),
+    }).then(r => r.json?.() ?? r);
+  },
 
   getHistory: (sessionId) =>
     apiFetch(`/api/ai/history/${sessionId}`),

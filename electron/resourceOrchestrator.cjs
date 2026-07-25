@@ -7,7 +7,6 @@
  *   - Snapshot refresh: 1s → adaptive (3s normal, 8s high pressure, 15s critical)
  *   - Workers adapt to pressure without polling CPU on every tick
  *   - Snapshot cached — multiple callers share one read, not N reads
- */
  *
  * RESOURCES TRACKED:
  *   CPU      — cores, usage %, temperature
