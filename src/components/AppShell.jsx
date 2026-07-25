@@ -1,18 +1,11 @@
-import React from 'react';
-import Titlebar      from './Titlebar.jsx';
+import React, { useState } from 'react';
+import Titlebar       from './Titlebar.jsx';
 import CommandPalette from './CommandPalette.jsx';
+import ActivityStream from './ActivityStream.jsx';
 
-/**
- * AppShell — Master layout.
- * No sidebar. Navigation via Command Palette (Ctrl+K, voice, orb click).
- *
- * Structure:
- *   Titlebar (always visible)
- *   CommandPalette (collapsible via Ctrl+K / orb / voice)
- *   ─── 3px glow strip toggle ───
- *   Active Page (full width, full remaining height)
- */
 export default function AppShell({ children }) {
+  const [streamVisible, setStreamVisible] = useState(false);
+
   return (
     <div style={{
       display:       'flex',
@@ -22,13 +15,8 @@ export default function AppShell({ children }) {
       overflow:      'hidden',
       background:    'var(--bg)',
     }}>
-      {/* Custom frameless titlebar */}
       <Titlebar />
-
-      {/* Command palette — slides open/closed, contains all nav tabs */}
       <CommandPalette />
-
-      {/* Main content — full width, no sidebar */}
       <main
         className="grid-bg"
         style={{
@@ -44,6 +32,12 @@ export default function AppShell({ children }) {
       >
         {children}
       </main>
+
+      {/* Live activity stream — floating overlay */}
+      <ActivityStream
+        visible={streamVisible}
+        onToggle={() => setStreamVisible(v => !v)}
+      />
     </div>
   );
 }

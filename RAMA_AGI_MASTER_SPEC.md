@@ -1181,3 +1181,80 @@ server/
 
 *RAMA_AGI_MASTER_SPEC.md — Generated July 2026 · Updated v2.0*  
 *Sections 16–22 added: Browser Engine, Multi-Model Hub, Agent Orchestrator, Dynamic Provisioner*
+
+
+---
+
+## SECTION 16 — AGI Capability Definition (Research-Backed)
+
+### Sources
+- "Operational Kardashev-Style Scale for Autonomous AI" (arxiv 2511.13411) — 10 capability axes
+- CoALA Memory Framework, Princeton 2023 — 4-layer memory taxonomy
+- Proactive Agent research (arxiv 2605.25971, 2605.14678) — proactivity patterns
+- Agentic UX research (Smashing Magazine 2026, Amazon Science 2025, UX Magazine 2025)
+
+### The 10 Capability Axes (AAI-Index)
+
+| # | Axis | Target | Description |
+|---|------|--------|-------------|
+| 1 | **Autonomy** | 10/10 | Acts without prompting, monitors, initiates |
+| 2 | **Generality** | 10/10 | Any domain, any task, zero retraining |
+| 3 | **Planning** | 10/10 | Multi-step, long-horizon, anticipates failure paths |
+| 4 | **Memory/Persistence** | 10/10 | Working→Episodic→Semantic→Procedural (CoALA) |
+| 5 | **Tool Economy** | 10/10 | Routes to optimal tool/model per subtask |
+| 6 | **Self-Revision** | 10/10 | Learns from interactions, improves own behavior |
+| 7 | **Coordination** | 10/10 | Multi-agent orchestration with resource safety |
+| 8 | **World-Model Fidelity** | 10/10 | Accurate model of master's context, goals, prefs |
+| 9 | **Proactivity** | 10/10 | Acts before asked — schedule/event/threshold triggers |
+| 10 | **Loyalty** | 10/10 | Every decision filtered through master's interest |
+
+### The 4-Layer Memory System (CoALA Framework)
+
+| Layer | Type | Storage | Decay |
+|-------|------|---------|-------|
+| **Working** | Current context, active task | In-context (RAM) | Session end |
+| **Episodic** | Past interactions, events | MongoDB | Slow (importance-weighted) |
+| **Semantic** | Facts, preferences, world knowledge | MongoDB + vector | Very slow |
+| **Procedural** | Learned skills, automation recipes | MongoDB | Almost never |
+
+### Loyalty Engine — Every Action Filtered Through
+
+1. Does this serve master's interest?
+2. Could this harm master, third parties, or systems?
+3. Is this destructive/external — needs approval?
+4. Only execute if all checks pass.
+
+### Agentic UX Principles (2025-26 Research Consensus)
+
+- Show what Rāma is doing RIGHT NOW → Activity Stream (floating overlay)
+- Explain WHY each decision was made → transparent reasoning in responses
+- Master can override/interrupt at any point → kill switches everywhere
+- Show confidence levels → never pretend certainty
+- Graceful error recovery → never silently fail
+- Autonomy feels like a privilege granted by master, not a right seized by AI
+
+### What Makes Rāma Different from Every Other AI
+
+| Capability | Rāma | GPT/Claude/Gemini |
+|-----------|------|-------------------|
+| Runs fully offline on your machine | ✓ | ✗ |
+| Controls OS (files, processes, apps) | ✓ | ✗ |
+| Real embedded PTY terminal | ✓ | ✗ |
+| Multi-agent parallel execution | ✓ | ✗ |
+| Modifies its own codebase | ✓ | ✗ |
+| 4-layer persistent memory | ✓ | limited/none |
+| Proactive — acts before asked | ✓ | ✗ |
+| Voice wake word (Hey Rāma) | ✓ | limited |
+| Routes to 7 AI providers intelligently | ✓ | ✗ |
+| Full browser automation (Playwright) | ✓ | ✗ |
+| Git sync across machines | ✓ | ✗ |
+| Encrypted local vault (AES-256-GCM) | ✓ | ✗ |
+| Dual identity (masked/revealed) | ✓ | ✗ |
+| Self-revision improvement loop | ✓ | ✗ |
+| Absolute loyalty filter on every action | ✓ | ✗ |
+| StockMind AI (10-algorithm stock analysis) | ✓ | ✗ |
+
+---
+
+*RAMA_AGI_MASTER_SPEC.md — Version 2.0 · July 2026 · Krishna Prasad*
+*Content was rephrased for compliance with licensing restrictions where external sources were referenced.*

@@ -16,6 +16,7 @@ const ALL_PAGES = [
   { route: '/models',    icon: '⋯',  label: 'Models',     desc: 'AI model router & keys',     color: 'var(--accent)',  keys: ['model','models','openai','claude','gemini','ollama','api'] },
   { route: '/stockmind', icon: '◬',  label: 'StockMind',  desc: 'Stock market AI',            color: 'var(--magenta)', keys: ['stock','market','trading','finance','stockmind'] },
   { route: '/knowledge', icon: '◉',  label: 'Knowledge',  desc: 'Rāma memory store',         color: 'var(--accent)',  keys: ['knowledge','memory','notes','docs'] },
+  { route: '/mind',      icon: '⊕',  label: 'Rāma Mind',  desc: '10 capability axes · AGI dashboard', color: 'var(--violet)', keys: ['mind','agi','capabilities','consciousness','memory','self'] },
 ];
 
 // ─── Voice mic button ─────────────────────────────────────────────────────────
