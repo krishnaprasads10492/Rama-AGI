@@ -22,8 +22,10 @@ const Knowledge = React.lazy(() => import('@pages/Knowledge/Knowledge.jsx'));
 const Home      = React.lazy(() => import('@pages/Home/Home.jsx'));
 const Agents    = React.lazy(() => import('@pages/Agents/Agents.jsx'));
 const Models    = React.lazy(() => import('@pages/Models/Models.jsx'));
-const RamaMind  = React.lazy(() => import('@pages/RamaMind/RamaMind.jsx'));
-const Users     = React.lazy(() => import('@pages/Users/Users.jsx'));
+const RamaMind     = React.lazy(() => import('@pages/RamaMind/RamaMind.jsx'));
+const Users        = React.lazy(() => import('@pages/Users/Users.jsx'));
+const Intelligence = React.lazy(() => import('@pages/Intelligence/Intelligence.jsx'));
+const IDE          = React.lazy(() => import('@pages/IDE/IDE.jsx'));
 
 // Loading fallback
 const PageLoader = () => (
@@ -146,6 +148,8 @@ export default function App() {
               <Route path="/models"     element={<Models />} />
               <Route path="/mind"       element={<RamaMind />} />
               <Route path="/users"      element={<Users />} />
+              <Route path="/intel"      element={<Intelligence />} />
+              <Route path="/ide"        element={<IDE />} />
               {/* Catch-all → Chat */}
               <Route path="*"           element={<Chat />} />
             </Routes>

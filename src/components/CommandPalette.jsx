@@ -17,7 +17,9 @@ const ALL_PAGES = [
   { route: '/stockmind', icon: '◬',  label: 'StockMind',  desc: 'Stock market AI',            color: 'var(--magenta)', keys: ['stock','market','trading','finance','stockmind'] },
   { route: '/knowledge', icon: '◉',  label: 'Knowledge',  desc: 'Rāma memory store',         color: 'var(--accent)',  keys: ['knowledge','memory','notes','docs'] },
   { route: '/mind',      icon: '⊕',  label: 'Rāma Mind',  desc: '10 capability axes · AGI dashboard', color: 'var(--violet)', keys: ['mind','agi','capabilities','consciousness','memory','self'] },
-  { route: '/users',     icon: '◫',  label: 'Users',      desc: 'User management & access control',   color: 'var(--amber)',  keys: ['users','user','access','permissions','accounts','manage'] },
+  { route: '/users',     icon: '◫',  label: 'Users',      desc: 'User management & access control',         color: 'var(--amber)',  keys: ['users','user','access','permissions','accounts','manage'] },
+  { route: '/intel',     icon: '◬',  label: 'Intelligence',desc: 'Universal prediction — multi-source truth',  color: 'var(--green)',  keys: ['intel','intelligence','predict','analysis','research','truth','source'] },
+  { route: '/ide',       icon: '⬢',  label: 'Rāma IDE',   desc: 'Supreme AGI code editor — edit anything',    color: 'var(--violet)', keys: ['ide','editor','code','coding','develop','build','create','scaffold'] },
 ];
 
 // ─── Voice mic button ─────────────────────────────────────────────────────────

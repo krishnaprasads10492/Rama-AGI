@@ -159,6 +159,24 @@ contextBridge.exposeInMainWorld('rama', {
   // ── Native Notifications ──────────────────────────────────────────────────
   notify: (title, body) => ipcRenderer.invoke('notify', { title, body }),
 
+  // ── Intelligence Engine ───────────────────────────────────────────────────
+  intel: {
+    analyze:      (opts)      => ipcRenderer.invoke('intel:analyze', opts),
+    getSession:   (id)        => ipcRenderer.invoke('intel:get-session', id),
+    listSessions: ()          => ipcRenderer.invoke('intel:list-sessions'),
+    checkSource:  (domain)    => ipcRenderer.invoke('intel:check-source', domain),
+    onProgress:   (cb) => {
+      const handler = (_e, data) => cb(data);
+      ipcRenderer.on('intel:progress', handler);
+      return () => ipcRenderer.removeListener('intel:progress', handler);
+    },
+    onComplete:   (cb) => {
+      const handler = (_e, data) => cb(data);
+      ipcRenderer.on('intel:complete', handler);
+      return () => ipcRenderer.removeListener('intel:complete', handler);
+    },
+  },
+
   // ── Session / Unlock ──────────────────────────────────────────────────────
   session: {
     isFirstRun:     ()           => ipcRenderer.invoke('session:is-first-run'),

@@ -17,6 +17,8 @@ const VOICE_ROUTES = [
   { patterns: ['open models', 'show models', 'model router'],                     route: '/models',     action: null },
   { patterns: ['open stockmind', 'stock mind', 'stock market'],                   route: '/stockmind',  action: null },
   { patterns: ['open knowledge', 'knowledge base'],                               route: '/knowledge',  action: null },
+  { patterns: ['open intelligence', 'intelligence engine', 'analyze', 'predict'],  route: '/intel',      action: null },
+  { patterns: ['open ide', 'code editor', 'open editor', 'rama ide'],              route: '/ide',        action: null },
   { patterns: ['close palette', 'close menu', 'dismiss', 'cancel'],               route: null,          action: 'close-palette' },
   { patterns: ['open menu', 'open palette', 'show commands'],                     route: null,          action: 'open-palette' },
   { patterns: ['identify yourself', 'who are you', 'reveal identity'],            route: null,          action: 'identify' },
