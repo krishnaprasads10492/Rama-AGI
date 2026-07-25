@@ -16,6 +16,7 @@ const vaultIPC     = require('./ipc/credentialVault.cjs');
 const modelIPC     = require('./ipc/modelRouter.cjs');
 const agentIPC         = require('./ipc/agentOrchestrator.cjs');
 const intelligenceIPC  = require('./ipc/intelligenceEngine.cjs');
+const evolutionIPC     = require('./ipc/evolutionEngine.cjs');
 const sessionMgr   = require('./sessionManager.cjs');
 const dataStore    = require('./dataStore.cjs');
 
@@ -221,6 +222,7 @@ app.whenReady().then(async () => {
   modelIPC.register(ipcMain);
   agentIPC.register(ipcMain);
   intelligenceIPC.register(ipcMain);
+  evolutionIPC.register(ipcMain);
   sessionMgr.register(ipcMain);
   dataStore.register(ipcMain);
 

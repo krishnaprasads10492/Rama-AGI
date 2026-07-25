@@ -26,6 +26,7 @@ const RamaMind     = React.lazy(() => import('@pages/RamaMind/RamaMind.jsx'));
 const Users        = React.lazy(() => import('@pages/Users/Users.jsx'));
 const Intelligence = React.lazy(() => import('@pages/Intelligence/Intelligence.jsx'));
 const IDE          = React.lazy(() => import('@pages/IDE/IDE.jsx'));
+const Evolution    = React.lazy(() => import('@pages/Evolution/Evolution.jsx'));
 
 // Loading fallback
 const PageLoader = () => (
@@ -150,6 +151,7 @@ export default function App() {
               <Route path="/users"      element={<Users />} />
               <Route path="/intel"      element={<Intelligence />} />
               <Route path="/ide"        element={<IDE />} />
+              <Route path="/evolution"  element={<Evolution />} />
               {/* Catch-all → Chat */}
               <Route path="*"           element={<Chat />} />
             </Routes>

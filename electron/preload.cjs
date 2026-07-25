@@ -159,6 +159,34 @@ contextBridge.exposeInMainWorld('rama', {
   // ── Native Notifications ──────────────────────────────────────────────────
   notify: (title, body) => ipcRenderer.invoke('notify', { title, body }),
 
+  // ── Evolution Engine ──────────────────────────────────────────────────────
+  evolution: {
+    scout:             (opts)      => ipcRenderer.invoke('evolution:scout',               opts),
+    readRepo:          (opts)      => ipcRenderer.invoke('evolution:read-repo',           opts),
+    analyzeAndPropose: (opts)      => ipcRenderer.invoke('evolution:analyze-and-propose', opts),
+    apply:             (opts)      => ipcRenderer.invoke('evolution:apply',               opts),
+    approve:           (id)        => ipcRenderer.invoke('evolution:approve',             id),
+    reject:            (id)        => ipcRenderer.invoke('evolution:reject',              id),
+    selfAssess:        ()          => ipcRenderer.invoke('evolution:self-assess'),
+    getLog:            ()          => ipcRenderer.invoke('evolution:get-log'),
+    getScout:          (id)        => ipcRenderer.invoke('evolution:get-scout',           id),
+    onScoutProgress:   (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('evolution:scout-progress', h);
+      return () => ipcRenderer.removeListener('evolution:scout-progress', h);
+    },
+    onScoutComplete:   (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('evolution:scout-complete', h);
+      return () => ipcRenderer.removeListener('evolution:scout-complete', h);
+    },
+    onApplied:         (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('evolution:applied', h);
+      return () => ipcRenderer.removeListener('evolution:applied', h);
+    },
+  },
+
   // ── Intelligence Engine ───────────────────────────────────────────────────
   intel: {
     analyze:      (opts)      => ipcRenderer.invoke('intel:analyze', opts),
