@@ -159,6 +159,23 @@ contextBridge.exposeInMainWorld('rama', {
   // ── Native Notifications ──────────────────────────────────────────────────
   notify: (title, body) => ipcRenderer.invoke('notify', { title, body }),
 
+  // ── Resource Orchestrator ─────────────────────────────────────────────────
+  orchestrator: {
+    submit:       (task)        => ipcRenderer.invoke('orchestrator:submit',         task),
+    status:       ()            => ipcRenderer.invoke('orchestrator:status'),
+    optimalModel: (type, local) => ipcRenderer.invoke('orchestrator:optimal-model',  type, local),
+    setLimits:    (limits)      => ipcRenderer.invoke('orchestrator:set-limits',     limits),
+    apiLimits:    ()            => ipcRenderer.invoke('orchestrator:api-limits'),
+    recordApiUse: (prov, toks)  => ipcRenderer.invoke('orchestrator:record-api-use', prov, toks),
+    cancel:       (id)          => ipcRenderer.invoke('orchestrator:cancel',         id),
+    onTaskQueued:    (cb) => { const h = (_e,d) => cb(d); ipcRenderer.on('orchestrator:task-queued',    h); return () => ipcRenderer.removeListener('orchestrator:task-queued',    h); },
+    onTaskStarted:   (cb) => { const h = (_e,d) => cb(d); ipcRenderer.on('orchestrator:task-started',   h); return () => ipcRenderer.removeListener('orchestrator:task-started',   h); },
+    onTaskComplete:  (cb) => { const h = (_e,d) => cb(d); ipcRenderer.on('orchestrator:task-complete',  h); return () => ipcRenderer.removeListener('orchestrator:task-complete',  h); },
+    onTaskFailed:    (cb) => { const h = (_e,d) => cb(d); ipcRenderer.on('orchestrator:task-failed',    h); return () => ipcRenderer.removeListener('orchestrator:task-failed',    h); },
+    onResourceUpdate:(cb) => { const h = (_e,d) => cb(d); ipcRenderer.on('orchestrator:resource-update',h); return () => ipcRenderer.removeListener('orchestrator:resource-update',h); },
+    onWorkersAdapted:(cb) => { const h = (_e,d) => cb(d); ipcRenderer.on('orchestrator:workers-adapted',h); return () => ipcRenderer.removeListener('orchestrator:workers-adapted',h); },
+  },
+
   // ── Evolution Engine ──────────────────────────────────────────────────────
   evolution: {
     scout:             (opts)      => ipcRenderer.invoke('evolution:scout',               opts),
