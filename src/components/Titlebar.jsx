@@ -170,23 +170,32 @@ export default function Titlebar() {
             <RamaOrb size={22} active={isThinking || voiceActive} />
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}
+          <div
             onClick={() => !masterAuthenticated && setShowAuth(true)}
             style={{ cursor: masterAuthenticated ? 'default' : 'pointer' }}
           >
             <span style={{
-              fontSize:      '11px',
+              fontFamily:    'var(--font-display)',
+              fontSize:      '13px',
               fontWeight:    700,
-              color:         masterAuthenticated ? 'var(--violet)' : 'var(--text-dim)',
-              letterSpacing: '0.12em',
+              letterSpacing: '0.14em',
               textTransform: 'uppercase',
+              background:    masterAuthenticated
+                ? 'linear-gradient(135deg, #4dd9ff 0%, #00c8ff 50%, #d4a940 100%)'
+                : 'linear-gradient(135deg, #6a9bc0, #4a7a9a)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+              filter:        masterAuthenticated ? 'drop-shadow(0 0 6px rgba(0,200,255,0.5))' : 'none',
               lineHeight:    '1.2',
+              display:       'block',
             }}>
               {masterAuthenticated ? 'RĀMA AGI' : 'ASSISTANT'}
             </span>
             {masterAuthenticated && (
-              <span style={{ fontSize: '9px', color: 'var(--muted)', letterSpacing: '0.06em' }}>
-                Krishna Prasad · MASTER
+              <span style={{ fontSize: '9px', color: 'rgba(212,169,64,0.6)', letterSpacing: '0.08em',
+                fontFamily: 'var(--font)', display: 'block' }}>
+                SUPER AGI · MASTER AUTHENTICATED
               </span>
             )}
           </div>
@@ -194,10 +203,10 @@ export default function Titlebar() {
           {/* Palette toggle hint */}
           <div onClick={togglePalette}
             style={{
-              padding:      '2px 6px',
-              background:   paletteOpen ? 'rgba(0,255,255,0.08)' : 'transparent',
-              border:       `1px solid ${paletteOpen ? 'var(--accent)' : 'var(--border)'}`,
-              borderRadius: '2px',
+              padding:      '2px 7px',
+              background:   paletteOpen ? 'rgba(0,200,255,0.08)' : 'transparent',
+              border:       `1px solid ${paletteOpen ? 'rgba(0,200,255,0.35)' : 'var(--border)'}`,
+              borderRadius: '3px',
               color:        paletteOpen ? 'var(--accent)' : 'var(--muted)',
               fontSize:     '9px',
               cursor:       'pointer',
@@ -211,13 +220,15 @@ export default function Titlebar() {
           {/* Current user pill */}
           {currentUser && tierBadge && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '5px',
-              padding: '2px 8px', background: `${tierBadge.color}12`,
-              border: `1px solid ${tierBadge.color}33`, borderRadius: '2px',
+              padding: '2px 8px', background: `${tierBadge.color}10`,
+              border: `1px solid ${tierBadge.color}28`, borderRadius: '3px',
               WebkitAppRegion: 'no-drag' }}>
               <span style={{ fontSize: '9px', color: tierBadge.color, fontWeight: 700 }}>
                 {currentUser.tier === TIERS.MASTER ? '◈' : '◎'}
               </span>
-              <span style={{ fontSize: '10px', color: tierBadge.color }}>{currentUser.name}</span>
+              <span style={{ fontSize: '10px', color: tierBadge.color, fontFamily: 'var(--font-display)' }}>
+                {currentUser.name}
+              </span>
             </div>
           )}
         </div>

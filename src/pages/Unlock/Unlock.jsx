@@ -89,49 +89,52 @@ export default function Unlock({ onUnlocked }) {
   }
 
   return (
-    <div style={{ height: '100vh', width: '100vw', background: 'var(--bg)',
+    <div style={{ height: '100vh', width: '100vw',
+      background: 'radial-gradient(ellipse 80% 60% at 50% -10%, rgba(0,100,180,0.15), transparent 60%), var(--bg)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
       className="grid-bg"
     >
-      {/* Deep violet glow behind card */}
-      <div style={{ position: 'absolute', top: '30%', left: '50%', transform: 'translateX(-50%)',
-        width: '500px', height: '500px', borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(119,0,255,0.12), transparent 65%)',
-        pointerEvents: 'none' }} />
+      {/* Logo-inspired radiant glow behind card */}
+      <div style={{ position: 'absolute', top: '15%', left: '50%', transform: 'translateX(-50%)',
+        width: '700px', height: '500px', borderRadius: '50%',
+        background: 'radial-gradient(ellipse, rgba(0,200,255,0.07) 0%, rgba(212,169,64,0.03) 40%, transparent 70%)',
+        pointerEvents: 'none', filter: 'blur(20px)' }} />
 
-      <div className="hud-card fade-in" style={{
-        width: '400px', padding: '40px', display: 'flex', flexDirection: 'column',
-        gap: '28px', position: 'relative', zIndex: 1,
+      <div className="neural-card fade-in" style={{
+        width: '400px', padding: '40px', display: 'flex',
+        flexDirection: 'column', gap: '28px', position: 'relative', zIndex: 1,
       }}>
 
         {/* Header */}
         <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
           <RamaOrb size={56} />
           <div>
-            <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--violet)', letterSpacing: '0.14em' }}>
+            <div className="title-glow" style={{ fontSize: '22px' }}>
               RĀMA AGI
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '5px', letterSpacing: '0.06em' }}>
+            <div style={{ fontSize: '11px', color: 'rgba(212,169,64,0.7)', marginTop: '4px',
+              letterSpacing: '0.2em', fontFamily: 'var(--font-display)', textTransform: 'uppercase' }}>
+              SUPER AGI
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '8px', letterSpacing: '0.05em' }}>
               {isFirstRun
                 ? 'First launch — set your master passcode'
                 : 'Enter master passcode to unlock'}
             </div>
           </div>
 
-          {/* Encryption notice */}
+          {/* Encryption notice — styled like the logo's tech readout */}
           <div style={{
-            display:      'flex',
-            alignItems:   'center',
-            gap:          '6px',
-            padding:      '5px 12px',
-            background:   'rgba(119,0,255,0.08)',
-            border:       '1px solid rgba(119,0,255,0.25)',
+            display:      'flex', alignItems: 'center', gap: '8px',
+            padding:      '6px 14px',
+            background:   'rgba(0,200,255,0.05)',
+            border:       '1px solid rgba(0,200,255,0.15)',
             borderRadius: 'var(--radius)',
-            fontSize:     '10px',
-            color:        'var(--violet)',
-            letterSpacing:'0.05em',
+            fontSize:     '10px', color: 'rgba(0,200,255,0.7)',
+            letterSpacing:'0.06em',
           }}>
-            🔒 AES-256-GCM · Argon2id · HMAC-SHA512
+            <span style={{ color: 'var(--gold)', fontSize: '12px' }}>⬢</span>
+            AES-256-GCM · Argon2id · HMAC-SHA512
           </div>
         </div>
 
@@ -193,12 +196,15 @@ export default function Unlock({ onUnlocked }) {
 
           <button className="btn btn-primary" disabled={unlocking || !passcode}
             onClick={handleUnlock}
-            style={{ width: '100%', justifyContent: 'center', padding: '11px',
-              fontSize: '13px', letterSpacing: '0.08em', marginTop: '4px',
-              background: unlocking ? 'var(--border)' : 'rgba(119,0,255,0.15)',
-              borderColor: 'var(--violet)', color: 'var(--violet)' }}>
+            style={{ width: '100%', justifyContent: 'center', padding: '12px',
+              fontSize: '13px', letterSpacing: '0.1em', marginTop: '4px',
+              fontFamily: 'var(--font-display)',
+              background: unlocking ? 'var(--border)' : 'linear-gradient(135deg, rgba(0,200,255,0.12), rgba(0,200,255,0.06))',
+              borderColor: unlocking ? 'var(--border)' : 'rgba(0,200,255,0.4)',
+              color: unlocking ? 'var(--muted)' : 'var(--accent)',
+              boxShadow: (!unlocking && passcode) ? 'var(--glow-cyan)' : 'none' }}>
             {unlocking
-              ? 'Deriving key...'
+              ? '⬢ Deriving key...'
               : isFirstRun
               ? '⚡ Initialize Rāma AGI'
               : '⚡ Unlock Rāma AGI'}
