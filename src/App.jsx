@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, useNavigate, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import AppShell      from '@components/AppShell.jsx';
 import ErrorBoundary from '@components/ErrorBoundary.jsx';
 import { useUIStore }   from '@store/uiStore.js';
@@ -12,23 +12,10 @@ import { TIERS } from '@services/accessControl.js';
 import Login   from '@pages/Login/Login.jsx';
 import Unlock  from '@pages/Unlock/Unlock.jsx';
 
-// Pages (lazy-loaded for performance)
-const Chat      = React.lazy(() => import('@pages/Chat/Chat.jsx'));
-const System    = React.lazy(() => import('@pages/System/System.jsx'));
-const Terminal  = React.lazy(() => import('@pages/Terminal/Terminal.jsx'));
-const GitSync   = React.lazy(() => import('@pages/GitSync/GitSync.jsx'));
-const StockMind = React.lazy(() => import('@pages/StockMind/StockMind.jsx'));
-const Knowledge = React.lazy(() => import('@pages/Knowledge/Knowledge.jsx'));
-const Home      = React.lazy(() => import('@pages/Home/Home.jsx'));
-const Agents    = React.lazy(() => import('@pages/Agents/Agents.jsx'));
-const Models    = React.lazy(() => import('@pages/Models/Models.jsx'));
-const RamaMind     = React.lazy(() => import('@pages/RamaMind/RamaMind.jsx'));
-const Users        = React.lazy(() => import('@pages/Users/Users.jsx'));
-const Intelligence = React.lazy(() => import('@pages/Intelligence/Intelligence.jsx'));
-const IDE          = React.lazy(() => import('@pages/IDE/IDE.jsx'));
-const Evolution    = React.lazy(() => import('@pages/Evolution/Evolution.jsx'));
-const Resources    = React.lazy(() => import('@pages/Resources/Resources.jsx'));
-const Settings     = React.lazy(() => import('@pages/Settings/Settings.jsx'));
+// Every page/route/tier comes from ONE registry — src/config/registry.js
+import { routablePages, visiblePages, lazyFor, registryIssues } from '@config/registry.js';
+
+const Chat = lazyFor('chat');
 
 // Loading fallback
 const PageLoader = () => (
@@ -53,6 +40,47 @@ const PageLoader = () => (
     <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
   </div>
 );
+
+// Access denied panel — shown when a route exists but the tier is too low
+const Forbidden = ({ page }) => (
+  <div style={{
+    display: 'flex', flexDirection: 'column', alignItems: 'center',
+    justifyContent: 'center', height: '100%', gap: '10px', textAlign: 'center',
+  }}>
+    <span style={{ fontSize: '32px', color: 'var(--red)' }}>⛔</span>
+    <div style={{ color: 'var(--text)', fontSize: '14px', fontWeight: 700 }}>
+      Access restricted
+    </div>
+    <div style={{ color: 'var(--muted)', fontSize: '11px', maxWidth: '320px' }}>
+      {page?.label ?? 'This module'} requires a higher access tier.
+      Rāma will not expose it to the current session.
+    </div>
+  </div>
+);
+
+/**
+ * Routes generated from the registry. A route is always mounted so deep links
+ * resolve, but the element is gated on tier — nothing leaks by URL guessing.
+ */
+function RegistryRoutes({ user }) {
+  const allowed = new Set(visiblePages(user).map(p => p.route));
+  return (
+    <Routes>
+      {routablePages().map((page) => {
+        const Component = lazyFor(page.id);
+        return (
+          <Route
+            key={page.id}
+            path={page.route}
+            element={allowed.has(page.route) ? <Component /> : <Forbidden page={page} />}
+          />
+        );
+      })}
+      {/* Catch-all → Chat (available to every tier) */}
+      <Route path="*" element={<Chat />} />
+    </Routes>
+  );
+}
 
 // Tray navigation — listens for nav:goto events from Electron tray
 function TrayNavListener() {
@@ -101,6 +129,12 @@ export default function App() {
     setAuthChecked(true);
   }, [setSession]);
 
+  // Registry integrity — a page defined without a loader would silently 404
+  useEffect(() => {
+    const issues = registryIssues();
+    if (issues.length) console.warn('[registry]', issues.join('; '));
+  }, []);
+
   if (!authChecked) return null;
 
   // Step 1: Crypto unlock gate — always first
@@ -139,26 +173,7 @@ export default function App() {
       <ErrorBoundary>
         <AppShell>
           <React.Suspense fallback={<PageLoader />}>
-            <Routes>
-              <Route path="/"           element={<Chat />} />
-              <Route path="/home"       element={<Home />} />
-              <Route path="/system"     element={<System />} />
-              <Route path="/terminal"   element={<Terminal />} />
-              <Route path="/git"        element={<GitSync />} />
-              <Route path="/stockmind"  element={<StockMind />} />
-              <Route path="/knowledge"  element={<Knowledge />} />
-              <Route path="/agents"     element={<Agents />} />
-              <Route path="/models"     element={<Models />} />
-              <Route path="/mind"       element={<RamaMind />} />
-              <Route path="/users"      element={<Users />} />
-              <Route path="/intel"      element={<Intelligence />} />
-              <Route path="/ide"        element={<IDE />} />
-              <Route path="/evolution"  element={<Evolution />} />
-              <Route path="/resources"  element={<Resources />} />
-              <Route path="/settings"   element={<Settings />} />
-              {/* Catch-all → Chat */}
-              <Route path="*"           element={<Chat />} />
-            </Routes>
+            <RegistryRoutes user={currentUser} />
           </React.Suspense>
         </AppShell>
       </ErrorBoundary>

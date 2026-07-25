@@ -4,28 +4,8 @@
  * All calls go through localhost — nothing leaves the machine.
  */
 
-const BASE = 'http://localhost:4097';
-
-// ─── Core fetch wrapper ────────────────────────────────────────────────────────
-async function apiFetch(path, opts = {}) {
-  const url = `${BASE}${path}`;
-  try {
-    const res = await fetch(url, {
-      headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
-      ...opts,
-    });
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      return { ok: false, status: res.status, error: body.error || res.statusText };
-    }
-
-    const data = await res.json();
-    return data;
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
-}
+// Shared transport — circuit breaker, retry/backoff, token injection.
+import { serverJson as apiFetch } from '@services/apiClient.js';
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 export const health = {
@@ -58,11 +38,11 @@ export const ramaChat = {
       }
     }
 
-    // Browser dev-mode fallback
+    // Browser dev-mode fallback — no vault, so provider keys must come from .env
     return apiFetch('/api/ai/chat', {
       method: 'POST',
       body:   JSON.stringify({ messages, provider, model, sessionId }),
-    }).then(r => r.json?.() ?? r);
+    });
   },
 
   getHistory: (sessionId) =>

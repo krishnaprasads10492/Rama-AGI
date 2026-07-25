@@ -17,6 +17,7 @@ const path = require('path');
 const fs   = require('fs');
 const os   = require('os');
 const { app } = require('electron');
+const net  = require('../lib/http.cjs');
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let browser     = null;
@@ -270,24 +271,11 @@ function register(ipcMain) {
 
   // ── Fetch & read a URL (lightweight, no full browser) ─────────────────────
   ipcMain.handle('browser:fetch-url', async (_e, url) => {
-    try {
-      const https = url.startsWith('https') ? require('https') : require('http');
-      const data  = await new Promise((resolve, reject) => {
-        const req = https.get(url, {
-          headers: { 'User-Agent': 'Mozilla/5.0 RamaAGI/1.0' },
-          timeout: 15000,
-        }, (res) => {
-          let body = '';
-          res.on('data', chunk => { body += chunk; });
-          res.on('end',  () => resolve(body));
-        });
-        req.on('error', reject);
-        req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
-      });
-      return { ok: true, data };
-    } catch (err) {
-      return { ok: false, error: err.message };
-    }
+    // Shared HTTP client: human headers, circuit breaker, 10MB cap.
+    // Keeps this path cheap so we never spin up Chromium just to read a page.
+    const res = await net.getHuman(url, { timeout: 15000 });
+    if (!res.ok) return { ok: false, error: res.error || `HTTP ${res.status}` };
+    return { ok: true, data: res.body };
   });
 }
 

@@ -24,11 +24,12 @@
 const crypto = require('crypto');
 const path   = require('path');
 const fs     = require('fs');
-const https  = require('https');
+const net    = require('../lib/http.cjs');
+const ledger = require('../lib/proposals.cjs');   // shared approve→apply gate
 
 // ─── Regen queue ──────────────────────────────────────────────────────────────
-const regenQueue   = [];   // pending analysis items
-const proposals    = new Map();  // proposalId → proposal
+const regenQueue     = [];       // pending analysis items
+const regenProposals = new Map();// proposalId → full detail (research, prompt, code)
 const regenHistory = [];
 
 // ─── Queue an analysis item ───────────────────────────────────────────────────
@@ -160,10 +161,24 @@ async function runRegenPipeline(item, modelResponse) {
     item.filePath
   );
 
+  // Register in the shared approval ledger. The ledger holds the lifecycle;
+  // the local map holds the bulky research/prompt detail the IDE needs.
+  const entry = ledger.create({
+    id:      proposalId,
+    kind:    ledger.KINDS.REGEN,
+    title:   `Fix ${item.filePath ? path.basename(item.filePath) : 'snippet'}`,
+    summary: item.error || 'Code quality issue',
+    changes: modelResponse && item.filePath
+      ? [{ action: 'patch', path: item.filePath, content: modelResponse }]
+      : [],
+    risk:    'medium',
+    meta:    { source: item.source || 'manual', language: item.language || 'javascript' },
+  });
+
   const proposal = {
     id:              proposalId,
-    status:          'pending',
-    createdAt:       Date.now(),
+    status:          entry.status,
+    createdAt:       entry.createdAt,
     source:          item.source || 'manual',
     filePath:        item.filePath || null,
     language:        item.language || 'javascript',
@@ -178,12 +193,37 @@ async function runRegenPipeline(item, modelResponse) {
     validationResult: null,
   };
 
-  proposals.set(proposalId, proposal);
+  regenProposals.set(proposalId, proposal);
   regenHistory.unshift({ id: proposalId, ts: Date.now(), source: item.source, status: 'pending' });
   if (regenHistory.length > 200) regenHistory.pop();
 
   return proposal;
 }
+
+// ─── Regen applier ────────────────────────────────────────────────────────────
+// Registered with the shared ledger — runs only after approval is recorded.
+ledger.registerApplier(ledger.KINDS.REGEN, async (entry) => {
+  const detail = regenProposals.get(entry.id);
+  const change = (entry.changes || [])[0];
+  const target = change?.path || detail?.filePath;
+  const code   = change?.content || detail?.fixedCode;
+
+  if (!code)   throw new Error('No fix code available');
+  if (!target) throw new Error('No file path specified');
+
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, code, 'utf8');
+
+  if (detail) { detail.status = 'applied'; detail.appliedAt = Date.now(); }
+
+  // Let the event bus fan this out (selfCare, astEngine, vectorMemory)
+  try {
+    const { bus } = require('../ramaEventBus.cjs');
+    bus.emit('regen:applied', { proposalId: entry.id, filePath: target });
+  } catch { /* non-fatal */ }
+
+  return { path: target, written: true };
+});
 
 // ─── Register IPC ─────────────────────────────────────────────────────────────
 function register(ipcMain) {
@@ -211,66 +251,37 @@ function register(ipcMain) {
 
   // ── Get a proposal ────────────────────────────────────────────────────────
   ipcMain.handle('regen:get-proposal', async (_e, proposalId) => {
-    const p = proposals.get(proposalId);
+    const p = regenProposals.get(proposalId);
     if (!p) return { ok: false, error: 'Proposal not found' };
-    return { ok: true, data: p };
+    // Status is authoritative in the ledger, not in the local detail record
+    const entry = ledger.get(proposalId);
+    return { ok: true, data: { ...p, status: entry?.status ?? p.status } };
   });
 
   // ── List proposals ────────────────────────────────────────────────────────
   ipcMain.handle('regen:list-proposals', async () => {
-    return { ok: true, data: regenHistory.slice(0, 50) };
+    return { ok: true, data: ledger.list({ kind: ledger.KINDS.REGEN, limit: 50 }) };
   });
 
   // ── Set AI-generated fix on proposal ──────────────────────────────────────
   ipcMain.handle('regen:set-fix', async (_e, { proposalId, fixedCode }) => {
-    const p = proposals.get(proposalId);
-    if (!p) return { ok: false, error: 'Proposal not found' };
+    const p     = regenProposals.get(proposalId);
+    const entry = ledger.get(proposalId);
+    if (!p || !entry) return { ok: false, error: 'Proposal not found' };
+
     p.fixedCode = fixedCode;
     p.status    = 'fix-ready';
+    // Attach the concrete change so the ledger's applier is self-sufficient
+    entry.changes = p.filePath
+      ? [{ action: 'patch', path: p.filePath, content: fixedCode }]
+      : [];
     return { ok: true };
   });
 
-  // ── Apply an approved proposal ────────────────────────────────────────────
-  ipcMain.handle('regen:apply', async (_e, { proposalId }) => {
-    const p = proposals.get(proposalId);
-    if (!p) return { ok: false, error: 'Proposal not found' };
-    if (p.status !== 'approved') return { ok: false, error: 'Proposal not approved by master' };
-    if (!p.fixedCode) return { ok: false, error: 'No fix code available' };
-    if (!p.filePath) return { ok: false, error: 'No file path specified' };
-
-    try {
-      fs.mkdirSync(path.dirname(p.filePath), { recursive: true });
-      fs.writeFileSync(p.filePath, p.fixedCode, 'utf8');
-      p.status    = 'applied';
-      p.appliedAt = Date.now();
-
-      // Emit to event bus
-      try {
-        const { bus } = require('../ramaEventBus.cjs');
-        bus.emit('regen:applied', { proposalId, filePath: p.filePath });
-      } catch { /* non-fatal */ }
-
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: err.message };
-    }
-  });
-
-  // ── Approve proposal ──────────────────────────────────────────────────────
-  ipcMain.handle('regen:approve', async (_e, proposalId) => {
-    const p = proposals.get(proposalId);
-    if (!p) return { ok: false, error: 'Not found' };
-    p.status = 'approved';
-    return { ok: true };
-  });
-
-  // ── Reject proposal ───────────────────────────────────────────────────────
-  ipcMain.handle('regen:reject', async (_e, proposalId) => {
-    const p = proposals.get(proposalId);
-    if (!p) return { ok: false, error: 'Not found' };
-    p.status = 'rejected';
-    return { ok: true };
-  });
+  // ── Approve / reject / apply — all owned by the shared ledger ─────────────
+  ipcMain.handle('regen:apply',   async (_e, { proposalId }) => ledger.apply(proposalId));
+  ipcMain.handle('regen:approve', async (_e, proposalId)     => ledger.approve(proposalId, 'master'));
+  ipcMain.handle('regen:reject',  async (_e, proposalId)     => ledger.reject(proposalId, 'master'));
 
   // ── Research a topic (for IDE use) ────────────────────────────────────────
   ipcMain.handle('regen:research', async (_e, { errorMessage, language }) => {
@@ -286,24 +297,11 @@ function register(ipcMain) {
   });
 }
 
-function httpsGet(url, headers = {}) {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
-    const req = https.request({
-      hostname: parsed.hostname,
-      path:     parsed.pathname + parsed.search,
-      method:   'GET',
-      headers:  { 'Accept': 'application/json', 'User-Agent': 'Rama-AGI/1.0', ...headers },
-      timeout:  10000,
-    }, (res) => {
-      const chunks = [];
-      res.on('data', c => chunks.push(c));
-      res.on('end',  () => resolve(Buffer.concat(chunks).toString('utf8')));
-    });
-    req.on('error',   reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
-    req.end();
-  });
+// Adapter over electron/lib/http.cjs — the single main-process HTTP client.
+async function httpsGet(url, headers = {}) {
+  const res = await net.get(url, { headers, timeout: 10000 });
+  if (res.ok) return res.body;
+  throw new Error(res.error || `HTTP ${res.status}`);
 }
 
 module.exports = { register, queueAnalysis, runRegenPipeline };

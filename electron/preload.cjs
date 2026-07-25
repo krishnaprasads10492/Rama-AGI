@@ -309,6 +309,24 @@ contextBridge.exposeInMainWorld('rama', {
     },
   },
 
+  // ── Proposal Ledger (single approve→apply gate for every self-change) ──────
+  proposals: {
+    list:    (filter)         => ipcRenderer.invoke('proposals:list',    filter),
+    get:     (id)             => ipcRenderer.invoke('proposals:get',     id),
+    create:  (def)            => ipcRenderer.invoke('proposals:create',  def),
+    approve: (id, by)         => ipcRenderer.invoke('proposals:approve', id, by),
+    reject:  (id, by, reason) => ipcRenderer.invoke('proposals:reject',  id, by, reason),
+    apply:   (id, opts)       => ipcRenderer.invoke('proposals:apply',   id, opts),
+    stats:   ()               => ipcRenderer.invoke('proposals:stats'),
+    audit:   (limit)          => ipcRenderer.invoke('proposals:audit',   limit),
+    on: (event, cb) => {
+      const channel = `proposals:${event}`;
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on(channel, h);
+      return () => ipcRenderer.removeListener(channel, h);
+    },
+  },
+
   // ── Vector Memory (semantic search — upgrade, keyword fallback always active) ──
   vector: {
     store:       (text, meta)       => ipcRenderer.invoke('vector:store',        text, meta),
@@ -492,6 +510,7 @@ const ALLOWED_PREFIXES = [
   'session:', 'store:', 'nucleus:', 'ipc-enc:', 'bus:', 'ast:', 'regen:',
   'vector:', 'sandbox:', 'graph:', 'selfcare:', 'vault:', 'models:',
   'agents:', 'browser:', 'app:', 'capability:', 'genome:', 'instance:',
+  'proposals:',
 ];
 
 function isAllowed(channel) {

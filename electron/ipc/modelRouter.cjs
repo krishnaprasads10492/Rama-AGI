@@ -8,8 +8,7 @@
  */
 
 const { getCredential } = require('./credentialVault.cjs');
-const https  = require('https');
-const http   = require('http');
+const net = require('../lib/http.cjs');
 
 // ─── Model registry ────────────────────────────────────────────────────────────
 const MODEL_REGISTRY = {
@@ -326,44 +325,36 @@ function analyzeCredentialNeeds(taskDescription) {
 }
 
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────
-function httpsPost(hostname, path, body, headers) {
-  return new Promise((resolve, reject) => {
-    const req = https.request({ hostname, path, method: 'POST', headers: { ...headers, 'Content-Length': Buffer.byteLength(body) } }, (res) => {
-      let data = '';
-      res.on('data', c => data += c);
-      res.on('end', () => resolve(data));
-    });
-    req.on('error', reject);
-    req.setTimeout(60000, () => { req.destroy(); reject(new Error('Request timeout')); });
-    req.write(body);
-    req.end();
+// Thin adapters over electron/lib/http.cjs — the single main-process HTTP client
+// (circuit breaker, retry/backoff, 429 handling, 10MB response cap).
+// Signatures are unchanged so provider functions above stay untouched.
+
+/** POST to an HTTPS provider endpoint. Returns the raw response body string. */
+async function httpsPost(hostname, path, body, headers) {
+  const res = await net.request(`https://${hostname}${path}`, {
+    method: 'POST', body, headers, timeout: 60000, retries: 1,
   });
+  // Providers return structured error JSON on 4xx — pass the body through so the
+  // caller can surface the real provider message instead of a bare status code.
+  if (res.body) return res.body;
+  throw new Error(res.error || `HTTP ${res.status}`);
 }
 
-function httpPost(hostname, port, path, body) {
-  return new Promise((resolve, reject) => {
-    const req = http.request({ hostname, port, path, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } }, (res) => {
-      let data = '';
-      res.on('data', c => data += c);
-      res.on('end', () => resolve(data));
-    });
-    req.on('error', reject);
-    req.setTimeout(120000, () => { req.destroy(); reject(new Error('Ollama timeout')); });
-    req.write(body);
-    req.end();
+/** POST to a local (plain HTTP) endpoint — Ollama. Long timeout, no retry. */
+async function httpPost(hostname, port, path, body) {
+  const res = await net.request(`http://${hostname}:${port}${path}`, {
+    method: 'POST', body, timeout: 120000, retries: 0,
+    headers: { 'Content-Type': 'application/json' },
   });
+  if (res.body) return res.body;
+  throw new Error(res.error || `Ollama HTTP ${res.status}`);
 }
 
-function httpGet(url) {
-  return new Promise((resolve, reject) => {
-    const req = http.get(url, { timeout: 5000 }, (res) => {
-      let data = '';
-      res.on('data', c => data += c);
-      res.on('end', () => resolve(data));
-    });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
-  });
+/** GET a local endpoint — Ollama model discovery. Fast fail, no retry. */
+async function httpGet(url) {
+  const res = await net.get(url, { timeout: 5000, retries: 0 });
+  if (res.ok) return res.body;
+  throw new Error(res.error || `HTTP ${res.status}`);
 }
 
 module.exports = { register, selectModel, chatCompletion, checkAvailable, MODEL_REGISTRY };

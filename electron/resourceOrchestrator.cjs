@@ -368,6 +368,75 @@ class ResourceOrchestrator extends EventEmitter {
     return { model: 'ollama/phi3', reason: 'fallback-all-limited' };
   }
 
+  /**
+   * Admission control — the SINGLE authority on "may this workload start?".
+   *
+   * agentOrchestrator (agent spawns), sandboxEngine (code execution) and the
+   * evolution/regen engines all used to make their own os.freemem()/CPU
+   * judgements with different thresholds. They now all ask here, so one policy
+   * governs the whole process and there is one place to tune it.
+   *
+   * @param {object} req { ramMB, label, priority, allowUnderPressure }
+   * @returns {{ allow: boolean, reason: string, snapshot: object }}
+   */
+  admit(req = {}) {
+    const {
+      ramMB    = 128,
+      label    = 'workload',
+      priority = PRIORITY.NORMAL,
+      allowUnderPressure = false,
+    } = req;
+
+    const snap = this.snapshot.ts ? this.snapshot : this._liveSnapshot();
+
+    // Master's critical work is never blocked — loyalty outranks throttling.
+    if (priority === PRIORITY.CRITICAL) {
+      return { allow: true, reason: 'critical-priority-bypass', snapshot: snap };
+    }
+
+    if (snap.ramFreeMB > 0 && snap.ramFreeMB < ramMB) {
+      return {
+        allow:  false,
+        reason: `Insufficient free RAM for ${label}: ${snap.ramFreeMB}MB free, needs ${ramMB}MB`,
+        snapshot: snap,
+      };
+    }
+
+    if (snap.ram >= THRESHOLDS.RAM.CRITICAL) {
+      return { allow: false, reason: `RAM at ${snap.ram}% — above critical threshold`, snapshot: snap };
+    }
+
+    if (snap.cpu >= THRESHOLDS.CPU.CRITICAL) {
+      return { allow: false, reason: `CPU at ${snap.cpu}% — above critical threshold`, snapshot: snap };
+    }
+
+    if (snap.temp && snap.temp >= THRESHOLDS.CPU_TEMP.CRITICAL) {
+      return { allow: false, reason: `CPU temperature ${snap.temp}°C — thermal protection`, snapshot: snap };
+    }
+
+    if (snap.pressure === 'critical' && !allowUnderPressure && priority > PRIORITY.HIGH) {
+      return { allow: false, reason: `System under critical pressure — ${label} deferred`, snapshot: snap };
+    }
+
+    return { allow: true, reason: 'ok', snapshot: snap };
+  }
+
+  /** Synchronous fallback snapshot for the first call before si resolves. */
+  _liveSnapshot() {
+    const total = os.totalmem();
+    const free  = os.freemem();
+    const ram   = Math.round(((total - free) / total) * 100);
+    return {
+      cpu: 0, ram, ramFreeMB: Math.round(free / 1024 / 1024),
+      temp: 0, pressure: this._computePressure(0, ram, 0), ts: Date.now(),
+    };
+  }
+
+  /** Read-only snapshot for other engines — no duplicate os/si polling. */
+  getSnapshot() {
+    return this.snapshot.ts ? { ...this.snapshot } : this._liveSnapshot();
+  }
+
   // ── Get current orchestration status ─────────────────────────────────────
   getStatus() {
     return {

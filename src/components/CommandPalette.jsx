@@ -5,25 +5,9 @@ import { useRamaStore } from '@store/ramaStore.js';
 import { VoiceEngine }  from '@services/voiceEngine.js';
 import { isMasterAuthenticated } from '@services/consciousness.js';
 
-// ─── All navigable pages ──────────────────────────────────────────────────────
-const ALL_PAGES = [
-  { route: '/',          icon: '◈',  label: 'Chat',       desc: 'AGI conversation',           color: 'var(--violet)',  keys: ['chat','conversation','talk','message'] },
-  { route: '/home',      icon: '⬡',  label: 'Home',       desc: 'Dashboard & overview',       color: 'var(--accent)',  keys: ['home','dashboard','overview'] },
-  { route: '/system',    icon: '⬢',  label: 'System',     desc: 'OS metrics, cleaner',        color: 'var(--green)',   keys: ['system','monitor','cpu','ram','disk','process','clean'] },
-  { route: '/terminal',  icon: '>_', label: 'Terminal',   desc: 'Embedded shell (PTY)',       color: 'var(--green)',   keys: ['terminal','shell','bash','cmd','powershell'] },
-  { route: '/git',       icon: '⎇',  label: 'Git Sync',   desc: 'Repository sync',            color: 'var(--amber)',   keys: ['git','sync','commit','push','pull','repo'] },
-  { route: '/agents',    icon: '◎',  label: 'Agents',     desc: 'Multi-agent control',        color: 'var(--violet)',  keys: ['agent','agents','spawn','orchestrate'] },
-  { route: '/models',    icon: '⋯',  label: 'Models',     desc: 'AI model router & keys',     color: 'var(--accent)',  keys: ['model','models','openai','claude','gemini','ollama','api'] },
-  { route: '/stockmind', icon: '◬',  label: 'StockMind',  desc: 'Stock market AI',            color: 'var(--magenta)', keys: ['stock','market','trading','finance','stockmind'] },
-  { route: '/knowledge', icon: '◉',  label: 'Knowledge',  desc: 'Rāma memory store',         color: 'var(--accent)',  keys: ['knowledge','memory','notes','docs'] },
-  { route: '/mind',      icon: '⊕',  label: 'Rāma Mind',  desc: '10 capability axes · AGI dashboard', color: 'var(--violet)', keys: ['mind','agi','capabilities','consciousness','memory','self'] },
-  { route: '/users',     icon: '◫',  label: 'Users',      desc: 'User management & access control',         color: 'var(--amber)',  keys: ['users','user','access','permissions','accounts','manage'] },
-  { route: '/intel',     icon: '◬',  label: 'Intelligence',desc: 'Universal prediction — multi-source truth',  color: 'var(--green)',  keys: ['intel','intelligence','predict','analysis','research','truth','source'] },
-  { route: '/ide',       icon: '⬢',  label: 'Rāma IDE',    desc: 'Supreme AGI code editor — edit anything',       color: 'var(--violet)', keys: ['ide','editor','code','coding','develop','build','create','scaffold'] },
-  { route: '/evolution', icon: '⚡', label: 'Evolution',   desc: 'Self-evolve from public repos',             color: 'var(--violet)', keys: ['evolve','evolution','improve','upgrade','github','self'] },
-  { route: '/resources', icon: '⬢', label: 'Resources',  desc: 'Dynamic resource orchestration',            color: 'var(--green)',  keys: ['resources','orchestrator','cpu','ram','workers','tasks','schedule'] },
-  { route: '/settings',  icon: '⚙', label: 'Settings',   desc: 'App configuration, AI providers, security',  color: 'var(--muted)',  keys: ['settings','config','preferences','ai','provider','passcode','autostart'] },
-];
+// Pages come from the single registry — see src/config/registry.js
+import { visiblePages, searchPages } from '@config/registry.js';
+import { useUserStore } from '@store/userStore.js';
 
 // ─── Voice mic button ─────────────────────────────────────────────────────────
 function VoiceMicBtn({ active, onToggle }) {
@@ -105,12 +89,7 @@ function PageTab({ page, active, onClick }) {
 // ─── Search results dropdown ──────────────────────────────────────────────────
 function SearchResults({ query, pages, onSelect }) {
   if (!query) return null;
-  const q = query.toLowerCase();
-  const results = pages.filter(p =>
-    p.label.toLowerCase().includes(q) ||
-    p.desc.toLowerCase().includes(q)  ||
-    p.keys.some(k => k.includes(q))
-  );
+  const results = searchPages(query, pages);
   if (results.length === 0) return null;
 
   return (
@@ -254,7 +233,14 @@ export default function CommandPalette({ extraPages = [] }) {
   const [voiceTranscript, setVoiceTranscript] = useState('');
   const [wakeActive,      setWakeActive]      = useState(false);
 
-  const allPages = [...ALL_PAGES, ...extraPages];
+  const { currentUser } = useUserStore();
+
+  // Tabs/search come from the registry, filtered by the current user's tier.
+  // `extraPages` lets Rāma surface self-created pages before a restart.
+  const allPages = React.useMemo(
+    () => [...visiblePages(currentUser), ...extraPages],
+    [currentUser, extraPages]
+  );
 
   // ── Keyboard: Ctrl+K toggle ──────────────────────────────────────────────
   useEffect(() => {
@@ -392,10 +378,7 @@ export default function CommandPalette({ extraPages = [] }) {
             onChange={e => setPaletteQuery(e.target.value)}
             onKeyDown={e => {
               if (e.key === 'Enter') {
-                const results = allPages.filter(p =>
-                  p.label.toLowerCase().includes(paletteQuery.toLowerCase()) ||
-                  p.keys.some(k => k.includes(paletteQuery.toLowerCase()))
-                );
+                const results = searchPages(paletteQuery, allPages);
                 if (results[0]) goTo(results[0].route, results[0].label);
               }
               if (e.key === 'Escape') closePalette();
@@ -472,11 +455,13 @@ export default function CommandPalette({ extraPages = [] }) {
 function colorToRgb(cssVar) {
   const map = {
     'var(--violet)':  '119,0,255',
-    'var(--accent)':  '0,255,255',
+    'var(--accent)':  '0,200,255',
     'var(--green)':   '0,255,65',
     'var(--magenta)': '255,0,170',
     'var(--amber)':   '255,170,0',
+    'var(--gold)':    '212,169,64',
     'var(--red)':     '255,0,60',
+    'var(--muted)':   '120,140,160',
   };
-  return map[cssVar] || '0,255,255';
+  return map[cssVar] || '0,200,255';
 }

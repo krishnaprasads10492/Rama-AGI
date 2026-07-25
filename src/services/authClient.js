@@ -2,20 +2,9 @@
  * authClient.js — Auth API calls + session management.
  */
 
-const BASE = 'http://localhost:4097';
-
-async function apiFetch(path, opts = {}, token = null) {
-  const headers = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  try {
-    const res  = await fetch(`${BASE}${path}`, { headers, ...opts });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return { ok: false, error: data.error || res.statusText, status: res.status };
-    return data;
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
-}
+// All server calls go through apiClient.serverJson — one circuit breaker,
+// one retry policy, one place that injects the session token.
+import { serverJson as apiFetch } from '@services/apiClient.js';
 
 // ─── Device fingerprint (for session binding) ─────────────────────────────────
 function getFingerprint() {

@@ -171,28 +171,11 @@ export function getDenied(user) {
     .map(([cap]) => cap);
 }
 
-/**
- * Filter navigation items by access level.
- */
-export function getVisibleRoutes(user) {
-  if (!user) return ['/'];   // Guest gets chat only
-  const tier = user.tier;
-  const routes = [
-    { route: '/',          minTier: TIERS.GUEST },
-    { route: '/home',      minTier: TIERS.VIEWER },
-    { route: '/system',    minTier: TIERS.OPERATOR },
-    { route: '/terminal',  minTier: TIERS.SUPERADMIN },
-    { route: '/git',       minTier: TIERS.OPERATOR },
-    { route: '/agents',    minTier: TIERS.OPERATOR },
-    { route: '/models',    minTier: TIERS.SUPERADMIN },
-    { route: '/stockmind', minTier: TIERS.VIEWER },
-    { route: '/knowledge', minTier: TIERS.VIEWER },
-    { route: '/mind',      minTier: TIERS.MASTER },
-    { route: '/users',     minTier: TIERS.ADMIN },
-    { route: '/settings',  minTier: TIERS.ADMIN },
-  ];
-  return routes.filter(r => tier <= r.minTier).map(r => r.route);
-}
+// NOTE: route visibility used to be duplicated here. It now lives in
+// src/config/registry.js (`visibleRoutes`), which is the single source of truth
+// for routes, nav, voice commands and per-page tiers. This module deliberately
+// does NOT import the registry — the registry imports TIERS from here, so the
+// dependency stays one-directional.
 
 // ─── Session token (client-side, HMAC-signed) ─────────────────────────────────
 /**

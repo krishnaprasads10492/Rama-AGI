@@ -36,49 +36,123 @@ export async function createPage(opts) {
 
   const code = generatedCode || generateDefaultPage(safeName, name, icon, color, description);
 
+  // Registration is a single registry.js patch — see generateRegistryUpdate
+  const registrySource = await readSourceFile('src/config/registry.js');
+  const files = [{ path: filePath, content: code, action: 'create' }];
+
+  if (registrySource) {
+    files.push({
+      path:    'src/config/registry.js',
+      action:  'update',
+      content: generateRegistryUpdate(registrySource, {
+        id: safeName.toLowerCase(),
+        route, label: name, icon, color,
+        desc: description,
+        componentPath: `@pages/${safeName}/${safeName}.jsx`,
+      }),
+    });
+  }
+
   return {
     type:       'create-page',
     description: `Create new page: ${name} at ${route}`,
-    files: [
-      { path: filePath, content: code, action: 'create' },
-    ],
-    postActions: [
-      { type: 'register-route', route, component: safeName, path: filePath },
-    ],
+    files,
+    postActions: registrySource
+      ? []
+      : [{ type: 'register-route', route, component: safeName, path: filePath }],
     requiresRestart: false,
   };
 }
 
-// ─── Register a route in App.jsx ──────────────────────────────────────────────
-export async function generateRouteUpdate(currentAppJsx, route, componentName, importPath) {
-  // Insert import
-  const importLine   = `const ${componentName} = React.lazy(() => import('${importPath}'));`;
-  const routeLine    = `              <Route path="${route}" element={<${componentName} />} />`;
+// ─── Register a new page in the registry ──────────────────────────────────────
+/**
+ * Patch src/config/registry.js — the ONE file a new page must be added to.
+ *
+ * Previously this had to edit App.jsx (route table), Sidebar.jsx (nav items) and
+ * voiceEngine.js (voice patterns) separately, which meant a self-created page
+ * could end up half-registered. Now a page needs exactly two insertions in one
+ * file: a PageDef and a loader entry.
+ *
+ * @param {string} registrySource  current contents of src/config/registry.js
+ * @param {object} page            { id, route, label, icon, color, desc, minTier, keys, voice, componentPath, capabilities }
+ * @returns {string} updated source
+ */
+export function generateRegistryUpdate(registrySource, page) {
+  const {
+    id, route, label, icon, color = 'var(--accent)', desc = '',
+    minTier = 'TIERS.MASTER', keys = [], voice = [],
+    componentPath, capabilities = ['custom-page'],
+  } = page;
 
-  // Find insertion points
-  const lastLazyIdx  = currentAppJsx.lastIndexOf("React.lazy");
-  const lastLazyEnd  = currentAppJsx.indexOf('\n', lastLazyIdx) + 1;
-  const catchAllIdx  = currentAppJsx.indexOf('Catch-all');
+  const arr = (xs) => xs.map(k => `'${String(k).replace(/'/g, "\\'")}'`).join(', ');
 
-  let updated = currentAppJsx;
-  // Add import after last lazy import
-  updated = updated.slice(0, lastLazyEnd) + importLine + '\n' + updated.slice(lastLazyEnd);
-  // Add route before catch-all
-  const catchIdx2 = updated.indexOf('Catch-all');
-  const lineStart = updated.lastIndexOf('\n', catchIdx2);
-  updated = updated.slice(0, lineStart) + '\n' + routeLine + updated.slice(lineStart);
+  const pageDef = `  {
+    route: '${route}', id: '${id}', label: '${label}', icon: '${icon}',
+    desc: '${desc.replace(/'/g, "\\'")}', color: '${color}',
+    minTier: ${minTier},
+    keys: [${arr(keys.length ? keys : [id, label.toLowerCase()])}],
+    voice: [${arr(voice.length ? voice : [`open ${label.toLowerCase()}`])}],
+    component: '${componentPath}',
+    capabilities: [${arr(capabilities)}],
+  },
+`;
+
+  // 1. Insert the PageDef before the closing bracket of the PAGES array
+  const pagesEnd = registrySource.indexOf('\n];', registrySource.indexOf('export const PAGES'));
+  if (pagesEnd === -1) throw new Error('Could not locate PAGES array in registry.js');
+  let updated = registrySource.slice(0, pagesEnd + 1) + pageDef + registrySource.slice(pagesEnd + 1);
+
+  // 2. Insert the lazy loader entry
+  const loadersIdx = updated.indexOf('const LOADERS = {');
+  if (loadersIdx === -1) throw new Error('Could not locate LOADERS map in registry.js');
+  const loadersEnd = updated.indexOf('\n};', loadersIdx);
+  const loaderLine = `  ${id}: () => import('${componentPath}'),`;
+  updated = updated.slice(0, loadersEnd + 1) + loaderLine + '\n' + updated.slice(loadersEnd + 1);
 
   return updated;
 }
 
-// ─── Generate Sidebar update ──────────────────────────────────────────────────
-export function generateNavItem(route, icon, label, color, title) {
-  return `  { route: '${route}', icon: '${icon}', label: '${label}', color: '${color}', title: '${title}' },`;
+// ─── Propose a modification (goes to the shared approval ledger) ───────────────
+/**
+ * Submits a change to electron/lib/proposals.cjs — the same gate the evolution
+ * and code-regen engines use. Rāma cannot write to its own source without an
+ * approval recorded there.
+ * @returns {Promise<{ok:boolean, id?:string, error?:string}>}
+ */
+export async function proposeModification(mod) {
+  if (!isElectron) return { ok: false, error: 'Not in Electron' };
+
+  const res = await window.rama.proposals.create({
+    kind:    'self-modify',
+    title:   mod.description,
+    summary: mod.description,
+    changes: (mod.files || []).map(f => ({
+      action:  f.action === 'update' ? 'patch' : f.action,
+      path:    f.path,
+      content: f.content,
+    })),
+    requiresRestart: !!mod.requiresRestart,
+    risk:    mod.requiresRestart ? 'high' : 'medium',
+    meta:    { type: mod.type, postActions: mod.postActions || [] },
+  });
+
+  return res.ok ? { ok: true, id: res.data.id } : res;
 }
 
 // ─── Apply a modification (write files) ──────────────────────────────────────
+/**
+ * Writes an approved modification. If the change came through the ledger, pass
+ * `mod.proposalId` and the ledger performs the write + audit. The direct-write
+ * path remains for master-initiated edits that were approved inline in the UI.
+ */
 export async function applyModification(mod) {
   if (!isElectron) return { ok: false, error: 'Not in Electron' };
+
+  // Ledger-backed path — preferred, keeps one audit trail
+  if (mod.proposalId) {
+    await window.rama.proposals.approve(mod.proposalId, 'master');
+    return window.rama.proposals.apply(mod.proposalId);
+  }
 
   const results = [];
   for (const file of mod.files) {

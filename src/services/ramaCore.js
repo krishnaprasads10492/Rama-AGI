@@ -11,6 +11,8 @@
  * - Proactive Agent research (arxiv 2605.25971, 2605.14678)
  */
 
+import { can } from '@services/accessControl.js';
+
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
 // ─── AXIS 1: Capability Index ─────────────────────────────────────────────────
@@ -260,27 +262,43 @@ export const ramaPlanner = new PlanningEngine();
  * Routes each task to the optimal tool combination.
  * Knows capabilities of every tool and selects best for each subtask.
  */
+// Each tool declares the capability key it needs from accessControl's matrix.
+// Before this link existed, tool routing ignored the session's access tier —
+// a Viewer's task could still route to terminal.run. Now every tool is gated.
 export const TOOL_REGISTRY = {
-  'web.search':     { desc: 'Search the internet',           input: 'query',    output: 'results',    cost: 'low'    },
-  'web.read':       { desc: 'Read a webpage',                input: 'url',      output: 'text',       cost: 'low'    },
-  'web.download':   { desc: 'Download a file',               input: 'url',      output: 'file',       cost: 'low'    },
-  'fs.read':        { desc: 'Read a local file',             input: 'path',     output: 'content',    cost: 'free'   },
-  'fs.write':       { desc: 'Write a local file',            input: 'path+data',output: 'ok',         cost: 'free'   },
-  'fs.search':      { desc: 'Search files on disk',          input: 'query',    output: 'paths',      cost: 'free'   },
-  'git.push':       { desc: 'Push code to GitHub',           input: 'repo',     output: 'ok',         cost: 'free'   },
-  'git.pull':       { desc: 'Pull from GitHub',              input: 'repo',     output: 'ok',         cost: 'free'   },
-  'system.metrics': { desc: 'Get system health metrics',     input: 'none',     output: 'metrics',    cost: 'free'   },
-  'system.kill':    { desc: 'Kill a process',                input: 'pid',      output: 'ok',         cost: 'free',  destructive: true },
-  'system.clean':   { desc: 'Clean temp files',              input: 'targets',  output: 'freed',      cost: 'free',  destructive: true },
-  'terminal.run':   { desc: 'Run a shell command',           input: 'command',  output: 'stdout',     cost: 'free',  destructive: true },
-  'agent.spawn':    { desc: 'Spawn a sub-agent',             input: 'type+task',output: 'result',     cost: 'medium' },
-  'model.chat':     { desc: 'Query an AI model',             input: 'messages', output: 'response',   cost: 'varies' },
-  'model.embed':    { desc: 'Generate text embeddings',      input: 'text',     output: 'vector',     cost: 'low'    },
-  'vault.get':      { desc: 'Retrieve a credential',         input: 'service',  output: 'key',        cost: 'free'   },
-  'vault.set':      { desc: 'Store a credential',            input: 'service+key',output: 'ok',       cost: 'free'   },
+  'web.search':     { desc: 'Search the internet',           input: 'query',    output: 'results',    cost: 'low',   cap: 'browser.search'         },
+  'web.read':       { desc: 'Read a webpage',                input: 'url',      output: 'text',       cost: 'low',   cap: 'browser.read'           },
+  'web.download':   { desc: 'Download a file',               input: 'url',      output: 'file',       cost: 'low',   cap: 'browser.download'       },
+  'fs.read':        { desc: 'Read a local file',             input: 'path',     output: 'content',    cost: 'free',  cap: 'os.filesystem-read'     },
+  'fs.write':       { desc: 'Write a local file',            input: 'path+data',output: 'ok',         cost: 'free',  cap: 'os.filesystem-write'    },
+  'fs.search':      { desc: 'Search files on disk',          input: 'query',    output: 'paths',      cost: 'free',  cap: 'os.filesystem-read'     },
+  'git.push':       { desc: 'Push code to GitHub',           input: 'repo',     output: 'ok',         cost: 'free',  cap: 'git.push'               },
+  'git.pull':       { desc: 'Pull from GitHub',              input: 'repo',     output: 'ok',         cost: 'free',  cap: 'git.read'               },
+  'system.metrics': { desc: 'Get system health metrics',     input: 'none',     output: 'metrics',    cost: 'free',  cap: 'os.metrics-read'        },
+  'system.kill':    { desc: 'Kill a process',                input: 'pid',      output: 'ok',         cost: 'free',  cap: 'os.process-kill',    destructive: true },
+  'system.clean':   { desc: 'Clean temp files',              input: 'targets',  output: 'freed',      cost: 'free',  cap: 'os.temp-clean',      destructive: true },
+  'terminal.run':   { desc: 'Run a shell command',           input: 'command',  output: 'stdout',     cost: 'free',  cap: 'terminal.open',      destructive: true },
+  'agent.spawn':    { desc: 'Spawn a sub-agent',             input: 'type+task',output: 'result',     cost: 'medium',cap: 'agents.spawn'           },
+  'model.chat':     { desc: 'Query an AI model',             input: 'messages', output: 'response',   cost: 'varies',cap: 'chat.send'              },
+  'model.embed':    { desc: 'Generate text embeddings',      input: 'text',     output: 'vector',     cost: 'low',   cap: 'models.use'             },
+  'vault.get':      { desc: 'Retrieve a credential',         input: 'service',  output: 'key',        cost: 'free',  cap: 'vault.read'             },
+  'vault.set':      { desc: 'Store a credential',            input: 'service+key',output: 'ok',       cost: 'free',  cap: 'vault.write'            },
 };
 
-export function routeToTools(taskDescription) {
+/** May this session use this tool? Single check, sourced from the matrix. */
+export function canUseTool(user, toolId) {
+  const tool = TOOL_REGISTRY[toolId];
+  if (!tool) return false;
+  if (!tool.cap) return true;
+  return can(user, tool.cap);
+}
+
+/**
+ * Select tools for a task. Pass the session user to have the result filtered to
+ * what that tier is actually permitted to do — planning then never produces a
+ * step that execution will reject.
+ */
+export function routeToTools(taskDescription, user = null) {
   const task = taskDescription.toLowerCase();
   const tools = [];
 
@@ -306,7 +324,9 @@ export function routeToTools(taskDescription) {
   // Always include model.chat for synthesis
   if (!tools.includes('model.chat')) tools.push('model.chat');
 
-  return tools;
+  // Gate by access tier when a session is supplied
+  const unique = [...new Set(tools)];
+  return user ? unique.filter(t => canUseTool(user, t)) : unique;
 }
 
 // ─── AXIS 6: Self-Revision Engine ─────────────────────────────────────────────

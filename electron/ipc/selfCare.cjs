@@ -30,7 +30,8 @@
  *   - Log every self-care action with reasoning
  */
 
-const si    = require('systeminformation');
+// System metrics come from resourceOrchestrator's shared snapshot (required
+// lazily inside checkSystemResources to avoid a load-order cycle at startup).
 const { BrowserWindow } = require('electron');
 
 // ─── Health state ──────────────────────────────────────────────────────────────
@@ -56,20 +57,19 @@ const components = {
 // ─── Health check functions ───────────────────────────────────────────────────
 async function checkSystemResources() {
   try {
-    const [cpu, mem] = await Promise.all([
-      si.currentLoad().catch(() => ({ currentLoad: 0 })),
-      si.mem().catch(() => ({ used: 1, total: 2 })),
-    ]);
-    const cpuPct = Math.round(cpu.currentLoad);
-    const ramPct = Math.round((mem.used / mem.total) * 100);
+    // Reuse the orchestrator's cached snapshot instead of polling
+    // systeminformation again — one sampler for the whole process.
+    const snap   = require('../resourceOrchestrator.cjs').orchestrator.getSnapshot();
+    const cpuPct = snap.cpu;
+    const ramPct = snap.ram;
 
     const issues = [];
     if (cpuPct > 90) issues.push({ severity: 'critical', msg: `CPU at ${cpuPct}% — suspending background tasks` });
     if (cpuPct > 75) issues.push({ severity: 'warn',     msg: `CPU at ${cpuPct}% — reducing agent concurrency` });
     if (ramPct > 88) issues.push({ severity: 'critical', msg: `RAM at ${ramPct}% — clearing caches` });
 
-    return { cpu: cpuPct, ram: ramPct, issues };
-  } catch { return { cpu: 0, ram: 0, issues: [] }; }
+    return { cpu: cpuPct, ram: ramPct, pressure: snap.pressure, issues };
+  } catch { return { cpu: 0, ram: 0, pressure: 'unknown', issues: [] }; }
 }
 
 async function checkVectorMemory() {

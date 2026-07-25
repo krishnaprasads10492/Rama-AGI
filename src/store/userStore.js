@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { TIERS, can, getVisibleRoutes } from '@services/accessControl.js';
+import { TIERS, can } from '@services/accessControl.js';
+import { visibleRoutes as registryVisibleRoutes, capabilitiesForTier } from '@config/registry.js';
 
 /**
  * userStore — Active session + user management state.
@@ -42,10 +43,10 @@ export const useUserStore = create((set, get) => ({
     return can(user, capability);
   },
 
-  visibleRoutes: () => {
-    const user = get().currentUser;
-    return getVisibleRoutes(user);
-  },
+  visibleRoutes: () => registryVisibleRoutes(get().currentUser),
+
+  // Page-level capabilities the current session can actually reach
+  sessionCapabilities: () => capabilitiesForTier(get().currentUser),
 
   // ── User management ────────────────────────────────────────────────────────
   setUsers: (users) => set({ users }),

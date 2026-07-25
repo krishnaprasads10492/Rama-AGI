@@ -30,6 +30,8 @@ const codeRegenIPC     = require('./ipc/codeRegenEngine.cjs');
 // ─── Immutable Encryption Foundry ────────────────────────────────────────────
 const nucleusSealer    = require('./nucleusSealer.cjs');
 const ipcEncryption    = require('./ipcEncryption.cjs');
+// ─── Shared foundations (one HTTP client, one approval ledger) ────────────────
+const proposalLedger   = require('./lib/proposals.cjs');
 const sessionMgr   = require('./sessionManager.cjs');
 const dataStore    = require('./dataStore.cjs');
 
@@ -269,6 +271,7 @@ app.whenReady().then(async () => {
   codeRegenIPC.register(ipcMain);
   nucleusSealer.register(ipcMain);
   ipcEncryption.register(ipcMain);
+  proposalLedger.register(ipcMain);
   sessionMgr.register(ipcMain);
   dataStore.register(ipcMain);
 

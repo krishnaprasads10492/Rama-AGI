@@ -229,6 +229,20 @@ function register(ipcMain) {
       return { ok: false, error: `Max concurrent executions reached (${LIMITS.MAX_CONCURRENT})` };
     }
 
+    // Resource admission — same single authority the agent spawner uses.
+    // SAFE code runs in-process and is cheap, so only child processes are gated.
+    if (tier !== 'SAFE') {
+      const admission = require('../resourceOrchestrator.cjs').orchestrator.admit({
+        ramMB: 128,
+        label: `sandbox ${lang} execution`,
+      });
+      if (!admission.allow) {
+        auditEntry.result = 'deferred-resource-pressure';
+        execAudit.unshift(auditEntry);
+        return { ok: false, error: admission.reason, execId, tier };
+      }
+    }
+
     let result;
     if (tier === 'SAFE') {
       result = runSafeJS(code);

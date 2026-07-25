@@ -140,6 +140,28 @@ export async function apiFetch(url, options = {}) {
   throw lastError ?? new ApiError('Request failed', 0, url);
 }
 
+// ─── Local Rāma server helper ─────────────────────────────────────────────────
+// Single entry point for every renderer → Express call. authClient.js and
+// ramaClient.js used to each carry their own `apiFetch` with a hardcoded base
+// URL and no circuit breaker; they now both route through here.
+export const SERVER_BASE = 'http://localhost:4097';
+
+/**
+ * Call the local Rāma server and return parsed JSON.
+ * Never throws — resolves to `{ ok: false, error, status }` on failure so
+ * callers can render an error state instead of crashing a page.
+ */
+export async function serverJson(path, opts = {}, token = null) {
+  const headers = { ...(opts.headers || {}) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  try {
+    const res = await apiFetch(`${SERVER_BASE}${path}`, { ...opts, headers });
+    return await res.json().catch(() => ({ ok: true }));
+  } catch (err) {
+    return { ok: false, error: err.message, status: err.status ?? 0 };
+  }
+}
+
 // ─── JSON fetch shorthand ─────────────────────────────────────────────────────
 export async function apiJson(url, options = {}) {
   const res  = await apiFetch(url, options);

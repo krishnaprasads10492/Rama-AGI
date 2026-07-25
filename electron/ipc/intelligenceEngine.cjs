@@ -24,8 +24,7 @@
  */
 
 const crypto = require('crypto');
-const https  = require('https');
-const http   = require('http');
+const net    = require('../lib/http.cjs');
 
 // ─── Human emulation profiles ─────────────────────────────────────────────────
 const HUMAN_PROFILES = [
@@ -266,74 +265,53 @@ async function searchWithHumanEmulation(query, profile) {
   return buildFallbackResults(query);
 }
 
+/**
+ * DuckDuckGo instant-answer API via the shared main-process HTTP client.
+ * `getJsonHuman` applies a rotating browser profile (UA / Accept-Language /
+ * Sec-Fetch headers) so the request looks like a person's browser — the
+ * gate-respecting behaviour the spec requires.
+ * Never throws: one failed search must not abort the intelligence pipeline.
+ */
 async function fetchDDGAPI(query, profile) {
-  return new Promise((resolve) => {
-    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
+  const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}`
+            + `&format=json&no_html=1&skip_disambig=1`;
 
-    const options = {
-      hostname: 'api.duckduckgo.com',
-      path:     `/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`,
-      method:   'GET',
-      headers:  {
-        'User-Agent':      profile.ua,
-        'Accept':          'application/json,text/html,*/*;q=0.8',
-        'Accept-Language': profile.lang,
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection':      'keep-alive',
-        'Sec-Fetch-Dest':  'document',
-        'Sec-Fetch-Mode':  'navigate',
-        'Sec-Fetch-Site':  'none',
-        'Cache-Control':   'max-age=0',
-      },
-      timeout: 10000,
-    };
+  const headers = profile
+    ? { 'User-Agent': profile.ua, 'Accept-Language': profile.lang }
+    : {};
 
-    const req = https.request(options, (res) => {
-      const chunks = [];
-      res.on('data', c => chunks.push(c));
-      res.on('end', () => {
-        try {
-          const body   = Buffer.concat(chunks).toString('utf8');
-          const parsed = JSON.parse(body);
-          const results = [];
+  const parsed = await net.getJsonHuman(url, { headers, timeout: 10000, retries: 1 });
+  if (!parsed || parsed.error) return [];
 
-          // Abstract (main result)
-          if (parsed.Abstract) {
-            results.push({
-              domain:  extractDomain(parsed.AbstractURL || parsed.AbstractSource),
-              url:     parsed.AbstractURL,
-              title:   parsed.Heading,
-              content: parsed.Abstract,
-              source:  parsed.AbstractSource,
-            });
-          }
+  const results = [];
 
-          // Related topics
-          if (Array.isArray(parsed.RelatedTopics)) {
-            for (const t of parsed.RelatedTopics.slice(0, 8)) {
-              if (t.Text && t.FirstURL) {
-                results.push({
-                  domain:  extractDomain(t.FirstURL),
-                  url:     t.FirstURL,
-                  title:   t.Text.split(' - ')[0],
-                  content: t.Text,
-                  source:  extractDomain(t.FirstURL),
-                });
-              }
-            }
-          }
-
-          resolve(results);
-        } catch {
-          resolve([]);
-        }
-      });
+  // Abstract (main result)
+  if (parsed.Abstract) {
+    results.push({
+      domain:  extractDomain(parsed.AbstractURL || parsed.AbstractSource),
+      url:     parsed.AbstractURL,
+      title:   parsed.Heading,
+      content: parsed.Abstract,
+      source:  parsed.AbstractSource,
     });
+  }
 
-    req.on('error', () => resolve([]));
-    req.on('timeout', () => { req.destroy(); resolve([]); });
-    req.end();
-  });
+  // Related topics
+  if (Array.isArray(parsed.RelatedTopics)) {
+    for (const t of parsed.RelatedTopics.slice(0, 8)) {
+      if (t.Text && t.FirstURL) {
+        results.push({
+          domain:  extractDomain(t.FirstURL),
+          url:     t.FirstURL,
+          title:   t.Text.split(' - ')[0],
+          content: t.Text,
+          source:  extractDomain(t.FirstURL),
+        });
+      }
+    }
+  }
+
+  return results;
 }
 
 function buildFallbackResults(query) {

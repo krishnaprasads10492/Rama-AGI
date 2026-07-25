@@ -25,7 +25,7 @@ const path   = require('path');
 const fs     = require('fs');
 const crypto = require('crypto');
 const { app } = require('electron');
-const https  = require('https');
+const net    = require('../lib/http.cjs');
 
 // ─── Vector index state ───────────────────────────────────────────────────────
 let vectra      = null;    // vectra LocalIndex instance
@@ -74,25 +74,16 @@ async function init() {
 // ─── Embedding generation ─────────────────────────────────────────────────────
 // Uses Ollama local embeddings if available, falls back to TF-IDF approximation
 async function embed(text) {
-  // Try Ollama local embedding first (zero cost, private)
+  // Try Ollama local embedding first (zero cost, private).
+  // NOTE: Ollama serves plain HTTP on 11434 — this used to be an https request,
+  // which always failed, so the TF-IDF fallback was the only live path.
   try {
-    const body = JSON.stringify({ model: 'nomic-embed-text', prompt: text });
-    const data = await new Promise((resolve, reject) => {
-      const req = https.request({
-        hostname: 'localhost', port: 11434,
-        path: '/api/embeddings', method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-        timeout: 5000,
-      }, (res) => {
-        const chunks = [];
-        res.on('data', c => chunks.push(c));
-        res.on('end', () => resolve(JSON.parse(Buffer.concat(chunks).toString())));
-      });
-      req.on('error', reject);
-      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
-      req.write(body); req.end();
-    });
-    if (data.embedding && Array.isArray(data.embedding)) {
+    const data = await net.postJson(
+      'http://localhost:11434/api/embeddings',
+      { model: 'nomic-embed-text', prompt: text },
+      { timeout: 5000, retries: 0 }
+    );
+    if (Array.isArray(data?.embedding)) {
       return { vector: data.embedding, source: 'ollama' };
     }
   } catch { /* Ollama not available */ }

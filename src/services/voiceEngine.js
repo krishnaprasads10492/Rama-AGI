@@ -4,24 +4,16 @@
  * Routes spoken commands to navigation, agents, and AI chat.
  */
 
-const WAKE_WORDS = ['hey rama', 'hey rāma', 'hey rama', 'hey roma', 'hey lama'];  // fuzzy matches
+const WAKE_WORDS = ['hey rama', 'hey rāma', 'hey roma', 'hey lama'];  // fuzzy matches
 
-// ─── Command routing table ────────────────────────────────────────────────────
-const VOICE_ROUTES = [
-  { patterns: ['open chat', 'new chat', 'go to chat', 'open conversation'],       route: '/',           action: null },
-  { patterns: ['open home', 'go home', 'dashboard'],                              route: '/home',       action: null },
-  { patterns: ['open system', 'system stats', 'system monitor', 'open monitor'],  route: '/system',     action: null },
-  { patterns: ['open terminal', 'open shell', 'terminal'],                        route: '/terminal',   action: null },
-  { patterns: ['open git', 'git sync', 'open sync'],                              route: '/git',        action: null },
-  { patterns: ['open agents', 'show agents', 'agent control'],                    route: '/agents',     action: null },
-  { patterns: ['open models', 'show models', 'model router'],                     route: '/models',     action: null },
-  { patterns: ['open stockmind', 'stock mind', 'stock market'],                   route: '/stockmind',  action: null },
-  { patterns: ['open knowledge', 'knowledge base'],                               route: '/knowledge',  action: null },
-  { patterns: ['open intelligence', 'intelligence engine', 'analyze', 'predict'],  route: '/intel',      action: null },
-  { patterns: ['open ide', 'code editor', 'open editor', 'rama ide'],              route: '/ide',        action: null },
-  { patterns: ['close palette', 'close menu', 'dismiss', 'cancel'],               route: null,          action: 'close-palette' },
-  { patterns: ['open menu', 'open palette', 'show commands'],                     route: null,          action: 'open-palette' },
-  { patterns: ['identify yourself', 'who are you', 'reveal identity'],            route: null,          action: 'identify' },
+// Navigation phrases live on each PageDef in src/config/registry.js.
+// Only non-navigation UI actions are declared here.
+import { matchVoiceToRoute } from '@config/registry.js';
+
+const VOICE_ACTIONS = [
+  { patterns: ['close palette', 'close menu', 'dismiss', 'cancel'],    action: 'close-palette' },
+  { patterns: ['open menu', 'open palette', 'show commands'],          action: 'open-palette'  },
+  { patterns: ['identify yourself', 'who are you', 'reveal identity'], action: 'identify'      },
 ];
 
 // ─── VoiceEngine class ────────────────────────────────────────────────────────
@@ -186,11 +178,17 @@ export class VoiceEngine {
 // ─── Match a spoken command to a route/action ─────────────────────────────────
 export function matchVoiceCommand(command) {
   const lower = command.toLowerCase();
-  for (const entry of VOICE_ROUTES) {
+
+  // UI actions win over navigation ("cancel" should never open a page)
+  for (const entry of VOICE_ACTIONS) {
     if (entry.patterns.some(p => lower.includes(p))) {
-      return { route: entry.route, action: entry.action };
+      return { route: null, action: entry.action };
     }
   }
+
+  // Navigation — resolved from the page registry
+  const nav = matchVoiceToRoute(lower);
+  if (nav) return { route: nav.route, action: null, page: nav.page };
 
   // "search for X" or "look up X"
   const searchMatch = lower.match(/(?:search for|look up|find|research)\s+(.+)/);
@@ -207,4 +205,4 @@ export function matchVoiceCommand(command) {
   return null;
 }
 
-export const VOICE_ROUTES_MAP = VOICE_ROUTES;
+export { VOICE_ACTIONS };

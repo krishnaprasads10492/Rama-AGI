@@ -27,8 +27,8 @@
  *   - Rate limiting compliance (GitHub: 60 req/hr unauth, 5000 with token)
  */
 
-const https  = require('https');
-const http   = require('http');
+const net       = require('../lib/http.cjs');
+const proposals = require('../lib/proposals.cjs');
 const path   = require('path');
 const fs     = require('fs');
 const crypto = require('crypto');
@@ -129,47 +129,18 @@ function register(ipcMain) {
     }
   });
 
-  // ── Apply an approved evolution proposal ─────────────────────────────────
+  // ── Approve / reject / apply ───────────────────────────────────────────────
+  // These delegate to the shared proposal ledger (electron/lib/proposals.cjs).
+  // The ledger owns the approval invariant; this engine only knows how to write
+  // absorbed files (see the registered applier below).
   ipcMain.handle('evolution:apply', async (event, { proposalId, repoPath }) => {
-    const proposal = evolutionLog.find(e => e.id === proposalId);
-    if (!proposal) return { ok: false, error: 'Proposal not found' };
-    if (proposal.status !== 'approved') return { ok: false, error: 'Proposal not approved' };
-
-    try {
-      const results = [];
-      for (const change of (proposal.changes || [])) {
-        const absPath = repoPath ? path.join(repoPath, change.path) : change.path;
-        fs.mkdirSync(path.dirname(absPath), { recursive: true });
-        fs.writeFileSync(absPath, change.content, 'utf8');
-        results.push({ path: change.path, written: true });
-      }
-
-      proposal.status     = 'applied';
-      proposal.appliedAt  = Date.now();
-      proposal.repoPath   = repoPath;
-
-      event.sender.send('evolution:applied', { proposalId, results });
-      return { ok: true, data: results };
-    } catch (err) {
-      return { ok: false, error: err.message };
-    }
+    const res = await proposals.apply(proposalId, { repoPath });
+    if (res.ok) event.sender.send('evolution:applied', { proposalId, results: res.data });
+    return res;
   });
 
-  // ── Approve / reject proposal ─────────────────────────────────────────────
-  ipcMain.handle('evolution:approve', async (_e, proposalId) => {
-    const p = evolutionLog.find(e => e.id === proposalId);
-    if (!p) return { ok: false, error: 'Not found' };
-    p.status = 'approved';
-    p.approvedAt = Date.now();
-    return { ok: true };
-  });
-
-  ipcMain.handle('evolution:reject', async (_e, proposalId) => {
-    const p = evolutionLog.find(e => e.id === proposalId);
-    if (!p) return { ok: false, error: 'Not found' };
-    p.status = 'rejected';
-    return { ok: true };
-  });
+  ipcMain.handle('evolution:approve', async (_e, proposalId) => proposals.approve(proposalId, 'master'));
+  ipcMain.handle('evolution:reject',  async (_e, proposalId) => proposals.reject(proposalId, 'master'));
 
   // ── Self-assessment: what should Rāma evolve next? ────────────────────────
   ipcMain.handle('evolution:self-assess', async () => {
@@ -381,8 +352,6 @@ function selectInterestingFiles(paths) {
 
 // ─── Build evolution proposal ──────────────────────────────────────────────────
 async function buildEvolutionProposal(finding, targetCapability, sender) {
-  const proposalId = crypto.randomBytes(10).toString('hex');
-
   // Read the source if it's a GitHub repo
   let sourceFiles = [];
   if (finding.type === 'github-repo' && finding.owner && finding.repo) {
@@ -390,29 +359,55 @@ async function buildEvolutionProposal(finding, targetCapability, sender) {
     sourceFiles = await readRepoFiles(finding.owner, finding.repo, [], sender);
   }
 
-  // Build the proposal
-  const proposal = {
-    id:               proposalId,
-    status:           'pending',
-    createdAt:        Date.now(),
-    source:           finding,
-    targetCapability,
-    sourceFiles:      sourceFiles.map(f => ({ path: f.path, size: f.size, language: f.language })),
-    summary:          buildProposalSummary(finding, targetCapability, sourceFiles),
-    licenseCompliant: finding.licenseOk,
-    licenseNote:      finding.licenseOk
-      ? `Source is ${finding.license} licensed — safe to learn from and adapt`
-      : `⚠ License ${finding.license} may restrict use — master must verify`,
-    changes:          [],   // Populated after AI synthesis (Phase 5 — needs model call)
-    improvementAxes:  detectImprovementAxes(finding, targetCapability),
-    estimatedGain:    estimateCapabilityGain(finding),
-  };
+  // Created through the shared ledger so it lands in the same approval queue as
+  // regen and self-modify changes — one gate, one audit trail.
+  const proposal = proposals.create({
+    kind:    proposals.KINDS.EVOLUTION,
+    title:   `Absorb ${finding.name} → ${targetCapability}`,
+    summary: buildProposalSummary(finding, targetCapability, sourceFiles),
+    // Populated after AI synthesis — an evolution is never applied empty.
+    changes: [],
+    risk:    finding.licenseOk ? 'medium' : 'high',
+    meta: {
+      source:           finding,
+      targetCapability,
+      sourceFiles:      sourceFiles.map(f => ({ path: f.path, size: f.size, language: f.language })),
+      licenseCompliant: finding.licenseOk,
+      licenseNote:      finding.licenseOk
+        ? `Source is ${finding.license} licensed — safe to learn from and adapt`
+        : `⚠ License ${finding.license} may restrict use — master must verify`,
+      improvementAxes:  detectImprovementAxes(finding, targetCapability),
+      estimatedGain:    estimateCapabilityGain(finding),
+    },
+  });
 
+  // Local log kept for the Evolution page's history view
   evolutionLog.unshift(proposal);
   if (evolutionLog.length > 200) evolutionLog.pop();
 
   return proposal;
 }
+
+// ─── Evolution applier ────────────────────────────────────────────────────────
+// Registered with the ledger. Only ever invoked after approval is recorded.
+proposals.registerApplier(proposals.KINDS.EVOLUTION, async (proposal, opts = {}) => {
+  const changes = proposal.changes || [];
+  if (changes.length === 0) {
+    throw new Error('Evolution proposal has no synthesised changes to apply');
+  }
+  if (proposal.meta?.licenseCompliant === false) {
+    throw new Error('Refusing to apply: source license is not compliant');
+  }
+
+  const results = [];
+  for (const change of changes) {
+    const absPath = opts.repoPath ? path.join(opts.repoPath, change.path) : change.path;
+    fs.mkdirSync(path.dirname(absPath), { recursive: true });
+    fs.writeFileSync(absPath, change.content, 'utf8');
+    results.push({ path: change.path, written: true });
+  }
+  return results;
+});
 
 // ─── Self-assessment ──────────────────────────────────────────────────────────
 function generateSelfAssessment() {
@@ -523,27 +518,15 @@ async function githubAPI(endpoint, headers) {
   return JSON.parse(data);
 }
 
-function httpsGet(url, headers = {}) {
-  return new Promise((resolve, reject) => {
-    const parsed  = new URL(url);
-    const options = {
-      hostname: parsed.hostname,
-      path:     parsed.pathname + parsed.search,
-      method:   'GET',
-      headers:  { 'Accept': 'application/json', ...headers },
-      timeout:  15000,
-    };
-    const req = https.request(options, (res) => {
-      const chunks = [];
-      res.on('data', c => chunks.push(c));
-      res.on('end',  () => resolve(Buffer.concat(chunks).toString('utf8')));
-    });
-    req.on('error',   reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('Request timeout')); });
-    req.end();
-  });
+// Adapter over electron/lib/http.cjs — the single main-process HTTP client.
+// GitHub/npm/arXiv are heavily rate-limited, so the shared circuit breaker and
+// 429 backoff in that client matter more here than anywhere else.
+async function httpsGet(url, headers = {}) {
+  const res = await net.get(url, { headers, timeout: 15000 });
+  if (res.ok) return res.body;
+  throw new Error(res.error || `HTTP ${res.status}`);
 }
 
-function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+const delay = net.delay;
 
 module.exports = { register };

@@ -8,21 +8,28 @@
 
 const { chatCompletion, selectModel } = require('./modelRouter.cjs');
 const { getCredential }               = require('./credentialVault.cjs');
+const resources = require('../resourceOrchestrator.cjs');
 const os    = require('os');
 const { v4: uuidv4 } = (() => {
   try { return require('uuid'); }
   catch { return { v4: () => `${Date.now()}-${Math.random().toString(36).slice(2)}` }; }
 })();
 
-// ─── Resource Governor constants ──────────────────────────────────────────────
+// ─── Agent lifecycle limits ───────────────────────────────────────────────────
+// Resource pressure (CPU / RAM / thermal) is NOT decided here. This file used to
+// carry its own thresholds, which meant two governors could disagree. All
+// resource admission now goes through resourceOrchestrator.admit(). What stays
+// here is agent-specific lifecycle policy: how many, how long, how often reaped.
 const GOVERNOR = {
   MAX_AGENTS:        10,      // Hard cap — never exceeded
-  MAX_AGENT_RAM_MB:  512,     // Per agent RAM limit
-  MAX_AGENT_CPU_PCT: 25,      // Per agent CPU cap
-  TOTAL_CPU_CAP:     70,      // Total CPU cap for all agents combined
-  TOTAL_RAM_CAP_PCT: 60,      // % of system RAM for all agents combined
+  MAX_AGENT_RAM_MB:  512,     // RAM an agent is expected to need (admission hint)
   AGENT_TIMEOUT_MS:  300000,  // 5 min — auto-kill hung agents
-  CHECK_INTERVAL_MS: 2000,    // Resource check frequency
+  CHECK_INTERVAL_MS: 2000,    // Lifecycle reaper frequency
+
+  // Mirrored from resourceOrchestrator.THRESHOLDS so the UI can display the
+  // real caps without a second source of truth.
+  get TOTAL_CPU_CAP()     { return resources.THRESHOLDS.CPU.HIGH; },
+  get TOTAL_RAM_CAP_PCT() { return resources.THRESHOLDS.RAM.HIGH; },
 };
 
 // ─── Agent state ──────────────────────────────────────────────────────────────
@@ -64,10 +71,14 @@ function register(ipcMain) {
       return { ok: false, error: `Max ${typeInfo.label} instances reached (${typeInfo.maxInstances})` };
     }
 
-    // RAM check
-    const freeMem = os.freemem() / 1024 / 1024;
-    if (freeMem < GOVERNOR.MAX_AGENT_RAM_MB) {
-      return { ok: false, error: `Insufficient free RAM (${Math.round(freeMem)}MB free, need ${GOVERNOR.MAX_AGENT_RAM_MB}MB)` };
+    // Resource admission — single authority (CPU, RAM, thermal, pressure)
+    const admission = resources.orchestrator.admit({
+      ramMB: GOVERNOR.MAX_AGENT_RAM_MB,
+      label: `${typeInfo.label} spawn`,
+      priority: config.priority ?? resources.PRIORITY.NORMAL,
+    });
+    if (!admission.allow) {
+      return { ok: false, error: admission.reason, snapshot: admission.snapshot };
     }
 
     const agentId = uuidv4();
@@ -147,29 +158,52 @@ function register(ipcMain) {
 
   // ── Get resource usage ────────────────────────────────────────────────────
   ipcMain.handle('agents:get-resources', async () => {
-    const total    = os.totalmem();
-    const free     = os.freemem();
-    const active   = Object.values(agents).filter(a => a.status === 'running').length;
+    // Metrics come from the orchestrator's shared snapshot — no second poll.
+    const snap   = resources.orchestrator.getSnapshot();
+    const total  = os.totalmem();
+    const active = Object.values(agents).filter(a => a.status === 'running').length;
     return {
       ok: true,
       data: {
         activeAgents:  active,
         maxAgents:     GOVERNOR.MAX_AGENTS,
-        ramFreeMB:     Math.round(free / 1024 / 1024),
+        ramFreeMB:     snap.ramFreeMB,
         ramTotalMB:    Math.round(total / 1024 / 1024),
-        ramUsedPct:    Math.round(((total - free) / total) * 100),
-        governor:      GOVERNOR,
+        ramUsedPct:    snap.ram,
+        cpuPct:        snap.cpu,
+        pressure:      snap.pressure,
+        governor: {
+          MAX_AGENTS:        GOVERNOR.MAX_AGENTS,
+          MAX_AGENT_RAM_MB:  GOVERNOR.MAX_AGENT_RAM_MB,
+          AGENT_TIMEOUT_MS:  GOVERNOR.AGENT_TIMEOUT_MS,
+          TOTAL_CPU_CAP:     GOVERNOR.TOTAL_CPU_CAP,
+          TOTAL_RAM_CAP_PCT: GOVERNOR.TOTAL_RAM_CAP_PCT,
+        },
       },
     };
   });
 
-  // ── Configure governor limits ──────────────────────────────────────────────
-  ipcMain.handle('agents:set-governor', async (_e, limits) => {
-    // Master can adjust limits (within safe bounds)
+  // ── Configure limits ──────────────────────────────────────────────────────
+  // Agent-count/timeout live here; CPU/RAM caps are forwarded to the single
+  // resource authority so both views stay consistent.
+  ipcMain.handle('agents:set-governor', async (_e, limits = {}) => {
     if (limits.MAX_AGENTS)       GOVERNOR.MAX_AGENTS       = Math.min(20, Math.max(1, limits.MAX_AGENTS));
     if (limits.AGENT_TIMEOUT_MS) GOVERNOR.AGENT_TIMEOUT_MS = Math.max(30000, limits.AGENT_TIMEOUT_MS);
-    if (limits.TOTAL_CPU_CAP)    GOVERNOR.TOTAL_CPU_CAP    = Math.min(90, Math.max(20, limits.TOTAL_CPU_CAP));
-    return { ok: true, governor: GOVERNOR };
+    if (limits.TOTAL_CPU_CAP) {
+      resources.THRESHOLDS.CPU.HIGH = Math.min(90, Math.max(20, limits.TOTAL_CPU_CAP));
+    }
+    if (limits.TOTAL_RAM_CAP_PCT) {
+      resources.THRESHOLDS.RAM.HIGH = Math.min(90, Math.max(20, limits.TOTAL_RAM_CAP_PCT));
+    }
+    return {
+      ok: true,
+      governor: {
+        MAX_AGENTS:        GOVERNOR.MAX_AGENTS,
+        AGENT_TIMEOUT_MS:  GOVERNOR.AGENT_TIMEOUT_MS,
+        TOTAL_CPU_CAP:     GOVERNOR.TOTAL_CPU_CAP,
+        TOTAL_RAM_CAP_PCT: GOVERNOR.TOTAL_RAM_CAP_PCT,
+      },
+    };
   });
 
   // Start resource governor watchdog
@@ -313,7 +347,9 @@ async function executeAction(action, agentId) {
   }
 }
 
-// ─── Resource Governor watchdog ───────────────────────────────────────────────
+// ─── Agent lifecycle reaper ───────────────────────────────────────────────────
+// Kills hung agents and garbage-collects finished ones. Resource pressure is
+// handled by resourceOrchestrator — this loop deliberately does no CPU/RAM math.
 function startGovernor() {
   if (govInterval) return;
   govInterval = setInterval(() => {
