@@ -113,7 +113,33 @@ export class MemorySystem {
     proc.successRate = (1 - alpha) * proc.successRate + alpha * (success ? 1 : 0);
   }
 
-  // ── Memory snapshot for context injection ─────────────────────────────────
+  // ── Semantic search (uses vector if available, keyword fallback if not) ──────
+  async searchSemantic(query, topK = 10) {
+    // New: try vector search via IPC
+    if (isElectron && window.rama?.vector) {
+      try {
+        const res = await window.rama.vector.search(query, topK, 0.3);
+        if (res.ok && res.data.length > 0) return res.data;
+      } catch { /* fall through to keyword */ }
+    }
+    // Always-working fallback: keyword search on in-memory store
+    return this.recallEpisodic(query, topK);
+  }
+
+  // ── Store with deduplication ──────────────────────────────────────────────
+  async storeWithDedup(text, metadata = {}) {
+    // Check duplicate before storing (prevents memory bloat)
+    if (isElectron && window.rama?.vector) {
+      try {
+        const dupRes = await window.rama.vector.isDuplicate(text, 0.92);
+        if (dupRes.ok && dupRes.isDuplicate) return null;  // skip duplicate
+        await window.rama.vector.store(text, metadata);
+      } catch { /* non-fatal */ }
+    }
+    // Always record in local memory too
+    this.recordEvent(metadata.type || 'general', text, metadata.importance || 0.5);
+    return true;
+  }
   getContextSnapshot() {
     const topSemantic = Object.entries(this._semantic)
       .sort(([, a], [, b]) => b.confidence - a.confidence)
@@ -160,10 +186,21 @@ export class PlanningEngine {
       status:   'pending',
       createdAt: Date.now(),
       result:   null,
+      graphPlanId: null,   // populated if graph planner is active
     };
 
-    // Decompose goal into steps using heuristics
-    // Phase 2: route this through an LLM for true decomposition
+    // Try graph planner first (async — non-blocking upgrade)
+    if (isElectron && window.rama?.graph) {
+      window.rama.graph.createPlan({ goal, category: 'general' }).then(res => {
+        if (res.ok) {
+          plan.graphPlanId = res.planId;
+          plan.parallelGroups = res.parallelGroups;
+          plan.criticalPath   = res.criticalPath;
+        }
+      }).catch(() => { /* silent — heuristic takes over */ });
+    }
+
+    // Heuristic decomposition always runs (baseline — never removed)
     const steps = this._decompose(goal, availableTools);
     plan.steps = steps;
     this.activePlans.push(plan);

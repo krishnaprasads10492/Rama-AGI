@@ -245,6 +245,67 @@ contextBridge.exposeInMainWorld('rama', {
     exportBackup:  (dest)                     => ipcRenderer.invoke('store:export-backup', dest),
   },
 
+  // ── Vector Memory (semantic search — upgrade, keyword fallback always active) ──
+  vector: {
+    store:       (text, meta)       => ipcRenderer.invoke('vector:store',        text, meta),
+    search:      (query, topK, min) => ipcRenderer.invoke('vector:search',       query, topK, min),
+    isDuplicate: (text, threshold)  => ipcRenderer.invoke('vector:is-duplicate', text, threshold),
+    health:      ()                 => ipcRenderer.invoke('vector:health'),
+    bulkStore:   (items)            => ipcRenderer.invoke('vector:bulk-store',   items),
+  },
+
+  // ── Sandbox (safe code execution — tiered safety, never replaces terminal) ──
+  sandbox: {
+    execute:  (opts)             => ipcRenderer.invoke('sandbox:execute', opts),
+    approve:  (opts)             => ipcRenderer.invoke('sandbox:approve', opts),
+    kill:     (execId)           => ipcRenderer.invoke('sandbox:kill',    execId),
+    audit:    ()                 => ipcRenderer.invoke('sandbox:audit'),
+    health:   ()                 => ipcRenderer.invoke('sandbox:health'),
+    onApprovalNeeded: (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('sandbox:approval-needed', h);
+      return () => ipcRenderer.removeListener('sandbox:approval-needed', h);
+    },
+  },
+
+  // ── Graph Reasoner (DAG planning — enhances heuristic planner) ────────────
+  graph: {
+    createPlan:  (opts)               => ipcRenderer.invoke('graph:create-plan',  opts),
+    updateNode:  (opts)               => ipcRenderer.invoke('graph:update-node',  opts),
+    getPlan:     (planId)             => ipcRenderer.invoke('graph:get-plan',     planId),
+    listPlans:   ()                   => ipcRenderer.invoke('graph:list-plans'),
+    replan:      (opts)               => ipcRenderer.invoke('graph:replan',       opts),
+    metrics:     ()                   => ipcRenderer.invoke('graph:metrics'),
+  },
+
+  // ── Self-Care (health monitoring + anti-liability engine) ─────────────────
+  selfCare: {
+    start:         ()                => ipcRenderer.invoke('selfcare:start'),
+    stop:          ()                => ipcRenderer.invoke('selfcare:stop'),
+    sweep:         ()                => ipcRenderer.invoke('selfcare:sweep'),
+    heal:          (opts)            => ipcRenderer.invoke('selfcare:heal',         opts),
+    trackScore:    (axis, score)     => ipcRenderer.invoke('selfcare:track-score',  { axis, score }),
+    getLog:        ()                => ipcRenderer.invoke('selfcare:get-log'),
+    getAlerts:     ()                => ipcRenderer.invoke('selfcare:get-alerts'),
+    getComponents: ()                => ipcRenderer.invoke('selfcare:get-components'),
+    getBaselines:  ()                => ipcRenderer.invoke('selfcare:get-baselines'),
+    onHealthUpdate: (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('selfcare:health-update', h);
+      return () => ipcRenderer.removeListener('selfcare:health-update', h);
+    },
+    onAlert: (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('selfcare:alert', h);
+      return () => ipcRenderer.removeListener('selfcare:alert', h);
+    },
+    onRegression: (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('selfcare:regression', h);
+      return () => ipcRenderer.removeListener('selfcare:regression', h);
+    },
+  },
+
   // ── App controls ──────────────────────────────────────────────────────────
   appControl: {
     setLoginItem: (enabled) => ipcRenderer.invoke('app:set-login-item', enabled),

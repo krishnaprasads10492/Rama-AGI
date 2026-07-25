@@ -77,6 +77,19 @@ export function startConsciousnessLoop({ onHealth, onAlert } = {}) {
 
   if (_loopInterval) return;
 
+  // Start self-care engine (non-blocking — runs in Electron main process)
+  if (typeof window !== 'undefined' && window.rama?.selfCare) {
+    window.rama.selfCare.start().catch(() => {});
+    // Listen for self-care health updates
+    window.rama.selfCare.onHealthUpdate((sweep) => {
+      _healthCache = { ...(_healthCache || {}), selfCare: sweep, ts: Date.now() };
+      onHealth?.(_healthCache);
+    });
+    window.rama.selfCare.onAlert((alert) => {
+      onAlert?.({ level: alert.severity, msg: `[${alert.component}] ${alert.message}` });
+    });
+  }
+
   // Run immediately, then every 60s
   _tick();
   _loopInterval = setInterval(_tick, 60000);

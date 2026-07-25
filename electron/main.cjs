@@ -18,6 +18,11 @@ const agentIPC         = require('./ipc/agentOrchestrator.cjs');
 const intelligenceIPC  = require('./ipc/intelligenceEngine.cjs');
 const evolutionIPC         = require('./ipc/evolutionEngine.cjs');
 const resourceOrchestrator = require('./resourceOrchestrator.cjs');
+// ─── Upgrade layer (additive — wraps existing, never replaces) ───────────────
+const vectorMemoryIPC  = require('./ipc/vectorMemory.cjs');
+const sandboxIPC       = require('./ipc/sandboxEngine.cjs');
+const graphIPC         = require('./ipc/graphReasoner.cjs');
+const selfCareIPC      = require('./ipc/selfCare.cjs');
 const sessionMgr   = require('./sessionManager.cjs');
 const dataStore    = require('./dataStore.cjs');
 
@@ -245,6 +250,11 @@ app.whenReady().then(async () => {
   intelligenceIPC.register(ipcMain);
   evolutionIPC.register(ipcMain);
   resourceOrchestrator.register(ipcMain);
+  // Upgrade layer
+  vectorMemoryIPC.register(ipcMain);
+  sandboxIPC.register(ipcMain);
+  graphIPC.register(ipcMain);
+  selfCareIPC.register(ipcMain);
   sessionMgr.register(ipcMain);
   dataStore.register(ipcMain);
 
