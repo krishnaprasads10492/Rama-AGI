@@ -24,8 +24,22 @@ let browserCtx  = null;
 const pages     = {};        // { [pageId]: Page }
 let pageCounter = 0;
 
-const downloadQueue  = [];   // { id, url, dest, status, progress, size }
-const downloadMap    = {};   // { [id]: download object }
+const downloadQueue  = [];
+const downloadMap    = {};
+
+// Auto-close browser after 5 min inactivity (prevents 200MB idle memory waste)
+let _browserLastUsed = 0;
+let _autoCloseTimer  = null;
+function touchBrowser() {
+  _browserLastUsed = Date.now();
+  clearTimeout(_autoCloseTimer);
+  _autoCloseTimer = setTimeout(async () => {
+    if (browser && Date.now() - _browserLastUsed > 5 * 60 * 1000) {
+      await closeBrowser();
+      console.warn('[browserEngine] Auto-closed after 5min inactivity — saves ~200MB RAM');
+    }
+  }, 5 * 60 * 1000 + 2000);
+}
 
 // ─── Register ────────────────────────────────────────────────────────────────
 function register(ipcMain) {
@@ -59,6 +73,7 @@ function register(ipcMain) {
   // ── Open page ─────────────────────────────────────────────────────────────
   ipcMain.handle('browser:open-page', async (_e, url) => {
     if (!browserCtx) return { ok: false, error: 'Browser not launched' };
+    touchBrowser();
     try {
       const id   = ++pageCounter;
       const page = await browserCtx.newPage();

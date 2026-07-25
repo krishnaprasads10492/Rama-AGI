@@ -102,7 +102,6 @@ export function startConsciousnessLoop({ onHealth, onAlert } = {}) {
   // Start self-care engine (non-blocking — runs in Electron main process)
   if (typeof window !== 'undefined' && window.rama?.selfCare) {
     window.rama.selfCare.start().catch(() => {});
-    // Listen for self-care health updates
     window.rama.selfCare.onHealthUpdate((sweep) => {
       _healthCache = { ...(_healthCache || {}), selfCare: sweep, ts: Date.now() };
       onHealth?.(_healthCache);
@@ -112,9 +111,15 @@ export function startConsciousnessLoop({ onHealth, onAlert } = {}) {
     });
   }
 
-  // Run immediately, then every 60s
-  _tick();
-  _loopInterval = setInterval(_tick, 60000);
+  // PERFORMANCE: stagger start by 15s so it doesn't collide with
+  // dataStore auto-save (60s) or selfCare sweep (120s) at t=0
+  setTimeout(() => {
+    _tick();
+    // Only run full loop if master is authenticated — saves CPU for guest sessions
+    _loopInterval = setInterval(() => {
+      if (_masterAuthenticated) _tick();
+    }, 60000);
+  }, 15000);
 }
 
 export function stopConsciousnessLoop() {

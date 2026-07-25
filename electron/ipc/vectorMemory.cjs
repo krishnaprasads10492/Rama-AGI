@@ -33,8 +33,9 @@ let vectraReady = false;
 let vectraError = null;
 let indexPath   = null;
 
-// Fallback keyword store (always maintained — never removed)
-const keywordStore = [];   // { id, text, metadata, ts }
+// Fallback keyword store (always maintained — capped at 2000 entries)
+const keywordStore = [];
+const KEYWORD_STORE_MAX = 2000;
 
 // Health tracking
 const health = {
@@ -132,9 +133,9 @@ function cosineSim(a, b) {
 async function store(text, metadata = {}) {
   const id = crypto.randomBytes(8).toString('hex');
 
-  // Always store in keyword fallback (never skip this)
+  // Always store in keyword fallback (capped — evicts oldest)
   keywordStore.push({ id, text, metadata, ts: Date.now() });
-  if (keywordStore.length > 5000) keywordStore.shift();
+  if (keywordStore.length > KEYWORD_STORE_MAX) keywordStore.shift();
   health.totalStored++;
 
   // Also store in vector index if available (background — non-blocking)

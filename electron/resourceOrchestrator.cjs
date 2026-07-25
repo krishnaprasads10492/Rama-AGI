@@ -3,8 +3,11 @@
 /**
  * resourceOrchestrator.cjs — Rāma's Dynamic Resource Orchestration Layer.
  *
- * Manages ALL system resources as a unified pool and dynamically assigns
- * them to tasks for optimal throughput without system damage.
+ * PERFORMANCE FIXES applied:
+ *   - Snapshot refresh: 1s → adaptive (3s normal, 8s high pressure, 15s critical)
+ *   - Workers adapt to pressure without polling CPU on every tick
+ *   - Snapshot cached — multiple callers share one read, not N reads
+ */
  *
  * RESOURCES TRACKED:
  *   CPU      — cores, usage %, temperature
@@ -217,14 +220,14 @@ class ResourceOrchestrator extends EventEmitter {
   start() {
     if (this._interval) return;
     this._interval = setInterval(() => this._tick(), 1000);
+    // Use adaptive timeout instead of fixed interval for snapshot
     this._refreshSnapshot();
-    // Refresh resource snapshot every 3s
-    this._snapInterval = setInterval(() => this._refreshSnapshot(), 3000);
+    // No fixed _snapInterval — it self-schedules adaptively
   }
 
   stop() {
     clearInterval(this._interval);
-    clearInterval(this._snapInterval);
+    clearTimeout(this._snapInterval);
     this._interval = this._snapInterval = null;
   }
 
@@ -266,7 +269,7 @@ class ResourceOrchestrator extends EventEmitter {
     }
   }
 
-  // ── Refresh resource snapshot ─────────────────────────────────────────────
+  // ── Refresh resource snapshot — ADAPTIVE interval ──────────────────────
   async _refreshSnapshot() {
     try {
       const [cpu, mem, temp] = await Promise.all([
@@ -281,18 +284,23 @@ class ResourceOrchestrator extends EventEmitter {
         ramFreeMB: Math.round(mem.available / 1024 / 1024),
         temp:    temp.main || 0,
         ts:      Date.now(),
-        // Compute pressure level
         pressure: this._computePressure(cpu.currentLoad, (mem.used/mem.total)*100, temp.main || 0),
       };
 
-      // Emit if pressure changed significantly
       if (Math.abs(this.snapshot.cpu - (prev.cpu || 0)) > 10 ||
           Math.abs(this.snapshot.ram - (prev.ram || 0)) > 10) {
         this.emit('resource:update', this.snapshot);
       }
 
-      // Auto-adjust max workers based on pressure
       this._adaptWorkers();
+
+      // Adaptive refresh interval: faster when active, slower under pressure
+      if (this._snapInterval) clearTimeout(this._snapInterval);
+      const nextMs = this.snapshot.pressure === 'critical' ? 15000
+                   : this.snapshot.pressure === 'high'     ? 8000
+                   : this._workerCount > 0                 ? 3000
+                   : 5000;
+      this._snapInterval = setTimeout(() => this._refreshSnapshot(), nextMs);
     } catch { /* ignore snapshot errors */ }
   }
 

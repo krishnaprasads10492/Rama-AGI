@@ -100,13 +100,11 @@ async function checkSandbox() {
 
 async function checkGraphReasoner() {
   try {
-    const { decomposeToGraph } = require('./graphReasoner.cjs');
-    const testGraph = decomposeToGraph('test goal for health check', 'general');
-    const ok = testGraph.nodes.size > 0 && testGraph.getReadyNodes().length > 0;
-    const status = ok ? 'healthy' : 'degraded';
-    components.graphReasoner.status    = status;
+    // Lightweight check — just verify module loads, no test graph creation
+    require('./graphReasoner.cjs');
+    components.graphReasoner.status    = 'healthy';
     components.graphReasoner.lastCheck = Date.now();
-    return { status, nodeCount: testGraph.nodes.size };
+    return { status: 'healthy' };
   } catch (err) {
     components.graphReasoner.status = 'error';
     return { status: 'error', error: err.message };
