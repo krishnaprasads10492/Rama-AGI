@@ -1643,6 +1643,10 @@ authenticated **Master session**, not merely an open store.
 | 27 | Rewire Login / Setup / App gate chain | done | `Login.jsx` rewritten for gates 2+3 with key recovery; `App.jsx` chain is Unlock → Setup → Login → app |
 | 28 | Rewire `Users.jsx` onto the new auth API | done | `setTier` / `setActive` / `remove` / `resetPassword` / `issueFor`; key handover UI added |
 | 29 | **Verify the renderer actually builds** | **blocked here** | `node_modules` is absent on this machine, so `vite build` cannot run. `package-lock.json` arrived from the build machine, so `npm install` has been done there. Next step, on the build machine: `npm run build`, then `node start.cjs` and report anything Vite rejects. Everything below assumes this passes. |
+| 37 | Routing over `file://` | done | Section 30. `BrowserRouter` → `HashRouter`. `pushState` with a path is a `SecurityError` on a `file://` origin, so every tab click was a silent no-op in the build while working in dev. |
+| 38 | Voice capability ladder | done | Section 30. `webkitSpeechRecognition` can never work in the Electron shell (Chromium lacks Google's API keys), and the old engine retried it every 300ms forever. Replaced with L0 text → L1 push-to-talk → L2 local Whisper → L3 cloud Whisper → L4 wake word. New `electron/ipc/voiceEngine.cjs` resolves local-before-cloud; renderer captures via MediaRecorder. Mic button and an `L<n>` chip show the live level and what the next one needs. Whisper detection **executes** the candidate and requires it to identify itself — a name match alone matched `C:\Windows\System32\main.cpl`. |
+| 39 | Permission + window-open policy | done | `main.cjs` now allows only `media` and sanitized clipboard writes, denies every other permission request, and routes `window.open` to the external browser instead of opening a renderer window. |
+| 40 | Voice level surfaced on the Settings page | not started | The ladder is visible in the palette only. Next step: add a Voice section to `Settings.jsx` showing the level, the detected backend, a Re-check button (`window.rama.voice.rescan`), and inputs for `RAMA_WHISPER_PATH` / `RAMA_WHISPER_MODEL`. |
 | 36 | Renderer entry / CSP / blank window | done | Section 29. Root cause of "Vite did not come up" and of first-run appearing to happen in the CLI: `index.html` was inside `publicDir`, so the dev server had no entry. Fixed by moving it to the project root and dropping the `rollupOptions.input` override. CSP moved to main-process headers (dev vs prod), which also un-blocks the Monaco CDN and HMR websocket. `main.cjs` now resolves dev server → build → inline diagnostic page and can never show a blank window. `start.cjs` readiness requires HTTP 200 **and** `id="root"`, and falls back to building the frontend. `diagnose()` gained `entry-missing` / `entry-duplicate` checks so this defect class cannot recur silently. |
 | 30 | Wire `mustChangePassword` into the login flow | not started | `authCore` sets it on admin-created accounts and returns it from `loginStep1`, but no UI forces the change yet. Next step: after a successful gate 3, if `user.mustChangePassword` render a forced change-password screen before the app mounts. |
 | 31 | Surface `auth:sessions` in the UI | not started | Handler exists and is gated on `audit.all`. Next step: add a Sessions panel to the Users page listing active sessions with revoke. |
@@ -1733,3 +1737,79 @@ Vite's 404. A dev server with no entry was reported as ready.
 (`id="root"`) in the body. Answering the socket is not the same as serving the
 app. When the check fails, stage 4 builds the frontend and switches the shell to
 the built files rather than opening a window onto nothing.
+
+---
+
+## SECTION 30 — Routing over file://, and the progressive capability ladder
+
+### Why every tab was dead
+
+`App.jsx` used `BrowserRouter`. When the shell loads the renderer with
+`loadFile()`, the page origin is `file://`. Chromium refuses `history.pushState`
+with a path on a `file://` origin — it throws a `SecurityError`. So
+`navigate('/system')` did nothing at all: no route change, no error the user
+could see, every tab a no-op.
+
+This was invisible in dev because the Vite dev server serves over `http://`,
+where `pushState` is legal. It only appeared once the build became the loaded
+renderer — the same divergence between dev and production that section 29 was
+about.
+
+**Decision:** `HashRouter`. Routes become `#/system`, which needs no History API
+and behaves identically over `http://` and `file://`. One router for both modes,
+so dev cannot pass while production is broken. `MemoryRouter` would also work but
+loses deep links and reload-in-place, both of which Rāma uses (tray navigation,
+the palette, and `did-fail-load` recovery).
+
+### Progressive capability ladder
+
+> "It should have min capabilities before using other resources so that it can
+> progress towards it."
+
+This is the general principle already used by the staged launcher (section 26)
+and the genome (section 24), stated as a rule for *features*:
+
+**A capability starts at the level that needs nothing, works there, and climbs
+only when a resource it needs is actually present. It never silently does
+nothing, and it always reports which level it is on and what the next level
+needs.**
+
+Three obligations follow for every laddered capability:
+
+1. **Level 0 must require nothing** — no network, no native module, no API key.
+   If level 0 does not work, the capability is broken, not degraded.
+2. **Climbing is detected, not assumed.** Presence of a resource is measured at
+   runtime; a missing one drops the level rather than throwing.
+3. **The current level is visible in the UI**, together with what the next level
+   requires. A silently absent capability is a bug regardless of the reason.
+
+### Voice as the first laddered capability
+
+Voice was the clearest violation. `webkitSpeechRecognition` exists in Electron
+but always fails with `network`, because Chromium is built without the Google API
+keys Chrome ships with, and Google withdrew Web Speech support for non-Chrome
+Chromium shells. The old engine auto-started continuous recognition on app load
+and restarted 300ms after every `onend` — so in the desktop shell it sat in a
+permanent failure loop, burning cycles and never once transcribing anything.
+
+| Level | Name | Needs | Gives |
+|---|---|---|---|
+| 0 | TEXT | nothing | Ctrl+K palette, typed commands. Always works. |
+| 1 | PUSH-TO-TALK | microphone permission + a transcription backend | Hold to speak, release to transcribe |
+| 2 | LOCAL STT | a Whisper binary on PATH or configured | Private, offline, no cost |
+| 3 | CLOUD STT | an OpenAI key in the credential vault | Highest accuracy |
+| 4 | WAKE WORD | a continuous-capable local engine | "Hey Rāma" hands-free |
+
+Resolution order for transcription is **local before cloud**: private and free
+before accurate and paid. Level 4 is deliberately gated on a *local* engine —
+streaming every ambient utterance to a paid API to listen for a wake word is the
+wrong trade in both privacy and cost.
+
+`webkitSpeechRecognition` stays as an opportunistic path, but it is probed once
+and permanently disabled on the first `network` error rather than retried. In a
+plain browser it works and grants level 4; in the desktop shell it does not, and
+the ladder falls to whatever level the machine can actually support.
+
+The mic button reports the live level and, on hover, exactly what the next level
+requires — so the user learns "install Whisper" or "add an OpenAI key" from the
+UI instead of from a silent non-response.

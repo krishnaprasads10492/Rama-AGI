@@ -3,38 +3,98 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useUIStore }   from '@store/uiStore.js';
 import { useRamaStore } from '@store/ramaStore.js';
 import { VoiceEngine }  from '@services/voiceEngine.js';
-import { isMasterAuthenticated } from '@services/consciousness.js';
+
 
 // Pages come from the single registry — see src/config/registry.js
 import { visiblePages, searchPages } from '@config/registry.js';
 import { useUserStore } from '@store/userStore.js';
 
 // ─── Voice mic button ─────────────────────────────────────────────────────────
-function VoiceMicBtn({ active, onToggle }) {
+/**
+ * Reports the live voice level and, on hover, exactly what the next level needs.
+ * A capability that is silently absent is a bug regardless of the reason, so this
+ * never renders as a plain dead button.
+ */
+function VoiceMicBtn({ capability, recording, active, onToggle, onPressStart, onPressEnd }) {
+  const level    = capability?.level ?? 0;
+  const canVoice = level >= 1;
+  const canWake  = !!capability?.wakeWordCapable;
+
+  const title = !canVoice
+    ? `Voice unavailable — ${capability?.nextStep ?? 'use Ctrl+K for typed commands'}`
+    : canWake
+      ? `${capability.levelName} · click to toggle "Hey Rāma", or hold to speak`
+      : `${capability.levelName} · hold to speak${capability?.nextStep ? ` · next: ${capability.nextStep}` : ''}`;
+
+  // Push-to-talk when there is no wake word; toggle when there is
+  const handlers = canWake
+    ? { onClick: onToggle }
+    : {
+        onMouseDown:  onPressStart,
+        onMouseUp:    onPressEnd,
+        onMouseLeave: (e) => { if (recording) onPressEnd?.(e); },
+        onTouchStart: (e) => { e.preventDefault(); onPressStart?.(e); },
+        onTouchEnd:   onPressEnd,
+      };
+
+  const live   = recording || active;
+  const colour = !canVoice ? 'var(--muted)' : recording ? 'var(--red)' : live ? 'var(--magenta)' : 'var(--muted)';
+
   return (
     <button
-      onClick={onToggle}
-      title={active ? 'Stop listening' : 'Start voice (Hey Rāma...)'}
+      {...(canVoice ? handlers : {})}
+      disabled={!canVoice}
+      title={title}
+      aria-label={title}
       style={{
         width:        '32px',
         height:       '32px',
         borderRadius: '50%',
-        border:       `1px solid ${active ? 'var(--magenta)' : 'var(--border)'}`,
-        background:   active ? 'rgba(255,0,170,0.15)' : 'transparent',
-        color:        active ? 'var(--magenta)' : 'var(--muted)',
-        cursor:       'pointer',
+        border:       `1px solid ${live ? colour : 'var(--border)'}`,
+        background:   recording ? 'rgba(255,0,60,0.18)' : live ? 'rgba(255,0,170,0.15)' : 'transparent',
+        color:        colour,
+        cursor:       canVoice ? 'pointer' : 'not-allowed',
         display:      'flex',
         alignItems:   'center',
         justifyContent: 'center',
         fontSize:     '14px',
         flexShrink:   0,
         transition:   'all 0.15s',
-        boxShadow:    active ? 'var(--glow-magenta)' : 'none',
-        animation:    active ? 'pulse-ring 1.5s ease infinite' : 'none',
+        opacity:      canVoice ? 1 : 0.45,
+        boxShadow:    live ? (recording ? '0 0 10px rgba(255,0,60,0.5)' : 'var(--glow-magenta)') : 'none',
+        animation:    live ? 'pulse-ring 1.5s ease infinite' : 'none',
       }}
     >
-      🎙
+      {canVoice ? '🎙' : '🚫'}
     </button>
+  );
+}
+
+// ─── Voice level chip ─────────────────────────────────────────────────────────
+/** Makes the ladder visible: which level voice is on, and how to climb. */
+function VoiceLevelChip({ capability, onRescan }) {
+  if (!capability) return null;
+
+  const level  = capability.level ?? 0;
+  const colour = level >= 4 ? 'var(--green)'
+               : level >= 2 ? 'var(--accent)'
+               : level >= 1 ? 'var(--amber)'
+               : 'var(--muted)';
+
+  return (
+    <span
+      onClick={onRescan}
+      title={capability.nextStep
+        ? `Voice level ${level}/4 — to climb: ${capability.nextStep}. Click to re-check.`
+        : `Voice level ${level}/4 — highest available. Click to re-check.`}
+      style={{
+        fontSize: '9px', letterSpacing: '0.08em', cursor: 'pointer',
+        padding: '2px 7px', borderRadius: '2px', flexShrink: 0,
+        color: colour, border: `1px solid ${colour}55`, background: `${colour}12`,
+      }}
+    >
+      L{level} {capability.levelName}
+    </span>
   );
 }
 
@@ -133,35 +193,43 @@ function SearchResults({ query, pages, onSelect }) {
 }
 
 // ─── Voice transcript HUD ─────────────────────────────────────────────────────
-function VoiceHUD({ transcript, wakeActive }) {
-  if (!transcript && !wakeActive) return null;
+function VoiceHUD({ transcript, wakeActive, recording, error }) {
+  if (!transcript && !wakeActive && !recording && !error) return null;
+
+  const colour = error ? 'var(--red)' : recording ? 'var(--red)' : 'var(--magenta)';
+  const label  = error     ? error
+               : recording ? '● Listening — release to transcribe'
+               : wakeActive ? '🎙 Rāma is listening...'
+               : transcript;
+
   return (
     <div style={{
       position:   'fixed',
       bottom:     '24px',
       left:       '50%',
       transform:  'translateX(-50%)',
-      background: 'rgba(255,0,170,0.15)',
-      border:     '1px solid rgba(255,0,170,0.5)',
+      background: `color-mix(in srgb, ${colour} 15%, transparent)`,
+      border:     `1px solid ${colour}`,
       borderRadius:'var(--radius-lg)',
       padding:    '8px 20px',
-      color:      wakeActive ? 'var(--magenta)' : 'var(--text-dim)',
+      color:      colour,
       fontSize:   '12px',
+      maxWidth:   '70vw',
       zIndex:     9000,
       backdropFilter: 'blur(8px)',
-      boxShadow:  'var(--glow-magenta)',
+      boxShadow:  `0 0 12px ${colour}55`,
       display:    'flex',
       alignItems: 'center',
       gap:        '10px',
       animation:  'fadeIn 0.2s ease',
     }}>
       <div style={{
-        width: '8px', height: '8px', borderRadius: '50%',
-        background: 'var(--magenta)',
-        animation: 'pulse-ring 1s ease infinite',
-        boxShadow: 'var(--glow-magenta)',
+        width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0,
+        background: colour,
+        animation: (recording || wakeActive) ? 'pulse-ring 1s ease infinite' : 'none',
+        boxShadow: `0 0 8px ${colour}`,
       }} />
-      {wakeActive ? '🎙 Rāma is listening...' : transcript}
+      {label}
     </div>
   );
 }
@@ -232,6 +300,9 @@ export default function CommandPalette({ extraPages = [] }) {
   const voiceRef      = useRef(null);
   const [voiceTranscript, setVoiceTranscript] = useState('');
   const [wakeActive,      setWakeActive]      = useState(false);
+  const [voiceCap,        setVoiceCap]        = useState(null);
+  const [recording,       setRecording]       = useState(false);
+  const [voiceError,      setVoiceError]      = useState('');
 
   const { currentUser } = useUserStore();
 
@@ -271,18 +342,21 @@ export default function CommandPalette({ extraPages = [] }) {
   }, [navigate, pushRecent, closePalette, allPages]);
 
   // ── Voice engine setup ───────────────────────────────────────────────────
+  // The engine resolves its own capability ladder and only starts continuous
+  // listening if this machine can actually do it. It no longer auto-starts a
+  // recogniser that cannot work — that was a permanent failure loop in Electron.
   useEffect(() => {
     const engine = new VoiceEngine({
-      onWake: (transcript) => {
+      onWake: () => {
         setWakeActive(true);
         openPalette();
         setTimeout(() => setWakeActive(false), 8000);
       },
       onTranscript: (t, isFinal) => {
         setVoiceTranscript(t);
-        if (isFinal) setTimeout(() => setVoiceTranscript(''), 2000);
+        if (isFinal) setTimeout(() => setVoiceTranscript(''), 2500);
       },
-      onCommand: (matched, command, raw) => {
+      onCommand: (matched, command) => {
         setLastVoiceCmd(command);
         setWakeActive(false);
         if (matched.route) {
@@ -298,30 +372,54 @@ export default function CommandPalette({ extraPages = [] }) {
           closePalette();
         }
       },
-      onError: (err) => console.warn('[voice]', err),
-      onReady: () => setVoiceWakeReady(true),
+      onError:  (err) => { setVoiceError(String(err)); setTimeout(() => setVoiceError(''), 6000); },
+      onLevel:  (cap) => setVoiceCap(cap),
+      onReady:  (cap) => {
+        setVoiceCap(cap);
+        setVoiceWakeReady(!!cap?.wakeWordCapable);
+        // Passive wake-word listening only where it genuinely works
+        if (cap?.wakeWordCapable) {
+          engine.start();
+          setVoiceActive(true);
+        }
+      },
     });
 
     voiceRef.current = engine;
     engine.init();
-    // Auto-start passive listening for wake word
-    engine.start();
-    setVoiceActive(true);
 
     return () => engine.stop();
   }, []);  // eslint-disable-line
 
+  // Toggle is only meaningful at the wake-word level
   const toggleVoice = useCallback(() => {
     const engine = voiceRef.current;
-    if (!engine) return;
-    if (voiceActive) {
-      engine.stop();
-      setVoiceActive(false);
-    } else {
-      engine.start();
-      setVoiceActive(true);
-    }
+    if (!engine?.canWake) return;
+    if (voiceActive) { engine.stop();  setVoiceActive(false); }
+    else             { engine.start(); setVoiceActive(true);  }
   }, [voiceActive, setVoiceActive]);
+
+  // Push-to-talk: hold to capture, release to transcribe
+  const startTalk = useCallback(async () => {
+    const engine = voiceRef.current;
+    if (!engine) return;
+    const started = await engine.startRecording();
+    if (started) setRecording(true);
+  }, []);
+
+  const endTalk = useCallback(async () => {
+    const engine = voiceRef.current;
+    if (!engine || !engine.recording) { setRecording(false); return; }
+    setRecording(false);
+    setVoiceTranscript('Transcribing...');
+    await engine.stopRecordingAndTranscribe();
+  }, []);
+
+  const rescanVoice = useCallback(async () => {
+    const engine = voiceRef.current;
+    if (!engine) return;
+    setVoiceCap(await engine.rescan());
+  }, []);
 
   // ── Self-modify handlers ─────────────────────────────────────────────────
   const handleApproveModification = useCallback(async () => {
@@ -349,7 +447,12 @@ export default function CommandPalette({ extraPages = [] }) {
       />
 
       {/* Voice HUD */}
-      <VoiceHUD transcript={voiceTranscript} wakeActive={wakeActive} />
+      <VoiceHUD
+        transcript={voiceTranscript}
+        wakeActive={wakeActive}
+        recording={recording}
+        error={voiceError}
+      />
 
       {/* Command palette container */}
       <div style={{
@@ -398,7 +501,15 @@ export default function CommandPalette({ extraPages = [] }) {
               fontSize:   '13px',
             }}
           />
-          <VoiceMicBtn active={voiceActive} onToggle={toggleVoice} />
+          <VoiceLevelChip capability={voiceCap} onRescan={rescanVoice} />
+          <VoiceMicBtn
+            capability={voiceCap}
+            recording={recording}
+            active={voiceActive}
+            onToggle={toggleVoice}
+            onPressStart={startTalk}
+            onPressEnd={endTalk}
+          />
           <button className="btn btn-sm" onClick={closePalette}
             style={{ fontSize: '11px', padding: '3px 8px' }}>
             ESC

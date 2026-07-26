@@ -341,6 +341,13 @@ contextBridge.exposeInMainWorld('rama', {
     status:   (p) => ipcRenderer.invoke('auth:status',   p),
   },
 
+  // ── Voice (progressive ladder: text → capture → local STT → cloud STT) ─────
+  voice: {
+    capabilities: ()     => ipcRenderer.invoke('voice:capabilities'),
+    rescan:       ()     => ipcRenderer.invoke('voice:rescan'),
+    transcribe:   (clip) => ipcRenderer.invoke('voice:transcribe', clip),
+  },
+
   // ── Genome (complete capability blueprint carried by every instance) ───────
   genome: {
     get:       ()        => ipcRenderer.invoke('genome:get'),
@@ -610,7 +617,7 @@ const ALLOWED_PREFIXES = [
   'session:', 'store:', 'nucleus:', 'ipc-enc:', 'bus:', 'ast:', 'regen:',
   'vector:', 'sandbox:', 'graph:', 'selfcare:', 'vault:', 'models:',
   'agents:', 'browser:', 'app:', 'capability:', 'genome:', 'instance:',
-  'proposals:', 'meta:', 'timeline:', 'auth:',
+  'proposals:', 'meta:', 'timeline:', 'auth:', 'voice:',
 ];
 
 function isAllowed(channel) {

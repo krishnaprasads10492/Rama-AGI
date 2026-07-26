@@ -39,6 +39,7 @@ const authIPC          = require('./ipc/authEngine.cjs');
 const instanceIPC      = require('./ipc/instanceManager.cjs');
 const metaCognitionIPC = require('./ipc/metaCognition.cjs');
 const timelineIPC      = require('./ipc/timeline.cjs');
+const voiceIPC         = require('./ipc/voiceEngine.cjs');
 const sessionMgr   = require('./sessionManager.cjs');
 const dataStore    = require('./dataStore.cjs');
 
@@ -116,6 +117,34 @@ function buildCsp() {
     `base-uri ${local}`,
     `form-action 'none'`,
   ].join('; ');
+}
+
+/**
+ * Permission policy. Electron's default handler approves most requests, which is
+ * more than Rāma needs. Only the microphone is required (push-to-talk voice), and
+ * only for our own renderer — everything else is denied.
+ */
+function applyPermissions() {
+  const { session } = require('electron');
+
+  const allowed = new Set(['media', 'clipboard-sanitized-write']);
+
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    const granted = allowed.has(permission);
+    if (!granted) console.warn(`[main] Denied permission request: ${permission}`);
+    callback(granted);
+  });
+
+  // Same policy for synchronous checks (getUserMedia consults this)
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => allowed.has(permission));
+
+  // Never allow a renderer to open arbitrary new windows
+  app.on('web-contents-created', (_e, contents) => {
+    contents.setWindowOpenHandler(({ url }) => {
+      shell.openExternal(url).catch(() => {});
+      return { action: 'deny' };
+    });
+  });
 }
 
 function applyCsp() {
@@ -457,13 +486,15 @@ app.whenReady().then(async () => {
   instanceIPC.register(ipcMain);
   metaCognitionIPC.register(ipcMain);
   timelineIPC.register(ipcMain);
+  voiceIPC.register(ipcMain);
   sessionMgr.register(ipcMain);
   dataStore.register(ipcMain);
   // Auth is registered after the store so its adapter can attach on unlock
   authIPC.register(ipcMain);
 
-  // CSP must be installed before the first request the window makes
+  // CSP and permission policy must be installed before the window makes requests
   applyCsp();
+  applyPermissions();
 
   createMainWindow();
   createTray();

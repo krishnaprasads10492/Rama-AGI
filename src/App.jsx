@@ -1,5 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
+// HashRouter, not BrowserRouter: the shell loads the built renderer with
+// loadFile(), so the origin is file://, where Chromium refuses history.pushState
+// with a path. Under BrowserRouter every tab click was a silent no-op in the
+// build while working fine in dev. Hash routes behave identically on both.
+// See RAMA_AGI_MASTER_SPEC.md section 30.
+import { HashRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import AppShell      from '@components/AppShell.jsx';
 import ErrorBoundary from '@components/ErrorBoundary.jsx';
 import { useAppStore }  from '@store/appStore.js';
@@ -235,7 +240,7 @@ export default function App() {
   }
 
   return (
-    <BrowserRouter>
+    <HashRouter>
       <TrayNavListener />
       <ConsciousnessProvider />
       <InstanceProvider />
@@ -246,6 +251,6 @@ export default function App() {
           </React.Suspense>
         </AppShell>
       </ErrorBoundary>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
