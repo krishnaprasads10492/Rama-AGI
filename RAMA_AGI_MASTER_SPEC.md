@@ -1646,6 +1646,7 @@ authenticated **Master session**, not merely an open store.
 | 37 | Routing over `file://` | done | Section 30. `BrowserRouter` → `HashRouter`. `pushState` with a path is a `SecurityError` on a `file://` origin, so every tab click was a silent no-op in the build while working in dev. |
 | 38 | Voice capability ladder | done | Section 30. `webkitSpeechRecognition` can never work in the Electron shell (Chromium lacks Google's API keys), and the old engine retried it every 300ms forever. Replaced with L0 text → L1 push-to-talk → L2 local Whisper → L3 cloud Whisper → L4 wake word. New `electron/ipc/voiceEngine.cjs` resolves local-before-cloud; renderer captures via MediaRecorder. Mic button and an `L<n>` chip show the live level and what the next one needs. Whisper detection **executes** the candidate and requires it to identify itself — a name match alone matched `C:\Windows\System32\main.cpl`. |
 | 39 | Permission + window-open policy | done | `main.cjs` now allows only `media` and sanitized clipboard writes, denies every other permission request, and routes `window.open` to the external browser instead of opening a renderer window. |
+| 44 | Error containment + optional deps | done | Section 33. `ErrorBoundary` wrapped `AppShell`, so one page crash removed the titlebar and tab strip — the same symptom as "navigation is not working". Boundary moved inside the shell, keyed on route so it clears on navigation, names the failing module, and records to the experiential dataset. Separately `systeminformation` was required at the top of `system.cjs` and `resourceOrchestrator.cjs` while the launcher classified it as *degrading*, so an absent optional module crashed main-process startup. New `electron/lib/sysinfo.cjs` guards the require and implements a Node-only fallback (verified: real CPU/RAM/OS figures with the module absent). System page dereferences hardened. |
 | 43 | Stale build + unreachable navigation | done | Section 32. Stage 4 reused `build/` without checking its age, so a stale bundle rendered pre-change code on every launch and made every fix look ineffective. `buildStaleness()` now compares build mtime against the newest source file; stage 4 rebuilds, `--diagnose` reports `build freshness`. Separately the tab strip defaulted to collapsed behind a 3px unlabelled target, so navigation was effectively invisible: it now opens by default (persisted) with a 22px labelled handle, and `goTo` no longer collapses it after every click. |
 | 42 | "not a function" bug class | done | Found a real one: `App.jsx` destructured `setLastHealthCheck` from `appStore`, but it lives in `uiStore`, so the first health tick after login threw from inside the consciousness loop. Added `scripts/auditRenderer.cjs` (`npm run audit`) which statically checks every Zustand destructure against the store's real keys and every `window.rama.<ns>.<fn>` against preload's surface — 21 destructures and 66 bridge calls, all resolving. Wired into `start.cjs` stage 1 so it runs on every boot. Preload exposure is now guarded: a `contextBridge` failure is reported to the main process, logged, and shown in the window instead of silently leaving `window.rama` undefined. |
 | 41 | Mic modes + mute/unmute | done | Section 31. Two independent mutes (mic and speech), four mic modes, and hands-free segmentation via Web Audio RMS so "unmute and just talk" works at L2 without a wake word. Mic mute releases the OS device so the platform indicator goes out. `Ctrl+Shift+M` / `Ctrl+Shift+S`, right-click for the mode menu, voice commands for muting. Preferences persist in `localStorage` because they must be readable before the passcode gate. |
@@ -1947,3 +1948,67 @@ verifier (section 27): **a mechanism that appears to work while doing nothing.**
 Silent success is the failure mode to design against, which is why staleness,
 capability level, and passcode correctness are all now measured and surfaced
 rather than inferred.
+
+---
+
+## SECTION 33 — Error containment, and optional dependencies that were secretly fatal
+
+### "MODULE CRITICAL FAILURE" was reporting the wrong scope
+
+`ErrorBoundary` wrapped `AppShell`. So when one page threw during render, the
+boundary replaced the titlebar and the tab strip along with the page. The result
+was a full-screen red banner and **no navigation at all** — which is why this also
+presented as "navigation is not working". One module's bug looked like total death.
+
+Two changes:
+
+1. **Scope.** The boundary now sits around the routed content only, inside the
+   shell. A page crash leaves the titlebar and tab strip alive, so the user can
+   navigate away from the broken module. A second, outer boundary still catches a
+   genuine shell failure.
+2. **Recovery.** A boundary latches `hasError` permanently, so navigating to a
+   working page kept showing the old error. It now takes a `resetKey` (the current
+   route) and clears on navigation.
+
+The message also names the failing module from the registry ("SYSTEM FAILED"
+rather than "MODULE CRITICAL FAILURE"), states that the rest of Rāma is
+unaffected, exposes the component stack on demand, and records the failure to the
+experiential dataset so render errors are measurable rather than merely visible.
+
+### An optional dependency was required at load
+
+`start.cjs` classifies `systeminformation` as **degrading**: without it Rāma should
+lose thermal, GPU, battery and process detail, not stop. But it was required at the
+top of both `electron/ipc/system.cjs` and `electron/resourceOrchestrator.cjs`, and
+`main.cjs` requires both at load. An absent optional module therefore threw during
+main-process startup and took the entire app down.
+
+The classification said "degraded" while the code said "fatal". That gap is the
+bug, and it applies to every optional dependency: **if a capability is declared
+degradable, its require must be guarded and its fallback must exist.**
+
+`electron/lib/sysinfo.cjs` guards the require and implements the Node-only level:
+
+| Answerable from Node alone | Needs systeminformation |
+|---|---|
+| CPU load, per-core load, core count, model, speed | CPU temperature |
+| Total / free / used memory | GPU controllers |
+| Platform, release, arch, hostname, uptime | Battery |
+| Network interfaces | Per-interface throughput, process list, FS throughput |
+
+CPU load from `os.cpus()` needs two samples, since the counters are cumulative —
+the first call reports 0 rather than inventing a figure, and the previous tick
+counts are retained. Everything genuinely unavailable returns `null`/`[]` and
+`status()` names the install command that restores it.
+
+Verified with `systeminformation` absent: 16% CPU across 14 cores, 48% of 31.4 GB,
+correct platform and hostname; temperature, GPU, battery and process list report
+empty and say why.
+
+### The System page no longer trusts its input
+
+`p.name.toLowerCase()` threw for OS processes with no name, and a partial metrics
+snapshot (one `systeminformation` call failing on a given platform) threw on
+`m.cpu.cores.length`, `m.gpu[0]` or `m.network.map`. The snapshot is now normalised
+once, every array is checked, and a failed fetch renders an explanation with the
+install hint instead of sitting on "Loading..." forever.

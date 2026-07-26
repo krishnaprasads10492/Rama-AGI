@@ -30,7 +30,9 @@
  *   8. Cost optimization     — use local model when API quota near limit
  */
 
-const si     = require('systeminformation');
+// Optional dependency, guarded — see electron/lib/sysinfo.cjs. Requiring
+// systeminformation directly made a degrading dependency fatal at startup.
+const si     = require('./lib/sysinfo.cjs');
 const os     = require('os');
 const crypto = require('crypto');
 const { EventEmitter } = require('events');

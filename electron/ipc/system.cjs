@@ -1,6 +1,10 @@
 'use strict';
 
-const si    = require('systeminformation');
+// `systeminformation` is optional: the launcher classifies it as degrading, not
+// blocking. Requiring it directly here made an absent optional module crash the
+// whole main process. lib/sysinfo.cjs guards the require and falls back to Node's
+// own `os` for everything Node can answer. See spec section 33.
+const si    = require('../lib/sysinfo.cjs');
 const os    = require('os');
 const fs    = require('fs');
 const path  = require('path');

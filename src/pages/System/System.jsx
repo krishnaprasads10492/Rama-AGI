@@ -178,14 +178,26 @@ export default function System() {
   const [showCleaner, setShowCleaner] = useState(false);
   const [tab, setTab]              = useState('overview');
   const [filter, setFilter]        = useState('');
+  const [error, setError]          = useState('');
 
   const load = useCallback(async () => {
+    // Every result is treated as possibly absent: an unregistered channel resolves
+    // to undefined, and `mRes.ok` on undefined throws inside this async function,
+    // which surfaces as an unhandled rejection with no explanation on screen.
     const [mRes, pRes] = await Promise.all([
-      systemClient.getMetrics(),
-      systemClient.getProcesses(),
+      systemClient.getMetrics().catch(err => ({ ok: false, error: err.message })),
+      systemClient.getProcesses().catch(err => ({ ok: false, error: err.message })),
     ]);
-    if (mRes.ok) setMetrics(mRes.data);
-    if (pRes.ok) setProcesses(pRes.data);
+
+    if (mRes?.ok && mRes.data) {
+      setMetrics(mRes.data);
+      setError('');
+    } else {
+      // systeminformation is an optional dependency — say so rather than hang
+      setError(mRes?.error ?? 'System metrics unavailable — is `systeminformation` installed?');
+    }
+
+    if (pRes?.ok && Array.isArray(pRes.data)) setProcesses(pRes.data);
   }, []);
 
   useEffect(() => {
@@ -199,12 +211,28 @@ export default function System() {
     setTimeout(load, 800);
   }, [load]);
 
-  const filteredProcs = processes.filter(p =>
-    p.name.toLowerCase().includes(filter.toLowerCase()) ||
-    String(p.pid).includes(filter)
-  );
+  // `p.name` can be absent for some OS processes; `p.name.toLowerCase()` then
+  // throws during render, which used to take the whole shell down with it.
+  const needle = filter.toLowerCase();
+  const filteredProcs = processes.filter((p) => {
+    if (!needle) return true;
+    return String(p?.name ?? '').toLowerCase().includes(needle)
+        || String(p?.pid ?? '').includes(needle);
+  });
 
-  const m = metrics;
+  /**
+   * Normalise the metrics snapshot. Every field below is dereferenced during
+   * render, and a partial snapshot — one `systeminformation` call failing on a
+   * given platform — would otherwise throw rather than degrade.
+   */
+  const m = metrics && {
+    ...metrics,
+    cpu:     { usage: 0, cores: [], temp: null, ...(metrics.cpu ?? {}) },
+    ram:     { total: 0, used: 0, usedPct: 0, swapUsed: 0, swapTotal: 0, ...(metrics.ram ?? {}) },
+    gpu:     Array.isArray(metrics.gpu) ? metrics.gpu : [],
+    network: Array.isArray(metrics.network) ? metrics.network : [],
+    os:      { platform: 'unknown', release: '', arch: '', hostname: '', uptime: 0, ...(metrics.os ?? {}) },
+  };
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -241,6 +269,23 @@ export default function System() {
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>
+        {error && (
+          <div className="hud-card" style={{
+            padding: '12px 16px', marginBottom: '16px',
+            borderColor: 'var(--amber)', color: 'var(--amber)', fontSize: '11px', lineHeight: 1.7,
+          }}>
+            {error}
+            <div style={{ color: 'var(--muted)', marginTop: '6px' }}>
+              OS sensing is an optional capability. Everything else in Rāma keeps working;
+              install the dependency and press Refresh to restore it.
+            </div>
+          </div>
+        )}
+
+        {!m && !error && (
+          <div style={{ color: 'var(--muted)', fontSize: '11px' }}>Reading system metrics...</div>
+        )}
+
         {tab === 'overview' && m && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '12px' }}>
@@ -258,7 +303,7 @@ export default function System() {
             </div>
 
             {/* CPU cores */}
-            {m.cpu.cores.length > 0 && (
+            {Array.isArray(m.cpu.cores) && m.cpu.cores.length > 0 && (
               <div className="hud-card" style={{ padding: '16px' }}>
                 <div className="section-label" style={{ marginBottom: '12px' }}>CPU CORES</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '8px' }}>

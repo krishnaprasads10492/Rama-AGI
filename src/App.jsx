@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 // with a path. Under BrowserRouter every tab click was a silent no-op in the
 // build while working fine in dev. Hash routes behave identically on both.
 // See RAMA_AGI_MASTER_SPEC.md section 30.
-import { HashRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import AppShell      from '@components/AppShell.jsx';
 import ErrorBoundary from '@components/ErrorBoundary.jsx';
 import { useAppStore }  from '@store/appStore.js';
@@ -18,7 +18,7 @@ import Setup   from '@pages/Setup/Setup.jsx';
 import Unlock  from '@pages/Unlock/Unlock.jsx';
 
 // Every page/route/tier comes from ONE registry — src/config/registry.js
-import { routablePages, visiblePages, lazyFor, registryIssues } from '@config/registry.js';
+import { routablePages, visiblePages, lazyFor, registryIssues, pageByRoute } from '@config/registry.js';
 
 const Chat = lazyFor('chat');
 
@@ -84,6 +84,23 @@ function RegistryRoutes({ user }) {
       {/* Catch-all → Chat (available to every tier) */}
       <Route path="*" element={<Chat />} />
     </Routes>
+  );
+}
+
+/**
+ * Boundary around the routed page only. Keyed on the route so that navigating to
+ * a working page clears a previous page's error instead of latching it forever.
+ * The page label comes from the registry, so the message names the module that
+ * actually failed rather than blaming Rāma as a whole.
+ */
+function PageBoundary({ children }) {
+  const location = useLocation();
+  const page     = pageByRoute(location.pathname);
+
+  return (
+    <ErrorBoundary resetKey={location.pathname} label={page?.label ?? 'Module'}>
+      {children}
+    </ErrorBoundary>
   );
 }
 
@@ -249,11 +266,16 @@ export default function App() {
       <TrayNavListener />
       <ConsciousnessProvider />
       <InstanceProvider />
-      <ErrorBoundary>
+      {/* Outer boundary catches a failure in the shell itself (titlebar, palette).
+          The routed content has its own boundary inside, so a page crash cannot
+          take the navigation down with it. */}
+      <ErrorBoundary label="Rāma shell">
         <AppShell>
-          <React.Suspense fallback={<PageLoader />}>
-            <RegistryRoutes user={currentUser} />
-          </React.Suspense>
+          <PageBoundary>
+            <React.Suspense fallback={<PageLoader />}>
+              <RegistryRoutes user={currentUser} />
+            </React.Suspense>
+          </PageBoundary>
         </AppShell>
       </ErrorBoundary>
     </HashRouter>
