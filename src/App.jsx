@@ -8,6 +8,7 @@ import { HashRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import AppShell      from '@components/AppShell.jsx';
 import ErrorBoundary from '@components/ErrorBoundary.jsx';
 import { useAppStore }  from '@store/appStore.js';
+import { useUIStore }   from '@store/uiStore.js';
 import { useUserStore } from '@store/userStore.js';
 import { startConsciousnessLoop, stopConsciousnessLoop, authenticateMaster } from '@services/consciousness.js';
 import { loadSession, saveSession, instanceApi } from '@services/authClient.js';
@@ -101,11 +102,15 @@ function TrayNavListener() {
 
 // Consciousness loop — starts on app load
 function ConsciousnessProvider() {
-  const { setLastHealthCheck, pushNotification } = useAppStore();
+  const { pushNotification } = useAppStore();
+  // setLastHealthCheck lives in uiStore, not appStore. Destructuring it from
+  // appStore yielded undefined, so the first health tick after login threw
+  // "not a function" from inside the consciousness loop.
+  const setLastHealthCheck = useUIStore(s => s.setLastHealthCheck);
 
   useEffect(() => {
     startConsciousnessLoop({
-      onHealth: (health) => setLastHealthCheck(health),
+      onHealth: (health) => setLastHealthCheck?.(health),
       onAlert:  (alert)  => pushNotification({
         type:    alert.level,
         message: alert.msg,

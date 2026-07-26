@@ -315,6 +315,18 @@ function createMainWindow() {
     setupAutoUpdater();
   });
 
+  // A broken bridge breaks everything downstream, and the renderer cannot report
+  // it once window.rama is gone. Surface it in the terminal and in the window.
+  ipcMain.removeAllListeners('app:preload-error');
+  ipcMain.on('app:preload-error', (_e, failures) => {
+    const list = Array.isArray(failures) ? failures : [String(failures)];
+    console.error('[main] Preload bridge failed:', list.join(' | '));
+    mainWindow?.loadURL(bootFailurePage([
+      { ok: false, what: 'Preload bridge', detail: list.join(' — ') },
+      { ok: true,  what: 'Engines',        detail: 'running; only the bridge to the UI is broken' },
+    ]));
+  });
+
   // Window controls via IPC
   ipcMain.on('window:minimize',     () => mainWindow?.minimize());
   ipcMain.on('window:maximize',     () => {

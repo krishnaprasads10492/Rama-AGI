@@ -2,11 +2,19 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-// ─── Rama API — exposed to renderer via window.rama ──────────────────────────
-// All Node/Electron access MUST go through this bridge.
-// The renderer never sees ipcRenderer directly.
-
-contextBridge.exposeInMainWorld('rama', {
+/**
+ * FAILURE MODE THIS FILE GUARDS AGAINST:
+ * If preload throws while evaluating, Electron logs one line and moves on —
+ * `window.rama` is simply never defined. Every one of the 200+ IPC channels then
+ * appears "not a function" from the renderer's side, and the real error is
+ * nowhere near the symptom. This project has already lost a debugging session to
+ * exactly that (an undefined `app` reference in the isDev getter).
+ *
+ * So: the API is built into a plain object first, exposure is wrapped, and any
+ * failure is reported three ways — main-process log, a marker on window.rama, and
+ * the boot diagnostic page. A broken bridge must never be a silent one.
+ */
+const RAMA_API = {
 
   // ── Window Controls ────────────────────────────────────────────────────────
   window: {
@@ -605,7 +613,7 @@ contextBridge.exposeInMainWorld('rama', {
       return () => ipcRenderer.removeListener('browser:download-progress', h);
     },
   },
-});
+};
 
 // ─── Compatibility shim ───────────────────────────────────────────────────────
 // Several pages were written against window.ipcRenderer directly.
@@ -624,7 +632,7 @@ function isAllowed(channel) {
   return typeof channel === 'string' && ALLOWED_PREFIXES.some(p => channel.startsWith(p));
 }
 
-contextBridge.exposeInMainWorld('ipcRenderer', {
+const IPC_SHIM = {
   invoke: (channel, ...args) => {
     if (!isAllowed(channel)) {
       console.error(`[preload] Blocked invoke on unregistered channel: ${channel}`);
@@ -652,4 +660,46 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
     if (!isAllowed(channel)) return;
     ipcRenderer.removeListener(channel, handler);
   },
-});
+};
+
+// ─── Guarded exposure ─────────────────────────────────────────────────────────
+/**
+ * `contextBridge` rejects values it cannot clone — a class instance, a Symbol, a
+ * getter that throws. When that happens mid-object the whole bridge is lost and
+ * the renderer sees `window.rama === undefined`, which surfaces as an unrelated
+ * "not a function" somewhere far away. Report it instead of losing it.
+ */
+function expose(name, value) {
+  try {
+    contextBridge.exposeInMainWorld(name, value);
+    return null;
+  } catch (err) {
+    const detail = `${name}: ${err.message}`;
+    console.error(`[preload] FAILED to expose window.${name} —`, err);
+    return detail;
+  }
+}
+
+const failures = [
+  expose('rama', RAMA_API),
+  expose('ipcRenderer', IPC_SHIM),
+].filter(Boolean);
+
+if (failures.length === 0) {
+  // A positive signal is worth as much as an error: it proves the bridge is live
+  // and tells us which namespaces the renderer can actually reach.
+  console.warn(`[preload] Bridge ready — ${Object.keys(RAMA_API).length} namespaces exposed`);
+} else {
+  // Tell the main process so it appears in the launcher output and the window,
+  // not only in a DevTools console the user may not have open.
+  try { ipcRenderer.send('app:preload-error', failures); } catch { /* bridge is very broken */ }
+
+  // Last resort: expose a marker so the renderer can explain itself rather than
+  // failing with a confusing TypeError on the first IPC call it attempts.
+  try {
+    contextBridge.exposeInMainWorld('rama', {
+      __preloadFailed: true,
+      __errors: failures,
+    });
+  } catch { /* nothing more can be done from here */ }
+}

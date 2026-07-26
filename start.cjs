@@ -391,6 +391,29 @@ function diagnose() {
     });
   }
 
+  // ── Renderer references ─────────────────────────────────────────────────────
+  // A store key or bridge call that does not exist is `undefined`, and throws
+  // "not a function" somewhere unrelated at runtime. Neither a syntax check nor a
+  // build catches it, so it is checked here on every boot.
+  try {
+    const audit = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'auditRenderer.cjs')], {
+      cwd: ROOT, encoding: 'utf8', timeout: 20_000,
+    });
+    const clean = audit.status === 0;
+    add('Renderer references', clean, clean ? '' : 'unresolved — see below');
+
+    if (!clean) {
+      const lines = String(audit.stdout ?? '')
+        .split('\n').map(l => l.trim())
+        .filter(l => l.startsWith('✕') || l.includes('does not define') || l.includes('not exposed'));
+      defects.push({
+        id: 'renderer-refs', severity: 'warn',
+        detail: `Unresolved renderer references: ${lines.slice(0, 4).join(' | ') || 'run npm run audit'}`,
+        fix: 'npm run audit    (lists every store key and bridge call that does not resolve)',
+      });
+    }
+  } catch { /* audit script unavailable — not fatal */ }
+
   // ── Renderer entry ──────────────────────────────────────────────────────────
   // Vite resolves the dev entry as <root>/index.html. This shipped once with the
   // entry inside public/ instead, so the dev server answered on its port but had
