@@ -391,6 +391,32 @@ function diagnose() {
     });
   }
 
+  // ── Renderer entry ──────────────────────────────────────────────────────────
+  // Vite resolves the dev entry as <root>/index.html. This shipped once with the
+  // entry inside public/ instead, so the dev server answered on its port but had
+  // nothing to serve and the window opened blank. Checked explicitly now.
+  const rootEntry   = fs.existsSync(path.join(ROOT, 'index.html'));
+  const strayEntry  = fs.existsSync(path.join(ROOT, 'public', 'index.html'));
+  add('index.html (root)', rootEntry, rootEntry ? '' : 'missing — Vite has no entry');
+
+  if (!rootEntry) {
+    defects.push({
+      id: 'entry-missing', severity: 'fatal',
+      detail: strayEntry
+        ? 'index.html is in public/ instead of the project root — Vite will serve nothing'
+        : 'index.html is missing from the project root — Vite has no entry to serve',
+      fix: strayEntry
+        ? 'git mv public/index.html index.html'
+        : 'Restore it from git: git checkout index.html',
+    });
+  } else if (strayEntry) {
+    defects.push({
+      id: 'entry-duplicate', severity: 'warn',
+      detail: 'a second index.html exists in public/ — it will be copied verbatim into the build',
+      fix: 'Delete public/index.html; the root one is the real entry',
+    });
+  }
+
   // ── Build artefacts ─────────────────────────────────────────────────────────
   const buildHtml = fs.existsSync(path.join(ROOT, 'build', 'index.html'));
   add('build/index.html', isDev ? true : buildHtml, isDev ? '(dev — not needed)' : '');
@@ -890,6 +916,47 @@ function viteInvocation() {
   return null;
 }
 
+/**
+ * Is Vite actually serving the app, or merely answering the socket?
+ *
+ * `waitForPort` cannot tell the difference: a dev server whose index.html is
+ * missing returns 404 on every request while looking completely alive to a port
+ * check. That exact case shipped once — index.html was inside publicDir, so the
+ * dev server had no entry and the Electron window opened onto nothing.
+ * Readiness therefore means HTTP 200 *and* the app entry in the body.
+ */
+function viteServingApp(timeoutMs = 40_000) {
+  const started = Date.now();
+  return new Promise((resolve) => {
+    const attempt = () => {
+      const req = http.get(
+        { host: '127.0.0.1', port: VITE_PORT, path: '/', timeout: 1200 },
+        (res) => {
+          if (res.statusCode !== 200) { res.resume(); return retry(`HTTP ${res.statusCode}`); }
+          let body = '';
+          res.setEncoding('utf8');
+          res.on('data', (c) => { body += c; if (body.length > 16384) req.destroy(); });
+          res.on('end', () => {
+            if (body.includes('id="root"')) resolve({ ok: true });
+            else retry('served a page without the app entry (id="root")');
+          });
+        }
+      );
+      req.on('error',   (e) => retry(e.code || e.message));
+      req.on('timeout', ()  => { req.destroy(); retry('timeout'); });
+    };
+
+    let lastReason = 'no response';
+    const retry = (reason) => {
+      lastReason = reason || lastReason;
+      if (Date.now() - started > timeoutMs) resolve({ ok: false, reason: lastReason });
+      else setTimeout(attempt, 600);
+    };
+
+    attempt();
+  });
+}
+
 function startVite() {
   const inv = viteInvocation();
   if (!inv) {
@@ -900,10 +967,39 @@ function startVite() {
   }
   info(`Vite dev server on :${VITE_PORT}`);
   supervise('VITE', C.blue, inv.cmd, inv.argv);
-  return waitForPort(VITE_PORT, 40_000);
+  return viteServingApp(40_000);
 }
 
-function startElectron() {
+/**
+ * The shell needs *a* renderer, not specifically Vite. When the dev server does
+ * not come up, build the frontend and tell Electron to use the built files
+ * instead of opening a window onto nothing.
+ * @returns {'vite'|'build'|'none'}
+ */
+function resolveRenderer(viteResult) {
+  if (viteResult?.ok) return 'vite';
+
+  warn(`Vite is not serving the app: ${viteResult?.reason ?? 'unknown'}`);
+  remember(`vite not serving: ${viteResult?.reason ?? ''}`, 'Fell back to the production build', true);
+
+  if (fs.existsSync(path.join(ROOT, 'build', 'index.html'))) {
+    ok('Using the existing production build for the window');
+    return 'build';
+  }
+
+  if (noHeal) {
+    fail('No build present and --no-heal was given — the window has nothing to load.');
+    return 'none';
+  }
+
+  info('No build present — building the frontend so the window has something to load');
+  return buildFrontend('Vite dev server unavailable') ? 'build' : 'none';
+}
+
+/**
+ * @param {'vite'|'build'|'none'} uiMode which renderer the shell should load
+ */
+function startElectron(uiMode = 'vite') {
   const bin = isWin
     ? path.join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe')
     : path.join(ROOT, 'node_modules', 'electron', 'dist', 'electron');
@@ -916,7 +1012,7 @@ function startElectron() {
     return null;
   }
 
-  info('Opening the Rāma window');
+  info(`Opening the Rāma window (renderer: ${uiMode})`);
   const proc = spawn(target, ['.'], {
     cwd:   ROOT,
     stdio: 'inherit',
@@ -924,6 +1020,9 @@ function startElectron() {
       ...process.env,
       RAMA_DEV:          isDev ? '1' : '0',
       RAMA_VITE_PORT:    String(VITE_PORT),
+      // Tells main.cjs which renderer to load. Without this the shell would keep
+      // trying the dev server that we already know is not serving the app.
+      RAMA_UI_MODE:      uiMode,
       // Same per-boot token the API got, so the shell can reach guarded routes
       RAMA_SERVER_TOKEN: SERVER_TOKEN,
     },
@@ -1124,26 +1223,42 @@ async function main() {
   else warn('API did not answer in time — continuing; the desktop app works over IPC regardless');
 
   // ── Stage 4 — Cortex ────────────────────────────────────────────────────────
+  // The goal is a renderer, not specifically Vite. If the dev server will not
+  // serve the app, fall back to the build so the window still has something to
+  // show — a blank window is never an acceptable outcome.
   let uiPort = SERVER_PORT;
+  let uiMode = 'build';
+
   if (useDev) {
     stage(4, 'CORTEX — Vite development server');
-    const viteUp = await startVite();
-    if (viteUp) { ok(`Vite ready → http://localhost:${VITE_PORT}`); uiPort = VITE_PORT; }
-    else {
-      fail('Vite did not come up.');
-      warn('Look at the [VITE] output above for the cause.');
+    const viteResult = await startVite();
+    uiMode = resolveRenderer(viteResult);
+
+    if (uiMode === 'vite') {
+      ok(`Vite ready → http://localhost:${VITE_PORT}`);
+      uiPort = VITE_PORT;
+    } else if (uiMode === 'build') {
+      warn('Running the window against the production build instead of HMR');
+      warn(`Fix HMR by resolving the [VITE] output above, then restart`);
+    } else {
+      fail('No renderer is available — the window will show a startup diagnostic.');
       warn(`The API is still available at http://localhost:${SERVER_PORT}/api/health`);
     }
   } else {
     stage(4, 'CORTEX — production build');
-    ok('Serving the prebuilt frontend from build/');
+    if (fs.existsSync(path.join(ROOT, 'build', 'index.html'))) {
+      ok('Serving the prebuilt frontend from build/');
+    } else {
+      uiMode = noHeal ? 'none' : (buildFrontend('production mode with no build') ? 'build' : 'none');
+      if (uiMode === 'none') fail('No build available — the window will show a startup diagnostic.');
+    }
   }
 
   // ── Stage 5 — Shell ─────────────────────────────────────────────────────────
   let shell = null;
   if (!noElectron) {
     stage(5, 'SHELL — desktop window');
-    shell = startElectron();
+    shell = startElectron(uiMode);
   } else {
     stage(5, 'SHELL — skipped (--no-electron)');
     info(`Open the UI in a browser: http://localhost:${uiPort}`);
@@ -1154,7 +1269,9 @@ async function main() {
   const genome = capabilityReport(degraded);
 
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-  const healthy = !crashed.has('API') && (!useDev || !crashed.has('VITE'));
+  // A Vite crash is no longer unhealthy on its own — the build fallback covers
+  // it. What matters is that a renderer exists and the API answered.
+  const healthy = !crashed.has('API') && uiMode !== 'none';
 
   process.stdout.write(`
 ${healthy ? `${C.green}${C.bold}  ✓ Rāma is awake${C.reset}` : `${C.yellow}${C.bold}  ◐ Rāma is awake with reduced capability${C.reset}`}

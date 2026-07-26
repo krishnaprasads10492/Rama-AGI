@@ -3,14 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' http://localhost:4097 http://localhost:8001; img-src 'self' data: blob:;" />
+  <!--
+    NOTE: Content-Security-Policy is deliberately NOT set here.
+    It is applied by the main process (electron/main.cjs, applyCsp) via response
+    headers, which cannot be neutered by injected markup and can differ between
+    dev and production. A single static meta tag cannot be correct for both:
+    dev needs the Vite origin and ws: for HMR, production must not have them.
+    See RAMA_AGI_MASTER_SPEC.md section 29.
+  -->
   <title>Rāma AGI</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico" />
   <link rel="icon" type="image/png"    href="/icon.png" sizes="512x512" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet" />
 </head>
 <body>
   <div id="root"></div>

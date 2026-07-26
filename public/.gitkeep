@@ -1,0 +1,5 @@
+Static assets served at the web root. Populated by `npm run icons`
+(icon.png, favicon.ico). The HTML entry deliberately does NOT live here —
+Vite copies this directory verbatim into the build output, so an entry placed
+here would be emitted untransformed alongside the real one.
+See RAMA_AGI_MASTER_SPEC.md section 29.

@@ -1642,7 +1642,8 @@ authenticated **Master session**, not merely an open store.
 | 26 | Passcode change full re-key | done | Section 27. `dataStore.markAllDirty()` added |
 | 27 | Rewire Login / Setup / App gate chain | done | `Login.jsx` rewritten for gates 2+3 with key recovery; `App.jsx` chain is Unlock → Setup → Login → app |
 | 28 | Rewire `Users.jsx` onto the new auth API | done | `setTier` / `setActive` / `remove` / `resetPassword` / `issueFor`; key handover UI added |
-| 29 | **Verify the renderer actually builds** | **blocked here** | `node_modules` is absent on this machine, so `vite build` cannot run. `package-lock.json` arrived from the build machine, so `npm install` has been done there. Next step, on the build machine: `npm run build`, then `node start.cjs --diagnose` and report anything Vite rejects. Everything below assumes this passes. |
+| 29 | **Verify the renderer actually builds** | **blocked here** | `node_modules` is absent on this machine, so `vite build` cannot run. `package-lock.json` arrived from the build machine, so `npm install` has been done there. Next step, on the build machine: `npm run build`, then `node start.cjs` and report anything Vite rejects. Everything below assumes this passes. |
+| 36 | Renderer entry / CSP / blank window | done | Section 29. Root cause of "Vite did not come up" and of first-run appearing to happen in the CLI: `index.html` was inside `publicDir`, so the dev server had no entry. Fixed by moving it to the project root and dropping the `rollupOptions.input` override. CSP moved to main-process headers (dev vs prod), which also un-blocks the Monaco CDN and HMR websocket. `main.cjs` now resolves dev server → build → inline diagnostic page and can never show a blank window. `start.cjs` readiness requires HTTP 200 **and** `id="root"`, and falls back to building the frontend. `diagnose()` gained `entry-missing` / `entry-duplicate` checks so this defect class cannot recur silently. |
 | 30 | Wire `mustChangePassword` into the login flow | not started | `authCore` sets it on admin-created accounts and returns it from `loginStep1`, but no UI forces the change yet. Next step: after a successful gate 3, if `user.mustChangePassword` render a forced change-password screen before the app mounts. |
 | 31 | Surface `auth:sessions` in the UI | not started | Handler exists and is gated on `audit.all`. Next step: add a Sessions panel to the Users page listing active sessions with revoke. |
 | 32 | Instance ↔ account ownership | not started | `instanceManager.spawn({ owner })` accepts an owner id but nothing passes one. Next step: pass `currentUser.id` from `Genome.jsx` and filter `instance:list` by owner for non-admin tiers. |
@@ -1658,3 +1659,77 @@ authenticated **Master session**, not merely an open store.
 4. Pick the first ledger row that is not `done` and follow its stated next step.
 5. Before writing code, confirm the change does not violate a locked invariant.
 6. On completion: update the row, write the next step, commit to `dev` and `source`.
+
+---
+
+## SECTION 29 — Renderer entry, CSP, and never showing a blank window
+
+### The fault that made the UI unreachable
+
+`index.html` lived in `public/` and `vite.config.js` set `publicDir: 'public'`.
+Vite resolves the dev entry as `<root>/index.html`, so with `root: '.'` there was
+no entry at all: the dev server answered on 5173 but had nothing to serve at `/`.
+Production happened to work because `rollupOptions.input` pointed at
+`public/index.html` explicitly. So the build was fine and dev was empty — which
+is why first-run setup appeared to happen "in the CLI": the window had nothing
+to render, leaving the launcher as the only thing reporting anything.
+
+Putting `index.html` inside `publicDir` is a second, independent mistake — Vite
+copies `publicDir` verbatim into `outDir`, so the entry would also be emitted
+untransformed alongside the real one.
+
+**Decision:** `index.html` sits at the project root, which is Vite's convention.
+`publicDir: 'public'` stays for genuine static assets (icons), and the
+`rollupOptions.input` override is removed so dev and build resolve the *same*
+entry. One entry, one resolution path, no divergence between modes.
+
+### CSP moves from a meta tag to response headers
+
+The meta CSP shipped `script-src 'self' 'unsafe-inline'`, which silently blocked
+two things:
+
+- `cdn.jsdelivr.net` — so the IDE's Monaco editor never loaded and quietly fell
+  back to a plain textarea
+- the Vite HMR websocket — `connect-src` had no `ws:`, so hot reload could not
+  connect even once the entry was fixed
+
+**Decision:** CSP is set by the main process via `onHeadersReceived`, with a
+different policy for dev and production. Two reasons this is better than a meta
+tag:
+
+1. A header cannot be neutered by injected markup, so it is strictly stronger.
+2. Dev needs `ws:` and Vite's origin; production must not have them. A single
+   static meta tag cannot be correct for both, and the version that "works
+   everywhere" is the loosened one.
+
+Production policy keeps `script-src 'self'` plus the Monaco CDN and nothing else.
+Dev adds the Vite origin and `ws:`.
+
+### The window must never be blank
+
+`createMainWindow` loaded the Vite URL unconditionally when `RAMA_DEV=1`. If Vite
+was not actually serving the app, the result was a blank window with the failure
+visible only in the terminal.
+
+**Decision:** loading is a resolution sequence, and its last step always renders
+something:
+
+1. In dev, probe the Vite URL. If it answers with the real entry, load it.
+2. Otherwise, if `build/index.html` exists, load that and say so in the window.
+3. Otherwise render an inline diagnostic page — served from a data URL, needing
+   no bundle — that states what was tried, what failed, the exact command that
+   fixes it, and a Retry button.
+
+Startup failure is therefore reported *in the UI*, not only in the CLI. This is
+the same principle as the genome report: state what is actually true rather than
+assume the happy path.
+
+### Readiness checks must check readiness
+
+`start.cjs`'s `waitForPort` resolved `true` on *any* HTTP response, including
+Vite's 404. A dev server with no entry was reported as ready.
+
+**Decision:** the Vite check requires HTTP 200 **and** the entry marker
+(`id="root"`) in the body. Answering the socket is not the same as serving the
+app. When the check fails, stage 4 builds the frontend and switches the shell to
+the built files rather than opening a window onto nothing.

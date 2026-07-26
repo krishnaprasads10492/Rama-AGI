@@ -8,9 +8,11 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url))
 export default defineConfig({
   plugins: [react()],
 
-  // Point Vite at the public dir where index.html lives
+  // index.html lives at the project root — Vite's convention, and the same
+  // entry for dev and build. It used to sit in `public/`, which meant the dev
+  // server had no entry to serve at all (spec section 29).
   root:      '.',
-  publicDir: 'public',
+  publicDir: 'public',   // static assets only — never the entry
 
   resolve: {
     alias: {
@@ -39,7 +41,8 @@ export default defineConfig({
     sourcemap:  false,
     target:     ['es2020', 'chrome87'],
     rollupOptions: {
-      input: path.resolve(__dirname, 'public/index.html'),
+      // No `input` override: the root index.html is the entry for both dev and
+      // build. Overriding it here is what let dev and production diverge.
       output: {
         manualChunks: {
           'vendor-react':   ['react', 'react-dom'],

@@ -2,6 +2,7 @@
 
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog, Notification } = require('electron');
 const path = require('path');
+const fs   = require('fs');
 const { autoUpdater } = require('electron-updater');
 
 // ─── IPC Handlers ───────────────────────────────────────────────────────────
@@ -44,7 +45,9 @@ const dataStore    = require('./dataStore.cjs');
 // ─── Constants ──────────────────────────────────────────────────────────────
 const isDev    = !app.isPackaged;
 const isHidden = process.argv.includes('--hidden');   // Launched by auto-start
-const VITE_URL = 'http://localhost:5173';
+// The launcher may move the dev server if 5173 is taken, so honour its choice
+const VITE_PORT = Number(process.env.RAMA_VITE_PORT) || 5173;
+const VITE_URL  = `http://localhost:${VITE_PORT}`;
 const BUILD_INDEX = path.join(__dirname, '..', 'build', 'index.html');
 
 let mainWindow = null;
@@ -76,6 +79,164 @@ function setupAutoUpdater() {
   autoUpdater.checkForUpdatesAndNotify();
 }
 
+// ─── Content Security Policy ─────────────────────────────────────────────────
+/**
+ * CSP is applied as a response header rather than a meta tag in index.html.
+ *
+ * Two reasons (spec section 29):
+ *   1. A header cannot be weakened by injected markup, so it is strictly stronger.
+ *   2. Dev needs the Vite origin and ws: for HMR; production must not have them.
+ *      One static meta tag cannot be correct for both, and the version that
+ *      "works everywhere" is the loosened one.
+ *
+ * The Monaco CDN is allowed in both because the IDE loads the editor from it.
+ * With the old meta policy (`script-src 'self'`) Monaco was silently blocked and
+ * the IDE fell back to a plain textarea without saying why.
+ */
+const MONACO_CDN = 'https://cdn.jsdelivr.net';
+const FONTS_CSS  = 'https://fonts.googleapis.com';
+const FONTS_FILE = 'https://fonts.gstatic.com';
+
+function buildCsp() {
+  const local = "'self'";
+  const api   = 'http://localhost:4097 http://localhost:8001';
+
+  // Dev additionally needs the Vite origin and its HMR websocket
+  const viteOrigin = isDev ? `${VITE_URL} ws://localhost:${VITE_PORT}` : '';
+
+  return [
+    `default-src ${local}`,
+    `script-src ${local} 'unsafe-inline' ${MONACO_CDN}`,
+    `worker-src ${local} blob:`,
+    `style-src ${local} 'unsafe-inline' ${FONTS_CSS} ${MONACO_CDN}`,
+    `font-src ${local} ${FONTS_FILE} ${MONACO_CDN} data:`,
+    `img-src ${local} data: blob:`,
+    `connect-src ${local} ${api} ${MONACO_CDN} ${viteOrigin}`.trim(),
+    `object-src 'none'`,
+    `base-uri ${local}`,
+    `form-action 'none'`,
+  ].join('; ');
+}
+
+function applyCsp() {
+  const { session } = require('electron');
+  const csp = buildCsp();
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [csp],
+      },
+    });
+  });
+}
+
+// ─── Renderer resolution ─────────────────────────────────────────────────────
+/**
+ * Is the Vite dev server actually serving the app? Answering the socket is not
+ * the same as serving the entry — a dev server with a missing index.html returns
+ * 404 on every request while looking perfectly alive to a port check.
+ */
+function probeVite(timeoutMs = 1500) {
+  return new Promise((resolve) => {
+    const req = require('http').get(
+      { host: 'localhost', port: VITE_PORT, path: '/', timeout: timeoutMs },
+      (res) => {
+        if (res.statusCode !== 200) { res.resume(); resolve(false); return; }
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => {
+          body += c;
+          if (body.length > 8192) { req.destroy(); resolve(body.includes('id="root"')); }
+        });
+        res.on('end', () => resolve(body.includes('id="root"')));
+      }
+    );
+    req.on('error',   () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
+}
+
+/**
+ * A blank window is never an acceptable outcome. If neither the dev server nor a
+ * production build can be loaded, render a diagnostic page that says what was
+ * tried, what failed, and the command that fixes it. It is a data URL, so it
+ * needs no bundle and cannot itself fail to load.
+ */
+function bootFailurePage(attempts) {
+  const rows = attempts.map(a =>
+    `<li><span class="${a.ok ? 'ok' : 'no'}">${a.ok ? '✓' : '✕'}</span> ${a.what}<em>${a.detail}</em></li>`
+  ).join('');
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Rāma AGI — startup</title>
+<style>
+  :root{--bg:#030810;--fg:#c9d6e2;--dim:#6d8296;--cyan:#00c8ff;--gold:#d4a940;--red:#ff3b5c}
+  *{box-sizing:border-box}
+  body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
+       background:radial-gradient(ellipse 80% 60% at 50% -10%,rgba(0,120,200,.18),transparent 60%),var(--bg);
+       color:var(--fg);font:13px/1.7 "JetBrains Mono",Consolas,monospace}
+  .card{width:640px;max-width:92vw;padding:34px;border:1px solid rgba(0,200,255,.22);border-radius:10px;
+        background:rgba(8,16,28,.72)}
+  h1{margin:0 0 4px;font-size:17px;letter-spacing:.14em;color:var(--cyan)}
+  .sub{color:var(--dim);font-size:11px;margin-bottom:22px}
+  ul{list-style:none;padding:0;margin:0 0 22px}
+  li{padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06)}
+  li em{display:block;color:var(--dim);font-style:normal;font-size:11px;margin-left:22px}
+  .ok{color:#28d17c;margin-right:8px}.no{color:var(--red);margin-right:8px}
+  .fix{padding:13px 15px;border:1px solid rgba(212,169,64,.3);background:rgba(212,169,64,.07);
+       border-radius:6px;color:var(--gold);font-size:12px}
+  code{display:block;margin-top:7px;color:var(--fg);user-select:all}
+  button{margin-top:22px;width:100%;padding:11px;cursor:pointer;font:inherit;letter-spacing:.1em;
+         color:var(--cyan);background:rgba(0,200,255,.09);border:1px solid rgba(0,200,255,.4);border-radius:6px}
+  button:hover{background:rgba(0,200,255,.16)}
+</style></head><body><div class="card">
+  <h1>RĀMA AGI</h1>
+  <div class="sub">The interface could not be loaded. Rāma's engines are running — only the window is empty.</div>
+  <ul>${rows}</ul>
+  <div class="fix">Build the interface, then reopen:<code>npm install &amp;&amp; npm run build &amp;&amp; node start.cjs --prod</code></div>
+  <button onclick="location.reload()">Retry</button>
+</div></body></html>`;
+
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+}
+
+/**
+ * Resolve what to load, in order of preference, and always end up with something
+ * on screen. `RAMA_UI_MODE=build` lets the launcher force the built files after
+ * it has decided the dev server is not viable.
+ */
+async function loadRenderer(win) {
+  const attempts = [];
+  const forceBuild = process.env.RAMA_UI_MODE === 'build';
+
+  if (isDev && !forceBuild) {
+    if (await probeVite()) {
+      attempts.push({ ok: true, what: 'Vite dev server', detail: VITE_URL });
+      await win.loadURL(VITE_URL);
+      win.webContents.openDevTools({ mode: 'detach' });
+      return { source: 'vite', attempts };
+    }
+    attempts.push({
+      ok: false,
+      what: 'Vite dev server',
+      detail: 'not serving the app entry on :5173 — falling back to the build',
+    });
+  } else if (forceBuild) {
+    attempts.push({ ok: true, what: 'Mode', detail: 'launcher selected the production build' });
+  }
+
+  if (fs.existsSync(BUILD_INDEX)) {
+    attempts.push({ ok: true, what: 'Production build', detail: BUILD_INDEX });
+    await win.loadFile(BUILD_INDEX);
+    return { source: 'build', attempts };
+  }
+
+  attempts.push({ ok: false, what: 'Production build', detail: `not found at ${BUILD_INDEX}` });
+  console.error('[main] No renderer available — showing the startup diagnostic page');
+  await win.loadURL(bootFailurePage(attempts));
+  return { source: 'diagnostic', attempts };
+}
+
 // ─── Main Window ─────────────────────────────────────────────────────────────
 function createMainWindow() {
   mainWindow = new BrowserWindow({
@@ -95,13 +256,26 @@ function createMainWindow() {
     },
   });
 
-  // Load renderer
-  if (isDev) {
-    mainWindow.loadURL(VITE_URL);
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
-  } else {
-    mainWindow.loadFile(BUILD_INDEX);
-  }
+  // Resolve the renderer: dev server → production build → diagnostic page.
+  // Always ends with something on screen; never a blank window.
+  loadRenderer(mainWindow).then(({ source }) => {
+    console.warn(`[main] Renderer loaded from: ${source}`);
+  }).catch((err) => {
+    console.error('[main] Renderer load failed:', err.message);
+    mainWindow?.loadURL(bootFailurePage([
+      { ok: false, what: 'Renderer', detail: err.message },
+    ]));
+  });
+
+  // A load failure after this point (dev server dying mid-session, for example)
+  // must also surface in the window rather than leaving it blank.
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
+    if (!isMainFrame || code === -3) return;   // -3 = aborted, normal on navigation
+    console.error(`[main] did-fail-load ${code} ${desc} ${url}`);
+    mainWindow?.loadURL(bootFailurePage([
+      { ok: false, what: 'Renderer', detail: `${desc} (${code}) — ${url}` },
+    ]));
+  });
 
   // Show once ready to avoid white flash
   mainWindow.once('ready-to-show', () => {
@@ -287,6 +461,9 @@ app.whenReady().then(async () => {
   dataStore.register(ipcMain);
   // Auth is registered after the store so its adapter can attach on unlock
   authIPC.register(ipcMain);
+
+  // CSP must be installed before the first request the window makes
+  applyCsp();
 
   createMainWindow();
   createTray();
