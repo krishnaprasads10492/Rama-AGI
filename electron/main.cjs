@@ -266,6 +266,44 @@ async function loadRenderer(win) {
   return { source: 'diagnostic', attempts };
 }
 
+// ─── Live reload (build mode) ────────────────────────────────────────────────
+/**
+ * Reload the window when the launcher signals that a COMPLETE build is ready.
+ *
+ * The signal is a marker file the launcher writes *after* `vite build` exits
+ * cleanly — deliberately not a watcher on `build/` itself, because Vite empties
+ * that directory first and the window would reload onto a half-written bundle.
+ *
+ * `fs.watchFile` (polling) rather than `fs.watch`: on Windows a file replaced by
+ * rename loses an `fs.watch` handle. One polled file every 500ms costs nothing.
+ * Only installed when the window is actually loaded from the build — under Vite,
+ * HMR already handles this. See spec section 34.
+ */
+let reloadWatcherActive = false;
+
+function watchForRebuilds(win) {
+  if (reloadWatcherActive) return;
+
+  const marker = path.join(__dirname, '..', 'build', '.reload');
+  let lastSeen = 0;
+
+  try {
+    if (fs.existsSync(marker)) lastSeen = fs.statSync(marker).mtimeMs;
+  } catch { /* first run — no marker yet */ }
+
+  fs.watchFile(marker, { interval: 500 }, (curr) => {
+    if (!curr.mtimeMs || curr.mtimeMs === lastSeen) return;
+    lastSeen = curr.mtimeMs;
+
+    if (win.isDestroyed()) return;
+    console.warn('[main] New build detected — reloading the window');
+    // IgnoringCache so a same-named chunk cannot be served from memory
+    win.webContents.reloadIgnoringCache();
+  });
+
+  reloadWatcherActive = true;
+}
+
 // ─── Main Window ─────────────────────────────────────────────────────────────
 function createMainWindow() {
   mainWindow = new BrowserWindow({
@@ -289,6 +327,9 @@ function createMainWindow() {
   // Always ends with something on screen; never a blank window.
   loadRenderer(mainWindow).then(({ source }) => {
     console.warn(`[main] Renderer loaded from: ${source}`);
+    // Under Vite, HMR already applies renderer changes; only the build path needs
+    // an explicit reload signal.
+    if (source === 'build' && isDev) watchForRebuilds(mainWindow);
   }).catch((err) => {
     console.error('[main] Renderer load failed:', err.message);
     mainWindow?.loadURL(bootFailurePage([

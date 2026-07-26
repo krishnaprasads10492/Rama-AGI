@@ -1646,6 +1646,7 @@ authenticated **Master session**, not merely an open store.
 | 37 | Routing over `file://` | done | Section 30. `BrowserRouter` → `HashRouter`. `pushState` with a path is a `SecurityError` on a `file://` origin, so every tab click was a silent no-op in the build while working in dev. |
 | 38 | Voice capability ladder | done | Section 30. `webkitSpeechRecognition` can never work in the Electron shell (Chromium lacks Google's API keys), and the old engine retried it every 300ms forever. Replaced with L0 text → L1 push-to-talk → L2 local Whisper → L3 cloud Whisper → L4 wake word. New `electron/ipc/voiceEngine.cjs` resolves local-before-cloud; renderer captures via MediaRecorder. Mic button and an `L<n>` chip show the live level and what the next one needs. Whisper detection **executes** the candidate and requires it to identify itself — a name match alone matched `C:\Windows\System32\main.cpl`. |
 | 39 | Permission + window-open policy | done | `main.cjs` now allows only `media` and sanitized clipboard writes, denies every other permission request, and routes `window.open` to the external browser instead of opening a renderer window. |
+| 45 | Live reload | done | Section 34. Watching split by domain so each change does the least that makes it live: `src`/`shared`/`index.html` → HMR under Vite, otherwise rebuild + window reload; `electron/**` → restart the shell only; `server/**` → restart the API only; `package.json` → warn, never auto-install. Reload is signalled by `build/.reload` written *after* a clean `vite build`, because Vite empties `outDir` first and a watcher on `build/` would reload a half-written bundle. 250ms debounce per domain, in-flight rebuilds coalesce. `--no-watch` disables. Classification verified by 22 assertions. |
 | 44 | Error containment + optional deps | done | Section 33. `ErrorBoundary` wrapped `AppShell`, so one page crash removed the titlebar and tab strip — the same symptom as "navigation is not working". Boundary moved inside the shell, keyed on route so it clears on navigation, names the failing module, and records to the experiential dataset. Separately `systeminformation` was required at the top of `system.cjs` and `resourceOrchestrator.cjs` while the launcher classified it as *degrading*, so an absent optional module crashed main-process startup. New `electron/lib/sysinfo.cjs` guards the require and implements a Node-only fallback (verified: real CPU/RAM/OS figures with the module absent). System page dereferences hardened. |
 | 43 | Stale build + unreachable navigation | done | Section 32. Stage 4 reused `build/` without checking its age, so a stale bundle rendered pre-change code on every launch and made every fix look ineffective. `buildStaleness()` now compares build mtime against the newest source file; stage 4 rebuilds, `--diagnose` reports `build freshness`. Separately the tab strip defaulted to collapsed behind a 3px unlabelled target, so navigation was effectively invisible: it now opens by default (persisted) with a 22px labelled handle, and `goTo` no longer collapses it after every click. |
 | 42 | "not a function" bug class | done | Found a real one: `App.jsx` destructured `setLastHealthCheck` from `appStore`, but it lives in `uiStore`, so the first health tick after login threw from inside the consciousness loop. Added `scripts/auditRenderer.cjs` (`npm run audit`) which statically checks every Zustand destructure against the store's real keys and every `window.rama.<ns>.<fn>` against preload's surface — 21 destructures and 66 bridge calls, all resolving. Wired into `start.cjs` stage 1 so it runs on every boot. Preload exposure is now guarded: a `contextBridge` failure is reported to the main process, logged, and shown in the window instead of silently leaving `window.rama` undefined. |
@@ -2012,3 +2013,58 @@ snapshot (one `systeminformation` call failing on a given platform) threw on
 `m.cpu.cores.length`, `m.gpu[0]` or `m.network.map`. The snapshot is now normalised
 once, every array is checked, and a failed fetch renders an explanation with the
 install hint instead of sitting on "Loading..." forever.
+
+---
+
+## SECTION 34 — Live reload: the minimum action for what actually changed
+
+### The problem
+
+Every source edit required stopping and restarting the whole launcher. That is
+four processes torn down and rebuilt — API, Vite, Electron, and the encrypted
+store, which means re-entering the passcode — to pick up a one-line change in a
+React component.
+
+### The principle
+
+**Do the least that makes the change live.** A renderer edit should not restart
+the main process, and a main-process edit should not tear down the API. Watching
+is therefore split by domain, and each domain has exactly one action:
+
+| Changed | Vite live | Build mode | Restart cost |
+|---|---|---|---|
+| `src/**`, `index.html`, `shared/**` | nothing — HMR already applied it | rebuild, then reload the window | none |
+| `electron/**` (incl. `preload.cjs`) | restart the Electron child only | same | window reopens; API and Vite untouched |
+| `server/**` | restart the API child only | same | window unaffected |
+| `vite.config.js` | Vite restarts itself | rebuild + reload | none |
+| `package.json`, lockfile | **warn only** | warn only | manual `npm install` |
+
+Dependencies are deliberately never auto-installed on a file change. An install
+can take minutes and can break a working tree; that is a decision, not a reflex.
+
+### Why a marker file rather than watching `build/`
+
+`vite build` empties `outDir` before writing. A watcher on `build/` would fire
+mid-build and reload the window onto a half-written bundle. So the launcher writes
+`build/.reload` **after** the build process exits successfully, and the main
+process watches that one file. The signal therefore means "a complete build is
+ready", not "something in build/ moved".
+
+`fs.watchFile` (polling, 500ms) is used rather than `fs.watch` because a file
+replaced by a rename loses an `fs.watch` handle on Windows. One polled file is
+negligible, and the watcher is only installed when the window is actually loaded
+from the build.
+
+### Guard rails
+
+- 250ms debounce per domain, so a save that touches several files rebuilds once
+- a rebuild or restart already in flight suppresses a new one; the last request is
+  coalesced rather than queued
+- `node_modules`, `build`, `data`, `.git` and dotfiles are excluded from watching
+- the passcode is **not** re-requested for a renderer rebuild, because the main
+  process and its unlocked store are never restarted for one
+- an `electron/**` change does restart the shell, which does re-lock the store —
+  unavoidable, since that is the process holding the keys. It is stated in the log
+  so the re-prompt is never a surprise.
+- `--no-watch` disables the whole mechanism; watching is on by default in dev and
+  off in `--prod`

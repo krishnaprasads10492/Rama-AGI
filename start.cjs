@@ -35,6 +35,7 @@
  *   node start.cjs --probe         Refresh the dependency version probe
  *   node start.cjs --no-electron   Server + Vite only (headless / remote UI)
  *   node start.cjs --no-heal       Diagnose and run, but never auto-install
+ *   node start.cjs --no-watch      Disable live reload (default: on in dev)
  *   node start.cjs --help
  */
 
@@ -55,6 +56,7 @@ const repairOnly = has('--repair');
 const doProbe    = has('--probe');
 const noElectron = has('--no-electron');
 const noHeal     = has('--no-heal');
+const noWatch    = has('--no-watch');
 const showHelp   = has('--help') || has('-h');
 
 const ROOT   = __dirname;
@@ -964,6 +966,7 @@ function waitForPort(port, timeoutMs = 25_000, pathname = '/') {
 
 function stopAll(exitCode = 0) {
   process.stdout.write(`\n${C.yellow}Stopping Rāma...${C.reset}\n`);
+  stopWatching();
   for (const { proc } of children) {
     try {
       if (proc && !proc.killed) {
@@ -1139,6 +1142,215 @@ function startElectron(uiMode = 'vite') {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// LIVE RELOAD — the minimum action for what actually changed (spec section 34)
+// ══════════════════════════════════════════════════════════════════════════════
+
+const RELOAD_MARKER = path.join(ROOT, 'build', '.reload');
+
+/** Signal the shell that a COMPLETE build is ready. Never mid-build. */
+function signalReload() {
+  try {
+    fs.mkdirSync(path.dirname(RELOAD_MARKER), { recursive: true });
+    fs.writeFileSync(RELOAD_MARKER, String(Date.now()));
+    return true;
+  } catch (err) {
+    warn(`Could not signal the window to reload: ${err.message}`);
+    return false;
+  }
+}
+
+/**
+ * Which domain does a changed path belong to? Each domain has exactly one
+ * action, so a renderer edit never restarts the main process.
+ * @returns {'renderer'|'main'|'server'|'deps'|null}
+ */
+function classifyChange(rel) {
+  const p = rel.replace(/\\/g, '/');
+
+  if (p === 'package.json' || p === 'package-lock.json') return 'deps';
+  if (p.startsWith('electron/'))                         return 'main';
+  if (p.startsWith('server/'))                           return 'server';
+  if (p.startsWith('src/') || p.startsWith('shared/'))   return 'renderer';
+  if (p === 'index.html' || p === 'vite.config.js')       return 'renderer';
+
+  return null;
+}
+
+let _uiMode      = 'build';
+let _watcher     = null;
+let _rebuilding  = false;
+let _rebuildAgain = false;
+const _timers    = {};
+
+/** Rebuild the renderer, then signal a reload. Async so the launcher stays live. */
+function rebuildRenderer() {
+  if (_rebuilding) { _rebuildAgain = true; return; }   // coalesce, never queue
+  _rebuilding = true;
+
+  const started = Date.now();
+  info('Change detected — rebuilding the interface');
+
+  // `vite build` empties build/ first, which is why the reload marker is only
+  // written after a clean exit. A watcher on build/ would catch a partial bundle.
+  const proc = spawn(process.execPath, [viteBinForBuild(), 'build'], {
+    cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], shell: false,
+    env: { ...process.env, FORCE_COLOR: '1' },
+  });
+
+  let errOut = '';
+  proc.stdout?.on('data', d => {
+    const line = String(d).trim();
+    if (/error|failed/i.test(line)) process.stdout.write(`${C.dim}[BUILD]${C.reset} ${line}\n`);
+  });
+  proc.stderr?.on('data', d => { errOut += d; });
+
+  proc.on('error', (err) => {
+    _rebuilding = false;
+    fail(`Rebuild could not start: ${err.message}`);
+  });
+
+  proc.on('close', (code) => {
+    _rebuilding = false;
+
+    if (code === 0) {
+      const secs = ((Date.now() - started) / 1000).toFixed(1);
+      if (signalReload()) ok(`Interface rebuilt in ${secs}s — window reloading`);
+      else                ok(`Interface rebuilt in ${secs}s`);
+      remember('renderer change', 'rebuilt and reloaded automatically', true);
+    } else {
+      fail(`Rebuild failed (exit ${code}) — the window keeps the previous build`);
+      const detail = errOut.split('\n').filter(Boolean).slice(-4).join(' | ');
+      if (detail) warn(`  ↳ ${detail.slice(0, 300)}`);
+    }
+
+    // A save landed while we were building — build once more, not N times
+    if (_rebuildAgain) { _rebuildAgain = false; rebuildRenderer(); }
+  });
+}
+
+/** Resolve Vite's own entry script for a build invocation. */
+function viteBinForBuild() {
+  const candidates = [
+    path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js'),
+    path.join(ROOT, 'node_modules', 'vite', 'dist', 'node', 'cli.js'),
+  ];
+  return candidates.find(c => fs.existsSync(c)) ?? candidates[0];
+}
+
+/** Restart one supervised child by name, leaving the others running. */
+function restartChild(name, respawn) {
+  const entry = children.find(c => c.name === name);
+
+  if (entry?.proc && !entry.proc.killed) {
+    try {
+      if (isWin) spawnSync('taskkill', ['/PID', String(entry.proc.pid), '/T', '/F'], { stdio: 'ignore' });
+      else entry.proc.kill('SIGTERM');
+    } catch { /* already gone */ }
+  }
+
+  // Give the OS a moment to release the port / window before respawning
+  setTimeout(() => {
+    crashed.delete(name);
+    respawn();
+  }, 600);
+}
+
+function restartShell() {
+  warn('Main-process change — restarting the window (the store re-locks, so the passcode is asked again)');
+  restartChild('SHELL', () => {
+    const entry = children.find(c => c.name === 'SHELL');
+    if (entry) children.splice(children.indexOf(entry), 1);
+    startElectron(_uiMode);
+  });
+}
+
+function restartApi() {
+  info('Server change — restarting the local API only');
+  restartChild('API', () => {
+    supervise('API', C.cyan, process.execPath, ['server/index.cjs'], {
+      env: { ...process.env, FORCE_COLOR: '1', RAMA_SERVER_TOKEN: SERVER_TOKEN },
+    });
+  });
+}
+
+/** Debounce per domain so one save that touches several files acts once. */
+function schedule(domain, fn, ms = 250) {
+  clearTimeout(_timers[domain]);
+  _timers[domain] = setTimeout(fn, ms);
+}
+
+/**
+ * @param {'vite'|'build'|'none'} uiMode
+ */
+function startWatching(uiMode) {
+  _uiMode = uiMode;
+
+  if (noWatch) { info('Live reload disabled (--no-watch)'); return false; }
+  if (isProd)  { info('Live reload off in production mode'); return false; }
+
+  let chokidar;
+  try { chokidar = require('chokidar'); }
+  catch {
+    warn('chokidar is not installed — live reload is off. Fix: npm install chokidar');
+    return false;
+  }
+
+  _watcher = chokidar.watch(
+    ['src', 'electron', 'server', 'shared', 'index.html', 'vite.config.js', 'package.json'],
+    {
+      cwd: ROOT,
+      ignoreInitial: true,
+      ignored: /(^|[\\/])(node_modules|build|data|\.git|\.kiro)([\\/]|$)|(^|[\\/])\../,
+      awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
+    }
+  );
+
+  const onChange = (rel) => {
+    const domain = classifyChange(rel);
+    if (!domain) return;
+
+    switch (domain) {
+      case 'renderer':
+        // With the dev server live, HMR has already applied it — doing anything
+        // here would be slower and would fight Vite.
+        if (_uiMode === 'vite') return;
+        schedule('renderer', () => rebuildRenderer());
+        break;
+
+      case 'main':
+        schedule('main', () => restartShell(), 400);
+        break;
+
+      case 'server':
+        schedule('server', () => restartApi(), 400);
+        break;
+
+      case 'deps':
+        // Never auto-install: it is slow and can break a working tree.
+        schedule('deps', () => {
+          warn(`${rel} changed — run "npm install" and restart when convenient`);
+        }, 800);
+        break;
+    }
+  };
+
+  _watcher.on('add', onChange).on('change', onChange).on('unlink', onChange);
+  _watcher.on('error', (err) => warn(`Watcher error: ${err.message}`));
+
+  const mode = _uiMode === 'vite'
+    ? 'renderer via Vite HMR · main + server restart on change'
+    : 'renderer rebuilds and reloads · main + server restart on change';
+  ok(`Live reload active — ${mode}`);
+  return true;
+}
+
+function stopWatching() {
+  try { _watcher?.close(); } catch { /* ignore */ }
+  _watcher = null;
+  for (const t of Object.values(_timers)) clearTimeout(t);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // STAGE 6 — FULL CAPABILITY REPORT
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -1213,6 +1425,7 @@ ${C.bold}Rāma AGI launcher${C.reset}
   node start.cjs --probe         Refresh the dependency version probe
   node start.cjs --no-electron   API + Vite only (headless)
   node start.cjs --no-heal       Diagnose and run, never auto-install
+  node start.cjs --no-watch      Disable live reload (on by default in dev)
   node start.cjs --help
 
 ${C.bold}How it boots${C.reset}
@@ -1376,6 +1589,11 @@ async function main() {
     info(`Open the UI in a browser: http://localhost:${uiPort}`);
   }
 
+  // ── Live reload ─────────────────────────────────────────────────────────────
+  // Watching starts only after everything is up, so the initial boot never
+  // triggers a rebuild of itself.
+  const watching = startWatching(uiMode);
+
   // ── Stage 6 — Full capability ───────────────────────────────────────────────
   stage(6, 'FULL — capability verification');
   const genome = capabilityReport(degraded);
@@ -1392,6 +1610,11 @@ ${healthy ? `${C.green}${C.bold}  ✓ Rāma is awake${C.reset}` : `${C.yellow}${
   ${C.cyan}API${C.reset}       http://localhost:${SERVER_PORT}/api/health
   ${C.cyan}Boot${C.reset}      ${elapsed}s · stage 6/6
   ${C.cyan}Security${C.reset}  AES-256-GCM + Argon2id · passcode required to unlock
+  ${C.cyan}Reload${C.reset}    ${watching
+    ? (uiMode === 'vite'
+        ? 'live — save any file, no restart needed'
+        : 'live — renderer rebuilds itself, main/server restart themselves')
+    : 'off — restart manually after changes (--no-watch)'}
 
   ${C.dim}Ctrl+C to stop · node start.cjs --diagnose for a health report${C.reset}
 `);
