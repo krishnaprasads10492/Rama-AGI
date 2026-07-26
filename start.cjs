@@ -442,13 +442,30 @@ function diagnose() {
 
   // ── Build artefacts ─────────────────────────────────────────────────────────
   const buildHtml = fs.existsSync(path.join(ROOT, 'build', 'index.html'));
-  add('build/index.html', isDev ? true : buildHtml, isDev ? '(dev — not needed)' : '');
+  add('build/index.html', isDev ? true : buildHtml, isDev ? '(dev — the build is a fallback)' : '');
   if (isProd && !buildHtml) {
     defects.push({
       id: 'build-missing', severity: 'fatal',
       detail: 'production build not found',
       fix: 'npm run build',
     });
+  }
+
+  // A stale build is worse than a missing one: it loads and renders old code, so
+  // source fixes look like they did nothing. Report it in both modes, because dev
+  // falls back to the build when the dev server will not serve.
+  if (buildHtml) {
+    const st = buildStaleness();
+    add('build freshness', !st.stale,
+      st.stale ? `stale — ${st.reason}` : `up to date (${st.buildAgeMin}m old)`);
+
+    if (st.stale) {
+      defects.push({
+        id: 'build-stale', severity: 'warn',
+        detail: `The build is older than the source (${st.reason}) — the window would render pre-change code`,
+        fix: 'npm run build',
+      });
+    }
   }
 
   // ── Ports ───────────────────────────────────────────────────────────────────
@@ -580,6 +597,67 @@ function installModule(mod) {
     warn(`${mod} could not be installed — the fallback path stays active`);
     return false;
   }
+}
+
+/**
+ * Is the production build older than the source it was built from?
+ *
+ * WHY THIS MATTERS MORE THAN IT SOUNDS: stage 4 falls back to `build/` when the
+ * dev server will not serve. Reusing it unconditionally means a stale bundle gets
+ * loaded on every launch, so source fixes appear to have no effect at all — the
+ * window keeps rendering the old code and the user reasonably concludes the fix
+ * did not work. Staleness must be measured, not assumed.
+ *
+ * @returns {{stale:boolean, reason?:string, newest?:string, buildAgeMin?:number}}
+ */
+function buildStaleness() {
+  const buildIndex = path.join(ROOT, 'build', 'index.html');
+  if (!fs.existsSync(buildIndex)) return { stale: true, reason: 'no build present' };
+
+  let buildTime;
+  try { buildTime = fs.statSync(buildIndex).mtimeMs; }
+  catch { return { stale: true, reason: 'build/index.html unreadable' }; }
+
+  // Everything the bundle is produced from
+  const watched = [
+    path.join(ROOT, 'src'),
+    path.join(ROOT, 'shared'),
+    path.join(ROOT, 'index.html'),
+    path.join(ROOT, 'vite.config.js'),
+    path.join(ROOT, 'package.json'),
+  ];
+
+  let newestTime = 0;
+  let newestPath = null;
+
+  const visit = (p) => {
+    let st;
+    try { st = fs.statSync(p); } catch { return; }
+
+    if (st.isDirectory()) {
+      let entries;
+      try { entries = fs.readdirSync(p); } catch { return; }
+      for (const e of entries) visit(path.join(p, e));
+      return;
+    }
+
+    if (st.mtimeMs > newestTime) { newestTime = st.mtimeMs; newestPath = p; }
+  };
+
+  for (const w of watched) visit(w);
+
+  const buildAgeMin = Math.round((Date.now() - buildTime) / 60000);
+
+  if (newestTime > buildTime) {
+    return {
+      stale: true,
+      reason: `${path.relative(ROOT, newestPath)} is newer than the build`,
+      newest: path.relative(ROOT, newestPath),
+      buildAgeMin,
+    };
+  }
+
+  return { stale: false, buildAgeMin };
 }
 
 function buildFrontend(reason) {
@@ -1005,18 +1083,23 @@ function resolveRenderer(viteResult) {
   warn(`Vite is not serving the app: ${viteResult?.reason ?? 'unknown'}`);
   remember(`vite not serving: ${viteResult?.reason ?? ''}`, 'Fell back to the production build', true);
 
-  if (fs.existsSync(path.join(ROOT, 'build', 'index.html'))) {
-    ok('Using the existing production build for the window');
+  // Never hand the window a stale bundle: it would render pre-fix code and make
+  // every source change look like it had no effect.
+  const staleness = buildStaleness();
+
+  if (!staleness.stale) {
+    ok(`Using the existing production build (${staleness.buildAgeMin}m old, up to date)`);
     return 'build';
   }
 
   if (noHeal) {
-    fail('No build present and --no-heal was given — the window has nothing to load.');
-    return 'none';
+    fail(`The build is stale (${staleness.reason}) and --no-heal was given.`);
+    warn('Run "npm run build" to refresh it.');
+    return fs.existsSync(path.join(ROOT, 'build', 'index.html')) ? 'build' : 'none';
   }
 
-  info('No build present — building the frontend so the window has something to load');
-  return buildFrontend('Vite dev server unavailable') ? 'build' : 'none';
+  warn(`Build is stale — ${staleness.reason}`);
+  return buildFrontend('dev server unavailable and the build is out of date') ? 'build' : 'none';
 }
 
 /**
@@ -1269,11 +1352,17 @@ async function main() {
     }
   } else {
     stage(4, 'CORTEX — production build');
-    if (fs.existsSync(path.join(ROOT, 'build', 'index.html'))) {
-      ok('Serving the prebuilt frontend from build/');
+    const staleness = buildStaleness();
+
+    if (!staleness.stale) {
+      ok(`Serving the prebuilt frontend from build/ (${staleness.buildAgeMin}m old, up to date)`);
+    } else if (noHeal) {
+      warn(`Build is stale — ${staleness.reason}. Run "npm run build".`);
+      uiMode = fs.existsSync(path.join(ROOT, 'build', 'index.html')) ? 'build' : 'none';
     } else {
-      uiMode = noHeal ? 'none' : (buildFrontend('production mode with no build') ? 'build' : 'none');
-      if (uiMode === 'none') fail('No build available — the window will show a startup diagnostic.');
+      warn(`Build is stale — ${staleness.reason}`);
+      uiMode = buildFrontend('the build is out of date') ? 'build' : 'none';
+      if (uiMode === 'none') fail('No usable build — the window will show a startup diagnostic.');
     }
   }
 

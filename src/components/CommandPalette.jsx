@@ -440,9 +440,11 @@ export default function CommandPalette({ extraPages = [] }) {
   const goTo = useCallback((route, label) => {
     navigate(route);
     pushRecent(route, label || allPages.find(p => p.route === route)?.label || route);
-    closePalette();
+    // The tab strip stays open: it is the app's only navigation, so collapsing it
+    // on every click meant one move and then no visible way back.
+    setPaletteQuery('');
     setWakeActive(false);
-  }, [navigate, pushRecent, closePalette, allPages]);
+  }, [navigate, pushRecent, setPaletteQuery, allPages]);
 
   // ── Voice engine setup ───────────────────────────────────────────────────
   // The engine resolves its own capability ladder and only starts continuous
@@ -706,21 +708,48 @@ export default function CommandPalette({ extraPages = [] }) {
         </div>
       </div>
 
-      {/* Palette toggle strip — always visible at top of content ──────────── */}
+      {/* Navigation handle — a real, labelled target. This used to be a 3px
+          strip, which is not a hit area anyone finds, and it is the only way to
+          reach navigation once collapsed. */}
       <div
-        onClick={() => paletteOpen ? closePalette() : openPalette()}
-        style={{
-          height:         '3px',
-          background:     paletteOpen
-            ? `linear-gradient(90deg, var(--violet), var(--accent), var(--magenta))`
-            : 'var(--border)',
-          cursor:         'pointer',
-          transition:     'background 0.3s',
-          flexShrink:     0,
-          boxShadow:      paletteOpen ? '0 0 8px rgba(0,255,255,0.4)' : 'none',
+        onClick={() => (paletteOpen ? closePalette() : openPalette())}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            paletteOpen ? closePalette() : openPalette();
+          }
         }}
-        title={paletteOpen ? 'Close command palette' : 'Open command palette (Ctrl+K)'}
-      />
+        title={paletteOpen ? 'Hide navigation' : 'Show navigation (Ctrl+K)'}
+        style={{
+          height:         paletteOpen ? '4px' : '22px',
+          display:        'flex',
+          alignItems:     'center',
+          justifyContent: 'center',
+          gap:            '8px',
+          background:     paletteOpen
+            ? 'linear-gradient(90deg, var(--violet), var(--accent), var(--magenta))'
+            : 'var(--surface)',
+          borderBottom:   paletteOpen ? 'none' : '1px solid var(--border)',
+          cursor:         'pointer',
+          transition:     'height 0.2s, background 0.3s',
+          flexShrink:     0,
+          boxShadow:      paletteOpen ? '0 0 8px rgba(0,200,255,0.4)' : 'none',
+          fontSize:       '9px',
+          letterSpacing:  '0.14em',
+          color:          'var(--muted)',
+          userSelect:     'none',
+        }}
+      >
+        {!paletteOpen && (
+          <>
+            <span style={{ color: 'var(--accent)' }}>▾</span>
+            <span>NAVIGATION</span>
+            <span style={{ opacity: 0.6 }}>Ctrl+K</span>
+          </>
+        )}
+      </div>
     </>
   );
 }

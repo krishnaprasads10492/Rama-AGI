@@ -1646,6 +1646,7 @@ authenticated **Master session**, not merely an open store.
 | 37 | Routing over `file://` | done | Section 30. `BrowserRouter` → `HashRouter`. `pushState` with a path is a `SecurityError` on a `file://` origin, so every tab click was a silent no-op in the build while working in dev. |
 | 38 | Voice capability ladder | done | Section 30. `webkitSpeechRecognition` can never work in the Electron shell (Chromium lacks Google's API keys), and the old engine retried it every 300ms forever. Replaced with L0 text → L1 push-to-talk → L2 local Whisper → L3 cloud Whisper → L4 wake word. New `electron/ipc/voiceEngine.cjs` resolves local-before-cloud; renderer captures via MediaRecorder. Mic button and an `L<n>` chip show the live level and what the next one needs. Whisper detection **executes** the candidate and requires it to identify itself — a name match alone matched `C:\Windows\System32\main.cpl`. |
 | 39 | Permission + window-open policy | done | `main.cjs` now allows only `media` and sanitized clipboard writes, denies every other permission request, and routes `window.open` to the external browser instead of opening a renderer window. |
+| 43 | Stale build + unreachable navigation | done | Section 32. Stage 4 reused `build/` without checking its age, so a stale bundle rendered pre-change code on every launch and made every fix look ineffective. `buildStaleness()` now compares build mtime against the newest source file; stage 4 rebuilds, `--diagnose` reports `build freshness`. Separately the tab strip defaulted to collapsed behind a 3px unlabelled target, so navigation was effectively invisible: it now opens by default (persisted) with a 22px labelled handle, and `goTo` no longer collapses it after every click. |
 | 42 | "not a function" bug class | done | Found a real one: `App.jsx` destructured `setLastHealthCheck` from `appStore`, but it lives in `uiStore`, so the first health tick after login threw from inside the consciousness loop. Added `scripts/auditRenderer.cjs` (`npm run audit`) which statically checks every Zustand destructure against the store's real keys and every `window.rama.<ns>.<fn>` against preload's surface — 21 destructures and 66 bridge calls, all resolving. Wired into `start.cjs` stage 1 so it runs on every boot. Preload exposure is now guarded: a `contextBridge` failure is reported to the main process, logged, and shown in the window instead of silently leaving `window.rama` undefined. |
 | 41 | Mic modes + mute/unmute | done | Section 31. Two independent mutes (mic and speech), four mic modes, and hands-free segmentation via Web Audio RMS so "unmute and just talk" works at L2 without a wake word. Mic mute releases the OS device so the platform indicator goes out. `Ctrl+Shift+M` / `Ctrl+Shift+S`, right-click for the mode menu, voice commands for muting. Preferences persist in `localStorage` because they must be readable before the passcode gate. |
 | 40 | Voice level surfaced on the Settings page | not started | The ladder is visible in the palette only. Next step: add a Voice section to `Settings.jsx` showing the level, the detected backend, a Re-check button (`window.rama.voice.rescan`), and inputs for `RAMA_WHISPER_PATH` / `RAMA_WHISPER_MODEL`. |
@@ -1895,3 +1896,54 @@ released and nothing is listening. The command is accepted while unmuted (it
 would be a no-op) and the mic button tooltip states that unmuting is a
 click or `Ctrl+Shift+M`. Pretending otherwise would be a capability that appears
 to exist and never fires — exactly what section 30 was written to prevent.
+
+---
+
+## SECTION 32 — Stale builds, and navigation that can be found
+
+### A stale build is worse than a missing one
+
+Section 29 made the shell fall back to `build/` when the dev server will not
+serve. Stage 4 then reused that build unconditionally. If the bundle was older
+than the source, the window rendered **pre-change code on every launch** — so a
+source fix appeared to have no effect, and the only reasonable conclusion from the
+outside was that the fix did not work.
+
+A missing build fails loudly. A stale build succeeds and lies.
+
+**Decision:** staleness is measured, never assumed. `buildStaleness()` compares
+the mtime of `build/index.html` against the newest file under `src/`, `shared/`,
+`index.html`, `vite.config.js` and `package.json`.
+
+- `--diagnose` reports `build freshness` in both dev and production mode, because
+  dev falls back to the build too
+- stage 4 rebuilds a stale bundle rather than loading it
+- `--no-heal` refuses to rebuild but still says the build is stale and names the
+  file that outdates it
+- the log states the build's age, so "which code am I looking at" is never a guess
+
+### Navigation has to be reachable
+
+The sidebar was removed by design in favour of a collapsible tab strip. But the
+strip defaulted to collapsed behind `Ctrl+K`, and the only pointer affordance was
+a **3px** unlabelled strip. For anyone who did not know the shortcut there was no
+visible way to move between pages — indistinguishable from broken navigation.
+
+Two changes:
+
+1. **Open by default**, with the choice persisted, so anyone who prefers it
+   collapsed keeps that.
+2. **The handle is a real target**: 22px, labelled `▾ NAVIGATION · Ctrl+K`,
+   keyboard-focusable with Enter/Space.
+
+Also: `goTo` used to call `closePalette()` after navigating. Since the strip is
+the app's only navigation, that gave the user exactly one move before the way back
+disappeared. It now clears the query and leaves the strip open.
+
+### The general rule this is an instance of
+
+Both faults share a shape with the voice ladder (section 30) and the passcode
+verifier (section 27): **a mechanism that appears to work while doing nothing.**
+Silent success is the failure mode to design against, which is why staleness,
+capability level, and passcode correctness are all now measured and surfaced
+rather than inferred.

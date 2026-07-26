@@ -23,12 +23,23 @@ function savePref(key, value) {
 export const useUIStore = create((set, get) => ({
 
   // ── Command Palette ────────────────────────────────────────────────────────
-  paletteOpen:   false,
+  // Open by default. The tab strip is the only navigation in the app — the
+  // sidebar was deliberately removed — so starting collapsed behind a keyboard
+  // shortcut left a new user with no visible way to move between pages at all.
+  // The choice is remembered, so anyone who prefers it collapsed keeps that.
+  paletteOpen:   loadPref('rama.paletteOpen', true),
   paletteQuery:  '',
-  openPalette:   ()      => set({ paletteOpen: true,  paletteQuery: '' }),
-  closePalette:  ()      => set({ paletteOpen: false, paletteQuery: '' }),
-  togglePalette: ()      => set(s => ({ paletteOpen: !s.paletteOpen, paletteQuery: '' })),
-  setPaletteQuery: (q)   => set({ paletteQuery: q }),
+
+  openPalette:  () => { savePref('rama.paletteOpen', true);  set({ paletteOpen: true,  paletteQuery: '' }); },
+  closePalette: () => { savePref('rama.paletteOpen', false); set({ paletteOpen: false, paletteQuery: '' }); },
+
+  togglePalette: () => set(s => {
+    const next = !s.paletteOpen;
+    savePref('rama.paletteOpen', next);
+    return { paletteOpen: next, paletteQuery: '' };
+  }),
+
+  setPaletteQuery: (q) => set({ paletteQuery: q }),
 
   // ── Recent pages ──────────────────────────────────────────────────────────
   recentPages: [],
