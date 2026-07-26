@@ -2,6 +2,9 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useRamaStore } from '@store/ramaStore.js';
 import { useUIStore }   from '@store/uiStore.js';
 import { ramaChat }     from '@services/ramaClient.js';
+import { resolveReflex } from '@services/cognition.js';
+import { useNavigate }  from 'react-router-dom';
+import { useUserStore } from '@store/userStore.js';
 import { getSystemPromptAsync, shouldRevealIdentity, getIdentityDisclosure, recordInteraction } from '@services/consciousness.js';
 import RamaOrb          from '@components/RamaOrb.jsx';
 
@@ -141,7 +144,10 @@ export default function Chat() {
     provider, model,
   } = useRamaStore();
 
-  const { masterAuthenticated } = useUIStore();
+  // Reflex skills can navigate and change mute state, so Chat needs both
+  const { masterAuthenticated, setMicMuted, setSpeechMuted } = useUIStore();
+  const { currentUser } = useUserStore();
+  const navigate = useNavigate();
 
   const [input, setInput]   = useState('');
   const messagesEndRef       = useRef(null);
@@ -177,6 +183,27 @@ export default function Chat() {
         addMessage({ role: 'assistant', content: getIdentityDisclosure(), id: Date.now() });
         setThinking(false);
       }, 600);
+      return;
+    }
+
+    // ── Tier 0: reflex ───────────────────────────────────────────────────────
+    // Anything Rāma can do to itself is answered here, with no model involved.
+    // "make the text bigger" must not become a paid API call that fails offline
+    // or while the vault is locked. See spec section 35.
+    const reflex = await resolveReflex(text, { user: currentUser });
+    if (reflex) {
+      if (reflex.action?.type === 'navigate') navigate(reflex.action.route);
+      if (reflex.action?.type === 'mute-mic')    setMicMuted(true);
+      if (reflex.action?.type === 'mute-speech') setSpeechMuted(true);
+
+      addMessage({
+        role:    'assistant',
+        content: reflex.say,
+        id:      Date.now(),
+        tier:    reflex.tierName,
+        skill:   reflex.skill,
+      });
+      setThinking(false);
       return;
     }
 

@@ -349,6 +349,13 @@ const RAMA_API = {
     status:   (p) => ipcRenderer.invoke('auth:status',   p),
   },
 
+  // ── Appearance (whole-surface scaling — reaches inline pixel values) ───────
+  appearance: {
+    getZoom:   ()      => ipcRenderer.invoke('appearance:get-zoom'),
+    setZoom:   (f)     => ipcRenderer.invoke('appearance:set-zoom', f),
+    nudgeZoom: (delta) => ipcRenderer.invoke('appearance:nudge-zoom', delta),
+  },
+
   // ── Voice (progressive ladder: text → capture → local STT → cloud STT) ─────
   voice: {
     capabilities: ()     => ipcRenderer.invoke('voice:capabilities'),
@@ -625,7 +632,7 @@ const ALLOWED_PREFIXES = [
   'session:', 'store:', 'nucleus:', 'ipc-enc:', 'bus:', 'ast:', 'regen:',
   'vector:', 'sandbox:', 'graph:', 'selfcare:', 'vault:', 'models:',
   'agents:', 'browser:', 'app:', 'capability:', 'genome:', 'instance:',
-  'proposals:', 'meta:', 'timeline:', 'auth:', 'voice:',
+  'proposals:', 'meta:', 'timeline:', 'auth:', 'voice:', 'appearance:',
 ];
 
 function isAllowed(channel) {

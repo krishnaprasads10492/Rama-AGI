@@ -53,6 +53,17 @@
   --font:         'JetBrains Mono', 'Courier New', monospace;   /* Code/data */
   --font-display: 'Rajdhani', 'JetBrains Mono', sans-serif;    /* Headers/titles */
 
+  /* Base was 13px with a great deal of 9–11px inline text on top of it, which is
+     not legible in a monospace face. The floor is raised here; whole-surface
+     scaling is handled by the zoom factor (spec section 35), because inline pixel
+     values cannot be overridden by any CSS rule. */
+  --font-size:    14px;
+  --text-xs:      11.5px;   /* smallest permitted — labels, badges */
+  --text-sm:      12.5px;
+  --text-base:    14px;
+  --text-lg:      16px;
+  --text-xl:      19px;
+
   /* ── Layout ─────────────────────────────────────────────────────────────── */
   --titlebar-h:  38px;
   --radius:      6px;
@@ -73,11 +84,20 @@ html, body, #root {
   background:  var(--bg);
   color:       var(--text);
   font-family: var(--font);
-  font-size:   13px;
-  line-height: 1.5;
+  font-size:   var(--font-size);
+  line-height: 1.6;
   -webkit-font-smoothing:  antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Monospace at small sizes benefits measurably from full pixel grid fitting */
+  text-rendering: optimizeLegibility;
+  font-variant-ligatures: none;
 }
+
+/* NOTE: a blanket minimum-size rule was considered and rejected. Any selector
+   broad enough to catch inherited text (`[class]`, `*`) collides with the utility
+   classes on equal specificity, so the winner depends on rule order rather than
+   intent — it silently resizes headings. The legibility floor is therefore set by
+   the tokens above and enforced globally by the zoom factor instead. */
 
 /* ── Display font for titles ─────────────────────────────────────────────── */
 .display {
@@ -471,11 +491,11 @@ textarea.input { resize: vertical; min-height: 80px; }
 .cursor-pointer  { cursor: pointer; }
 .select-none     { user-select: none; }
 .font-bold       { font-weight: 700; }
-.text-xs         { font-size: 11px; }
-.text-sm         { font-size: 12px; }
-.text-base       { font-size: 13px; }
-.text-lg         { font-size: 15px; }
-.text-xl         { font-size: 18px; }
+.text-xs         { font-size: var(--text-xs); }
+.text-sm         { font-size: var(--text-sm); }
+.text-base       { font-size: var(--text-base); }
+.text-lg         { font-size: var(--text-lg); }
+.text-xl         { font-size: var(--text-xl); }
 .uppercase       { text-transform: uppercase; letter-spacing: 0.08em; }
 .rounded         { border-radius: var(--radius); }
 .border          { border: 1px solid var(--border); }

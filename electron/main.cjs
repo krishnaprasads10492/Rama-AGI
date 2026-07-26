@@ -266,6 +266,52 @@ async function loadRenderer(win) {
   return { source: 'diagnostic', attempts };
 }
 
+// ─── Appearance ──────────────────────────────────────────────────────────────
+/**
+ * Whole-surface scaling. The interface is built from hundreds of inline
+ * `fontSize` values, which no CSS rule can raise — `setZoomFactor` is the only
+ * mechanism that scales every pixel including inline styles, which is exactly the
+ * problem it exists for. See spec section 35.
+ *
+ * Bounds are deliberate: below 0.6 the chrome becomes unusable, above 2.0 the
+ * fixed-height titlebar clips. The value is clamped rather than rejected so a
+ * voice or chat command can never render Rāma unusable.
+ */
+const ZOOM_MIN = 0.6;
+const ZOOM_MAX = 2.0;
+
+function clampZoom(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, n));
+}
+
+function registerAppearance(ipcMain) {
+  ipcMain.handle('appearance:set-zoom', async (_e, factor) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'No window' };
+    const z = clampZoom(factor);
+    mainWindow.webContents.setZoomFactor(z);
+    return { ok: true, zoom: z, min: ZOOM_MIN, max: ZOOM_MAX };
+  });
+
+  ipcMain.handle('appearance:get-zoom', async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'No window' };
+    return { ok: true, zoom: mainWindow.webContents.getZoomFactor(), min: ZOOM_MIN, max: ZOOM_MAX };
+  });
+
+  // Nudge by a step — what "make the text bigger" resolves to at tier 0
+  ipcMain.handle('appearance:nudge-zoom', async (_e, delta) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'No window' };
+    const current = mainWindow.webContents.getZoomFactor();
+    const z = clampZoom(current + (Number(delta) || 0));
+    mainWindow.webContents.setZoomFactor(z);
+    return {
+      ok: true, zoom: z, min: ZOOM_MIN, max: ZOOM_MAX,
+      atLimit: z === ZOOM_MIN || z === ZOOM_MAX,
+    };
+  });
+}
+
 // ─── Live reload (build mode) ────────────────────────────────────────────────
 /**
  * Reload the window when the launcher signals that a COMPLETE build is ready.
@@ -534,6 +580,7 @@ app.whenReady().then(async () => {
   nucleusSealer.register(ipcMain);
   ipcEncryption.register(ipcMain);
   proposalLedger.register(ipcMain);
+  registerAppearance(ipcMain);
   // Genome layer — registered after the engines it describes so verify() is honest
   genomeIPC.register(ipcMain);
   instanceIPC.register(ipcMain);

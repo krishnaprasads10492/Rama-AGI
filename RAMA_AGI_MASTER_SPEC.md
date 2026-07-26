@@ -1646,6 +1646,9 @@ authenticated **Master session**, not merely an open store.
 | 37 | Routing over `file://` | done | Section 30. `BrowserRouter` → `HashRouter`. `pushState` with a path is a `SecurityError` on a `file://` origin, so every tab click was a silent no-op in the build while working in dev. |
 | 38 | Voice capability ladder | done | Section 30. `webkitSpeechRecognition` can never work in the Electron shell (Chromium lacks Google's API keys), and the old engine retried it every 300ms forever. Replaced with L0 text → L1 push-to-talk → L2 local Whisper → L3 cloud Whisper → L4 wake word. New `electron/ipc/voiceEngine.cjs` resolves local-before-cloud; renderer captures via MediaRecorder. Mic button and an `L<n>` chip show the live level and what the next one needs. Whisper detection **executes** the candidate and requires it to identify itself — a name match alone matched `C:\Windows\System32\main.cpl`. |
 | 39 | Permission + window-open policy | done | `main.cjs` now allows only `media` and sanitized clipboard writes, denies every other permission request, and routes `window.open` to the external browser instead of opening a renderer window. |
+| 46 | Cognition ladder + legibility | done | Section 35. `src/services/cognition.js`: tier 0 reflex (9 skills, no model), tier 1 local, tier 2 cloud, tier 3 candidate-finding from the experiential dataset. Wired into Chat ahead of the model call. Legibility: base 13px→14px with tokenised scale, plus `appearance:*` IPC over `setZoomFactor`, which is the only mechanism that reaches the hundreds of inline pixel values. Routing verified by 28 assertions, including that "refactor this function to be smaller" escalates rather than zooming out. |
+| 47 | Tier 3 auto-proposal of new reflexes | not started | `findReflexCandidates()` reports escalation counts by tool but does not yet synthesise a skill. Next step: when one phrasing cluster exceeds ~20 escalations with structurally identical answers, generate a `SKILLS` entry and file it as a `SELF_MODIFY` proposal (invariant I6 — never auto-applied). |
+| 48 | Appearance panel in Settings | not started | Zoom is reachable by chat/voice command only. Next step: add a Voice + Appearance section to `Settings.jsx` with a zoom slider bound to `window.rama.appearance`, the voice level from ledger row 40, and `RAMA_WHISPER_PATH`. |
 | 45 | Live reload | done | Section 34. Watching split by domain so each change does the least that makes it live: `src`/`shared`/`index.html` → HMR under Vite, otherwise rebuild + window reload; `electron/**` → restart the shell only; `server/**` → restart the API only; `package.json` → warn, never auto-install. Reload is signalled by `build/.reload` written *after* a clean `vite build`, because Vite empties `outDir` first and a watcher on `build/` would reload a half-written bundle. 250ms debounce per domain, in-flight rebuilds coalesce. `--no-watch` disables. Classification verified by 22 assertions. |
 | 44 | Error containment + optional deps | done | Section 33. `ErrorBoundary` wrapped `AppShell`, so one page crash removed the titlebar and tab strip — the same symptom as "navigation is not working". Boundary moved inside the shell, keyed on route so it clears on navigation, names the failing module, and records to the experiential dataset. Separately `systeminformation` was required at the top of `system.cjs` and `resourceOrchestrator.cjs` while the launcher classified it as *degrading*, so an absent optional module crashed main-process startup. New `electron/lib/sysinfo.cjs` guards the require and implements a Node-only fallback (verified: real CPU/RAM/OS figures with the module absent). System page dereferences hardened. |
 | 43 | Stale build + unreachable navigation | done | Section 32. Stage 4 reused `build/` without checking its age, so a stale bundle rendered pre-change code on every launch and made every fix look ineffective. `buildStaleness()` now compares build mtime against the newest source file; stage 4 rebuilds, `--diagnose` reports `build freshness`. Separately the tab strip defaulted to collapsed behind a 3px unlabelled target, so navigation was effectively invisible: it now opens by default (persisted) with a 22px labelled handle, and `goTo` no longer collapses it after every click. |
@@ -2068,3 +2071,69 @@ from the build.
   so the re-prompt is never a surprise.
 - `--no-watch` disables the whole mechanism; watching is on by default in dev and
   off in `--prod`
+
+---
+
+## SECTION 35 — The cognition ladder, and Rāma acting on itself
+
+### The principle, restated for thinking
+
+Sections 30 and 34 applied "start at the level that needs nothing" to voice and to
+reloading. The same rule governs cognition, and it is the mechanism by which Rāma
+climbs rather than merely runs:
+
+| Tier | Name | Needs | Handles | Cost |
+|---|---|---|---|---|
+| 0 | REFLEX | nothing | its own state, appearance, navigation, system readings, muting | none |
+| 1 | LOCAL | Ollama | reasoning, drafting, summarising, code | none, private |
+| 2 | CLOUD | a vault API key | hard reasoning, research, long context | metered |
+| 3 | LEARN | tier 2 history | turning a repeated tier-2 answer into a tier-0 reflex | none |
+
+**Tier 0 must never call a model.** Asking Rāma to make its own text larger is not
+a language problem; routing it to a cloud LLM would be slower, cost money, fail
+offline, and — worst — fail while the vault is locked. Anything Rāma can do to
+*itself* belongs at tier 0 by definition.
+
+Escalation is strictly ordered and each step is recorded to the experiential
+dataset with the tier that answered. That record is what tier 3 consumes.
+
+### Tier 3 is the evolution mechanism
+
+`metaCognition` already records `(action, context, outcome)` with the tool that
+served it. When a phrasing repeatedly reaches tier 2 and the cloud answer is
+structurally the same each time, that is evidence a reflex is missing. Tier 3
+proposes a new skill through the existing proposal ledger — so Rāma's own
+intelligence grows downward into the cheap tier over time, and every such change
+still passes the master's approval gate (invariant I6).
+
+This is the concrete answer to "keep evolving into a higher intellectual being":
+capability is not a fixed set of tiers but a **flow of competence from expensive
+tiers to free ones**, driven by measured evidence, gated by consent.
+
+### Skills are declarative
+
+A tier-0 skill declares its patterns, what it does, and what it says. It never
+reaches the network and never blocks. The registry is data, so tier 3 can add to
+it and `capabilities()` can enumerate it truthfully — the same measured-not-claimed
+rule as the genome.
+
+### Legibility was a real defect, not a preference
+
+Text was illegible because the UI is built from hundreds of inline `fontSize`
+values between 9px and 11px in a monospace face. Two consequences:
+
+1. Raising the root `font-size` fixes nothing — inline pixel values ignore it.
+2. There is no CSS rule that can raise a floor across inline styles.
+
+**Decision: scale the whole surface rather than chase individual values.**
+`webContents.setZoomFactor` scales every pixel in the renderer, inline styles
+included, and is the mechanism Chromium provides for exactly this. In browser mode
+the fallback is `zoom` on the document element.
+
+Base tokens were raised too (13px → 14px, and the utility scale with it), so the
+default is legible before any scaling is applied. Scaling then remains a
+preference rather than a workaround.
+
+Rāma can therefore be *told* to fix it — "make the text bigger", "zoom out",
+"reset the zoom" — and does so at tier 0, with the setting persisted. That was the
+second half of the request: the ability to ask it to improve its own UX.
