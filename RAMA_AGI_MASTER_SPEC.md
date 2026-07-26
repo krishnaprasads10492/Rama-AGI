@@ -1642,11 +1642,13 @@ authenticated **Master session**, not merely an open store.
 | 26 | Passcode change full re-key | done | Section 27. `dataStore.markAllDirty()` added |
 | 27 | Rewire Login / Setup / App gate chain | done | `Login.jsx` rewritten for gates 2+3 with key recovery; `App.jsx` chain is Unlock → Setup → Login → app |
 | 28 | Rewire `Users.jsx` onto the new auth API | done | `setTier` / `setActive` / `remove` / `resetPassword` / `issueFor`; key handover UI added |
-| 29 | **Verify the renderer actually builds** | **blocked** | `node_modules` is absent on this machine. Needs `npm install` then `npm run build` on the target machine. Everything below assumes this passes. |
+| 29 | **Verify the renderer actually builds** | **blocked here** | `node_modules` is absent on this machine, so `vite build` cannot run. `package-lock.json` arrived from the build machine, so `npm install` has been done there. Next step, on the build machine: `npm run build`, then `node start.cjs --diagnose` and report anything Vite rejects. Everything below assumes this passes. |
 | 30 | Wire `mustChangePassword` into the login flow | not started | `authCore` sets it on admin-created accounts and returns it from `loginStep1`, but no UI forces the change yet. Next step: after a successful gate 3, if `user.mustChangePassword` render a forced change-password screen before the app mounts. |
 | 31 | Surface `auth:sessions` in the UI | not started | Handler exists and is gated on `audit.all`. Next step: add a Sessions panel to the Users page listing active sessions with revoke. |
 | 32 | Instance ↔ account ownership | not started | `instanceManager.spawn({ owner })` accepts an owner id but nothing passes one. Next step: pass `currentUser.id` from `Genome.jsx` and filter `instance:list` by owner for non-admin tiers. |
 | 33 | Genome-change applier | not started | `genome:propose-change` creates a `GENOME` proposal but no applier is registered for that kind, so approval cannot be applied. Next step: register an applier that patches the sealed nucleus via `nucleusSealer.patchNucleus` and requires a restart. |
+| 34 | Resume protocol itself | done | This section, plus `.kiro/steering/rama-resume-protocol.md` (`inclusion: always`) so a cold session loads it without being told. |
+| 35 | Key material excluded from git | done | `.gitignore` now covers `data/`, `*.enc`, `rama.salt`, `rama.verify`, `.nucleus.enc`, `.nucleus.salt`. Committing any of them would enable an offline attack on the passcode. |
 
 ### Resume checklist for a cold session
 
