@@ -1646,6 +1646,7 @@ authenticated **Master session**, not merely an open store.
 | 37 | Routing over `file://` | done | Section 30. `BrowserRouter` → `HashRouter`. `pushState` with a path is a `SecurityError` on a `file://` origin, so every tab click was a silent no-op in the build while working in dev. |
 | 38 | Voice capability ladder | done | Section 30. `webkitSpeechRecognition` can never work in the Electron shell (Chromium lacks Google's API keys), and the old engine retried it every 300ms forever. Replaced with L0 text → L1 push-to-talk → L2 local Whisper → L3 cloud Whisper → L4 wake word. New `electron/ipc/voiceEngine.cjs` resolves local-before-cloud; renderer captures via MediaRecorder. Mic button and an `L<n>` chip show the live level and what the next one needs. Whisper detection **executes** the candidate and requires it to identify itself — a name match alone matched `C:\Windows\System32\main.cpl`. |
 | 39 | Permission + window-open policy | done | `main.cjs` now allows only `media` and sanitized clipboard writes, denies every other permission request, and routes `window.open` to the external browser instead of opening a renderer window. |
+| 41 | Mic modes + mute/unmute | done | Section 31. Two independent mutes (mic and speech), four mic modes, and hands-free segmentation via Web Audio RMS so "unmute and just talk" works at L2 without a wake word. Mic mute releases the OS device so the platform indicator goes out. `Ctrl+Shift+M` / `Ctrl+Shift+S`, right-click for the mode menu, voice commands for muting. Preferences persist in `localStorage` because they must be readable before the passcode gate. |
 | 40 | Voice level surfaced on the Settings page | not started | The ladder is visible in the palette only. Next step: add a Voice section to `Settings.jsx` showing the level, the detected backend, a Re-check button (`window.rama.voice.rescan`), and inputs for `RAMA_WHISPER_PATH` / `RAMA_WHISPER_MODEL`. |
 | 36 | Renderer entry / CSP / blank window | done | Section 29. Root cause of "Vite did not come up" and of first-run appearing to happen in the CLI: `index.html` was inside `publicDir`, so the dev server had no entry. Fixed by moving it to the project root and dropping the `rollupOptions.input` override. CSP moved to main-process headers (dev vs prod), which also un-blocks the Monaco CDN and HMR websocket. `main.cjs` now resolves dev server → build → inline diagnostic page and can never show a blank window. `start.cjs` readiness requires HTTP 200 **and** `id="root"`, and falls back to building the frontend. `diagnose()` gained `entry-missing` / `entry-duplicate` checks so this defect class cannot recur silently. |
 | 30 | Wire `mustChangePassword` into the login flow | not started | `authCore` sets it on admin-created accounts and returns it from `loginStep1`, but no UI forces the change yet. Next step: after a successful gate 3, if `user.mustChangePassword` render a forced change-password screen before the app mounts. |
@@ -1813,3 +1814,83 @@ the ladder falls to whatever level the machine can actually support.
 The mic button reports the live level and, on hover, exactly what the next level
 requires — so the user learns "install Whisper" or "add an OpenAI key" from the
 UI instead of from a silent non-response.
+
+---
+
+## SECTION 31 — Mic modes, mute, and hands-free without a wake word
+
+### The gap
+
+Section 30 built two ways to talk to Rāma and no way to *stay* talking to it:
+
+- at level 4 the mic button toggled wake-word listening
+- at levels 1–3 it was hold-to-talk only
+
+So on any machine without a local Whisper engine there was no persistent
+listening, and on every machine there was no mute — no single control to say
+"stop listening to me" or "stop talking to me". For an assistant meant to be
+always present, mute is not a nicety; it is the control that makes always-present
+acceptable.
+
+### Two independent mutes
+
+They are deliberately separate. Conflating them means silencing Rāma's replies
+also stops it hearing you, which is almost never what is wanted.
+
+| Control | Meaning | Default |
+|---|---|---|
+| **Mic mute** | Rāma cannot hear. Tracks stopped, stream released, recogniser aborted. | unmuted |
+| **Speech mute** | Rāma does not speak. TTS suppressed and any current utterance cancelled. | unmuted |
+
+Mic mute releases the OS microphone rather than merely ignoring input, so the
+platform's own mic-in-use indicator goes out. A mute that leaves the light on is
+not a mute the user can trust.
+
+### Three mic modes
+
+| Mode | Behaviour | Available at |
+|---|---|---|
+| `off` | Nothing captured. | always |
+| `ptt` | Hold the button to speak, release to transcribe. | L1+ |
+| `hands-free` | Open mic; speech is auto-segmented on silence and each segment transcribed. | L2+ (needs a transcription backend) |
+| `wake` | Passive listening for "Hey Rāma". | L4 only |
+
+**Hands-free is the answer to "unmute and just talk" without a wake word.**
+Segmentation uses Web Audio: an `AnalyserNode` computes RMS over the input, a
+segment opens when the level crosses the speech threshold and closes after
+~1.2s below it. No model, no network, no dependency — it works at level 2 wherever
+transcription exists.
+
+Guard rails, because an open mic that transcribes forever is a cost and privacy
+risk:
+
+- segments shorter than 400ms are discarded as noise
+- a segment is force-closed at 30s so one continuous noise source cannot produce
+  an unbounded clip
+- a 250ms cool-down after each segment prevents an echo of Rāma's own TTS
+  re-triggering capture
+- hands-free is never the default; the user selects it
+
+### Controls
+
+| Trigger | Effect |
+|---|---|
+| Click mic | Toggle mic mute |
+| Hold mic | Push-to-talk, regardless of mode (a direct request always works) |
+| Right-click / long-press mic | Mode menu |
+| `Ctrl+Shift+M` | Toggle mic mute |
+| `Ctrl+Shift+S` | Toggle speech mute |
+| Say "mute" / "unmute" | Mic mute (unmute only from a still-live session) |
+| Say "stop talking" / "be quiet" | Speech mute |
+
+Mode and both mute states persist across restarts, so the user sets their
+preference once. Persistence is `localStorage` — a UI preference, not data, and it
+must survive before the encrypted store is unlocked.
+
+### One honest exception
+
+Voice-driven *unmute* cannot work once the mic is muted, because the stream is
+released and nothing is listening. The command is accepted while unmuted (it
+would be a no-op) and the mic button tooltip states that unmuting is a
+click or `Ctrl+Shift+M`. Pretending otherwise would be a capability that appears
+to exist and never fires — exactly what section 30 was written to prevent.

@@ -2,7 +2,9 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useUIStore }   from '@store/uiStore.js';
 import { useRamaStore } from '@store/ramaStore.js';
-import { VoiceEngine }  from '@services/voiceEngine.js';
+import {
+  VoiceEngine, MIC_MODES, MIC_MODE_LABELS, modesForLevel,
+} from '@services/voiceEngine.js';
 
 
 // Pages come from the single registry — see src/config/registry.js
@@ -15,37 +17,54 @@ import { useUserStore } from '@store/userStore.js';
  * A capability that is silently absent is a bug regardless of the reason, so this
  * never renders as a plain dead button.
  */
-function VoiceMicBtn({ capability, recording, active, onToggle, onPressStart, onPressEnd }) {
+/**
+ * Click toggles mic mute. Hold is push-to-talk and works regardless of mode — a
+ * direct request should always be honoured. Right-click opens the mode menu.
+ */
+function VoiceMicBtn({ capability, recording, micMuted, mode, onToggleMute, onPressStart, onPressEnd, onOpenModes }) {
   const level    = capability?.level ?? 0;
   const canVoice = level >= 1;
-  const canWake  = !!capability?.wakeWordCapable;
+  const held     = useRef(false);
+  const timer    = useRef(null);
 
   const title = !canVoice
     ? `Voice unavailable — ${capability?.nextStep ?? 'use Ctrl+K for typed commands'}`
-    : canWake
-      ? `${capability.levelName} · click to toggle "Hey Rāma", or hold to speak`
-      : `${capability.levelName} · hold to speak${capability?.nextStep ? ` · next: ${capability.nextStep}` : ''}`;
+    : micMuted
+      ? 'Mic muted — click or Ctrl+Shift+M to unmute'
+      : `${capability.levelName} · ${MIC_MODE_LABELS[mode] ?? mode} · click to mute, hold to speak, right-click for modes`;
 
-  // Push-to-talk when there is no wake word; toggle when there is
-  const handlers = canWake
-    ? { onClick: onToggle }
-    : {
-        onMouseDown:  onPressStart,
-        onMouseUp:    onPressEnd,
-        onMouseLeave: (e) => { if (recording) onPressEnd?.(e); },
-        onTouchStart: (e) => { e.preventDefault(); onPressStart?.(e); },
-        onTouchEnd:   onPressEnd,
-      };
+  // Distinguish a click from a hold: 220ms decides
+  const handlers = canVoice ? {
+    onMouseDown: () => {
+      held.current = false;
+      timer.current = setTimeout(async () => { held.current = true; await onPressStart?.(); }, 220);
+    },
+    onMouseUp: async () => {
+      clearTimeout(timer.current);
+      if (held.current) { held.current = false; await onPressEnd?.(); }
+      else onToggleMute?.();
+    },
+    onMouseLeave: async () => {
+      clearTimeout(timer.current);
+      if (held.current) { held.current = false; await onPressEnd?.(); }
+    },
+    onContextMenu: (e) => { e.preventDefault(); onOpenModes?.(); },
+  } : {};
 
-  const live   = recording || active;
-  const colour = !canVoice ? 'var(--muted)' : recording ? 'var(--red)' : live ? 'var(--magenta)' : 'var(--muted)';
+  const live   = recording || (!micMuted && mode !== MIC_MODES.OFF && level >= 2);
+  const colour = !canVoice ? 'var(--muted)'
+               : micMuted  ? 'var(--red)'
+               : recording ? 'var(--red)'
+               : live      ? 'var(--magenta)'
+               : 'var(--muted)';
 
   return (
     <button
-      {...(canVoice ? handlers : {})}
+      {...handlers}
       disabled={!canVoice}
       title={title}
       aria-label={title}
+      aria-pressed={!micMuted}
       style={{
         width:        '32px',
         height:       '32px',
@@ -62,11 +81,92 @@ function VoiceMicBtn({ capability, recording, active, onToggle, onPressStart, on
         transition:   'all 0.15s',
         opacity:      canVoice ? 1 : 0.45,
         boxShadow:    live ? (recording ? '0 0 10px rgba(255,0,60,0.5)' : 'var(--glow-magenta)') : 'none',
-        animation:    live ? 'pulse-ring 1.5s ease infinite' : 'none',
+        animation:    (recording || (live && !micMuted && mode === MIC_MODES.WAKE)) ? 'pulse-ring 1.5s ease infinite' : 'none',
       }}
     >
-      {canVoice ? '🎙' : '🚫'}
+      {!canVoice ? '🚫' : micMuted ? '🔇' : '🎙'}
     </button>
+  );
+}
+
+// ─── Speech output mute ───────────────────────────────────────────────────────
+/** Independent of the mic: silencing Rāma's replies must not stop it hearing. */
+function SpeechMuteBtn({ muted, onToggle }) {
+  return (
+    <button
+      onClick={onToggle}
+      title={muted ? 'Rāma is silent — click or Ctrl+Shift+S to let it speak' : 'Rāma speaks — click to silence'}
+      aria-label={muted ? 'Unmute Rāma speech' : 'Mute Rāma speech'}
+      aria-pressed={muted}
+      style={{
+        width: '28px', height: '28px', borderRadius: '50%',
+        border: `1px solid ${muted ? 'var(--amber)' : 'var(--border)'}`,
+        background: muted ? 'rgba(255,170,0,0.12)' : 'transparent',
+        color: muted ? 'var(--amber)' : 'var(--muted)',
+        cursor: 'pointer', display: 'flex', alignItems: 'center',
+        justifyContent: 'center', fontSize: '12px', flexShrink: 0,
+        transition: 'all 0.15s',
+      }}
+    >
+      {muted ? '🔕' : '🔔'}
+    </button>
+  );
+}
+
+// ─── Mic mode menu ────────────────────────────────────────────────────────────
+/** Only modes this machine can deliver are offered; the rest say what they need. */
+function MicModeMenu({ open, capability, mode, onPick, onClose }) {
+  if (!open) return null;
+
+  const available = modesForLevel(capability);
+  const all = [MIC_MODES.OFF, MIC_MODES.PTT, MIC_MODES.HANDS_FREE, MIC_MODES.WAKE];
+
+  const why = {
+    [MIC_MODES.HANDS_FREE]: 'needs a transcription backend',
+    [MIC_MODES.WAKE]:       'needs a local speech engine',
+    [MIC_MODES.PTT]:        'needs microphone access',
+  };
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 300 }} />
+      <div style={{
+        position: 'absolute', top: '100%', right: '52px', marginTop: '4px',
+        background: 'var(--elevated)', border: '1px solid var(--border)',
+        borderRadius: 'var(--radius)', zIndex: 301, minWidth: '210px',
+        boxShadow: '0 8px 28px rgba(0,0,0,0.55)', overflow: 'hidden',
+      }}>
+        <div style={{
+          padding: '7px 12px', fontSize: '9px', letterSpacing: '0.1em',
+          color: 'var(--muted)', borderBottom: '1px solid var(--border)',
+        }}>
+          MICROPHONE MODE
+        </div>
+        {all.map(m => {
+          const enabled = available.includes(m);
+          const active  = mode === m;
+          return (
+            <div
+              key={m}
+              onClick={() => enabled && onPick(m)}
+              title={enabled ? '' : why[m]}
+              style={{
+                padding: '8px 12px', fontSize: '11px',
+                cursor: enabled ? 'pointer' : 'not-allowed',
+                opacity: enabled ? 1 : 0.4,
+                color: active ? 'var(--accent)' : 'var(--text-dim)',
+                background: active ? 'rgba(0,200,255,0.08)' : 'transparent',
+                display: 'flex', alignItems: 'center', gap: '8px',
+              }}
+            >
+              <span style={{ width: '10px' }}>{active ? '●' : ''}</span>
+              <span style={{ flex: 1 }}>{MIC_MODE_LABELS[m]}</span>
+              {!enabled && <span style={{ fontSize: '8px', color: 'var(--muted)' }}>unavailable</span>}
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }
 
@@ -290,6 +390,8 @@ export default function CommandPalette({ extraPages = [] }) {
     openPalette, closePalette, setPaletteQuery,
     pushRecent, recentPages,
     voiceActive, setVoiceActive, setVoiceWakeReady, setLastVoiceCmd,
+    micMode, setMicMode, micMuted, setMicMuted, toggleMicMuted,
+    speechMuted, setSpeechMuted, toggleSpeechMuted,
     pendingModification, clearPendingMod,
     masterAuthenticated,
   } = useUIStore();
@@ -303,6 +405,7 @@ export default function CommandPalette({ extraPages = [] }) {
   const [voiceCap,        setVoiceCap]        = useState(null);
   const [recording,       setRecording]       = useState(false);
   const [voiceError,      setVoiceError]      = useState('');
+  const [modeMenuOpen,    setModeMenuOpen]    = useState(false);
 
   const { currentUser } = useUserStore();
 
@@ -365,6 +468,15 @@ export default function CommandPalette({ extraPages = [] }) {
           closePalette();
         } else if (matched.action === 'open-palette') {
           openPalette();
+        } else if (matched.action === 'mute-speech') {
+          setSpeechMuted(true);
+          engine.setSpeechMuted(true);
+        } else if (matched.action === 'unmute-speech') {
+          setSpeechMuted(false);
+          engine.setSpeechMuted(false);
+        } else if (matched.action === 'mute-mic') {
+          setMicMuted(true);
+          engine.setMicMuted(true);
         } else if (matched.action === 'inject-message') {
           if (!activeSessionId) createSession();
           addMessage({ role: 'user', content: matched.message, id: Date.now() });
@@ -374,14 +486,22 @@ export default function CommandPalette({ extraPages = [] }) {
       },
       onError:  (err) => { setVoiceError(String(err)); setTimeout(() => setVoiceError(''), 6000); },
       onLevel:  (cap) => setVoiceCap(cap),
-      onReady:  (cap) => {
+      onState:  (st)  => { setRecording(st.recording); setVoiceActive(st.listening || st.recording); },
+      onReady:  async (cap) => {
         setVoiceCap(cap);
         setVoiceWakeReady(!!cap?.wakeWordCapable);
-        // Passive wake-word listening only where it genuinely works
-        if (cap?.wakeWordCapable) {
-          engine.start();
-          setVoiceActive(true);
-        }
+
+        // Restore the saved preferences. A saved mode this machine can no longer
+        // deliver falls back to the best it can, rather than silently doing nothing.
+        engine.setSpeechMuted(speechMuted);
+        engine.setMicMuted(micMuted);
+
+        const available = modesForLevel(cap);
+        const wanted    = available.includes(micMode) ? micMode
+                        : available.includes(MIC_MODES.PTT) ? MIC_MODES.PTT
+                        : MIC_MODES.OFF;
+        if (wanted !== micMode) setMicMode(wanted);
+        await engine.setMode(wanted);
       },
     });
 
@@ -391,13 +511,46 @@ export default function CommandPalette({ extraPages = [] }) {
     return () => engine.stop();
   }, []);  // eslint-disable-line
 
-  // Toggle is only meaningful at the wake-word level
-  const toggleVoice = useCallback(() => {
+  // ── Mute controls ─────────────────────────────────────────────────────────
+  const handleToggleMic = useCallback(() => {
+    const next = toggleMicMuted();
+    voiceRef.current?.setMicMuted(next);
+    setVoiceError(next ? 'Mic muted' : 'Mic live');
+    setTimeout(() => setVoiceError(''), 1800);
+  }, [toggleMicMuted]);
+
+  const handleToggleSpeech = useCallback(() => {
+    const next = toggleSpeechMuted();
+    voiceRef.current?.setSpeechMuted(next);
+    setVoiceError(next ? 'Rāma will stay silent' : 'Rāma can speak');
+    setTimeout(() => setVoiceError(''), 1800);
+  }, [toggleSpeechMuted]);
+
+  const handlePickMode = useCallback(async (mode) => {
+    setModeMenuOpen(false);
     const engine = voiceRef.current;
-    if (!engine?.canWake) return;
-    if (voiceActive) { engine.stop();  setVoiceActive(false); }
-    else             { engine.start(); setVoiceActive(true);  }
-  }, [voiceActive, setVoiceActive]);
+    if (!engine) return;
+    if (await engine.setMode(mode)) {
+      setMicMode(mode);
+      // Choosing a listening mode implies wanting to be heard
+      if (mode !== MIC_MODES.OFF && micMuted) {
+        setMicMuted(false);
+        engine.setMicMuted(false);
+      }
+    }
+  }, [setMicMode, micMuted, setMicMuted]);
+
+  // ── Keyboard: Ctrl+Shift+M mic, Ctrl+Shift+S speech ──────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey) return;
+      const key = e.key.toLowerCase();
+      if (key === 'm') { e.preventDefault(); handleToggleMic(); }
+      if (key === 's') { e.preventDefault(); handleToggleSpeech(); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [handleToggleMic, handleToggleSpeech]);
 
   // Push-to-talk: hold to capture, release to transcribe
   const startTalk = useCallback(async () => {
@@ -502,13 +655,23 @@ export default function CommandPalette({ extraPages = [] }) {
             }}
           />
           <VoiceLevelChip capability={voiceCap} onRescan={rescanVoice} />
+          <SpeechMuteBtn muted={speechMuted} onToggle={handleToggleSpeech} />
           <VoiceMicBtn
             capability={voiceCap}
             recording={recording}
-            active={voiceActive}
-            onToggle={toggleVoice}
+            micMuted={micMuted}
+            mode={micMode}
+            onToggleMute={handleToggleMic}
             onPressStart={startTalk}
             onPressEnd={endTalk}
+            onOpenModes={() => setModeMenuOpen(o => !o)}
+          />
+          <MicModeMenu
+            open={modeMenuOpen}
+            capability={voiceCap}
+            mode={micMode}
+            onPick={handlePickMode}
+            onClose={() => setModeMenuOpen(false)}
           />
           <button className="btn btn-sm" onClick={closePalette}
             style={{ fontSize: '11px', padding: '3px 8px' }}>
