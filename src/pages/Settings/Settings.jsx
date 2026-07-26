@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRamaStore } from '@store/ramaStore.js';
 import { useUserStore } from '@store/userStore.js';
+import { getFingerprint } from '@services/authClient.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -42,7 +43,7 @@ function Toggle({ value, onChange }) {
 
 export default function Settings() {
   const { provider, model, setProvider, setModel } = useRamaStore();
-  const { currentUser, canDo } = useUserStore();
+  const { currentUser, sessionToken, canDo } = useUserStore();
 
   const [tab,          setTab]          = useState('ai');
   const [autoStart,    setAutoStart]    = useState(false);
@@ -87,9 +88,19 @@ export default function Settings() {
       return;
     }
     if (!isElectron) { setPassMsg('Passcode change requires Electron runtime'); return; }
-    const res = await window.ipcRenderer?.invoke('session:change-passcode', oldPasscode, newPasscode);
+
+    setPassMsg('Re-encrypting every domain under the new passcode...');
+
+    // Authorised by the signed-in Master session, not by the store being open
+    const res = await window.rama.session.changePasscode({
+      token:       sessionToken,
+      fingerprint: getFingerprint(),
+      oldPasscode,
+      newPasscode,
+    });
+
     if (res?.ok) {
-      setPassMsg('✓ Passcode changed successfully');
+      setPassMsg('✓ Passcode changed — all data re-encrypted under the new key');
       setOldPasscode(''); setNewPasscode(''); setConfirmNew('');
     } else {
       setPassMsg(`✕ ${res?.error || 'Failed'}`);

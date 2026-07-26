@@ -249,10 +249,64 @@ function isFirstRun(dataDir) {
   return !fs.existsSync(getSaltPath(dataDir));
 }
 
+// ─── Passcode verification ────────────────────────────────────────────────────
+/**
+ * WHY THIS EXISTS: `unlock()` only derives keys — it cannot tell a correct
+ * passcode from an incorrect one, because any passcode derives *some* key. The
+ * failure only shows up later, when a decrypt fails its HMAC. Since dataStore
+ * falls back to empty defaults on a domain that will not decrypt, a wrong
+ * passcode used to look exactly like a fresh install: no data, no accounts,
+ * ready to re-provision. That is an authentication bypass, not a UX wrinkle.
+ *
+ * The verifier closes it. A tiny known-plaintext blob is written under the
+ * current keys on first unlock. On every later unlock it must decrypt and match,
+ * which it can only do if the derived keys — and therefore the passcode — are
+ * the same. The blob reveals nothing: it is a constant, not a secret.
+ */
+const VERIFIER_MAGIC = 'rama-nucleus-verifier-v1';
+
+function getVerifierPath(dataDir) { return path.join(dataDir, 'rama.verify'); }
+
+function hasVerifier(dataDir) { return fs.existsSync(getVerifierPath(dataDir)); }
+
+/** Write the verifier under the currently-derived keys. First unlock only. */
+function writeVerifier(dataDir) {
+  if (!_unlocked) throw new Error('CryptoCore: not unlocked');
+  const filePath = getVerifierPath(dataDir);
+  const payload  = JSON.stringify({ magic: VERIFIER_MAGIC, createdAt: Date.now() });
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(filePath, encryptBuffer(Buffer.from(payload, 'utf8'), 'rama.verify'), { mode: 0o600 });
+}
+
+/**
+ * @returns {boolean} true only when the current keys decrypt the verifier.
+ * Any failure — bad HMAC, bad auth tag, corrupt file — reads as false.
+ */
+function verifyPasscode(dataDir) {
+  if (!_unlocked) return false;
+  const filePath = getVerifierPath(dataDir);
+  if (!fs.existsSync(filePath)) return false;
+  try {
+    const plain  = decryptBuffer(fs.readFileSync(filePath), 'rama.verify');
+    const parsed = JSON.parse(plain.toString('utf8'));
+    return parsed?.magic === VERIFIER_MAGIC;
+  } catch {
+    return false;
+  }
+}
+
+/** Re-key the verifier after a passcode change (keys must already be the new ones). */
+function rewriteVerifier(dataDir) {
+  const filePath = getVerifierPath(dataDir);
+  if (fs.existsSync(filePath)) secureDelete(filePath);
+  writeVerifier(dataDir);
+}
+
 module.exports = {
   unlock, lock, encryptBuffer, decryptBuffer,
   encryptToFile, decryptFromFile, secureDelete,
   encryptString, decryptString, isFirstRun,
+  hasVerifier, writeVerifier, verifyPasscode, rewriteVerifier,
   isUnlocked: () => _unlocked,
   cache: { get: cacheGet, set: cacheSet, del: cacheDel, clear: cacheClear },
 };

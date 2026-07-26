@@ -28,3 +28,14 @@ ai_backend/*.egg-info/
 *.key
 *.enc
 secrets/
+
+# Runtime data — encrypted stores, salt, verifier, scenario memory, logs.
+# Never committed: rama.salt and rama.verify are per-machine, and the .enc
+# domains are the user's data. Committing them would also let an attacker
+# attempt an offline attack against the passcode.
+data/
+*.enc
+rama.salt
+rama.verify
+.nucleus.enc
+.nucleus.salt

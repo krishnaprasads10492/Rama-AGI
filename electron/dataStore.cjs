@@ -288,9 +288,25 @@ function register(ipcMain) {
   });
 }
 
+/**
+ * Mark every domain dirty so the next saveAll() rewrites all of them.
+ * Needed by the passcode re-key: the in-memory copy is the only source of the
+ * plaintext once the old salt has been destroyed, so every domain must be
+ * written back out under the new keys, not just the ones that happened to change.
+ */
+function markAllDirty() {
+  for (const domain of DOMAINS) {
+    if (!cache[domain]) cache[domain] = getDefaultData(domain);
+    dirty.add(domain);
+  }
+  return DOMAINS.length;
+}
+
 module.exports = {
   register,
   loadAll,
+  markAllDirty,
+  DOMAINS,
   flushAndClear,
   get,
   set,

@@ -1,15 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import AppShell      from '@components/AppShell.jsx';
 import ErrorBoundary from '@components/ErrorBoundary.jsx';
-import { useUIStore }   from '@store/uiStore.js';
 import { useAppStore }  from '@store/appStore.js';
 import { useUserStore } from '@store/userStore.js';
-import { startConsciousnessLoop, stopConsciousnessLoop } from '@services/consciousness.js';
-import { loadSession, authApi, saveSession } from '@services/authClient.js';
-import { authenticateMaster } from '@services/consciousness.js';
+import { startConsciousnessLoop, stopConsciousnessLoop, authenticateMaster } from '@services/consciousness.js';
+import { loadSession, saveSession, instanceApi } from '@services/authClient.js';
 import { TIERS } from '@services/accessControl.js';
 import Login   from '@pages/Login/Login.jsx';
+import Setup   from '@pages/Setup/Setup.jsx';
 import Unlock  from '@pages/Unlock/Unlock.jsx';
 
 // Every page/route/tier comes from ONE registry — src/config/registry.js
@@ -147,12 +146,27 @@ function InstanceProvider() {
   return null;
 }
 
+/**
+ * App — the gate chain.
+ *
+ *   Gate 1  passcode  → Unlock.jsx      decrypts the store
+ *   Setup             → Setup.jsx       only when this copy has no owner yet
+ *   Gate 2+3          → Login.jsx       password, then 12-digit access key
+ *   then              → the app
+ *
+ * Each gate is a hard boundary: the next one cannot be reached or inspected
+ * until the previous has actually passed. Provisioning is asked of the store,
+ * never assumed, so a build handed to someone else configures itself in the UI
+ * and they never open the source.
+ */
 export default function App() {
   const { currentUser, setSession } = useUserStore();
   const [authChecked,    setAuthChecked]    = useState(false);
   const [cryptoUnlocked, setCryptoUnlocked] = useState(false);
+  const [instanceInfo,   setInstanceInfo]   = useState(null);   // null = not asked yet
+  const [setupDone,      setSetupDone]      = useState(false);
 
-  // Step 1: Check & restore session
+  // Restore an existing session, if the tab still holds one
   useEffect(() => {
     const existing = loadSession();
     if (existing) {
@@ -168,18 +182,26 @@ export default function App() {
     if (issues.length) console.warn('[registry]', issues.join('; '));
   }, []);
 
+  // Ask the store whether this copy has an owner. Only meaningful post-unlock.
+  const refreshInstanceInfo = useCallback(async () => {
+    const res = await instanceApi.info();
+    setInstanceInfo(res?.ok ? res.data : { provisioned: false, unreachable: true });
+  }, []);
+
+  useEffect(() => {
+    if (cryptoUnlocked) refreshInstanceInfo();
+  }, [cryptoUnlocked, refreshInstanceInfo]);
+
   if (!authChecked) return null;
 
-  // Step 1: Crypto unlock gate — always first
+  // ── Gate 1 — passcode unlocks the encrypted store ────────────────────────
   if (!cryptoUnlocked) {
     return (
       <Unlock onUnlocked={(result) => {
-        if (result.devMode) {
-          // Browser dev mode — skip crypto, show login
-          setCryptoUnlocked(true);
-          return;
-        }
-        // In Electron, session manager returned user after unlock
+        // Browser dev mode: no store to open, so fall straight through
+        if (result.devMode) { setCryptoUnlocked(true); return; }
+
+        // The session manager may hand back an already-authenticated user
         if (result.user) {
           saveSession(result.token, result.user);
           setSession(result.user, result.token);
@@ -190,11 +212,24 @@ export default function App() {
     );
   }
 
-  // Step 2: User login gate (for non-master accounts)
+  // Waiting on the store's answer — render nothing rather than guess a gate
+  if (instanceInfo === null) return null;
+
+  // ── First run — provision this instance's owner ──────────────────────────
+  if (!instanceInfo.provisioned && !setupDone && !instanceInfo.browserOnly) {
+    return (
+      <Setup onProvisioned={async () => {
+        setSetupDone(true);
+        await refreshInstanceInfo();
+      }} />
+    );
+  }
+
+  // ── Gates 2 and 3 — password, then access key ────────────────────────────
   if (!currentUser) {
     return (
       <div style={{ fontFamily: 'var(--font)' }}>
-        <Login onLogin={() => {}} />
+        <Login onLogin={() => { /* setSession already ran inside Login */ }} />
       </div>
     );
   }

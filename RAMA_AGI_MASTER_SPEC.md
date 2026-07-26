@@ -1419,3 +1419,240 @@ dataset stays in memory and is never written in plaintext.
 |---|---|---|---|
 | `/genome` | Genome | Master | Gene map, measured gene health, instances, expression, failover |
 | `/introspect` | Introspect | Master | Success rates, optimization vectors, regressions, timeline |
+
+---
+
+## SECTION 26 — Startup Architecture (staged self-healing boot)
+
+`start.cjs` is the single entry point. It is modelled on how a brain wakes:
+the smallest viable part comes online first, uses itself to repair its own
+startup problems, and only then brings the rest up. **No stage assumes the next
+one works.**
+
+| Stage | Name | Responsibility | Can it fail the boot? |
+|---|---|---|---|
+| 0 | BRAINSTEM | Zero dependencies. Node version, paths, `.env`, data dirs, scenario memory, UTF-8 console. | Only if Node itself is too old |
+| 1 | DIAGNOSE | Measure npm deps, native modules, ports, disk, build artefacts. Produces a defect list. **Fixes nothing.** | No — measurement only |
+| 2 | SELF-HEAL | Repair each defect: remembered fix first, generic fix second. Every repair is app-scoped. | Only if a blocking defect cannot be repaired |
+| 3 | CORE | Express API on 4097. Rāma's spinal cord. | No — the desktop app works over IPC regardless |
+| 4 | CORTEX | Vite dev server, or the production build. | Only in `--prod` with no build |
+| 5 | SHELL | The Electron window. | No — browser URL is reported as fallback |
+| 6 | FULL | Verify the genome, report which capabilities are actually live. | No — reports honestly instead |
+
+### Separation of blocking from degrading
+
+A missing dependency is classified, not lumped together:
+
+- **blocking** — `express`, `electron`, `vite`, `react`. Without these there is no app.
+- **degrading** — `argon2` (scrypt fallback), `node-pty` (piped shell), `systeminformation`
+  (no thermal sensing), `simple-git` (no timeline), `playwright` (HTTP fetch only),
+  `vectra` (TF-IDF keyword memory). Each names the capability it costs.
+
+Stage 1 prints both lists with the exact command that fixes each. Nothing is
+silently swallowed and nothing is silently repaired without saying so.
+
+### Scenario memory
+
+Every failure and its resolution is written to
+`data/system/startup-scenarios.json`. The second time Rāma meets a problem it
+already holds the fix, so boot gets faster and quieter over time. Recognised
+patterns are matched against child-process output live, so a failure is explained
+at the moment it appears rather than left as a stack trace.
+
+### Host system is never modified
+
+Repairs are confined to the project: `npm install`, `npm rebuild <module>`, a
+frontend build, freeing a port owned by a previous Rāma run. The launcher does
+not touch registry keys, global packages, or system configuration.
+
+### Per-boot API token
+
+`start.cjs` generates a fresh random `RAMA_SERVER_TOKEN` on every launch and
+passes it to both the Express server and the Electron shell. It is never written
+to disk, so a token captured from one run is worthless in the next. Token-guarded
+server routes **fail closed** when it is absent rather than trusting any local
+caller.
+
+### Flags
+
+```
+node start.cjs                 Development (Vite HMR + Electron)
+node start.cjs --prod          Production (build/ + Electron)
+node start.cjs --build         Force a frontend rebuild first
+node start.cjs --diagnose      Report only — change nothing, exit
+node start.cjs --repair        Heal everything it can, then exit
+node start.cjs --probe         Refresh the dependency version probe
+node start.cjs --no-electron   Server + Vite only (headless / remote UI)
+node start.cjs --no-heal       Diagnose and run, but never auto-install
+```
+
+---
+
+## SECTION 27 — Authentication Architecture (three independent gates)
+
+Reaching Rāma requires **three independent secrets**. Losing any one of them to
+an attacker is not sufficient.
+
+| Gate | Secret | Proves | Implementation | Yields |
+|---|---|---|---|---|
+| 1 | Store passcode | You can decrypt the data | `cryptoCore` + `sessionManager` | An open store. **No identity.** |
+| 2 | Password | Who you are | Argon2id (64 MiB, t=3, p=4), scrypt fallback | A 10-minute step token |
+| 3 | 12-digit access key | You hold the issued key | HMAC-SHA256(key, userId) | The session token |
+
+### Ownership of each concern
+
+| Concern | Owner | Notes |
+|---|---|---|
+| Store decryption | `electron/cryptoCore.cjs` | AES-256-GCM v3, AAD-bound, gzip, LRU |
+| Gate 1 lifecycle | `electron/sessionManager.cjs` | Opens the store. Holds **no** user identity. |
+| Accounts + sessions | `electron/lib/authCore.cjs` | The only implementation |
+| IPC surface | `electron/ipc/authEngine.cjs` | Fails closed while the store is locked |
+| Storage | `electron/dataStore.cjs`, `instances` domain | No plaintext account file exists anywhere |
+| Tier matrix | `shared/capabilities.json` | One definition, three runtimes |
+
+### Security properties
+
+- Argon2id password hashing; scrypt fallback when the native module is missing
+- Brute-force lockout: 5 failures → 15 minutes, per username
+- `timingSafeEqual` on every secret comparison
+- A dummy hash is computed for unknown users so timing does not enumerate accounts
+- Generic error text on every path that could confirm an account exists
+- Step tokens are single-use, 10-minute, and never persisted
+- Session tokens are bound to a client fingerprint; a mismatch **revokes** the token
+- Access keys are stored only as HMAC. Shown once. Not reproducible — not even by Rāma.
+- Master (tier 0) is provisioned once and is never grantable afterwards
+
+### First run — the user never opens the source
+
+1. `Unlock.jsx` sets the store passcode
+2. The store is asked whether it has an owner (`auth:instance-info`)
+3. If not, `Setup.jsx` provisions one: identity → access level → key handover
+4. `Login.jsx` takes it from there
+
+A build handed to someone else configures itself entirely in the UI.
+
+### Distributed-instance tier policy
+
+Master is Rāma's single principal and **ships with no build**. Every distributed
+copy provisions its owner at **SuperAdmin (1)** by default: complete operational
+control of that instance, no access to master identity, the credential vault,
+genome changes, or self-modification approval. The owner may deliberately choose
+Admin (2) or Operator (3) instead. Master is claimable only with the master
+enrolment secret.
+
+### Three vulnerabilities closed in this work
+
+These were real, present in the codebase, and each is worth recording so the
+design is not accidentally reverted:
+
+1. **Hardcoded master password over HTTP.** `server/routes/auth.cjs` seeded a
+   tier-0 account with a default password and issued a session from a single POST
+   to `localhost:4097/api/auth/login` — one factor, no passcode, no key. The
+   server now has no authentication authority at all: it cannot read the
+   encrypted store, so rather than approximate auth with a weaker scheme it
+   returns 501 and explains where auth actually lives.
+
+2. **Passcode alone granted Master.** `sessionManager.masterUnlock()` minted a
+   tier-0 session and returned a token, so `App.jsx` set a session and skipped
+   gates 2 and 3 entirely. It also kept its own master record in the `users`
+   domain — a second account store. Both removed; gate 1 now returns
+   `{ ok, storeUnlocked, firstRun }` and nothing else.
+
+3. **A wrong passcode looked like a fresh install.** `cryptoCore.unlock()` only
+   derives keys; any passcode "succeeds". `dataStore.loadAll()` falls back to
+   empty defaults for a domain that will not decrypt, so a wrong passcode
+   presented an empty store — no accounts, ready to re-provision. Fixed with
+   `rama.verify`: a known-plaintext blob written under the correct keys on first
+   unlock and required to decrypt on every later unlock. Verified by test:
+   derivation still succeeds under a wrong passcode, `verifyPasscode()` returns
+   false, and the data itself fails its HMAC.
+
+### Passcode change is a full re-key
+
+The old implementation called `unlock(newPasscode, dir)` while the old salt file
+was still present. That reused the old salt, derived keys matching nothing on
+disk, and left every `.enc` file unreadable — silent data loss. The correct
+sequence, now implemented in `sessionManager.changePasscode()`:
+
+1. Verify the old passcode against the verifier
+2. Load every domain into memory under the **old** keys
+3. Securely delete the old salt and verifier
+4. Derive the **new** keys, write a new verifier
+5. `dataStore.markAllDirty()` then `saveAll()` — rewrite every domain
+6. Re-seal the nucleus under the new passcode
+
+Steps 1–2 are safe to abort. From step 3 the in-memory copy is the only source of
+plaintext, which is why step 2 is unconditional. Authority requires an
+authenticated **Master session**, not merely an open store.
+
+---
+
+## SECTION 28 — BUILD LEDGER & RESUME PROTOCOL
+
+> **READ THIS SECTION FIRST.** It exists because chat sessions end, crash, or hit
+> a context limit mid-task. There are many valid ways to build the same
+> functionality; without a record of which way was chosen, a later session
+> re-decides differently and breaks what already works.
+
+### Working agreement
+
+1. **Research before changing.** For anything non-trivial, check current practice
+   and the existing codebase first, then write the decision into this section
+   *before* implementing.
+2. **Ledger first, code second.** When a task is picked up, add it to the ledger
+   below with status `in-progress` and its next concrete step.
+3. **Update on completion.** When a step finishes, mark it and write the *next*
+   step explicitly, so a cold session can resume from the document alone.
+4. **Never re-litigate a locked invariant** (below) without the master saying so.
+5. **Verify before claiming done.** `node --check` on every `.cjs`, diagnostics
+   clean on every `.jsx`, and a behavioural test where the logic is security- or
+   data-critical.
+
+### Locked invariants — do not change without explicit instruction
+
+| # | Invariant | Where enforced |
+|---|---|---|
+| I1 | Three gates. Passcode ≠ identity. Gate 1 never returns a user or a token. | `sessionManager.masterUnlock` |
+| I2 | The Express server has **no** authentication authority. No user table, no login route. | `server/routes/auth.cjs` |
+| I3 | A wrong passcode must be rejected, never treated as first run. | `cryptoCore.verifyPasscode` |
+| I4 | Master (tier 0) is provisioned once and is never grantable afterwards. | `authCore.provision`, `authCore.createUser` |
+| I5 | Access keys are stored as HMAC only, shown once, never reproducible. | `authCore.mintKey` |
+| I6 | Nothing is written to Rāma's own source without an approval recorded in the ledger. | `lib/proposals.cjs` |
+| I7 | Every page/route/tier/voice entry comes from `src/config/registry.js`. | `registry.js` |
+| I8 | Tiers and the capability matrix are defined once in `shared/capabilities.json`. | all three runtimes |
+| I9 | One main-process HTTP client; one renderer→server transport. | `electron/lib/http.cjs`, `apiClient.serverJson` |
+| I10 | One resource admission authority. | `resourceOrchestrator.admit` |
+| I11 | Upgrades are additive. Every new engine has a working fallback. | per-engine |
+| I12 | No `console.log` in shipped code. Pinned dependency versions. No placeholders. | project-wide |
+| I13 | Commit and push to **both** `dev` and `source`. | git workflow |
+| I14 | Passcode change is a full re-key (load → destroy salt → re-derive → rewrite all). | `sessionManager.changePasscode` |
+
+### Ledger
+
+| # | Task | Status | Notes / next step |
+|---|---|---|---|
+| 1–18 | Phase 1–4 foundation, browser, models, agents, palette, voice, 10 axes, tiers, encryption, IDE, evolution, resources, installer, theme, StockMind absorption, vector/graph/sandbox/self-care, event bus + AST + regen, nucleus + IPC encryption, performance pass, 4 showstopper bug fixes | done | See sections 1–22 |
+| 19 | Consolidate 19 duplicated subsystems | done | Section 23. Commit `416e592` |
+| 20 | Genome / instance holonic layer | done | Section 24. 30 genes, 6 roles, verified 30/30 live |
+| 21 | Meta-cognition + timeline flashbacks | done | Section 25 |
+| 22 | Staged self-healing startup (`start.cjs`) | done | Section 26. `--diagnose` verified working |
+| 23 | Three-gate authentication | done | Section 27. Behavioural test passed on all 3 gates + lockout + fingerprint binding |
+| 24 | Close hardcoded-master-password HTTP backdoor | done | Section 27, item 1 |
+| 25 | Passcode verifier (`rama.verify`) | done | Section 27, item 3. Test proved wrong passcode now rejected |
+| 26 | Passcode change full re-key | done | Section 27. `dataStore.markAllDirty()` added |
+| 27 | Rewire Login / Setup / App gate chain | done | `Login.jsx` rewritten for gates 2+3 with key recovery; `App.jsx` chain is Unlock → Setup → Login → app |
+| 28 | Rewire `Users.jsx` onto the new auth API | done | `setTier` / `setActive` / `remove` / `resetPassword` / `issueFor`; key handover UI added |
+| 29 | **Verify the renderer actually builds** | **blocked** | `node_modules` is absent on this machine. Needs `npm install` then `npm run build` on the target machine. Everything below assumes this passes. |
+| 30 | Wire `mustChangePassword` into the login flow | not started | `authCore` sets it on admin-created accounts and returns it from `loginStep1`, but no UI forces the change yet. Next step: after a successful gate 3, if `user.mustChangePassword` render a forced change-password screen before the app mounts. |
+| 31 | Surface `auth:sessions` in the UI | not started | Handler exists and is gated on `audit.all`. Next step: add a Sessions panel to the Users page listing active sessions with revoke. |
+| 32 | Instance ↔ account ownership | not started | `instanceManager.spawn({ owner })` accepts an owner id but nothing passes one. Next step: pass `currentUser.id` from `Genome.jsx` and filter `instance:list` by owner for non-admin tiers. |
+| 33 | Genome-change applier | not started | `genome:propose-change` creates a `GENOME` proposal but no applier is registered for that kind, so approval cannot be applied. Next step: register an applier that patches the sealed nucleus via `nucleusSealer.patchNucleus` and requires a restart. |
+
+### Resume checklist for a cold session
+
+1. Read sections 23–28 of this document.
+2. `git log --oneline -8` — confirm which ledger rows are actually committed.
+3. `node start.cjs --diagnose` — see what the environment is missing.
+4. Pick the first ledger row that is not `done` and follow its stated next step.
+5. Before writing code, confirm the change does not violate a locked invariant.
+6. On completion: update the row, write the next step, commit to `dev` and `source`.

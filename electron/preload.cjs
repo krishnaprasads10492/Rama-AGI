@@ -222,14 +222,17 @@ contextBridge.exposeInMainWorld('rama', {
     },
   },
 
-  // ── Session / Unlock ──────────────────────────────────────────────────────
+  // ── Gate 1: store passcode ────────────────────────────────────────────────
+  // This gate opens the encrypted store. It does NOT establish an identity —
+  // there is no `validate` here any more, because it never had a session to
+  // validate. Identity lives behind `rama.auth`.
   session: {
-    isFirstRun:     ()           => ipcRenderer.invoke('session:is-first-run'),
-    unlock:         (passcode)   => ipcRenderer.invoke('session:unlock', passcode),
-    lock:           ()           => ipcRenderer.invoke('session:lock'),
-    validate:       (token)      => ipcRenderer.invoke('session:validate', token),
-    status:         ()           => ipcRenderer.invoke('session:status'),
-    changePasscode: (old_, new_) => ipcRenderer.invoke('session:change-passcode', old_, new_),
+    isFirstRun:     ()      => ipcRenderer.invoke('session:is-first-run'),
+    unlock:         (pass)  => ipcRenderer.invoke('session:unlock', pass),
+    lock:           ()      => ipcRenderer.invoke('session:lock'),
+    status:         ()      => ipcRenderer.invoke('session:status'),
+    // Requires an authenticated Master session; re-encrypts every domain
+    changePasscode: (opts)  => ipcRenderer.invoke('session:change-passcode', opts),
   },
 
   // ── Encrypted data store ──────────────────────────────────────────────────
@@ -307,6 +310,35 @@ contextBridge.exposeInMainWorld('rama', {
       ipcRenderer.on('regen:proposal-ready', h);
       return () => ipcRenderer.removeListener('regen:proposal-ready', h);
     },
+  },
+
+  // ── Authentication (3 gates: passcode → password → 12-digit access key) ────
+  auth: {
+    instanceInfo:  ()      => ipcRenderer.invoke('auth:instance-info'),
+    provision:     (opts)  => ipcRenderer.invoke('auth:provision', opts),
+
+    loginStep1:    (p)     => ipcRenderer.invoke('auth:login-step1', p),
+    loginStep2:    (p)     => ipcRenderer.invoke('auth:login-step2', p),
+    logout:        (token) => ipcRenderer.invoke('auth:logout', token),
+    me:            (p)     => ipcRenderer.invoke('auth:me', p),
+
+    keygen:            (p) => ipcRenderer.invoke('auth:keygen',             p),
+    keygenFromStep:    (t) => ipcRenderer.invoke('auth:keygen-step',        t),
+    keygenFromCreds:   (p) => ipcRenderer.invoke('auth:keygen-credentials', p),
+    issueKey:          (p) => ipcRenderer.invoke('auth:issue-key',          p),
+
+    changePassword: (p)    => ipcRenderer.invoke('auth:change-password', p),
+    resetPassword:  (p)    => ipcRenderer.invoke('auth:reset-password',  p),
+    checkPassword:  (pw)   => ipcRenderer.invoke('auth:check-password',  pw),
+
+    listUsers:  (p) => ipcRenderer.invoke('auth:list-users',  p),
+    createUser: (p) => ipcRenderer.invoke('auth:create-user', p),
+    setTier:    (p) => ipcRenderer.invoke('auth:set-tier',    p),
+    setActive:  (p) => ipcRenderer.invoke('auth:set-active',  p),
+    deleteUser: (p) => ipcRenderer.invoke('auth:delete-user', p),
+
+    sessions: (p) => ipcRenderer.invoke('auth:sessions', p),
+    status:   (p) => ipcRenderer.invoke('auth:status',   p),
   },
 
   // ── Genome (complete capability blueprint carried by every instance) ───────
@@ -578,7 +610,7 @@ const ALLOWED_PREFIXES = [
   'session:', 'store:', 'nucleus:', 'ipc-enc:', 'bus:', 'ast:', 'regen:',
   'vector:', 'sandbox:', 'graph:', 'selfcare:', 'vault:', 'models:',
   'agents:', 'browser:', 'app:', 'capability:', 'genome:', 'instance:',
-  'proposals:', 'meta:', 'timeline:',
+  'proposals:', 'meta:', 'timeline:', 'auth:',
 ];
 
 function isAllowed(channel) {

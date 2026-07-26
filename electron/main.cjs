@@ -34,6 +34,7 @@ const ipcEncryption    = require('./ipcEncryption.cjs');
 const proposalLedger   = require('./lib/proposals.cjs');
 // ─── Genome / Instance layer (holonic architecture) ───────────────────────────
 const genomeIPC        = require('./genome.cjs');
+const authIPC          = require('./ipc/authEngine.cjs');
 const instanceIPC      = require('./ipc/instanceManager.cjs');
 const metaCognitionIPC = require('./ipc/metaCognition.cjs');
 const timelineIPC      = require('./ipc/timeline.cjs');
@@ -284,6 +285,8 @@ app.whenReady().then(async () => {
   timelineIPC.register(ipcMain);
   sessionMgr.register(ipcMain);
   dataStore.register(ipcMain);
+  // Auth is registered after the store so its adapter can attach on unlock
+  authIPC.register(ipcMain);
 
   createMainWindow();
   createTray();
