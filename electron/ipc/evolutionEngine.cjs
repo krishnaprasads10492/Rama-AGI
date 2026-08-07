@@ -399,7 +399,12 @@ function flattenProposal(p) {
 }
 
 // ─── Evolution applier ────────────────────────────────────────────────────────
-// Registered with the ledger. Only ever invoked after approval is recorded.
+// Registered with the ledger. Only ever invoked after approval is recorded — this
+// verification step runs after that check, so it informs the audit trail and does
+// not soften the approval invariant (I6). It is also run once at the point
+// `regen:set-fix` attaches real content (evolutionEngine currently has no
+// synthesis path that fills `changes` before apply — this covers that path when
+// it exists, and is a harmless no-op otherwise).
 proposals.registerApplier(proposals.KINDS.EVOLUTION, async (proposal, opts = {}) => {
   const changes = proposal.changes || [];
   if (changes.length === 0) {
@@ -409,6 +414,13 @@ proposals.registerApplier(proposals.KINDS.EVOLUTION, async (proposal, opts = {})
     throw new Error('Refusing to apply: source license is not compliant');
   }
 
+  try {
+    const { verifyProposal } = require('../lib/verifyProposal.cjs');
+    proposal.meta = { ...proposal.meta, verification: await verifyProposal(proposal) };
+  } catch (err) {
+    proposal.meta = { ...proposal.meta, verification: { ok: false, reason: err.message, files: [] } };
+  }
+
   const results = [];
   for (const change of changes) {
     const absPath = opts.repoPath ? path.join(opts.repoPath, change.path) : change.path;
@@ -416,7 +428,7 @@ proposals.registerApplier(proposals.KINDS.EVOLUTION, async (proposal, opts = {})
     fs.writeFileSync(absPath, change.content, 'utf8');
     results.push({ path: change.path, written: true });
   }
-  return results;
+  return { written: results, verification: proposal.meta.verification };
 });
 
 // ─── Self-assessment ──────────────────────────────────────────────────────────

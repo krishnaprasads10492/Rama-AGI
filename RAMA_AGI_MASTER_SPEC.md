@@ -1647,6 +1647,7 @@ authenticated **Master session**, not merely an open store.
 | 38 | Voice capability ladder | done | Section 30. `webkitSpeechRecognition` can never work in the Electron shell (Chromium lacks Google's API keys), and the old engine retried it every 300ms forever. Replaced with L0 text → L1 push-to-talk → L2 local Whisper → L3 cloud Whisper → L4 wake word. New `electron/ipc/voiceEngine.cjs` resolves local-before-cloud; renderer captures via MediaRecorder. Mic button and an `L<n>` chip show the live level and what the next one needs. Whisper detection **executes** the candidate and requires it to identify itself — a name match alone matched `C:\Windows\System32\main.cpl`. |
 | 39 | Permission + window-open policy | done | `main.cjs` now allows only `media` and sanitized clipboard writes, denies every other permission request, and routes `window.open` to the external browser instead of opening a renderer window. |
 | 46 | Cognition ladder + legibility | done | Section 35. `src/services/cognition.js`: tier 0 reflex (9 skills, no model), tier 1 local, tier 2 cloud, tier 3 candidate-finding from the experiential dataset. Wired into Chat ahead of the model call. Legibility: base 13px→14px with tokenised scale, plus `appearance:*` IPC over `setZoomFactor`, which is the only mechanism that reaches the hundreds of inline pixel values. Routing verified by 28 assertions, including that "refactor this function to be smaller" escalates rather than zooming out. |
+| 49 | Genome hot-swap applier + verification report + auto-failover | done | Section 36. Modelled the master's architecture poster against the real codebase: mapped 8 concepts already built, closed 3 genuine gaps the diagram pointed at (genome proposals could not be applied; failover could be answered but not acted on; no verification step before a risky change), and explicitly declined 5 poster claims with no engineering referent (1.5T-param lattice, ZK-PoK, Monte-Carlo parallel universes, Coq proofs, infinite scaling) rather than fabricate metrics around them. `electron/lib/genomeApplier.cjs` registers the missing `GENOME` applier with a deep merge (verified: sibling axis untouched, locked-nucleus apply refused). `electron/lib/verifyProposal.cjs` attaches AST-based quality/issue reports to regen (before approval) and evolution (after approval, audit-only) proposals — verified a deliberately-bad file scores lower than a clean one. `selfCare.cjs` gained `checkInstanceFailover()`: auto-expresses a dormant gene on a sibling instance when an active instance needs a dead one, additive and reversible only, always notifies master. |
 | 47 | Tier 3 auto-proposal of new reflexes | not started | `findReflexCandidates()` reports escalation counts by tool but does not yet synthesise a skill. Next step: when one phrasing cluster exceeds ~20 escalations with structurally identical answers, generate a `SKILLS` entry and file it as a `SELF_MODIFY` proposal (invariant I6 — never auto-applied). |
 | 48 | Appearance panel in Settings | not started | Zoom is reachable by chat/voice command only. Next step: add a Voice + Appearance section to `Settings.jsx` with a zoom slider bound to `window.rama.appearance`, the voice level from ledger row 40, and `RAMA_WHISPER_PATH`. |
 | 45 | Live reload | done | Section 34. Watching split by domain so each change does the least that makes it live: `src`/`shared`/`index.html` → HMR under Vite, otherwise rebuild + window reload; `electron/**` → restart the shell only; `server/**` → restart the API only; `package.json` → warn, never auto-install. Reload is signalled by `build/.reload` written *after* a clean `vite build`, because Vite empties `outDir` first and a watcher on `build/` would reload a half-written bundle. 250ms debounce per domain, in-flight rebuilds coalesce. `--no-watch` disables. Classification verified by 22 assertions. |
@@ -2137,3 +2138,89 @@ preference rather than a workaround.
 Rāma can therefore be *told* to fix it — "make the text bigger", "zoom out",
 "reset the zoom" — and does so at tier 0, with the setting persisted. That was the
 second half of the request: the ability to ask it to improve its own UX.
+
+---
+
+## SECTION 36 — Reading the architecture poster against what is real
+
+The master supplied an architecture diagram ("Universal Instantiation, Cryptographic
+Loyalty & Self-Evolution Blueprint"). It is a mix of concepts already built, concepts
+worth building, and poster language with no engineering referent. This section
+records which is which, so a later session does not try to implement the third
+category.
+
+### Already built — the diagram is describing this system, correctly
+
+| Diagram term | Real implementation |
+|---|---|
+| Rāma Supreme Genome / Universal AI DNA | `electron/genome.cjs` — 30 genes, 8 domains, holonic (section 24) |
+| Master Keyphrase Anchor / Authorized Master | `authCore.cjs` three-gate auth + `nucleusSealer.cjs` (section 27) |
+| Universal Instantiation (spawning engine) | `instanceManager.cjs` — `spawn()`, persisted, admission-gated |
+| Task-driven differentiation (M_task) | `genome.expressedFor(role)` / `express()` — dormant gene activation |
+| Limit-Breaker Engagement (anomaly detection) | `metaCognition.js` self-audit + `selfCare.cjs` regression detection (section 25, 33) |
+| Neural Cellular Automata self-healing | `selfCare.cjs` health sweep + heal actions (partial — see below) |
+| Holonic resilience ("each part is the whole") | the genome's core design: every instance carries every gene |
+| Infrastructure / tooling / orchestration stack | sections 1–22 — Express, Electron, IPC layer, resource orchestrator |
+
+### Genuinely missing — worth building, and buildable honestly
+
+| Diagram term | What it actually means here | Built in this pass? |
+|---|---|---|
+| Genome hot-swapping (verified capability merge) | `proposals.cjs` `KINDS.GENOME` had no registered applier — a genome-change proposal could be approved but never applied | yes — `electron/lib/genomeApplier.cjs` |
+| Self-healing lattice / morphogenetic healing / replacement | `failoverCandidates()` could answer "who could take over" but nothing acted on it | yes — auto-failover in `selfCare.cjs`, notified and reversible |
+| Formal proof generator (honest version) | not theorem proving — a verification report (AST quality + impact) attached to a proposal before a human approves it | yes — `attachVerification()` in the proposal creation path |
+
+### Poster language not implemented, and why
+
+- **"1.5T parameter neural lattice"**, **"+342% epigenetic pruning"**, **"27.2ms inference
+  throughput"** — no basis. Rāma routes to existing model APIs and Ollama; it does not
+  train or host a 1.5T-parameter model. Inventing a metrics dashboard around numbers
+  with no measurement behind them would violate the project's own rule (section 24, 33):
+  measured, never claimed.
+- **Post-quantum ZK-PoK** — the real auth is Argon2id + HKDF + HMAC-bound sessions
+  (section 27), which is solid but is not a zero-knowledge proof system. Labelling it ZK-PoK
+  would be a false claim about the cryptography in use.
+- **Monte Carlo Synthetic Sandbox (parallel simulation universes)** — `sandboxEngine.cjs`
+  runs one execution at a time with resource admission and tiered approval (section 24).
+  Running N parallel simulated universes to Monte-Carlo a decision is a real idea but a
+  large one; it is not attempted here. What ships instead is the verification report above,
+  which is the honest, buildable slice of the same intent: know more before applying a change.
+- **Coq theorem proving** — no formal verification toolchain is wired in. The AST-based
+  quality/impact check is real static analysis, not a machine-checked proof, and is
+  described as such.
+- **"Infinite task scaling"** — capacity is bounded and stated: `MAX_INSTANCES = 8`,
+  `MAX_AGENTS = 10`, admission-gated by `resourceOrchestrator`. Claiming "infinite" would
+  contradict the project's own admission-control design.
+
+### What was added
+
+1. **`electron/lib/genomeApplier.cjs`** — registers the `GENOME` proposal kind with an
+   applier that patches the sealed nucleus via `nucleusSealer.patchNucleus` and marks
+   `requiresRestart`. A genome change is high-risk by definition (it can alter loyalty,
+   ethics, or capability wiring), so it goes through the same single approval gate as
+   every other self-change (invariant I6) — nothing new is exempted.
+
+2. **Auto-failover in `selfCare.cjs`** — when a health sweep finds a dead gene the active
+   instance needs, it checks `failoverCandidates()` for another live instance that already
+   holds it dormant, and expresses it there automatically. This is deliberately **not**
+   gated behind a proposal, for the same reason `disable-vector` already auto-applies:
+   expressing a dormant gene is additive and reversible (it does not delete anything, and
+   `express()` already refuses to exceed the owning tier's authority). Master is still
+   always notified — "never self-heal silently" is selfCare's own founding rule, and this
+   does not get an exception either.
+
+3. **Verification report (`electron/lib/verifyProposal.cjs`)** — runs `astEngine.analyzeFile`
+   on each file a proposal would write and records quality score + issues into
+   `proposal.meta.verification`. Advisory only; it never touches `proposals.apply()`'s
+   approval invariant.
+
+   Timing differs honestly by engine, because only one of them has a hook that runs
+   before approval with real file content:
+   - `codeRegenEngine`'s `regen:set-fix` is the point the AI-generated fix becomes real
+     content, and it runs **before** the proposal can be approved — so for regen
+     proposals the master sees the report while deciding.
+   - `evolutionEngine` has no synthesis step yet that fills `changes` before apply (see
+     ledger — evolution proposals are created with `changes: []`), so its verification
+     runs inside the registered applier, **after** approval, as a recorded audit note
+     rather than as input to the decision. This is stated plainly rather than implying
+     parity between the two engines.

@@ -284,17 +284,32 @@ function register(ipcMain) {
     data: { role, expressed: expressedFor(role), dormant: dormantFor(role) },
   }));
 
-  // Genome changes are proposals — never applied directly, even for master.
+  /**
+   * Genome changes are proposals — never applied directly, even for master.
+   * `nucleusPatch` is what the registered applier (lib/genomeApplier.cjs) merges
+   * into the sealed nucleus after approval. Without it the proposal is created
+   * but can never be meaningfully applied — reject that case up front rather
+   * than letting it fail later at apply time with a confusing error.
+   */
   ipcMain.handle('genome:propose-change', async (_e, change) => {
     const ledger = require('./lib/proposals.cjs');
+
+    if (!change?.nucleusPatch || typeof change.nucleusPatch !== 'object') {
+      return { ok: false, error: 'A genome proposal needs a nucleusPatch object describing the change' };
+    }
+
     const p = ledger.create({
       kind:    ledger.KINDS.GENOME,
-      title:   change?.title || 'Genome change',
-      summary: change?.summary || '',
-      changes: change?.changes || [],
+      title:   change.title || 'Genome change',
+      summary: change.summary || '',
+      changes: change.changes || [],
       risk:    'high',
       requiresRestart: true,
-      meta:    { genomeHash: hashGenome({ version: GENOME_VERSION }), kind: change?.kind },
+      meta: {
+        genomeHash:   hashGenome({ version: GENOME_VERSION }),
+        kind:         change.kind,
+        nucleusPatch: change.nucleusPatch,
+      },
     });
     return { ok: true, data: { id: p.id, status: p.status } };
   });

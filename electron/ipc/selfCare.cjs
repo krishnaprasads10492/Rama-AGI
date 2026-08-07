@@ -108,6 +108,71 @@ function checkGenome() {
   }
 }
 
+/**
+ * Holonic self-healing: if an active instance is missing a gene it needs (per
+ * genome.verify()'s measured, not-claimed dead-gene list), check whether another
+ * live instance already holds that gene dormant and express it there.
+ *
+ * WHY THIS IS SAFE TO AUTO-APPLY (unlike a genome/self-modify proposal):
+ *   - expressing a dormant gene is additive — nothing is deleted or rewritten
+ *   - express() already refuses to exceed the expressing instance owner's tier
+ *   - it is fully reversible (the gene can be left expressed or the instance
+ *     suspended; no source file is touched)
+ * This mirrors the existing `disable-vector` self-heal action, which also
+ * auto-applies for the same reason. Master is still always notified — "never
+ * self-heal silently" has no exception here either.
+ */
+async function checkInstanceFailover() {
+  const actions = [];
+  try {
+    const genomeMod = require('../genome.cjs');
+    const instMod   = require('./instanceManager.cjs');
+
+    const verify = genomeMod.verify();
+    const deadGenes = verify.genes.filter(g => !g.live).map(g => g.id);
+    if (deadGenes.length === 0) return { actions };
+
+    const active = instMod.list({ status: instMod.STATUS.ACTIVE });
+
+    for (const inst of active) {
+      const missing = deadGenes.filter(g => inst.expressed.includes(g));
+      if (missing.length === 0) continue;   // this instance never needed the dead gene
+
+      for (const geneId of missing) {
+        // Find a sibling instance that holds the gene dormant (i.e. could take
+        // it over without a restart) rather than expressing it on the same
+        // instance that already failed to resolve it.
+        const candidates = instMod.list({ status: instMod.STATUS.ACTIVE })
+          .filter(c => c.id !== inst.id && c.dormant.includes(geneId));
+
+        if (candidates.length === 0) continue;
+
+        const target = candidates[0];
+        const res = instMod.express(target.id, geneId, null);   // null = system-initiated, no tier gate to bypass
+        actions.push({
+          geneId, failedOn: inst.id, healedOn: target.id, ok: !!res.ok,
+          message: res.ok
+            ? `Gene "${geneId}" was unreachable on ${inst.label} (${inst.id}) — expressed it on ${target.label} (${target.id}) instead`
+            : `Attempted failover for "${geneId}" onto ${target.id} but it failed: ${res.error}`,
+        });
+      }
+    }
+  } catch (err) {
+    return { actions: [], error: err.message };
+  }
+
+  if (actions.length) {
+    for (const a of actions) {
+      broadcast('selfcare:notification', {
+        ts: Date.now(), type: 'auto-failover', message: a.message,
+      });
+    }
+    healthLog.unshift({ ts: Date.now(), status: 'self-healed', alertCount: actions.length, actions });
+  }
+
+  return { actions };
+}
+
 async function checkSandbox() {
   try {
     const si2 = require('./sandboxEngine.cjs');
@@ -154,6 +219,11 @@ async function runHealthSweep() {
       message:   `${sweep.genome.degraded} of ${sweep.genome.total} genes not resolvable: ${sweep.genome.deadGenes.join(', ')}`,
       ts,
     });
+  }
+
+  sweep.failover = await checkInstanceFailover();
+  for (const f of sweep.failover.actions) {
+    sweep.alerts.push({ severity: 'warn', component: 'instance', message: f.message, ts });
   }
 
   // Aggregate resource alerts

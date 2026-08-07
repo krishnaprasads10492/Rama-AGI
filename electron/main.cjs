@@ -35,6 +35,7 @@ const ipcEncryption    = require('./ipcEncryption.cjs');
 const proposalLedger   = require('./lib/proposals.cjs');
 // ─── Genome / Instance layer (holonic architecture) ───────────────────────────
 const genomeIPC        = require('./genome.cjs');
+const genomeApplier    = require('./lib/genomeApplier.cjs');
 const authIPC          = require('./ipc/authEngine.cjs');
 const instanceIPC      = require('./ipc/instanceManager.cjs');
 const metaCognitionIPC = require('./ipc/metaCognition.cjs');
@@ -580,6 +581,7 @@ app.whenReady().then(async () => {
   nucleusSealer.register(ipcMain);
   ipcEncryption.register(ipcMain);
   proposalLedger.register(ipcMain);
+  genomeApplier.register();   // closes the gap: GENOME proposals could not be applied
   registerAppearance(ipcMain);
   // Genome layer — registered after the engines it describes so verify() is honest
   genomeIPC.register(ipcMain);

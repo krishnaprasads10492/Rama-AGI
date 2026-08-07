@@ -275,7 +275,18 @@ function register(ipcMain) {
     entry.changes = p.filePath
       ? [{ action: 'patch', path: p.filePath, content: fixedCode }]
       : [];
-    return { ok: true };
+
+    // Verification report for the human deciding — advisory only, does not
+    // gate apply(). This is the point real content first exists for this
+    // proposal, so it is the right point to run it. See spec section 36.
+    try {
+      const { verifyProposal } = require('../lib/verifyProposal.cjs');
+      entry.meta = { ...entry.meta, verification: await verifyProposal(entry) };
+    } catch (err) {
+      entry.meta = { ...entry.meta, verification: { ok: false, reason: err.message, files: [] } };
+    }
+
+    return { ok: true, data: { verification: entry.meta.verification } };
   });
 
   // ── Approve / reject / apply — all owned by the shared ledger ─────────────
