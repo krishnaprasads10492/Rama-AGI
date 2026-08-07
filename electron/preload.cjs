@@ -572,6 +572,7 @@ const RAMA_API = {
     getAudit:     ()           => ipcRenderer.invoke('agents:get-audit'),
     getResources: ()           => ipcRenderer.invoke('agents:get-resources'),
     setGovernor:  (limits)     => ipcRenderer.invoke('agents:set-governor', limits),
+    getReputation:()           => ipcRenderer.invoke('agents:get-reputation'),
     onSpawned:    (cb) => {
       const h = (_e, d) => cb(d);
       ipcRenderer.on('agents:spawned', h);

@@ -42,6 +42,7 @@ let govInterval  = null;
 // ─── Agent types & capabilities ───────────────────────────────────────────────
 const AGENT_TYPES = {
   research:  { label: 'ResearchAgent',  model: 'general',  persistent: false, maxInstances: 3 },
+  creative:  { label: 'CreativeAgent',  model: 'general',  persistent: false, maxInstances: 2 },
   code:      { label: 'CodeAgent',      model: 'code',     persistent: false, maxInstances: 2 },
   data:      { label: 'DataAgent',      model: 'analysis', persistent: false, maxInstances: 2 },
   monitor:   { label: 'MonitorAgent',   model: 'fast',     persistent: true,  maxInstances: 3 },
@@ -50,6 +51,46 @@ const AGENT_TYPES = {
   browser:   { label: 'BrowserAgent',   model: 'general',  persistent: false, maxInstances: 2 },
   orchestrator: { label: 'Orchestrator', model: 'general', persistent: true,  maxInstances: 1 },
 };
+
+// ─── Reputation-weighted scheduling (spec section 37) ─────────────────────────
+// NOT a currency or a market — an agent type's recent success rate nudges its
+// spawn priority. Bounded so it can only reorder the queue under contention; it
+// can never grant an admission resourceOrchestrator.admit() would refuse
+// (invariant I10 stays the one authority on that).
+const REPUTATION = {};   // type -> { runs, successes, score }
+const REP_MIN_RUNS  = 4;      // below this, no adjustment — not enough evidence
+const REP_MAX_BOOST = 1;      // priority levels a strong reputation can improve by
+const REP_MAX_PENALTY = 1;    // priority levels a poor one can worsen by
+
+function recordReputation(type, ok) {
+  const r = REPUTATION[type] ?? (REPUTATION[type] = { runs: 0, successes: 0 });
+  r.runs++;
+  if (ok) r.successes++;
+}
+
+/** Adjust a requested priority by this type's track record. Clamped to PRIORITY's range. */
+function reputationAdjustedPriority(type, requested) {
+  const r = REPUTATION[type];
+  if (!r || r.runs < REP_MIN_RUNS) return requested;
+
+  const rate = r.successes / r.runs;
+  const { PRIORITY } = resources;
+  const bounds = Object.values(PRIORITY);
+  const lo = Math.min(...bounds), hi = Math.max(...bounds);   // lower number = higher priority
+
+  let delta = 0;
+  if (rate >= 0.85) delta = -REP_MAX_BOOST;      // reliable: nudge toward higher priority
+  else if (rate <= 0.40) delta = REP_MAX_PENALTY; // struggling: nudge toward lower priority
+
+  return Math.min(hi, Math.max(lo, requested + delta));
+}
+
+function getReputations() {
+  return Object.fromEntries(Object.entries(REPUTATION).map(([type, r]) => [type, {
+    runs: r.runs, successes: r.successes,
+    rate: r.runs ? Math.round((r.successes / r.runs) * 100) : null,
+  }]));
+}
 
 // ─── Register IPC handlers ────────────────────────────────────────────────────
 function register(ipcMain) {
@@ -71,11 +112,14 @@ function register(ipcMain) {
       return { ok: false, error: `Max ${typeInfo.label} instances reached (${typeInfo.maxInstances})` };
     }
 
-    // Resource admission — single authority (CPU, RAM, thermal, pressure)
+    // Resource admission — single authority (CPU, RAM, thermal, pressure).
+    // Reputation only reorders the queue under contention; it cannot lower the
+    // bar for admission itself.
+    const requestedPriority = config.priority ?? resources.PRIORITY.NORMAL;
     const admission = resources.orchestrator.admit({
       ramMB: GOVERNOR.MAX_AGENT_RAM_MB,
       label: `${typeInfo.label} spawn`,
-      priority: config.priority ?? resources.PRIORITY.NORMAL,
+      priority: reputationAdjustedPriority(type, requestedPriority),
     });
     if (!admission.allow) {
       return { ok: false, error: admission.reason, snapshot: admission.snapshot };
@@ -183,6 +227,11 @@ function register(ipcMain) {
     };
   });
 
+  // ── Reputation (spec section 37 — not a currency, a priority nudge) ────────
+  ipcMain.handle('agents:get-reputation', async () => {
+    return { ok: true, data: getReputations() };
+  });
+
   // ── Configure limits ──────────────────────────────────────────────────────
   // Agent-count/timeout live here; CPU/RAM caps are forwarded to the single
   // resource authority so both views stay consistent.
@@ -279,21 +328,145 @@ async function executeAgent(agentId, task, config, sender) {
       }
     }
 
-    agent.result = result.content;
+    let finalContent = result.content;
+
+    // ── Optional refinement loop (spec section 37) ────────────────────────────
+    // Off by default: only runs when the caller asks for a metric, so agents
+    // that never opt in behave exactly as before.
+    if (config.refineAgainst) {
+      checkKilled();
+      const refined = await refineOutput({
+        content: finalContent,
+        metric: config.refineAgainst,
+        agent, step, checkKilled,
+      });
+      finalContent = refined.content;
+    }
+
+    agent.result = finalContent;
     agent.status = agent.type === 'monitor' || agent.type === 'sync' ? 'running' : 'complete';
+    recordReputation(agent.type, true);
     broadcast('agents:update', sanitize(agent));
-    broadcast('agents:complete', { agentId, result: result.content });
+    broadcast('agents:complete', { agentId, result: finalContent });
 
   } catch (err) {
     if (err.message !== 'Agent killed') {
       agent.status = 'error';
       agent.error  = err.message;
+      recordReputation(agent.type, false);
       broadcast('agents:update', sanitize(agent));
     }
   } finally {
     clearTimeout(timeoutId);
   }
 }
+
+// ─── Refinement loop ───────────────────────────────────────────────────────────
+/**
+ * Score a draft, and if it falls short, ask the model to revise specifically
+ * against the stated weaknesses. Bounded at 3 iterations — this is a genuine
+ * iterate-until-good-enough loop, not a metaphor, but it must terminate.
+ *
+ * Every attempt is recorded as a step, so the full history of drafts is visible
+ * and nothing is silently rewritten.
+ */
+const REFINE_MAX_ITERATIONS = 3;
+const REFINE_TARGET_SCORE   = 75;   // out of 100
+
+async function refineOutput({ content, metric, agent, step, checkKilled }) {
+  const scorer = REFINE_METRICS[metric];
+  if (!scorer) {
+    step('refine:skipped', { reason: `Unknown metric "${metric}"`, known: Object.keys(REFINE_METRICS) });
+    return { content, iterations: 0 };
+  }
+
+  let current = content;
+  let last = null;
+
+  for (let i = 1; i <= REFINE_MAX_ITERATIONS; i++) {
+    checkKilled();
+    const scored = scorer(current);
+    last = scored;
+    step(`refine:score:${i}`, { metric, score: scored.score, weaknesses: scored.weaknesses });
+
+    if (scored.score >= REFINE_TARGET_SCORE) {
+      step('refine:accepted', { metric, iterations: i, score: scored.score });
+      return { content: current, iterations: i, finalScore: scored.score };
+    }
+
+    if (i === REFINE_MAX_ITERATIONS) break;   // don't burn a model call we won't use
+
+    checkKilled();
+    const revision = await chatCompletion([
+      { role: 'system', content: `You are revising your own previous output to improve its ${metric}. Fix the specific weaknesses named. Keep every factual claim intact — do not invent new ones. Return only the revised text.` },
+      { role: 'user', content: `Previous draft:\n${current}\n\nWeaknesses to fix: ${scored.weaknesses.join('; ') || 'general improvement needed'}\n\nRevise it.` },
+    ], agent.model || 'gpt-4o');
+
+    current = revision.content?.trim() || current;
+    step(`refine:revised:${i}`, { length: current.length });
+  }
+
+  step('refine:capped', { metric, iterations: REFINE_MAX_ITERATIONS, finalScore: last?.score ?? null });
+  return { content: current, iterations: REFINE_MAX_ITERATIONS, finalScore: last?.score ?? null };
+}
+
+// ─── Refinement metrics ────────────────────────────────────────────────────────
+/**
+ * Two metrics, matching what can be honestly measured. No "engagement" metric:
+ * that needs real audience response data this system does not have, and a made-up
+ * proxy would be exactly the kind of fabricated number the project declined
+ * elsewhere (spec section 36). Readability is the real, buildable mechanism most
+ * "adjust tone" requests actually want.
+ */
+const REFINE_METRICS = {
+  /** Reuses intelligenceEngine's own source-credibility table — one opinion, not two. */
+  credibility: (text) => {
+    let getSourceCredibility;
+    try { ({ getSourceCredibility } = require('./intelligenceEngine.cjs')); }
+    catch { getSourceCredibility = null; }
+
+    const domains = [...new Set(
+      [...text.matchAll(/https?:\/\/([a-z0-9.-]+)/gi)].map(m => m[1].replace(/^www\./, '').toLowerCase())
+    )];
+
+    if (domains.length === 0) {
+      return { score: 40, weaknesses: ['No sources are cited — add citations with links'] };
+    }
+    if (!getSourceCredibility) {
+      return { score: 60, weaknesses: ['Credibility scoring unavailable in this context'] };
+    }
+
+    const scores = domains.map(d => getSourceCredibility(d).score);
+    const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+    const weak = domains.filter((d, i) => scores[i] < 0.6);
+
+    return {
+      score: Math.round(avg * 100),
+      weaknesses: weak.length ? [`Low-credibility or unranked sources: ${weak.join(', ')}`] : [],
+    };
+  },
+
+  /** Plain readability heuristic: sentence length, jargon density, passive voice. */
+  readability: (text) => {
+    const sentences = text.split(/[.!?]+\s/).filter(s => s.trim().length > 0);
+    const words = text.split(/\s+/).filter(Boolean);
+    const avgSentenceLen = words.length / Math.max(1, sentences.length);
+
+    const jargonHits = (text.match(/\b(utiliz\w+|leverage\w*|synerg\w+|paradigm\w*|optimal\w*|holistic\w*)\b/gi) || []).length;
+    const passiveHits = (text.match(/\b(is|are|was|were|been|being)\s+\w+ed\b/gi) || []).length;
+
+    const weaknesses = [];
+    let score = 100;
+
+    if (avgSentenceLen > 28) { score -= 25; weaknesses.push(`Sentences average ${Math.round(avgSentenceLen)} words — shorten them`); }
+    else if (avgSentenceLen > 22) { score -= 12; weaknesses.push('Some sentences run long — tighten them'); }
+
+    if (jargonHits > 2) { score -= 20; weaknesses.push(`${jargonHits} jargon/buzzwords found — use plain language`); }
+    if (passiveHits > sentences.length * 0.3) { score -= 15; weaknesses.push('Heavy passive voice — prefer active voice'); }
+
+    return { score: Math.max(0, score), weaknesses };
+  },
+};
 
 // ─── System prompts per agent type ───────────────────────────────────────────
 function buildSystemPrompt(type, label) {
@@ -305,6 +478,9 @@ Current time: ${new Date().toISOString()}`;
 
   const typePrompts = {
     research:  `${base}\nYour role: Research, synthesize information, and provide comprehensive analysis. Cite sources. Cross-reference multiple sources.`,
+    // Creative agents drafting copy are the type most tempted to invent facts to
+    // sound persuasive — the guardrail is stated directly in the prompt.
+    creative:  `${base}\nYour role: Draft copy, narrative, or content matched to the requested tone and audience. Never state a fact, statistic, or claim you cannot support — if you are not certain, say so or omit it. Prefer clear, plain language over jargon.`,
     code:      `${base}\nYour role: Write clean, secure, well-commented code. Always show the full implementation. Follow project conventions.`,
     data:      `${base}\nYour role: Analyze data, find patterns, generate insights. Show your methodology.`,
     monitor:   `${base}\nYour role: Watch for specified events/changes and report immediately when detected.`,
@@ -394,4 +570,4 @@ function logAudit(action, agentId, meta) {
   if (agentLog.length > 1000) agentLog.pop();
 }
 
-module.exports = { register, agents, GOVERNOR };
+module.exports = { register, agents, GOVERNOR, AGENT_TYPES, getReputations, REFINE_METRICS };

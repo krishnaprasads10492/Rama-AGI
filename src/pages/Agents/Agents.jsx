@@ -5,6 +5,7 @@ const isElectron = typeof window !== 'undefined' && !!window.rama;
 
 const AGENT_TYPES = [
   { type: 'research', icon: '🔍', label: 'Research',  desc: 'Web search, doc synthesis',      color: 'var(--accent)'  },
+  { type: 'creative', icon: '✎',  label: 'Creative',  desc: 'Draft copy, tone, refine drafts', color: 'var(--magenta)' },
   { type: 'code',     icon: '⌨',  label: 'Code',      desc: 'Write, test, run code',          color: 'var(--green)'   },
   { type: 'data',     icon: '📊', label: 'Data',      desc: 'Analyze datasets, insights',     color: 'var(--violet)'  },
   { type: 'browser',  icon: '🌐', label: 'Browser',   desc: 'Web navigation, scraping',       color: 'var(--cyan)'    },
@@ -138,12 +139,19 @@ function SpawnModal({ onClose, onSpawn }) {
   const [type,    setType]    = useState('research');
   const [task,    setTask]    = useState('');
   const [context, setContext] = useState('');
+  const [refine,  setRefine]  = useState('');   // '' | 'credibility' | 'readability'
   const [busy,    setBusy]    = useState(false);
+
+  // Refinement only makes sense for agents that produce prose to iterate on.
+  const canRefine = type === 'research' || type === 'creative';
 
   const spawn = async () => {
     if (!task.trim()) return;
     setBusy(true);
-    await onSpawn({ type, task, config: { context } });
+    await onSpawn({
+      type, task,
+      config: { context, ...(canRefine && refine ? { refineAgainst: refine } : {}) },
+    });
     setBusy(false);
     onClose();
   };
@@ -185,6 +193,37 @@ function SpawnModal({ onClose, onSpawn }) {
           <textarea className="input" rows={2} placeholder="Any additional context or data..."
             value={context} onChange={e => setContext(e.target.value)} />
         </div>
+
+        {canRefine && (
+          <div>
+            <div className="section-label" style={{ marginBottom: '6px' }}>
+              REFINE OUTPUT AGAINST (optional)
+            </div>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              {[
+                { v: '',             label: 'Off' },
+                { v: 'credibility',  label: 'Credibility' },
+                { v: 'readability',  label: 'Readability' },
+              ].map(o => (
+                <button key={o.v} onClick={() => setRefine(o.v)} style={{
+                  flex: 1, padding: '6px', fontSize: '11px', cursor: 'pointer',
+                  border: `1px solid ${refine === o.v ? 'var(--accent)' : 'var(--border)'}`,
+                  borderRadius: 'var(--radius)',
+                  background: refine === o.v ? 'rgba(0,200,255,0.08)' : 'transparent',
+                  color: refine === o.v ? 'var(--accent)' : 'var(--muted)',
+                  fontFamily: 'var(--font)',
+                }}>
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: '9px', color: 'var(--muted)', marginTop: '4px' }}>
+              The agent scores its own draft and revises up to 3 times against the
+              weaknesses found. No fabricated "engagement" score — credibility reuses
+              Rāma's source-vetting table, readability is a plain sentence/jargon heuristic.
+            </div>
+          </div>
+        )}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
           <button className="btn btn-sm" onClick={onClose}>Cancel</button>

@@ -508,4 +508,7 @@ function humanDelay(minMs, maxMs) {
   return new Promise(resolve => setTimeout(resolve, delay));
 }
 
-module.exports = { register };
+// getSourceCredibility exported so other engines (e.g. the agent orchestrator's
+// refinement loop, spec section 37) reuse this one scoring table instead of
+// each maintaining their own opinion of what's credible.
+module.exports = { register, getSourceCredibility };

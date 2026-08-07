@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>RĀMA AGI — Capability Audit (real vs. poster)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Rajdhani:wght@400;500;600;700&display=swap');
+
+  :root {
+    --bg:          #030810;
+    --surface:     #060f1e;
+    --elevated:    #0b1a30;
+    --border:      #0d2444;
+    --accent:      #00c8ff;
+    --accent-soft: #4dd9ff;
+    --gold:        #d4a940;
+    --gold-soft:   #e8c060;
+    --violet:      #5b4fff;
+    --green:       #00d68f;
+    --red:         #ff4060;
+    --text:        #e8f4ff;
+    --text-dim:    #6a9bc0;
+    --muted:       #3a5a7a;
+    --font:         'JetBrains Mono', monospace;
+    --font-display: 'Rajdhani', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: radial-gradient(ellipse 90% 60% at 50% -10%, rgba(0,120,200,.14), transparent 60%), var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.6;
+    padding: 40px 24px 80px;
+  }
+
+  .wrap { max-width: 1180px; margin: 0 auto; }
+
+  header { text-align: center; margin-bottom: 36px; }
+  header h1 {
+    font-family: var(--font-display);
+    font-size: 30px; font-weight: 700; letter-spacing: 0.06em;
+    color: var(--accent-soft);
+    text-shadow: 0 0 24px rgba(0,200,255,.35);
+  }
+  header .sub {
+    margin-top: 8px; font-size: 12px; letter-spacing: 0.18em;
+    color: var(--gold-soft); text-transform: uppercase;
+  }
+  header .note {
+    margin-top: 14px; font-size: 12px; color: var(--text-dim);
+    max-width: 720px; margin-inline: auto; line-height: 1.8;
+  }
+
+  .legend {
+    display: flex; gap: 18px; justify-content: center; flex-wrap: wrap;
+    margin: 26px 0 40px; font-size: 11px; letter-spacing: 0.05em;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+  .col-heading {
+    font-family: var(--font-display);
+    font-size: 15px; letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 10px 14px; border-radius: 6px; margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+  .card .name { font-weight: 700; font-size: 12.5px; color: var(--text); }
+  .card .ref  { margin-top: 5px; font-size: 10.5px; color: var(--text-dim); }
+  .card .ref code {
+    background: var(--elevated); padding: 1px 5px; border-radius: 3px;
+    color: var(--accent-soft); font-size: 10px;
+  }
+
+  .col-real    .col-heading { background: rgba(0,214,143,0.1); color: var(--green); border: 1px solid rgba(0,214,143,0.3); }
+  .col-real    .card { border-left-color: var(--green); }
+
+  .col-partial .col-heading { background: rgba(212,169,64,0.1); color: var(--gold-soft); border: 1px solid rgba(212,169,64,0.3); }
+  .col-partial .card { border-left-color: var(--gold); }
+
+  .col-fake    .col-heading { background: rgba(255,64,96,0.08); color: var(--red); border: 1px solid rgba(255,64,96,0.28); }
+  .col-fake    .card { border-left-color: var(--red); }
+  .col-fake    .card .poster {
+    font-size: 10.5px; color: var(--muted); text-decoration: line-through;
+    margin-bottom: 4px;
+  }
+  .col-fake    .card .why { font-size: 10.5px; color: var(--text-dim); margin-top: 5px; }
+
+  .better-tag {
+    display: inline-block; margin-top: 6px; font-size: 9.5px;
+    background: rgba(0,200,255,0.1); color: var(--accent-soft);
+    border: 1px solid rgba(0,200,255,0.3); border-radius: 3px; padding: 1px 6px;
+    letter-spacing: 0.04em;
+  }
+
+  footer {
+    margin-top: 48px; text-align: center; font-size: 11px; color: var(--muted);
+    border-top: 1px solid var(--border); padding-top: 18px;
+  }
+  footer code { color: var(--text-dim); }
+
+  /* ── Grounded architecture map ──────────────────────────────────────────── */
+  .map-section { margin-top: 56px; }
+  .map-section .col-heading {
+    background: rgba(0,200,255,0.08); color: var(--accent-soft);
+    border: 1px solid rgba(0,200,255,0.28); justify-content: center;
+    font-size: 16px; margin-bottom: 20px;
+  }
+  .map-groups { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+  @media (max-width: 900px) { .map-groups { grid-template-columns: 1fr; } }
+
+  .map-group {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px 18px;
+  }
+  .map-group h3 {
+    font-family: var(--font-display); font-size: 13px; letter-spacing: 0.08em;
+    color: var(--gold-soft); margin-bottom: 12px; text-transform: uppercase;
+  }
+  .map-item { margin-bottom: 12px; padding-left: 14px; border-left: 2px solid var(--border); }
+  .map-item .item-name { font-size: 12px; font-weight: 700; color: var(--text); }
+  .map-item .item-name code {
+    background: var(--elevated); padding: 1px 5px; border-radius: 3px;
+    color: var(--accent-soft); font-size: 10.5px; font-weight: 400;
+  }
+  .map-item .item-desc { font-size: 10.5px; color: var(--text-dim); margin-top: 3px; }
+  .map-item.corrected { border-left-color: var(--gold); }
+  .map-item .correction {
+    margin-top: 5px; font-size: 10px; color: var(--gold-soft);
+    background: rgba(212,169,64,0.08); border: 1px solid rgba(212,169,64,0.25);
+    border-radius: 4px; padding: 5px 8px; line-height: 1.6;
+  }
+  .map-item .correction b { color: var(--gold); }
+  .map-item .was { text-decoration: line-through; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>RĀMA AGI — CAPABILITY AUDIT</h1>
+    <div class="sub">Measured against the codebase, not against the poster</div>
+    <div class="note">
+      Generated from the running project, not drawn. Every item on the left maps
+      to a real, verified file. Every item on the right is a claim from the
+      shared architecture posters with no corresponding implementation —
+      declined rather than faked, per the project's own measured-not-claimed rule
+      (RAMA_AGI_MASTER_SPEC.md §24, §33, §36).
+    </div>
+  </header>
+
+  <div class="legend">
+    <span><i class="dot" style="background:var(--green)"></i> Real &amp; working now</span>
+    <span><i class="dot" style="background:var(--gold)"></i> Real, but lighter than the poster claims</span>
+    <span><i class="dot" style="background:var(--red)"></i> Poster language — no implementation, not attempted</span>
+  </div>
+
+  <div class="grid">
+
+    <!-- ═══════════════════ COLUMN 1 — REAL ═══════════════════ -->
+    <div class="col-real">
+      <div class="col-heading">✓ Already built</div>
+
+      <div class="card">
+        <div class="name">Three-gate authentication</div>
+        <div class="ref">Passcode → password (Argon2id) → 12-digit HMAC access key.
+        <code>authCore.cjs</code></div>
+      </div>
+
+      <div class="card">
+        <div class="name">Holonic multi-instance genome</div>
+        <div class="ref">30 genes / 8 domains; every instance carries the full genome,
+        expresses a role subset. <code>genome.cjs</code></div>
+      </div>
+
+      <div class="card">
+        <div class="name">Specialized worker roles</div>
+        <div class="ref">Strategic Optimizer, R&amp;D, Cyber Sentinel, Cultural/Wellness Advisor.
+        <code>genome.ROLES</code></div>
+      </div>
+
+      <div class="card">
+        <div class="name">Multi-model routing with fallback</div>
+        <div class="ref">OpenAI · Anthropic · Gemini · Groq · Mistral · Ollama, local-first.
+        <code>modelRouter.cjs</code></div>
+      </div>
+
+      <div class="card">
+        <div class="name">Single approval ledger for self-changes</div>
+        <div class="ref">Nothing modifies Rāma's own code/genome without recorded master approval.
+        <code>proposals.cjs</code></div>
+        <div class="better-tag">stronger than the poster's vague "loyalty thread"</div>
+      </div>
+
+      <div class="card">
+        <div class="name">AST-based code verification</div>
+        <div class="ref">Quality score + issues attached to a proposal before approval.
+        <code>verifyProposal.cjs</code></div>
+      </div>
+
+      <div class="card">
+        <div class="name">Encrypted local data store</div>
+        <div class="ref">AES-256-GCM at rest, verified-passcode gate against
+        wrong-key false-negatives. <code>cryptoCore.cjs</code></div>
+      </div>
+
+      <div class="card">
+        <div class="name">Resource-admission authority</div>
+        <div class="ref">One CPU/RAM/thermal gate all spawns go through.
+        <code>resourceOrchestrator.admit()</code></div>
+      </div>
+
+      <div class="card">
+        <div class="name">Auto-failover between instances</div>
+        <div class="ref">Dead gene on one instance → expressed on a sibling that holds it dormant.
+        <code>selfCare.checkInstanceFailover()</code></div>
+      </div>
+
+      <div class="card">
+        <div class="name">Tiered cognition ladder</div>
+        <div class="ref">Reflex (no model) → local → cloud, escalation only when needed.
+        <code>cognition.js</code></div>
+        <div class="better-tag">not on any poster — genuinely additive</div>
+      </div>
+
+      <div class="card">
+        <div class="name">Self-healing staged launcher</div>
+        <div class="ref">Diagnose → repair → boot in stages; live reload on file change.
+        <code>start.cjs</code></div>
+      </div>
+
+      <div class="card">
+        <div class="name">Voice with mute/hands-free/wake ladder</div>
+        <div class="ref">Local-first STT, independent mic/speech mute.
+        <code>voiceEngine.cjs</code></div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════ COLUMN 2 — PARTIAL ═══════════════════ -->
+    <div class="col-partial">
+      <div class="col-heading">◐ Real, lighter than claimed</div>
+
+      <div class="card">
+        <div class="name">Source credibility scoring</div>
+        <div class="poster">poster: "formal proof / theorem verification"</div>
+        <div class="ref">Real: a scored domain table (Reuters, arXiv, etc.), 0–1 credibility, bias tag.
+        Static analysis, not a proof system. <code>intelligenceEngine.cjs</code></div>
+      </div>
+
+      <div class="card">
+        <div class="name">Refinement / self-critique loop</div>
+        <div class="poster">poster: "optimized for engagement"</div>
+        <div class="ref">Real: agent scores its own draft (credibility or readability),
+        revises up to 3x. No "engagement" metric — that needs real audience data
+        this system doesn't have. <code>agentOrchestrator.refineOutput()</code></div>
+      </div>
+
+      <div class="card">
+        <div class="name">Sandboxed execution</div>
+        <div class="poster">poster: "Monte Carlo parallel-universe sandbox"</div>
+        <div class="ref">Real: one execution at a time, tiered (SAFE/STANDARD/ELEVATED),
+        resource-admitted. <code>sandboxEngine.cjs</code></div>
+      </div>
+
+      <div class="card">
+        <div class="name">Reputation-weighted agent scheduling</div>
+        <div class="poster">poster: "internal agent economy"</div>
+        <div class="ref">Real: a type's success rate nudges its queue priority ±1 level.
+        No currency, no transfers, cannot bypass admission.
+        <code>agentOrchestrator.reputationAdjustedPriority()</code></div>
+      </div>
+
+      <div class="card">
+        <div class="name">Web research &amp; browser automation</div>
+        <div class="poster">poster: "global perception array"</div>
+        <div class="ref">Real: Playwright browser control, screenshots, search.
+        No camera, mic-as-sensor, or physical sensing of any kind.
+        <code>browserEngine.cjs</code></div>
+      </div>
+
+      <div class="card">
+        <div class="name">Git-based state history</div>
+        <div class="poster">poster: "timeline replay" as a sensory feature</div>
+        <div class="ref">Real: commit-history flashback for code changes only —
+        not a perception mechanism. <code>timeline.cjs</code></div>
+      </div>
+
+      <div class="card">
+        <div class="name">Genome hot-patching</div>
+        <div class="poster">poster: "verified upgrade hot-swapping"</div>
+        <div class="ref">Real: approved proposal deep-merges into the sealed nucleus.
+        No "evolving neural weight topologies" — it edits a JSON identity record.
+        <code>genomeApplier.cjs</code></div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════ COLUMN 3 — NOT PRESENT / NOT PLAUSIBLE ═══════════════════ -->
+    <div class="col-fake">
+      <div class="col-heading">✕ Not present — not attempted</div>
+
+      <div class="card">
+        <div class="poster">"22T+ sparse experts / capability points"</div>
+        <div class="why">Nothing here trains or hosts a model at any scale — it routes
+        to existing provider APIs and Ollama.</div>
+      </div>
+
+      <div class="card">
+        <div class="poster">"Fused lattice QKD" / "Post-quantum ZK-PoK"</div>
+        <div class="why">Real crypto is Argon2id + AES-256-GCM + HMAC — solid, but not
+        quantum key distribution or a zero-knowledge proof system.</div>
+      </div>
+
+      <div class="card">
+        <div class="poster">"Coq theorem proving / 23 verifier chains"</div>
+        <div class="why">No formal-verification toolchain exists. What's real is
+        static AST analysis (quality score + issue list).</div>
+      </div>
+
+      <div class="card">
+        <div class="poster">"Global Perception Array" — vision, audio, scent, touch, EMF</div>
+        <div class="why">No physical sensors of any kind are wired in or plausible
+        for a desktop app to acquire.</div>
+      </div>
+
+      <div class="card">
+        <div class="poster">"Cellular mitosis / morphogenetic healing / 140ms lattice regeneration"</div>
+        <div class="why">Biological metaphor with an invented latency figure attached
+        to nothing measured.</div>
+      </div>
+
+      <div class="card">
+        <div class="poster">"+342% epigenetic pruning efficiency"</div>
+        <div class="why">No baseline, no measurement, no mechanism this could be a
+        percentage of.</div>
+      </div>
+
+      <div class="card">
+        <div class="poster">"Infinite exploration / infinite self-evolution / infinite task scaling"</div>
+        <div class="why">Directly contradicts the codebase's own bounded design —
+        MAX_INSTANCES = 8, MAX_AGENTS = 10, everything admission-gated.</div>
+      </div>
+
+      <div class="card">
+        <div class="poster">"27.2ms inference throughput"</div>
+        <div class="why">A precise-looking number with no benchmark behind it —
+        latency depends entirely on whichever provider API answers.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════ GROUNDED ARCHITECTURE MAP ═══════════════════ -->
+  <div class="map-section">
+    <div class="col-heading">RĀMA AGI — GROUNDED ARCHITECTURE &amp; IMPLEMENTATION MAP</div>
+    <div class="note" style="margin-bottom:22px;">
+      This map was submitted for review against the codebase. It was accurate on
+      every file name, function name, and constant checked. Two corrections were
+      needed and are marked below — both are the same class of mistake the poster
+      audit above exists to catch: an invented precision number, and a link
+      between two systems implied by layout that doesn't exist in the code.
+    </div>
+
+    <div class="map-groups">
+
+      <div class="map-group">
+        <h3>1. Security &amp; Identity Layer</h3>
+        <div class="map-item">
+          <div class="item-name">Three-Gate Authentication <code>authCore.cjs</code></div>
+          <div class="item-desc">Argon2id password + 12-digit HMAC access key.</div>
+        </div>
+        <div class="map-item">
+          <div class="item-name">Local Vault <code>cryptoCore.cjs</code></div>
+          <div class="item-desc">AES-256-GCM at rest, with a verifier that rejects a wrong
+          passcode instead of silently returning an empty store.</div>
+        </div>
+      </div>
+
+      <div class="map-group">
+        <h3>2. Cognition &amp; Routing Engine</h3>
+        <div class="map-item">
+          <div class="item-name">Multi-Model Router <code>modelRouter.cjs</code></div>
+          <div class="item-desc">Fallback chain: OpenAI → Anthropic → Gemini → Groq → Mistral → Ollama.</div>
+        </div>
+        <div class="map-item corrected">
+          <div class="item-name">Tiered Cognition Ladder <code>cognition.js</code></div>
+          <div class="item-desc">Reflex (no LLM) → Local open-weight → Cloud API.</div>
+          <div class="correction">
+            <span class="was">"&lt;5ms" reflex latency</span> — never benchmarked, no timing
+            code exists for this tier. <b>Corrected:</b> reflex means "no model call, no
+            network round-trip" — a real property, not a measured number. Same mistake
+            class as the poster's invented "27.2ms inference throughput," just smaller.
+          </div>
+        </div>
+      </div>
+
+      <div class="map-group">
+        <h3>3. Genome &amp; Instantiation Mesh</h3>
+        <div class="map-item">
+          <div class="item-name">Holonic Multi-Instance Genome <code>genome.cjs</code></div>
+          <div class="item-desc">30 genes / 8 domains, verified live against this machine.</div>
+        </div>
+        <div class="map-item">
+          <div class="item-name">Specialized Roles <code>genome.ROLES</code></div>
+          <div class="item-desc">Strategic Enterprise Optimizer, R&amp;D Agent, Cybersecurity
+          Sentinel, Cultural Alignment &amp; Wellness Advisor — full labels checked against source.</div>
+        </div>
+        <div class="map-item">
+          <div class="item-name">Resource Orchestrator <code>resourceOrchestrator.cjs</code></div>
+          <div class="item-desc">Bounded CPU/RAM/thermal admission control. <code>MAX_INSTANCES=8</code>.</div>
+        </div>
+      </div>
+
+      <div class="map-group">
+        <h3>4. Governance &amp; Code Evolution</h3>
+        <div class="map-item">
+          <div class="item-name">Approval Ledger <code>proposals.cjs</code></div>
+          <div class="item-desc">Single gate — no self-change without recorded master approval.</div>
+        </div>
+        <div class="map-item corrected">
+          <div class="item-name">AST Static Verification <code>verifyProposal.cjs</code></div>
+          <div class="item-desc">Code quality scoring and issue detection.</div>
+          <div class="correction">
+            <span class="was">"before execution"</span> — implies it gates
+            <code>sandboxEngine.cjs</code>; it does not, they never call each other.
+            <b>Corrected:</b> it runs before a file-write <em>proposal is approved</em>
+            (self-modify / regen / evolution), not before sandboxed code execution.
+            Two separate systems, wrongly linked by layout.
+          </div>
+        </div>
+        <div class="map-item">
+          <div class="item-name">Sandboxed Execution <code>sandboxEngine.cjs</code></div>
+          <div class="item-desc">Tiered, resource-admitted execution: SAFE / STANDARD / ELEVATED.
+          Independent of the verification step above.</div>
+        </div>
+      </div>
+
+      <div class="map-group" style="grid-column: 1 / -1;">
+        <h3>5. OS Runtime &amp; User Interface</h3>
+        <div class="map-item">
+          <div class="item-name">Self-Healing Boot Launcher <code>start.cjs</code></div>
+          <div class="item-desc">Diagnose → repair → boot in stages, plus live reload on file change.</div>
+        </div>
+        <div class="map-item">
+          <div class="item-name">Browser Automation <code>browserEngine.cjs</code></div>
+          <div class="item-desc">Playwright-driven search, navigation, screenshot capture.</div>
+        </div>
+        <div class="map-item">
+          <div class="item-name">Local Voice Engine <code>voiceEngine.cjs</code></div>
+          <div class="item-desc">Local-first STT, wake-word ladder, independent mic/speech mute.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <footer>
+    Source of truth: <code>RAMA_AGI_MASTER_SPEC.md</code> §24, §33, §36–37 ·
+    Query the running app directly with <code>genome:get</code> / <code>genome:verify</code>
+    for the live, measured inventory.
+  </footer>
+
+</div>
+</body>
+</html>

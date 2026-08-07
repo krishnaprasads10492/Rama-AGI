@@ -1647,6 +1647,8 @@ authenticated **Master session**, not merely an open store.
 | 38 | Voice capability ladder | done | Section 30. `webkitSpeechRecognition` can never work in the Electron shell (Chromium lacks Google's API keys), and the old engine retried it every 300ms forever. Replaced with L0 text → L1 push-to-talk → L2 local Whisper → L3 cloud Whisper → L4 wake word. New `electron/ipc/voiceEngine.cjs` resolves local-before-cloud; renderer captures via MediaRecorder. Mic button and an `L<n>` chip show the live level and what the next one needs. Whisper detection **executes** the candidate and requires it to identify itself — a name match alone matched `C:\Windows\System32\main.cpl`. |
 | 39 | Permission + window-open policy | done | `main.cjs` now allows only `media` and sanitized clipboard writes, denies every other permission request, and routes `window.open` to the external browser instead of opening a renderer window. |
 | 46 | Cognition ladder + legibility | done | Section 35. `src/services/cognition.js`: tier 0 reflex (9 skills, no model), tier 1 local, tier 2 cloud, tier 3 candidate-finding from the experiential dataset. Wired into Chat ahead of the model call. Legibility: base 13px→14px with tokenised scale, plus `appearance:*` IPC over `setZoomFactor`, which is the only mechanism that reaches the hundreds of inline pixel values. Routing verified by 28 assertions, including that "refactor this function to be smaller" escalates rather than zooming out. |
+| 50 | Creative Agent + refinement loop + reputation scheduling | done | Section 37. `agentOrchestrator.cjs`: fifth agent type (creative), a bounded 3-iteration self-scoring refinement loop against two honest metrics (credibility reusing `intelligenceEngine`'s table, readability via a plain heuristic — deliberately no fabricated "engagement" score), and reputation-weighted scheduling (success rate nudges queue priority ±1, never bypasses `resourceOrchestrator.admit()`). Wired into the Agents page spawn modal. |
+| 51 | Capability audit document | done | `docs/rama-capability-audit.html` — standalone, styled with Rāma's real design tokens, three-column real/partial/fabricated breakdown of the architecture posters, plus a corrected "grounded architecture map" the master submitted for review (two errors found and marked: an unbenchmarked "<5ms" latency claim, and a false link between `verifyProposal.cjs` and `sandboxEngine.cjs` implied by layout). Open in any browser, no server needed. |
 | 49 | Genome hot-swap applier + verification report + auto-failover | done | Section 36. Modelled the master's architecture poster against the real codebase: mapped 8 concepts already built, closed 3 genuine gaps the diagram pointed at (genome proposals could not be applied; failover could be answered but not acted on; no verification step before a risky change), and explicitly declined 5 poster claims with no engineering referent (1.5T-param lattice, ZK-PoK, Monte-Carlo parallel universes, Coq proofs, infinite scaling) rather than fabricate metrics around them. `electron/lib/genomeApplier.cjs` registers the missing `GENOME` applier with a deep merge (verified: sibling axis untouched, locked-nucleus apply refused). `electron/lib/verifyProposal.cjs` attaches AST-based quality/issue reports to regen (before approval) and evolution (after approval, audit-only) proposals — verified a deliberately-bad file scores lower than a clean one. `selfCare.cjs` gained `checkInstanceFailover()`: auto-expresses a dormant gene on a sibling instance when an active instance needs a dead one, additive and reversible only, always notifies master. |
 | 47 | Tier 3 auto-proposal of new reflexes | not started | `findReflexCandidates()` reports escalation counts by tool but does not yet synthesise a skill. Next step: when one phrasing cluster exceeds ~20 escalations with structurally identical answers, generate a `SKILLS` entry and file it as a `SELF_MODIFY` proposal (invariant I6 — never auto-applied). |
 | 48 | Appearance panel in Settings | not started | Zoom is reachable by chat/voice command only. Next step: add a Voice + Appearance section to `Settings.jsx` with a zoom slider bound to `window.rama.appearance`, the voice level from ledger row 40, and `RAMA_WHISPER_PATH`. |
@@ -2224,3 +2226,90 @@ category.
      runs inside the registered applier, **after** approval, as a recorded audit note
      rather than as input to the decision. This is stated plainly rather than implying
      parity between the two engines.
+
+---
+
+## SECTION 37 — Creative Agent, refinement loop, and a real internal economy
+
+### What the second diagram showed, honestly assessed
+
+A swimlane diagram of an orchestrator delegating to Search/Research/Creative/
+Summarizer agents, with an inline "evaluate credibility → adjust tone → optimize
+for engagement" loop, labelled "internal agent economy." Section 36's method
+applies again: map what is real, build what is missing and buildable, decline
+what has no honest engineering referent.
+
+Findings before this pass:
+- Orchestrator delegating to typed agents — real (`agentOrchestrator.cjs`)
+- Research agent — real, by name
+- Source credibility scoring — real, but lived in `intelligenceEngine.cjs`,
+  structurally separate from the agent loop the diagram shows it inside
+- Creative agent — **missing**, no such type existed
+- Iterative refine-against-a-metric loop — **missing**, agents ran once and
+  returned; nothing scored its own output and revised
+- "Internal agent economy" — **missing**, and worth being precise about what
+  that phrase can honestly mean here (see below)
+
+### Creative Agent
+
+Added as a fifth content-producing type alongside research/code/data, with its
+own system prompt (tone, audience, format-following, explicit "no unsupported
+claims" instruction — creative agents drafting copy are the type most tempted to
+invent facts, so the guardrail is in the prompt itself).
+
+### The refinement loop — real, bounded, and honestly labelled
+
+`refineOutput()` is a genuine iterate-until-good-enough loop:
+
+1. Score the current draft against a metric (see below)
+2. If the score clears the bar, or the iteration cap is hit, stop
+3. Otherwise, ask the model to revise specifically against the score's stated
+   weaknesses, and loop
+
+Two metrics are implemented, matching the two the diagram actually shows:
+
+- **credibility** — reuses `intelligenceEngine`'s existing `SOURCE_CREDIBILITY`
+  scoring rather than inventing a second one. A research/creative agent's draft is
+  scanned for cited domains and scored by the same table Rāma already trusts for
+  fact-checking, so there is exactly one credibility opinion in the system, not two
+  that can disagree.
+- **legibility/audience-fit** — a plain readability heuristic (sentence length,
+  jargon density against a small stopword-style list, passive-voice ratio). This
+  is the honest, buildable version of "adjust tone for target audience": Rāma has
+  no measure of *engagement* (that requires real audience data this system does
+  not have and will not fabricate), but it can measure and improve *readability*,
+  which is the mechanism most "adjust tone" requests actually want.
+
+**What was deliberately not built:** an "engagement" score. There is no metric for
+engagement without real audience response data, and inventing a proxy number and
+calling it "engagement" would be exactly the kind of fabricated-metric the project
+declined in section 36 (the 1.5T-parameter lattice, the +342% pruning). Readability
+is offered instead, named as what it is.
+
+The loop is capped at 3 iterations and each attempt is recorded as a step, so a
+runaway "keep trying to be more engaging" loop cannot happen and the full history
+of drafts is visible in the agent's step log — nothing is silently rewritten.
+
+### "Internal agent economy" — the honest version
+
+An economy implies scarcity, allocation, and a currency. Rāma already has exactly
+that, just not under this name: `resourceOrchestrator`'s CPU/RAM/thermal admission
+gate, the per-type instance caps in `AGENT_TYPES`, and the priority queue in
+`resourceOrchestrator.PRIORITY`. What did not exist was a way for an agent's
+*history* to affect its future priority — an economy needs feedback, not just a
+fixed price list.
+
+`agentOrchestrator` now tracks a lightweight reputation score per agent type,
+fed by the existing experiential dataset: an agent type whose runs tend to
+complete successfully earns a small priority boost on its next spawn; one that
+times out or errors repeatedly is deprioritised, never blocked outright (a
+struggling agent type still gets to run — it just doesn't jump the queue ahead of
+a reliable one under contention). This is deliberately modest: no currency
+changes hands, no agent can spend or transfer anything, and the effect is capped
+so it can shift queue order under contention but can never grant an admission
+`resourceOrchestrator.admit()` would otherwise refuse. That refusal remains the
+one authority (invariant I10).
+
+This is named "reputation-weighted scheduling," not "economy" — the word
+"economy" implies more than a priority nudge, and section 36's discipline about
+not overstating a mechanism applies here too.
