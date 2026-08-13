@@ -137,4 +137,27 @@ function stopAll() {
   }
 }
 
-module.exports = { register, stopAll };
+// ─── Direct (non-IPC) access for other main-process modules ─────────────────
+// marketIntel.cjs calls these to auto-start the backend on first use without
+// round-tripping through ipcMain.handle from inside the main process itself.
+function getRunningStatus() {
+  return {
+    python: {
+      running: !!processes['python'] && !processes['python'].killed,
+      pid:     processes['python']?.pid ?? null,
+    },
+  };
+}
+
+async function startPythonBackendPublic() {
+  if (processes['python']?.killed === false) {
+    return { ok: true, message: 'already running', pid: processes['python'].pid };
+  }
+  try {
+    return await startPythonBackend();
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+module.exports = { register, stopAll, getRunningStatus, startPythonBackendPublic };

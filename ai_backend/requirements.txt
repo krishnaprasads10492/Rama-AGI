@@ -1,0 +1,36 @@
+# Rama AGI — StockMind prediction engine dependencies.
+# Pinned per invariant I12 (no ^ or ~, no ranges). Trimmed to what the
+# absorbed engine/*.py files actually import — see RAMA_AGI_MASTER_SPEC.md
+# Section 39. Revisit a specific pin if a wheel is genuinely unavailable on
+# the build machine's Python version.
+
+# ── API ────────────────────────────────────────────────────────────────────
+fastapi==0.115.12
+uvicorn[standard]==0.34.3
+pydantic==2.11.7
+
+# ── Data ───────────────────────────────────────────────────────────────────
+numpy==1.26.4
+pandas==2.2.3
+scipy==1.14.1
+
+# ── ML — ensemble models (models.py / registry.py) ─────────────────────────
+scikit-learn==1.5.2
+lightgbm==4.5.0
+xgboost==2.1.3
+
+# ── Time-series ────────────────────────────────────────────────────────────
+statsmodels==0.14.4
+
+# ── Finance math ───────────────────────────────────────────────────────────
+numpy-financial==1.0.0
+
+# ── Technical indicators (features.py) ─────────────────────────────────────
+ta==0.11.0
+
+# ── HTTP client (data_fetcher.py — Yahoo Finance OHLCV) ────────────────────
+httpx==0.28.1
+
+# ── Utilities ──────────────────────────────────────────────────────────────
+python-dotenv==1.1.0
+joblib==1.4.2
