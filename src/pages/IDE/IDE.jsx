@@ -437,11 +437,11 @@ function DiffModal({ original, modified, description, onAccept, onReject }) {
             ['AFTER',  modified, 'var(--green)', 'rgba(0,214,143,0.15)']].map(([label, code, color, bg]) => (
             <div key={label} style={{ display:'flex', flexDirection:'column', overflow:'hidden' }}>
               <div style={{ fontSize:10, color, fontWeight:700, marginBottom:5, letterSpacing:'0.1em' }}>{label}</div>
-              <pre style={{ background:'var(--surface)', border:`1px solid ${color}44`,
+              <pre style={{ background: bg, border:`1px solid ${color}44`,
                 borderRadius:'var(--radius)', padding:12, overflow:'auto', flex:1,
                 fontSize:11, fontFamily:'var(--font)', color:'var(--text)',
                 whiteSpace:'pre-wrap', wordBreak:'break-all', margin:0,
-                maxHeight:'48vh', background: bg }}>
+                maxHeight:'48vh' }}>
                 {(code||'').slice(0,4000)}
               </pre>
             </div>

@@ -13,9 +13,21 @@ const { execSync }   = require('child_process');
 const { existsSync, writeFileSync, mkdirSync } = require('fs');
 const path           = require('path');
 
+/**
+ * electron-builder's `beforeBuild` hook (unlike `afterPack`) is called BEFORE
+ * app.asar exists and receives { appDir, electronVersion, platform, arch } —
+ * not { appOutDir, packager }. There is no `packager` object at this point, so
+ * `context.packager.projectDir` always threw here. `appDir` is the project
+ * root (same thing `packager.projectDir` would have resolved to), so use that.
+ * See https://www.electron.build/docs/api/app-builder-lib.Interface.Hooks
+ *
+ * Returning `false` tells electron-builder "dependency install/rebuild is
+ * handled outside of electron-builder" so it does not also try to run its own
+ * npmRebuild pass on top of this hook (see packager.js installAppDependencies).
+ */
 module.exports = async function(context) {
-  const { appOutDir, packager } = context;
-  const root = packager.projectDir;
+  const { appDir, platform } = context;
+  const root = appDir;
 
   console.log('\n⬢ Rāma AGI — Pre-build checks...\n');
 
@@ -42,8 +54,12 @@ module.exports = async function(context) {
     linux:  ['icon.png'],
   };
 
-  const platform = packager.platform.name;
-  const icons    = needed[platform] || needed.linux;
+  // `platform` here is builder-util's Platform enum object ({ name, ... }),
+  // e.g. Platform.WINDOWS.name === 'windows' — not the Node.js `win32` you'd
+  // get from `process.platform`. Map electron-builder's platform names to the
+  // ones this table already uses.
+  const platformKey = { windows: 'win32', mac: 'darwin', linux: 'linux' }[platform?.name] || 'linux';
+  const icons        = needed[platformKey] || needed.linux;
 
   for (const icon of icons) {
     const iconPath = path.join(assetsDir, icon);
