@@ -1,0 +1,162 @@
+{
+  "_comment": "Seed catalog of external resources Rāma can research for master — free and premium AI/AGI infrastructure. This is a STARTING list, not exhaustive: resourceResearchEngine.cjs re-verifies every entry's live docs on request rather than trusting these numbers to stay current. 'wiredAs' points at the registry key that already exists in code, if any, so the UI can show enabled vs researched-only vs unknown without re-deriving it. Prices/limits last checked 2026-08-13 — see RAMA_AGI_MASTER_SPEC.md Section 38 for sourcing.",
+  "version": 1,
+  "lastResearched": "2026-08-13",
+  "axes": {
+    "llm": {
+      "label": "LLM Inference",
+      "resources": [
+        {
+          "id": "openai",
+          "name": "OpenAI API",
+          "docsUrl": "https://openai.com/api/pricing/",
+          "credKey": "OPENAI_API_KEY",
+          "wiredAs": "modelRouter.MODEL_REGISTRY",
+          "tier": "premium-only",
+          "notes": "No free API tier. GPT-5.6 family; mini/nano variants sub-$1/1M tokens."
+        },
+        {
+          "id": "anthropic",
+          "name": "Anthropic Claude API",
+          "docsUrl": "https://claude.com/pricing",
+          "credKey": "ANTHROPIC_API_KEY",
+          "wiredAs": "modelRouter.MODEL_REGISTRY",
+          "tier": "premium-only",
+          "notes": "Free consumer chat tier exists but the API itself has no free tier. Sonnet 5 ~$3/$15 per 1M tok in/out."
+        },
+        {
+          "id": "gemini",
+          "name": "Google Gemini API",
+          "docsUrl": "https://ai.google.dev/gemini-api/docs/pricing",
+          "credKey": "GEMINI_API_KEY",
+          "wiredAs": "modelRouter.MODEL_REGISTRY",
+          "tier": "freemium",
+          "notes": "Free tier ~5-15 RPM depending on model, 5000 free requests/mo shared across 3.x models."
+        },
+        {
+          "id": "groq",
+          "name": "Groq API",
+          "docsUrl": "https://groq.com/pricing",
+          "credKey": "GROQ_API_KEY",
+          "wiredAs": "modelRouter.MODEL_REGISTRY",
+          "tier": "freemium",
+          "notes": "No card required, full model catalog, rate-limited (~30 RPM). Paid from $0.05/1M tok."
+        },
+        {
+          "id": "mistral",
+          "name": "Mistral API",
+          "docsUrl": "https://mistral.ai/products/la-plateforme",
+          "credKey": "MISTRAL_API_KEY",
+          "wiredAs": "modelRouter.MODEL_REGISTRY",
+          "tier": "premium-only",
+          "notes": "Already wired; verify current free trial credit at research time."
+        },
+        {
+          "id": "ollama",
+          "name": "Ollama (local)",
+          "docsUrl": "https://ollama.com",
+          "credKey": null,
+          "wiredAs": "modelRouter.MODEL_REGISTRY",
+          "tier": "free",
+          "notes": "Fully free, offline, no key. The level-0 fallback the whole router leans on under resource pressure."
+        },
+        {
+          "id": "openrouter",
+          "name": "OpenRouter",
+          "docsUrl": "https://openrouter.ai/docs/guides/routing/model-variants/free",
+          "credKey": "OPENROUTER_API_KEY",
+          "wiredAs": null,
+          "tier": "freemium",
+          "notes": "NOT YET WIRED. ~14 rotating :free model IDs (Llama, Nemotron, Hy3, etc.), single key, no card. Good first candidate for a resource-enable proposal — one integration adds many free fallback models."
+        }
+      ]
+    },
+    "voice": {
+      "label": "Voice (TTS output)",
+      "resources": [
+        {
+          "id": "whisper-local",
+          "name": "Local Whisper (whisper.cpp)",
+          "docsUrl": "https://github.com/ggerganov/whisper.cpp",
+          "credKey": null,
+          "wiredAs": "voiceEngine (L2)",
+          "tier": "free",
+          "notes": "Already the L2 target of the voice capability ladder (Section 30). No new integration needed."
+        },
+        {
+          "id": "elevenlabs",
+          "name": "ElevenLabs TTS",
+          "docsUrl": "https://elevenlabs.io/pricing/api",
+          "credKey": "ELEVENLABS_API_KEY",
+          "wiredAs": null,
+          "tier": "freemium",
+          "notes": "NOT WIRED. Free tier ~10k credits/mo. Premium ~$0.05-0.10/1k chars — most expensive mainstream TTS (~$100-200/1M chars vs OpenAI/Google ~$10-15/1M). Different axis than STT ladder — this is speech OUTPUT quality, not input."
+        },
+        {
+          "id": "openai-tts",
+          "name": "OpenAI TTS",
+          "docsUrl": "https://openai.com/api/pricing/",
+          "credKey": "OPENAI_API_KEY",
+          "wiredAs": null,
+          "tier": "premium-only",
+          "notes": "NOT WIRED. Cheaper premium TTS alternative to ElevenLabs if voice-cloning quality isn't required. Reuses the same OPENAI_API_KEY already in the vault if set."
+        }
+      ]
+    },
+    "search": {
+      "label": "Web Research / Search",
+      "resources": [
+        {
+          "id": "duckduckgo",
+          "name": "DuckDuckGo Instant Answer API",
+          "docsUrl": "https://duckduckgo.com/api",
+          "credKey": null,
+          "wiredAs": "intelligenceEngine.fetchDDGAPI",
+          "tier": "free",
+          "notes": "Already integrated, unlimited, no key. Correct level-0 fallback for this axis — keep regardless of what else is added."
+        },
+        {
+          "id": "tavily",
+          "name": "Tavily Search API",
+          "docsUrl": "https://docs.tavily.com/documentation/api-credits",
+          "credKey": "TAVILY_API_KEY",
+          "wiredAs": null,
+          "tier": "freemium",
+          "notes": "NOT WIRED. 1,000 free credits/mo, no card; also has a fully keyless basic tier. Purpose-built for LLM/agent consumption (structured, RAG-ready) — real upgrade over browserEngine's DOM-scrape fallback."
+        },
+        {
+          "id": "exa",
+          "name": "Exa Search API",
+          "docsUrl": "https://exa.ai/pricing",
+          "credKey": "EXA_API_KEY",
+          "wiredAs": null,
+          "tier": "freemium",
+          "notes": "NOT WIRED. ~20,000 free requests/mo — larger free allowance than Tavily. Compare against Tavily in the research report before proposing either."
+        }
+      ]
+    },
+    "vector": {
+      "label": "Vector Memory",
+      "resources": [
+        {
+          "id": "qdrant-local",
+          "name": "Qdrant (self-hosted)",
+          "docsUrl": "https://qdrant.tech/documentation/",
+          "credKey": null,
+          "wiredAs": null,
+          "tier": "free",
+          "notes": "NOT WIRED. Self-hosted is free, open-source (Apache-2.0), no vector-count cap beyond hardware. Matches the project's 'local before cloud' doctrine — natural upgrade over vectorMemory.cjs's in-memory/keyword fallback with no premium key required."
+        },
+        {
+          "id": "pinecone",
+          "name": "Pinecone",
+          "docsUrl": "https://www.pinecone.io/pricing/",
+          "credKey": "PINECONE_API_KEY",
+          "wiredAs": null,
+          "tier": "freemium",
+          "notes": "NOT WIRED. Free tier exists but reportedly tightened in 2026. Closed-source, no self-host option — conflicts with I11 (every engine needs a working fallback) unless paired with a local option anyway, which makes Qdrant the more consistent first choice."
+        }
+      ]
+    }
+  }
+}

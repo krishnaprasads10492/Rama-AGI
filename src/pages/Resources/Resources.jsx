@@ -163,6 +163,157 @@ function SubmitTaskPanel({ onSubmit }) {
   );
 }
 
+// ─── Resource research tab ─────────────────────────────────────────────────────
+const STATUS_STYLES = {
+  enabled:              { color: 'var(--green)',  label: 'ENABLED' },
+  'wired-no-key':       { color: 'var(--amber)',  label: 'WIRED — NO KEY' },
+  'wired-vault-locked': { color: 'var(--amber)',  label: 'WIRED — VAULT LOCKED' },
+  'keyed-not-wired':    { color: 'var(--amber)',  label: 'KEY SET — NOT WIRED' },
+  'no-key-needed':      { color: 'var(--green)',  label: 'READY' },
+  'researched-only':    { color: 'var(--muted)',  label: 'NOT ENABLED' },
+};
+
+function ResourceRow({ resource, onResearch, researching }) {
+  const st = STATUS_STYLES[resource.status] || STATUS_STYLES['researched-only'];
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px',
+      borderBottom: '1px solid var(--border)' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600 }}>{resource.name}</div>
+        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{resource.notes}</div>
+      </div>
+      <div style={{ padding: '2px 8px', background: `${st.color}18`, border: `1px solid ${st.color}44`,
+        borderRadius: 2, fontSize: 9, fontWeight: 700, color: st.color, letterSpacing: '0.05em', flexShrink: 0 }}>
+        {st.label}
+      </div>
+      <button className="btn btn-sm" style={{ fontSize: 10, flexShrink: 0 }}
+        disabled={researching}
+        onClick={() => onResearch(resource)}>
+        {researching ? '…' : '🔎 Research'}
+      </button>
+    </div>
+  );
+}
+
+function ResourceReportPanel({ report }) {
+  if (!report) return null;
+  if (!report.ok) {
+    return (
+      <div className="hud-card" style={{ padding: 16, borderColor: 'var(--red)' }}>
+        <div style={{ fontSize: 12, color: 'var(--red)', fontWeight: 700, marginBottom: 6 }}>
+          Could not read docs: {report.reason}
+        </div>
+        {report.hint && <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{report.hint}</div>}
+      </div>
+    );
+  }
+  const s = report.signals || {};
+  return (
+    <div className="hud-card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div className="section-label">RESEARCH REPORT — {report.url}</div>
+      {s.pricesFound?.length > 0 && (
+        <div><span style={{ fontSize: 10, color: 'var(--muted)' }}>PRICES FOUND: </span>
+          <span style={{ fontSize: 11, color: 'var(--text)' }}>{s.pricesFound.join(', ')}</span></div>
+      )}
+      {s.rateLimitsFound?.length > 0 && (
+        <div><span style={{ fontSize: 10, color: 'var(--muted)' }}>RATE LIMITS: </span>
+          <span style={{ fontSize: 11, color: 'var(--text)' }}>{s.rateLimitsFound.join(', ')}</span></div>
+      )}
+      {s.freeTierMentions?.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>FREE TIER MENTIONS</div>
+          {s.freeTierMentions.map((m, i) => (
+            <div key={i} style={{ fontSize: 10, color: 'var(--text-dim)', padding: '3px 0' }}>… {m} …</div>
+          ))}
+        </div>
+      )}
+      {s.apiKeyMentions?.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>CREDENTIAL / AUTH MENTIONS</div>
+          {s.apiKeyMentions.map((m, i) => (
+            <div key={i} style={{ fontSize: 10, color: 'var(--text-dim)', padding: '3px 0' }}>… {m} …</div>
+          ))}
+        </div>
+      )}
+      <div style={{ fontSize: 10, color: 'var(--muted)', fontStyle: 'italic' }}>{report.disclaimer}</div>
+    </div>
+  );
+}
+
+function ResearchTab() {
+  const [catalog, setCatalog] = useState(null);
+  const [customUrl, setCustomUrl] = useState('');
+  const [researching, setResearching] = useState(null);
+  const [report, setReport] = useState(null);
+
+  const load = useCallback(async () => {
+    if (!isElectron) return;
+    const res = await window.rama?.resourceResearch?.catalog?.();
+    if (res?.ok) setCatalog(res.data);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const runResearch = async (resource) => {
+    if (!isElectron) { emitActivity('action', `[Demo] Research ${resource?.name || customUrl}`); return; }
+    setResearching(resource?.id || 'custom');
+    setReport(null);
+    const opts = resource ? { resourceId: resource.id } : { url: customUrl };
+    const res = await window.rama?.resourceResearch?.research?.(opts);
+    setResearching(null);
+    if (res?.ok) {
+      setReport(res.data);
+      emitActivity('action', `Researched ${resource?.name || customUrl}`);
+    } else {
+      setReport({ ok: false, reason: res?.error || 'Unknown error' });
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 760 }}>
+      <div className="hud-card" style={{ padding: 16 }}>
+        <div className="section-label" style={{ marginBottom: 10 }}>RESEARCH AN ARBITRARY URL</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input className="input" value={customUrl} onChange={e => setCustomUrl(e.target.value)}
+            placeholder="https://provider.com/pricing" style={{ flex: 1, fontSize: 11 }} />
+          <button className="btn btn-primary btn-sm" disabled={!customUrl || researching}
+            onClick={() => runResearch(null)}>
+            {researching === 'custom' ? '…' : 'Read Docs'}
+          </button>
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.6 }}>
+          Rāma fetches the page live and extracts pricing, rate limits, and credential
+          requirements — it never answers this from training data alone.
+        </div>
+      </div>
+
+      {catalog && Object.entries(catalog.axes || {}).map(([axisId, axis]) => (
+        <div key={axisId} className="hud-card" style={{ overflow: 'hidden' }}>
+          <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)',
+            fontSize: 10, color: 'var(--muted)', fontWeight: 700, letterSpacing: '0.1em' }}>
+            {axis.label?.toUpperCase()}
+          </div>
+          {(axis.resources || []).map(r => (
+            <ResourceRow key={r.id} resource={r} researching={researching === r.id}
+              onResearch={runResearch} />
+          ))}
+        </div>
+      ))}
+
+      <ResourceReportPanel report={report} />
+
+      <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.7, padding: '10px 14px',
+        background: 'var(--elevated)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+        <span style={{ color: 'var(--accent)', fontWeight: 700 }}>How enabling works:</span>{' '}
+        Research never writes anything. Turning a finding into a real integration goes through
+        the same proposal ledger every self-change uses (Proposals page) — master reviews the
+        exact wiring diff before it's applied, and any credential is entered directly into the
+        vault afterward, never stored in the proposal itself.
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Resources page ──────────────────────────────────────────────────────
 export default function Resources() {
   const [status,  setStatus]  = useState(null);
@@ -263,7 +414,7 @@ export default function Resources() {
 
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
-        {['overview', 'queue', 'api-limits', 'events', 'configure'].map(t => (
+        {['overview', 'queue', 'api-limits', 'research', 'events', 'configure'].map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '9px 14px', border: 'none', background: 'transparent',
             color: tab === t ? 'var(--accent)' : 'var(--muted)',
@@ -368,6 +519,9 @@ export default function Resources() {
             </div>
           </div>
         )}
+
+        {/* ── Research ── */}
+        {tab === 'research' && <ResearchTab />}
 
         {/* ── Events ── */}
         {tab === 'events' && (
