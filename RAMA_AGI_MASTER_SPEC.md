@@ -1687,6 +1687,8 @@ authenticated **Master session**, not merely an open store.
 | 53 | Release channel — dormant version-bump/tag/CI path for the auto-updater | done (inert by design) | Section 39. `electron/lib/releaseChannel.cjs` (`release:state`, `release:cut` — bump `package.json`, prepend `CHANGELOG.md`, commit, annotated tag, optional push; master-only via new `release.cut` tier-0 capability), `.github/workflows/release.yml` (fires only on a `v*.*.*` tag push, builds+publishes via `electron-builder --publish always` — does nothing until Actions is enabled on GitHub and a tag is actually pushed), and a Release tab on `GitSync.jsx`. Does not go through `proposals.cjs` — this is master directly using a tool, same category as git commit/push, gated by tier not by the self-modify ledger. `node --check` clean, `npm run audit` clean (71 bridge calls resolve). Nothing has been tagged or pushed; `autoUpdater` has nothing to find yet. Next step if master wants this live: enable GitHub Actions on the repo, decide on code signing (currently unsigned — SmartScreen/Gatekeeper warnings expected), then cut `v1.0.1` with `push:false` first to sanity-check the tag/changelog before pushing for real. |
 | 54 | Local self-update — master's own local CI/CD (pull → install → build → apply, no external pipeline) | done | Section 40. `electron/lib/localUpdateEngine.cjs` (`checkForUpdates` read-only status, `pullBuildApply` — refuses on a dirty tree unless forced, pulls, classifies changed files with the same domain rule `start.cjs`'s live-reload watcher uses, installs only if deps changed, builds only if renderer changed, reports whether a restart or reload is needed without doing either itself), `registerLocalUpdate()` in `main.cjs` (the actual restart/reload actions — only the main process can do these safely), gated by new tier-0 `system.self-update` capability. Update + Release tabs both live on `GitSync.jsx` now. Does not go through `proposals.cjs` — master fetching their own already-committed code, same category as `git.cjs`'s pull/checkout. `node --check` clean, `npm run audit` clean (76 bridge calls resolve). Not exercised end-to-end (no second commit existed upstream this session) — logic verified by review against `start.cjs`'s proven `classifyChange`, not by a real pull. Next step: commit from another clone, then use the Update tab to confirm one real pull→build→restart cycle. |
 
+| 55 | Publish an applied self-modify proposal to its own branch, with release notes | done | Section 41. `electron/lib/publishProposal.cjs` — pushes an already-`applied` proposal's changes to `self-modify/<date>-<slug>-<id>` (never `dev`/`source` directly), with generated release notes (structured facts always; AI explanation appended opportunistically via `modelRouter.cjs`, degrading silently to structured-only). Master-only (`release.cut`, same gate as cutting a version release — I6 unchanged, ledger approval already happened before this runs). Verified end-to-end against a disposable scratch repo: `dev` untouched, new branch has the files + notes, working tree returns to the starting branch automatically. Wired into `Evolution.jsx`'s ProposalCard as "⎇ Publish branch". `npm run audit` clean (78 bridge calls). Not yet exercised against a real remote with `push:true`, and not yet surfaced in `Resources.jsx`'s research tab for RESOURCE-kind proposals. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -2806,3 +2808,102 @@ by code review against `start.cjs`'s existing, already-proven `classifyChange`
 rule rather than by running a real pull. Next step if resumed cold: make a
 trivial commit on the `dev`/`source` remotes from another clone, then use the
 Update tab here to confirm a real pull → build → restart cycle end-to-end.
+
+
+---
+
+## SECTION 41 — Publish an applied self-modify proposal to its own branch
+
+> Master's ask: the app should be able to push a change it made to itself as
+> a NEW branch (not straight to `dev`/`source`), with generated release notes
+> explaining what changed and why it matters, so an old version is always
+> reachable to revert to.
+
+### Where this sits relative to the ledger (I6) and to Section 39's release channel
+
+The ledger's approve→apply gate is unchanged and runs first — `publishProposal()`
+refuses anything that is not already `STATUS.APPLIED`. This section only
+answers what happens to an already-approved, already-applied change on its
+way toward `dev`/`source`: it lands on its own branch, not on those branches
+directly, so master's merge is the point where it actually becomes "the new
+version" rather than the write to disk being that point.
+
+This is a different mechanism from Section 39's `releaseChannel.cjs` on
+purpose: that module cuts a version tag for the whole project when master
+decides a batch of accumulated changes is ready to ship. This one runs per
+proposal, immediately after that one proposal is applied, and never touches
+version numbers or CHANGELOG.md — it is about keeping each self-change
+individually reviewable and revertible, not about cutting a release.
+
+### What `electron/lib/publishProposal.cjs` does
+
+1. Refuses anything not `STATUS.APPLIED` (I6 is enforced upstream, not
+   re-checked loosely here).
+2. Names a branch `self-modify/<date>-<slugified-title>-<id prefix>`.
+3. Generates release notes (see below) and writes them to a **tracked**
+   `release-notes/<proposalId>.md` — deliberately not under `data/`, which is
+   entirely gitignored (encrypted stores, per-machine key material). Notes
+   must actually be committed, so they cannot live there.
+4. Creates the branch, stages the proposal's own changed files (already on
+   disk from `apply()`) plus the notes file, commits, and — if `push:true`
+   (the default) — pushes with `-u origin <branch>`.
+5. Always checks out back to the branch the repo was on before publishing,
+   success or failure, so a publish call never leaves the working tree
+   sitting on the new branch.
+
+Verified against a disposable scratch git repo (not this project's real
+repo): after publish, `dev` still contained only its original file, the new
+branch contained the proposal's file plus the notes file, and the working
+tree matched `dev` exactly having returned there automatically.
+
+### Release notes — a laddered capability (Section 30's pattern), not an LLM dependency
+
+- **L0 (always available, no network/credential needed):** assembled directly
+  from the proposal record — kind, title, summary, changed files, risk,
+  requires-restart, and the AST-based verification summary/issues from
+  `verifyProposal.cjs` if it ran. This alone is what "explanation and
+  significance" means when no model is configured.
+- **L1 (used opportunistically):** the same structured facts are handed to
+  whatever model `modelRouter.cjs` can currently reach (`selectModel` +
+  `checkAvailable`), asked to explain the change and its significance in
+  plain language. Any failure — no model configured, no credential, a failed
+  call — silently falls back to L0 rather than blocking the push. The AI
+  explanation is appended after the structured facts, not instead of them, so
+  the concrete file list and risk/verification data are never only as
+  reliable as an LLM call.
+
+### Why master-triggered, not autonomous — same reasoning as Section 39's tags
+
+`publish:proposal` is gated on `release.cut` (tier 0), the same capability
+that gates cutting a version release. Pushing requires a live git credential
+on whatever machine is running Rāma; letting the app push on its own after an
+unattended self-modify would mean a compromised or buggy instance could push
+under master's identity with no one in the loop. The invariant already
+written for releases applies unchanged here: Rāma can say a change is ready
+to publish, it should not decide to ship itself. `push:false` is available
+for the same "commit locally, review before it leaves this machine" step
+`releaseChannel.cjs` already offers for tags.
+
+### UI
+
+`ProposalCard` in `Evolution.jsx` gained a "⎇ Publish branch" action, shown
+only once a proposal's status is `applied`. It calls
+`window.rama.publish.proposal({ user, repoPath, proposalId })` and displays
+the resulting branch/commit outcome plus a collapsible view of the generated
+release notes.
+
+### Status
+
+Built and verified end-to-end against a disposable scratch repo (branch
+creation, commit, notes file, and return-to-starting-branch all confirmed;
+push was not exercised against a real remote in this session — `push:false`
+path was used for the scratch test). `node --check` clean on
+`publishProposal.cjs`, `main.cjs`, `preload.cjs`. `npm run audit` clean (78
+bridge calls resolve, up from 77 — the new `publish.*` surface). Not yet
+wired into any proposal kind besides being callable for all of them
+(SELF_MODIFY, EVOLUTION, REGEN, GENOME, RESOURCE) uniformly, since the ledger
+already treats every kind the same way at the apply boundary. Next step if
+resumed cold: exercise `push:true` against a real fork/test remote once one
+is available, and consider whether `RemoteEngine` proposals from
+`resourceResearchEngine.cjs` should surface the same "Publish branch" action
+in `Resources.jsx`'s research tab (currently only wired into `Evolution.jsx`).

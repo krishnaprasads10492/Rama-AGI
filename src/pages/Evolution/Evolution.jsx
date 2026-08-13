@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { emitActivity } from '@components/ActivityStream.jsx';
+import { useUserStore } from '@store/userStore.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -102,7 +103,7 @@ function FindingCard({ finding, onAnalyze, onReadSource }) {
   );
 }
 
-function ProposalCard({ proposal, onApprove, onReject, onApply, repoPath }) {
+function ProposalCard({ proposal, onApprove, onReject, onApply, onPublish, repoPath }) {
   const statusColors = {
     pending:  'var(--amber)',
     approved: 'var(--green)',
@@ -110,6 +111,16 @@ function ProposalCard({ proposal, onApprove, onReject, onApply, repoPath }) {
     applied:  'var(--violet)',
   };
   const [expanded, setExpanded] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [publishResult, setPublishResult] = useState(null);
+
+  const publish = async () => {
+    setPublishing(true);
+    setPublishResult(null);
+    const res = await onPublish(proposal.id);
+    setPublishResult(res);
+    setPublishing(false);
+  };
 
   return (
     <div className="hud-card" style={{ padding: 14, marginBottom: 8,
@@ -165,8 +176,37 @@ function ProposalCard({ proposal, onApprove, onReject, onApply, repoPath }) {
               borderColor: 'var(--violet)' }}
               onClick={() => onApply(proposal.id)}>⚡ Apply</button>
           )}
+          {proposal.status === 'applied' && (
+            <button className="btn btn-sm" style={{ fontSize: 10, color: 'var(--accent)',
+              borderColor: 'var(--accent)' }}
+              disabled={publishing || !repoPath}
+              onClick={publish}>
+              {publishing ? '…' : '⎇ Publish branch'}
+            </button>
+          )}
         </div>
       </div>
+
+      {publishResult && (
+        <div style={{ marginTop: 8, fontSize: 11, lineHeight: 1.6,
+          color: publishResult.ok ? 'var(--green)' : 'var(--red)' }}>
+          {publishResult.ok ? (
+            <>
+              ✓ {publishResult.note}
+              <details style={{ marginTop: 4 }}>
+                <summary style={{ cursor: 'pointer', color: 'var(--muted)', fontSize: 10 }}>
+                  Release notes ({publishResult.generatedBy === 'ai' ? 'AI-explained' : 'structured'})
+                </summary>
+                <pre style={{ whiteSpace: 'pre-wrap', fontSize: 10, color: 'var(--text-dim)',
+                  background: 'var(--surface)', padding: 8, borderRadius: 'var(--radius)',
+                  marginTop: 4, maxHeight: 220, overflow: 'auto' }}>
+                  {publishResult.releaseNotes}
+                </pre>
+              </details>
+            </>
+          ) : `✕ ${publishResult.error}`}
+        </div>
+      )}
     </div>
   );
 }
@@ -199,6 +239,7 @@ function AssessmentRow({ item, onScout }) {
 }
 
 export default function Evolution() {
+  const { currentUser } = useUserStore();
   const [tab,         setTab]         = useState('assess');
   const [assessment,  setAssessment]  = useState([]);
   const [findings,    setFindings]    = useState([]);
@@ -307,6 +348,17 @@ export default function Evolution() {
       setProposals(s => s.map(p => p.id === id ? { ...p, status: 'applied' } : p));
       emitActivity('complete', `Evolution applied: proposal ${id}`);
     }
+  };
+
+  // Pushes an already-applied proposal to its own self-modify/<slug> branch
+  // with generated release notes — never commits to dev/source directly, so
+  // the previous state stays reachable. Master-only (release.cut), same gate
+  // as cutting a version release. See electron/lib/publishProposal.cjs.
+  const publish = async (id) => {
+    if (!isElectron || !repoPath) return { ok: false, error: 'Set repo path first' };
+    const res = await window.rama.publish.proposal({ user: currentUser, repoPath, proposalId: id });
+    if (res?.ok) emitActivity('complete', `Published ${id} to branch ${res.branch}`);
+    return res;
   };
 
   return (
@@ -466,7 +518,7 @@ export default function Evolution() {
               </div>
             ) : proposals.map(p => (
               <ProposalCard key={p.id} proposal={p} onApprove={approve}
-                onReject={reject} onApply={apply} repoPath={repoPath} />
+                onReject={reject} onApply={apply} onPublish={publish} repoPath={repoPath} />
             ))}
           </div>
         )}

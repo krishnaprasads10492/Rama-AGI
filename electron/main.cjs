@@ -40,6 +40,7 @@ const genomeIPC        = require('./genome.cjs');
 const genomeApplier    = require('./lib/genomeApplier.cjs');
 const releaseChannel   = require('./lib/releaseChannel.cjs');
 const localUpdateEngine = require('./lib/localUpdateEngine.cjs');
+const publishProposal  = require('./lib/publishProposal.cjs');
 const authIPC          = require('./ipc/authEngine.cjs');
 const instanceIPC      = require('./ipc/instanceManager.cjs');
 const metaCognitionIPC = require('./ipc/metaCognition.cjs');
@@ -636,6 +637,7 @@ app.whenReady().then(async () => {
   genomeApplier.register();   // closes the gap: GENOME proposals could not be applied
   releaseChannel.register(ipcMain);   // dormant until master cuts a release — see Section 39
   registerLocalUpdate(ipcMain);       // local pull → install → build → apply — see Section 40
+  publishProposal.register(ipcMain);  // applied self-modify proposals → new branch, never dev/source directly
   registerAppearance(ipcMain);
   // Genome layer — registered after the engines it describes so verify() is honest
   genomeIPC.register(ipcMain);

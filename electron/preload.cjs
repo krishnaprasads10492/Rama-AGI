@@ -227,6 +227,12 @@ const RAMA_API = {
     cut:   (opts)           => ipcRenderer.invoke('release:cut', opts),
   },
 
+  // ── Publish (applied self-modify proposal → its own branch, with notes) ───
+  publish: {
+    previewNotes: (proposalId)  => ipcRenderer.invoke('publish:preview-notes', { proposalId }),
+    proposal:     (opts)        => ipcRenderer.invoke('publish:proposal', opts),
+  },
+
   // ── Local Update (master's own local CI/CD — pull → install → build → apply) ──
   update: {
     check:        (repoPath)      => ipcRenderer.invoke('update:check', { repoPath }),
