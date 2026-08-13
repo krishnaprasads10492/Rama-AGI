@@ -12,12 +12,14 @@ const gitIPC       = require('./ipc/git.cjs');
 const terminalIPC  = require('./ipc/terminal.cjs');
 const appsIPC      = require('./ipc/appAssimilation.cjs');
 const aiIPC        = require('./ipc/aiProcess.cjs');
+const marketIPC    = require('./ipc/marketIntel.cjs');
 const browserIPC   = require('./ipc/browserEngine.cjs');
 const vaultIPC     = require('./ipc/credentialVault.cjs');
 const modelIPC     = require('./ipc/modelRouter.cjs');
 const agentIPC         = require('./ipc/agentOrchestrator.cjs');
 const intelligenceIPC  = require('./ipc/intelligenceEngine.cjs');
 const evolutionIPC         = require('./ipc/evolutionEngine.cjs');
+const resourceResearchIPC  = require('./ipc/resourceResearchEngine.cjs');
 const resourceOrchestrator = require('./resourceOrchestrator.cjs');
 // ─── Upgrade layer (additive — wraps existing, never replaces) ───────────────
 const vectorMemoryIPC  = require('./ipc/vectorMemory.cjs');
@@ -36,6 +38,8 @@ const proposalLedger   = require('./lib/proposals.cjs');
 // ─── Genome / Instance layer (holonic architecture) ───────────────────────────
 const genomeIPC        = require('./genome.cjs');
 const genomeApplier    = require('./lib/genomeApplier.cjs');
+const releaseChannel   = require('./lib/releaseChannel.cjs');
+const localUpdateEngine = require('./lib/localUpdateEngine.cjs');
 const authIPC          = require('./ipc/authEngine.cjs');
 const instanceIPC      = require('./ipc/instanceManager.cjs');
 const metaCognitionIPC = require('./ipc/metaCognition.cjs');
@@ -285,6 +289,52 @@ function clampZoom(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return 1;
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, n));
+}
+
+// ─── Local self-update (master's own git repo → install → build → apply) ────
+/**
+ * Master-triggered local CI/CD: pull the configured repo, install/build only
+ * what changed, and apply the result to THIS running instance. No external
+ * pipeline — see RAMA_AGI_MASTER_SPEC.md Section 40. Gated by tier, not by
+ * proposals.cjs (I6 governs Rāma authoring its own changes; this is master
+ * fetching commits that already exist in their own git history).
+ */
+function registerLocalUpdate(ipcMain) {
+  const capability = require('./lib/capability.cjs');
+
+  ipcMain.handle('update:check', async (_e, { repoPath } = {}) => {
+    return localUpdateEngine.checkForUpdates(repoPath);
+  });
+
+  ipcMain.handle('update:pull-build', async (event, { user, repoPath, force } = {}) => {
+    if (!capability.can(user, 'system.self-update')) {
+      const who = capability.TIER_LABELS[String(user?.tier)] ?? 'This account';
+      return { ok: false, error: `${who} may not trigger a local update (needs "system.self-update")` };
+    }
+    return localUpdateEngine.pullBuildApply({
+      repoPath, force,
+      onLog: (chunk) => event.sender.send('update:log', chunk),
+    });
+  });
+
+  // Reload just the window — safe when only the renderer changed
+  ipcMain.handle('update:reload-window', async (_e, { user } = {}) => {
+    if (!capability.can(user, 'system.self-update')) return { ok: false, error: 'Not permitted' };
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'No window' };
+    mainWindow.webContents.reloadIgnoringCache();
+    return { ok: true };
+  });
+
+  // Full relaunch — needed when electron/server/deps changed. Uses Electron's
+  // own relaunch, so this respects the same lifecycle a manual restart would
+  // (session locks, tray cleanup via 'before-quit' handlers already wired).
+  ipcMain.handle('update:restart-app', async (_e, { user } = {}) => {
+    if (!capability.can(user, 'system.self-update')) return { ok: false, error: 'Not permitted' };
+    app.relaunch();
+    app.isQuiting = true;
+    app.exit(0);
+    return { ok: true };
+  });
 }
 
 function registerAppearance(ipcMain) {
@@ -563,12 +613,14 @@ app.whenReady().then(async () => {
   terminalIPC.register(ipcMain, mainWindow);
   appsIPC.register(ipcMain);
   aiIPC.register(ipcMain);
+  marketIPC.register(ipcMain);
   browserIPC.register(ipcMain);
   vaultIPC.register(ipcMain);
   modelIPC.register(ipcMain);
   agentIPC.register(ipcMain);
   intelligenceIPC.register(ipcMain);
   evolutionIPC.register(ipcMain);
+  resourceResearchIPC.register(ipcMain);
   resourceOrchestrator.register(ipcMain);
   // Upgrade layer
   vectorMemoryIPC.register(ipcMain);
@@ -582,6 +634,8 @@ app.whenReady().then(async () => {
   ipcEncryption.register(ipcMain);
   proposalLedger.register(ipcMain);
   genomeApplier.register();   // closes the gap: GENOME proposals could not be applied
+  releaseChannel.register(ipcMain);   // dormant until master cuts a release — see Section 39
+  registerLocalUpdate(ipcMain);       // local pull → install → build → apply — see Section 40
   registerAppearance(ipcMain);
   // Genome layer — registered after the engines it describes so verify() is honest
   genomeIPC.register(ipcMain);

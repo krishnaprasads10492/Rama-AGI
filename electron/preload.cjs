@@ -144,6 +144,15 @@ const RAMA_API = {
     },
   },
 
+  // ── Market Intel (absorbed StockMind prediction engine) ───────────────────
+  marketIntel: {
+    predict:         (opts) => ipcRenderer.invoke('market:predict', opts),
+    backtest:        (opts) => ipcRenderer.invoke('market:backtest', opts),
+    backtestPresets: (opts) => ipcRenderer.invoke('market:backtest-presets', opts),
+    strategyScore:   (opts) => ipcRenderer.invoke('market:strategy-score', opts),
+    health:          (opts) => ipcRenderer.invoke('market:health', opts),
+  },
+
   // ── Updater ───────────────────────────────────────────────────────────────
   updater: {
     installNow: () => ipcRenderer.send('updater:install-now'),
@@ -210,6 +219,32 @@ const RAMA_API = {
       ipcRenderer.on('evolution:applied', h);
       return () => ipcRenderer.removeListener('evolution:applied', h);
     },
+  },
+
+  // ── Release Channel (dormant until master cuts a real release) ────────────
+  release: {
+    state: (repoPath)       => ipcRenderer.invoke('release:state', { repoPath }),
+    cut:   (opts)           => ipcRenderer.invoke('release:cut', opts),
+  },
+
+  // ── Local Update (master's own local CI/CD — pull → install → build → apply) ──
+  update: {
+    check:        (repoPath)      => ipcRenderer.invoke('update:check', { repoPath }),
+    pullBuild:    (opts)          => ipcRenderer.invoke('update:pull-build', opts),
+    reloadWindow: (opts)          => ipcRenderer.invoke('update:reload-window', opts),
+    restartApp:   (opts)          => ipcRenderer.invoke('update:restart-app', opts),
+    onLog: (cb) => {
+      const h = (_e, chunk) => cb(chunk);
+      ipcRenderer.on('update:log', h);
+      return () => ipcRenderer.removeListener('update:log', h);
+    },
+  },
+
+  // ── Resource Research (catalog + live doc-reading + enable proposals) ─────
+  resourceResearch: {
+    catalog:       ()      => ipcRenderer.invoke('resource:catalog'),
+    research:      (opts)  => ipcRenderer.invoke('resource:research', opts),
+    proposeEnable: (opts)  => ipcRenderer.invoke('resource:propose-enable', opts),
   },
 
   // ── Intelligence Engine ───────────────────────────────────────────────────

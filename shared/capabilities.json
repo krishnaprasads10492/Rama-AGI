@@ -59,6 +59,9 @@
     "git.push": 1,
     "git.force": 0,
 
+    "release.view": 2,
+    "release.cut": 0,
+
     "browser.search": 3,
     "browser.read": 3,
     "browser.download": 2,
@@ -68,6 +71,11 @@
     "models.use": 3,
     "models.add-key": 1,
     "models.ollama-pull": 1,
+
+    "resources.research": 2,
+    "resources.propose-enable": 1,
+
+    "system.self-update": 0,
 
     "vault.read": 0,
     "vault.write": 0,

@@ -129,7 +129,7 @@ export const PAGES = [
     keys: ['resources', 'orchestrator', 'cpu', 'ram', 'workers', 'tasks', 'schedule', 'priority', 'queue'],
     voice: ['open resources', 'resource monitor', 'show workers'],
     component: '@pages/Resources/Resources.jsx',
-    capabilities: ['task-scheduling', 'resource-governance', 'rate-limit-mgmt'],
+    capabilities: ['task-scheduling', 'resource-governance', 'rate-limit-mgmt', 'resource-research'],
   },
   {
     route: '/mind', id: 'mind', label: 'Rāma Mind', icon: '⊕',
