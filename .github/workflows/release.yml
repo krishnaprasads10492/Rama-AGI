@@ -1,0 +1,57 @@
+name: Release Rāma AGI
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DORMANT BY DESIGN. This workflow does nothing until BOTH are true:
+#   1. It exists on the default branch on GitHub (committing this file alone
+#      does not build anything — pushing a normal commit does not trigger it)
+#   2. A tag matching v*.*.* is pushed (git tag v1.1.0 && git push origin v1.1.0)
+#
+# See RAMA_AGI_MASTER_SPEC.md Section 39 for the full design, what "cutting a
+# release" means for Rāma's self-improvement loop, and how to activate this
+# for real (repo Actions must be enabled; code signing is a separate, optional
+# step not configured here — unsigned builds trigger a SmartScreen warning on
+# Windows and a Gatekeeper warning on macOS, which is normal for an unsigned
+# app and does not block installation).
+# ═══════════════════════════════════════════════════════════════════════════
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+# Never run two release builds for the same tag concurrently
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer
+        run: npm run build
+
+      # electron-builder reads GH_TOKEN to upload artifacts to the GitHub
+      # Release matching the pushed tag. GITHUB_TOKEN is provided
+      # automatically by Actions for the repo the workflow runs in — no
+      # secret needs to be created for a same-repo release.
+      - name: Package and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --publish always

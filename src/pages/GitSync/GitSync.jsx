@@ -1,5 +1,217 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { gitClient, fsClient } from '@services/ipcClient.js';
+import { useUserStore } from '@store/userStore.js';
+
+const isElectron = typeof window !== 'undefined' && !!window.rama;
+
+// ─── Release panel — dormant until master cuts a release (Section 39) ─────────
+function ReleasePanel({ repoPath }) {
+  const { currentUser, canDo } = useUserStore();
+  const [state,   setState]   = useState(null);
+  const [bump,    setBump]    = useState('patch');
+  const [notes,   setNotes]   = useState('');
+  const [busy,    setBusy]    = useState(false);
+  const [result,  setResult]  = useState(null);
+
+  const load = useCallback(async () => {
+    if (!isElectron || !repoPath) return;
+    const res = await window.rama.release.state(repoPath);
+    if (res?.ok) setState(res.data);
+  }, [repoPath]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const canCut = canDo('release.cut');
+
+  const cut = async (push) => {
+    setBusy(true);
+    setResult(null);
+    const res = await window.rama.release.cut({ user: currentUser, repoPath, bump, notes, push });
+    setBusy(false);
+    setResult(res);
+    if (res?.ok) { setNotes(''); load(); }
+  };
+
+  if (!repoPath) return null;
+
+  return (
+    <div className="hud-card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className="section-label">RELEASE CHANNEL</div>
+
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 11 }}>
+        <div><span style={{ color: 'var(--muted)' }}>Current version: </span>
+          <span style={{ color: 'var(--text)', fontWeight: 700 }}>{state?.version || '—'}</span></div>
+        <div><span style={{ color: 'var(--muted)' }}>Last tag: </span>
+          <span style={{ color: 'var(--text)' }}>{state?.lastTag || 'none'}</span></div>
+        <div><span style={{ color: 'var(--muted)' }}>Commits since: </span>
+          <span style={{ color: 'var(--text)' }}>{state?.commitsSinceTag ?? '—'}</span></div>
+        <div><span style={{ color: 'var(--muted)' }}>CI workflow: </span>
+          <span style={{ color: state?.workflowPresent ? 'var(--amber)' : 'var(--muted)' }}>
+            {state?.workflowPresent ? 'present, dormant until enabled on GitHub' : 'not present'}
+          </span></div>
+      </div>
+
+      {!canCut ? (
+        <div style={{ fontSize: 11, color: 'var(--muted)' }}>Only master may cut a release.</div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {['patch', 'minor', 'major'].map(b => (
+              <button key={b} onClick={() => setBump(b)} style={{
+                padding: '4px 10px', border: `1px solid ${bump === b ? 'var(--amber)' : 'var(--border)'}`,
+                borderRadius: 'var(--radius)', background: bump === b ? 'rgba(212,169,64,0.1)' : 'transparent',
+                color: bump === b ? 'var(--amber)' : 'var(--muted)', cursor: 'pointer',
+                fontFamily: 'var(--font)', fontSize: 10, textTransform: 'uppercase',
+              }}>{b}</button>
+            ))}
+          </div>
+          <textarea className="input" value={notes} onChange={e => setNotes(e.target.value)}
+            placeholder="Release notes — what changed, why it matters"
+            style={{ fontSize: 11, minHeight: 60, resize: 'vertical' }} />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-sm" disabled={busy} onClick={() => cut(false)}>
+              {busy ? '…' : 'Tag Locally'}
+            </button>
+            <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => cut(true)}>
+              {busy ? '…' : '⬆ Tag & Push'}
+            </button>
+          </div>
+          {result && (
+            <div style={{ fontSize: 11, color: result.ok ? 'var(--green)' : 'var(--red)', lineHeight: 1.6 }}>
+              {result.ok ? `✓ ${result.tag} — ${result.note}` : `✕ ${result.error}`}
+            </div>
+          )}
+        </>
+      )}
+
+      <div style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.6, fontStyle: 'italic' }}>
+        Tagging and pushing is the only automated step. Building installers and publishing
+        them requires a CI/CD pipeline (a dormant GitHub Actions workflow already exists at
+        .github/workflows/release.yml) — enabling it and configuring code signing are
+        deliberately separate, explicit steps master takes when ready to make this universal.
+      </div>
+    </div>
+  );
+}
+
+// ─── Local update panel — master's own local CI/CD (Section 40) ──────────────
+function LocalUpdatePanel({ repoPath }) {
+  const { currentUser, canDo } = useUserStore();
+  const [state,   setState]   = useState(null);
+  const [busy,    setBusy]    = useState(false);
+  const [result,  setResult]  = useState(null);
+  const [log,     setLog]     = useState('');
+
+  const canUpdate = canDo('system.self-update');
+
+  const load = useCallback(async () => {
+    if (!isElectron || !repoPath) return;
+    const res = await window.rama.update.check(repoPath);
+    if (res?.ok) setState(res.data);
+  }, [repoPath]);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!isElectron) return;
+    const unsub = window.rama.update.onLog((chunk) => setLog(s => (s + chunk).slice(-8000)));
+    return () => unsub?.();
+  }, []);
+
+  const pullBuild = async (force) => {
+    setBusy(true);
+    setResult(null);
+    setLog('');
+    const res = await window.rama.update.pullBuild({ user: currentUser, repoPath, force });
+    setBusy(false);
+    setResult(res);
+    if (res?.ok) load();
+  };
+
+  const applyNow = async () => {
+    if (result?.requiresAppRestart) {
+      await window.rama.update.restartApp({ user: currentUser });
+    } else if (result?.requiresWindowReload) {
+      await window.rama.update.reloadWindow({ user: currentUser });
+    }
+  };
+
+  if (!repoPath) return null;
+
+  return (
+    <div className="hud-card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className="section-label">LOCAL SELF-UPDATE</div>
+      <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+        Pulls the tracked branch on this machine, installs dependencies only if
+        package.json changed, and rebuilds the renderer only if src/shared changed.
+        Nothing here runs on GitHub — this is local to this install.
+      </div>
+
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 11 }}>
+        <div><span style={{ color: 'var(--muted)' }}>Branch: </span>
+          <span style={{ color: 'var(--text)' }}>{state?.branch || '—'}</span></div>
+        <div><span style={{ color: 'var(--muted)' }}>Behind: </span>
+          <span style={{ color: state?.behind > 0 ? 'var(--amber)' : 'var(--green)' }}>
+            {state?.behind ?? '—'} commit(s)
+          </span></div>
+        <div><span style={{ color: 'var(--muted)' }}>Working tree: </span>
+          <span style={{ color: state?.isClean ? 'var(--green)' : 'var(--red)' }}>
+            {state ? (state.isClean ? 'clean' : 'dirty') : '—'}
+          </span></div>
+      </div>
+
+      {state?.commits?.length > 0 && (
+        <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>
+          {state.commits.slice(0, 5).map(c => (
+            <div key={c.hash} style={{ padding: '2px 0' }}>
+              <span style={{ color: 'var(--accent)' }}>{c.hash}</span> {c.message}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!canUpdate ? (
+        <div style={{ fontSize: 11, color: 'var(--muted)' }}>Only master may trigger a local update.</div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-sm btn-primary" disabled={busy || state?.upToDate}
+              onClick={() => pullBuild(false)}>
+              {busy ? '…' : '⬇ Pull, Install & Build'}
+            </button>
+            {result?.dirty && (
+              <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => pullBuild(true)}>
+                Force (discard local edits' protection)
+              </button>
+            )}
+          </div>
+
+          {log && (
+            <pre style={{ fontSize: 10, color: 'var(--text-dim)', background: 'var(--surface)',
+              border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 10,
+              maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{log}</pre>
+          )}
+
+          {result && (
+            <div style={{ fontSize: 11, color: result.ok ? 'var(--green)' : 'var(--red)', lineHeight: 1.6 }}>
+              {result.ok
+                ? (result.changed
+                    ? `✓ Updated ${result.fromHead?.slice(0,7)} → ${result.toHead?.slice(0,7)} — domains: ${result.domains.join(', ') || 'none'}`
+                    : '✓ Already up to date')
+                : `✕ ${result.error}`}
+            </div>
+          )}
+
+          {result?.ok && result.changed && (result.requiresAppRestart || result.requiresWindowReload) && (
+            <button className="btn btn-sm" onClick={applyNow}>
+              {result.requiresAppRestart ? '↻ Restart App to Apply' : '↻ Reload Window to Apply'}
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 export default function GitSync() {
   const [repoPath,  setRepoPath]  = useState('');
@@ -99,7 +311,7 @@ export default function GitSync() {
         <>
           {/* Tabs */}
           <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
-            {['status', 'log', 'diff'].map(t => (
+            {['status', 'log', 'diff', 'update', 'release'].map(t => (
               <button key={t} onClick={() => setTab(t)} style={{
                 padding: '9px 18px', border: 'none', background: 'transparent',
                 color: tab === t ? 'var(--amber)' : 'var(--muted)',
@@ -163,6 +375,10 @@ export default function GitSync() {
                 ))}
               </div>
             )}
+
+            {tab === 'update' && <LocalUpdatePanel repoPath={repoPath} />}
+
+            {tab === 'release' && <ReleasePanel repoPath={repoPath} />}
 
             {tab === 'diff' && (
               <div className="hud-card" style={{ padding: '0', overflow: 'hidden' }}>
