@@ -70,7 +70,11 @@ function TempCleaner({ onClose }) {
     systemClient.getTempTargets().then(res => {
       if (res.ok) {
         setTargets(res.data);
-        setSelected(new Set(res.data.map(t => t.path)));
+        // Safe temp/cache dirs are pre-selected; anything flagged `risky`
+        // (browser caches that can sign the user out, even though they no
+        // longer point at login/history data) starts unchecked — cleaning
+        // those needs a deliberate click, not a side effect of "Clean N targets".
+        setSelected(new Set(res.data.filter(t => !t.risky).map(t => t.path)));
       }
       setLoading(false);
     });
@@ -117,19 +121,26 @@ function TempCleaner({ onClose }) {
                     background: selected.has(t.path) ? 'rgba(0,255,255,0.05)' : 'transparent',
                     marginBottom: '2px', border: `1px solid ${selected.has(t.path) ? 'rgba(0,255,255,0.2)' : 'transparent'}`,
                   }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
                     <div style={{
-                      width: '14px', height: '14px', borderRadius: '2px',
+                      width: '14px', height: '14px', borderRadius: '2px', flexShrink: 0,
                       border: `1px solid ${selected.has(t.path) ? 'var(--accent)' : 'var(--border)'}`,
                       background: selected.has(t.path) ? 'var(--accent)' : 'transparent',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '9px', color: 'var(--bg)', flexShrink: 0,
+                      fontSize: '9px', color: 'var(--bg)',
                     }}>
                       {selected.has(t.path) && '✓'}
                     </div>
-                    <span style={{ fontSize: '12px' }}>{t.label}</span>
+                    <div style={{ minWidth: 0 }}>
+                      <span style={{ fontSize: '12px' }}>{t.label}</span>
+                      {t.risky && (
+                        <div style={{ fontSize: '10px', color: 'var(--amber)', marginTop: '2px' }}>
+                          ⚠ {t.note || 'May affect saved logins or sessions — not selected by default.'}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <span style={{ fontSize: '11px', color: 'var(--amber)' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--amber)', flexShrink: 0, marginLeft: '10px' }}>
                     {t.sizeBytes > 0 ? formatBytes(t.sizeBytes) : '—'}
                     {t.fileCount > 0 ? ` (${t.fileCount} files)` : ''}
                   </span>

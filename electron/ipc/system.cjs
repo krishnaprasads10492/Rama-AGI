@@ -244,9 +244,22 @@ function getTempTargets() {
       { id: 'win-temp',        label: 'Windows Temp (%TEMP%)',            path: process.env.TEMP  || path.join(localApp, 'Temp') },
       { id: 'win-sys-temp',    label: 'Windows System Temp',              path: 'C:\\Windows\\Temp' },
       { id: 'win-prefetch',    label: 'Windows Prefetch',                 path: 'C:\\Windows\\Prefetch' },
-      { id: 'chrome-cache',    label: 'Chrome Cache',                     path: path.join(localApp, 'Google', 'Chrome', 'User Data', 'Default', 'Cache') },
-      { id: 'edge-cache',      label: 'Edge Cache',                       path: path.join(localApp, 'Microsoft', 'Edge', 'User Data', 'Default', 'Cache') },
-      { id: 'firefox-cache',   label: 'Firefox Cache',                    path: path.join(localApp, 'Mozilla', 'Firefox', 'Profiles') },
+      // Browser cache — deliberately narrowed to the Cache/*Cache* subfolder only,
+      // never the profile root, and flagged `risky: true` so the UI never
+      // pre-selects it. A prior version pointed the Firefox entry at the whole
+      // Profiles directory, which co-locates logins.json/cookies.sqlite/
+      // places.sqlite (saved logins + history) with the cache in the SAME
+      // directory — cleaning it would have signed the user out of every site
+      // and erased browsing history, not just freed disk space. Chrome/Edge
+      // already isolate Cache/ from Login Data/Cookies/History, but they still
+      // sign the user out of sites using session-only cookies, so they stay
+      // risky (unchecked by default) rather than "safe temp".
+      { id: 'chrome-cache',    label: 'Chrome Cache',                     path: path.join(localApp, 'Google', 'Chrome', 'User Data', 'Default', 'Cache'), risky: true, note: 'Cache only — will not touch saved passwords, cookies, or history. May sign you out of some sites.' },
+      { id: 'edge-cache',      label: 'Edge Cache',                       path: path.join(localApp, 'Microsoft', 'Edge', 'User Data', 'Default', 'Cache'), risky: true, note: 'Cache only — will not touch saved passwords, cookies, or history. May sign you out of some sites.' },
+      // Firefox has no separate always-present "cache-only, safe to nuke" path
+      // that is stable across versions/profiles without parsing profiles.ini,
+      // and getting that wrong risks deleting real profile data — so it is not
+      // offered as a target at all rather than guessed at.
       { id: 'npm-cache',       label: 'npm Cache',                        path: path.join(appData, 'npm-cache') },
       { id: 'pip-cache',       label: 'pip Cache',                        path: path.join(localApp, 'pip', 'cache') },
       { id: 'win-update',      label: 'Windows Update Cache',             path: 'C:\\Windows\\SoftwareDistribution\\Download' },
