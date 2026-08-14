@@ -58,6 +58,73 @@ function ProcessRow({ proc, onKill }) {
   );
 }
 
+// ─── Rāma's own footprint — separate from total machine usage ────────────────
+// Master asked for the difference between total system load and what Rāma
+// itself accounts for, foreground and background. This panel is the answer:
+// real per-process figures from Electron's own app.getAppMetrics() (main,
+// every window, GPU, utility) plus Rāma's external child processes (Python
+// backend, open terminals, the Playwright browser) looked up by PID — never
+// an estimate, and a process whose PID has already exited is shown as
+// "not found" rather than silently dropped.
+function RamaFootprintPanel() {
+  const [footprint, setFootprint] = useState(null);
+  const [loading,   setLoading]   = useState(true);
+
+  useEffect(() => {
+    let stopped = false;
+    const loop = async () => {
+      if (stopped) return;
+      const res = await systemClient.getOwnFootprint().catch(err => ({ ok: false, error: err.message }));
+      if (!stopped && res?.ok) setFootprint(res.data);
+      setLoading(false);
+      if (!stopped) setTimeout(loop, 5000);
+    };
+    loop();
+    return () => { stopped = true; };
+  }, []);
+
+  if (loading && !footprint) {
+    return <div style={{ color: 'var(--muted)', fontSize: '11px' }}>Reading Rāma's own footprint...</div>;
+  }
+  if (!footprint) return null;
+
+  const byType = {};
+  for (const p of footprint.processes) {
+    const key = p.source === 'electron' ? p.type : p.label;
+    byType[key] = byType[key] || { cpuPct: 0, memKB: 0, count: 0, allFound: true };
+    byType[key].cpuPct += p.cpuPct || 0;
+    byType[key].memKB  += p.memKB || 0;
+    byType[key].count  += 1;
+    if (p.found === false) byType[key].allFound = false;
+  }
+
+  return (
+    <div className="hud-card" style={{ padding: '16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <div className="section-label">RĀMA'S OWN FOOTPRINT</div>
+        <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+          {footprint.totals.cpuPct}% CPU · {formatBytes(footprint.totals.memMB * 1024 * 1024)} RAM
+        </span>
+      </div>
+      <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 10, lineHeight: 1.6 }}>
+        {footprint.note}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8 }}>
+        {Object.entries(byType).map(([label, v]) => (
+          <div key={label} style={{ padding: '8px 10px', background: 'var(--surface)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              {label} {v.count > 1 ? `(${v.count})` : ''}
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: v.allFound ? 'var(--accent)' : 'var(--amber)', marginTop: 2 }}>
+              {v.allFound ? `${v.cpuPct.toFixed(1)}% · ${formatBytes(v.memKB * 1024)}` : 'process exited'}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Temp cleaner modal ───────────────────────────────────────────────────────
 function TempCleaner({ onClose }) {
   const [targets,  setTargets]  = useState([]);
@@ -212,9 +279,21 @@ export default function System() {
   }, []);
 
   useEffect(() => {
-    load();
-    const id = setInterval(load, 5000);
-    return () => clearInterval(id);
+    // Self-paced polling, not a fixed setInterval: on a machine where a
+    // metrics call takes longer than the poll interval (observed several
+    // seconds per systeminformation call without a persistent PowerShell
+    // session — see electron/lib/sysinfo.cjs), a fixed timer fires the next
+    // call before the previous one returns. Calls pile up, results arrive
+    // out of order, and the numbers on screen stop reflecting reality. This
+    // schedules the next poll only after the current one finishes.
+    let stopped = false;
+    const loop = async () => {
+      if (stopped) return;
+      await load();
+      if (!stopped) setTimeout(loop, 5000);
+    };
+    loop();
+    return () => { stopped = true; };
   }, [load]);
 
   const killProcess = useCallback(async (pid) => {
@@ -312,6 +391,8 @@ export default function System() {
                 value={`${formatBytes(m.network[0]?.rxSec || 0)}/s`}
                 sub={`↑ ${formatBytes(m.network[0]?.txSec || 0)}/s`} color="var(--green)" />
             </div>
+
+            <RamaFootprintPanel />
 
             {/* CPU cores */}
             {Array.isArray(m.cpu.cores) && m.cpu.cores.length > 0 && (

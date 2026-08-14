@@ -17,6 +17,85 @@ let streamInterval = null;
 // ─── Register all system IPC handlers ────────────────────────────────────────
 function register(ipcMain) {
 
+  // ── What Rāma itself is using, separate from total system load ──────────
+  // Master asked for the System page to show real machine-wide metrics AND
+  // what's due to Rāma specifically, in foreground and background. Two
+  // sources, combined honestly rather than guessed:
+  //   1. app.getAppMetrics() — Electron's own accounting for every process
+  //      IT spawned directly: main, every renderer (foreground window),
+  //      GPU, and utility processes. Real per-process CPU%/memory, no
+  //      estimation.
+  //   2. Rāma's own EXTERNAL child processes that Electron doesn't count
+  //      because they're spawned via plain child_process, not Electron's
+  //      process model: the Python prediction backend (aiProcess.cjs),
+  //      any open terminal PTY sessions (terminal.cjs), and the Playwright
+  //      browser (browserEngine.cjs) if launched. Their PIDs are looked up
+  //      in the live systeminformation process list for real CPU/RAM
+  //      numbers — never estimated, and reported as "process not found"
+  //      rather than silently omitted if a PID has already exited.
+  ipcMain.handle('system:get-own-footprint', async () => {
+    try {
+      const { app } = require('electron');
+      const electronProcs = app.getAppMetrics().map(m => ({
+        pid:     m.pid,
+        type:    m.type,             // Browser | Renderer | GPU | Utility | ...
+        cpuPct:  m.cpu?.percentCPUUsage ?? null,
+        memKB:   m.memory?.workingSetSize ?? null,
+        source:  'electron',
+      }));
+
+      // External child processes Electron's own accounting doesn't see.
+      // Each getter is best-effort and guarded — a module not loaded yet
+      // (e.g. no Python backend ever started) must not fail this handler.
+      const externalPids = [];
+      try {
+        const ai = require('./aiProcess.cjs').getRunningStatus?.();
+        if (ai?.python?.pid) externalPids.push({ pid: ai.python.pid, label: 'AI backend (Python)' });
+      } catch { /* aiProcess not loaded */ }
+      try {
+        const term = require('./terminal.cjs');
+        for (const [id, session] of Object.entries(term.getSessionPids?.() ?? {})) {
+          externalPids.push({ pid: session, label: `Terminal ${id}` });
+        }
+      } catch { /* terminal not loaded */ }
+      try {
+        const browser = require('./browserEngine.cjs');
+        const bpid = browser.getBrowserPid?.();
+        if (bpid) externalPids.push({ pid: bpid, label: 'Browser automation (Playwright)' });
+      } catch { /* browserEngine not loaded */ }
+
+      let externalProcs = [];
+      if (externalPids.length > 0) {
+        try {
+          const { list } = await si.processes();
+          externalProcs = externalPids.map(({ pid, label }) => {
+            const found = list.find(p => p.pid === pid);
+            return found
+              ? { pid, label, cpuPct: parseFloat(found.cpu?.toFixed?.(1) ?? found.cpu ?? 0), memKB: found.memRss ?? null, source: 'external', found: true }
+              : { pid, label, cpuPct: null, memKB: null, source: 'external', found: false };
+          });
+        } catch {
+          externalProcs = externalPids.map(({ pid, label }) => ({ pid, label, cpuPct: null, memKB: null, source: 'external', found: null }));
+        }
+      }
+
+      const all = [...electronProcs, ...externalProcs];
+      const totalCpuPct = all.reduce((s, p) => s + (p.cpuPct || 0), 0);
+      const totalMemMB  = Math.round(all.reduce((s, p) => s + (p.memKB || 0), 0) / 1024);
+
+      return {
+        ok: true,
+        data: {
+          processes: all,
+          totals: { cpuPct: Math.round(totalCpuPct * 10) / 10, memMB: totalMemMB },
+          note: 'CPU% here is per-process, not normalized against total system capacity the way the machine-wide gauge is — compare against the machine-wide CPU% for scale, not as an exact fraction of it.',
+        },
+      };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   // ── Full metrics snapshot ────────────────────────────────────────────────
   ipcMain.handle('system:get-metrics', async () => {
     try {
@@ -209,23 +288,41 @@ function register(ipcMain) {
   });
 
   // ── Streaming metrics ─────────────────────────────────────────────────────
+  // Self-paced rather than a fixed setInterval: a fixed timer fires again
+  // before a slow si.currentLoad()/si.mem() call returns (observed several
+  // seconds per call on a machine without a persistent PowerShell session —
+  // see sysinfo.cjs), so calls pile up and results arrive stale/out of
+  // order. Scheduling the next tick only after the current one resolves
+  // means it can never get further than one call behind reality.
   ipcMain.on('system:start-stream', (event) => {
     if (streamInterval) return;
-    streamInterval = setInterval(async () => {
+    let stopped = false;
+    streamInterval = { stop: () => { stopped = true; } };
+
+    const tick = async () => {
+      if (stopped) return;
+      const startedAt = Date.now();
       try {
         const [cpu, mem] = await Promise.all([si.currentLoad(), si.mem()]);
+        if (stopped) return;
         event.sender.send('system:metrics-stream', {
-          cpu:    Math.round(cpu.currentLoad),
-          ram:    Math.round((mem.used / mem.total) * 100),
-          ts:     Date.now(),
+          cpu:      Math.round(cpu.currentLoad),
+          ram:      Math.round((mem.used / mem.total) * 100),
+          ts:       Date.now(),
+          // How long this sample itself took to gather — surfaced so the UI
+          // can show "stats may be delayed" honestly instead of pretending
+          // a slow sample happened instantly.
+          sampleMs: Date.now() - startedAt,
         });
       } catch { /* ignore stream errors */ }
-    }, 2000);
+      if (!stopped) setTimeout(tick, Math.max(500, 2000 - (Date.now() - startedAt)));
+    };
+    tick();
   });
 
   ipcMain.on('system:stop-stream', () => {
     if (streamInterval) {
-      clearInterval(streamInterval);
+      streamInterval.stop();
       streamInterval = null;
     }
   });

@@ -111,4 +111,15 @@ function destroyAll() {
   }
 }
 
-module.exports = { register, destroyAll };
+/** For system.cjs's own-footprint reporting — real PIDs of open PTY sessions,
+ * so their CPU/RAM can be looked up in the live process list rather than
+ * estimated or silently omitted from "what Rāma itself is using." */
+function getSessionPids() {
+  const out = {};
+  for (const [id, session] of Object.entries(sessions)) {
+    if (session.term?.pid) out[id] = session.term.pid;
+  }
+  return out;
+}
+
+module.exports = { register, destroyAll, getSessionPids };

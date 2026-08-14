@@ -292,4 +292,12 @@ function getDownloadDir() {
   return path.join(os.homedir(), 'Downloads', 'RamaAGI');
 }
 
-module.exports = { register, closeBrowser };
+/** For system.cjs's own-footprint reporting — the real PID of the Playwright
+ * browser process, if one is running, so its CPU/RAM can be looked up in the
+ * live process list. Playwright launches its own Chromium process tree;
+ * `browser.process()` is the top one. */
+function getBrowserPid() {
+  return browser?.process()?.pid ?? null;
+}
+
+module.exports = { register, closeBrowser, getBrowserPid };

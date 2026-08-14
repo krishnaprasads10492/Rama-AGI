@@ -45,6 +45,7 @@ const RAMA_API = {
     killProcess:      (pid)           => ipcRenderer.invoke('system:kill-process', pid),
     getNetworkStats:  ()              => ipcRenderer.invoke('system:get-network-stats'),
     getDiskUsage:     ()              => ipcRenderer.invoke('system:get-disk-usage'),
+    getOwnFootprint:  ()              => ipcRenderer.invoke('system:get-own-footprint'),
     cleanTemp:        (targets)       => ipcRenderer.invoke('system:clean-temp', targets),
     getTempTargets:   ()              => ipcRenderer.invoke('system:get-temp-targets'),
     streamMetrics:    (cb) => {

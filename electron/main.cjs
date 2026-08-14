@@ -678,6 +678,7 @@ app.on('before-quit', () => {
   sessionMgr.lockSession();   // zero all key material
   nucleusSealer.lock();        // zero nucleus key
   ipcEncryption.clearSession(); // zero IPC session key
+  require('./lib/sysinfo.cjs').shutdown();   // release the persistent PowerShell session (Windows)
   aiIPC.stopAll();
   terminalIPC.destroyAll();
   browserIPC.closeBrowser();

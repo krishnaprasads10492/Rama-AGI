@@ -42,6 +42,7 @@ export const systemClient = {
   getDiskUsage:   ()             => ipc('system.getDiskUsage'),
   getTempTargets: ()             => ipc('system.getTempTargets'),
   cleanTemp:      (targets)      => ipc('system.cleanTemp', targets),
+  getOwnFootprint: ()            => ipc('system.getOwnFootprint'),
 };
 
 // ─── Filesystem ───────────────────────────────────────────────────────────────
