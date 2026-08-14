@@ -48,6 +48,9 @@ const timelineIPC      = require('./ipc/timeline.cjs');
 const voiceIPC         = require('./ipc/voiceEngine.cjs');
 const sessionMgr   = require('./sessionManager.cjs');
 const dataStore    = require('./dataStore.cjs');
+// ─── Floating status badge (always-on-top presence indicator) ────────────────
+const badgeWindow  = require('./badgeWindow.cjs');
+const badgeState   = require('./lib/badgeState.cjs');
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const isDev    = !app.isPackaged;
@@ -330,6 +333,38 @@ function registerLocalUpdate(ipcMain) {
   });
 }
 
+/**
+ * Badge control — enable/disable (clickability), status is read-only from
+ * the renderer's side (driven by actual main-process state above), and the
+ * "bring everything to front" action voice/UI both call into. No capability
+ * gate: same sensitivity class as window minimize/maximize (pure UI
+ * visibility, not data or execution access) — any signed-in tier may do this
+ * to their own visible instance.
+ */
+function registerBadgeIpc(ipcMain) {
+  ipcMain.handle('badge:set-enabled', async (_e, enabled) => {
+    badgeWindow.setEnabled(!!enabled);
+    return { ok: true, enabled: !!enabled };
+  });
+
+  ipcMain.handle('badge:get-enabled', async () => {
+    return { ok: true, enabled: badgeWindow.isEnabled() };
+  });
+
+  ipcMain.handle('badge:bring-to-front', async () => {
+    bringToFront();
+    return { ok: true };
+  });
+
+  ipcMain.handle('badge:set-hide-tray', async (_e, hide) => {
+    const current = badgeState.load();
+    badgeState.save({ ...current, hideTray: !!hide });
+    if (hide && tray) { tray.destroy(); tray = null; }
+    else if (!hide && !tray) { createTray(); }
+    return { ok: true, hideTray: !!hide };
+  });
+}
+
 function registerAppearance(ipcMain) {
   ipcMain.handle('appearance:set-zoom', async (_e, factor) => {
     if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'No window' };
@@ -473,7 +508,27 @@ function createMainWindow() {
   mainWindow.on('maximize',   () => mainWindow?.webContents.send('window:maximized',   true));
   mainWindow.on('unmaximize', () => mainWindow?.webContents.send('window:maximized', false));
 
-  // Minimize to tray instead of taskbar close
+  // Minimize to tray instead of taskbar close. The badge tracks this: full
+  // window visible → 'live', minimized/hidden (badge is the only visible
+  // presence) → 'paused'. It never goes fully invisible on its own — only
+  // an explicit "disable badge" (click-through) or app quit changes that.
+  mainWindow.on('minimize', () => {
+    mainWindow.setSkipTaskbar(true);
+    badgeWindow.setStatus('paused');
+  });
+  mainWindow.on('restore', () => {
+    mainWindow.setSkipTaskbar(false);
+    badgeWindow.setStatus('live');
+  });
+  mainWindow.on('show', () => {
+    mainWindow.setSkipTaskbar(false);
+    badgeWindow.setStatus('live');
+  });
+  mainWindow.on('hide', () => {
+    mainWindow.setSkipTaskbar(true);
+    badgeWindow.setStatus('paused');
+  });
+
   mainWindow.on('close', (e) => {
     if (!app.isQuiting) {
       e.preventDefault();
@@ -482,6 +537,22 @@ function createMainWindow() {
   });
 
   return mainWindow;
+}
+
+/**
+ * Bring the whole app forward regardless of current visibility state — the
+ * voice "come back"/"bring rama forward" action, and the badge's click
+ * handler when enabled. Restores the tray icon too if it had been hidden,
+ * since a hidden tray with a hidden window would otherwise leave no way
+ * back in short of the badge itself.
+ */
+function bringToFront() {
+  if (badgeState.load().hideTray && !tray) createTray();
+  if (!mainWindow || mainWindow.isDestroyed()) { createMainWindow(); return; }
+  mainWindow.setSkipTaskbar(false);
+  mainWindow.show();
+  mainWindow.focus();
+  badgeWindow.setStatus('live');
 }
 
 // ─── System Tray ─────────────────────────────────────────────────────────────
@@ -647,7 +718,15 @@ app.whenReady().then(async () => {
   applyPermissions();
 
   createMainWindow();
-  createTray();
+
+  // Tray is skippable — master can voice-disable it while keeping the app
+  // running in the background; "come back" (bringToFront) restores it.
+  if (!badgeState.load().hideTray) createTray();
+
+  // The badge is the "always present from boot till close" piece — created
+  // once here, independent of the main window's own show/hide lifecycle.
+  badgeWindow.create({ onClick: bringToFront });
+  registerBadgeIpc(ipcMain);
 });
 
 app.on('window-all-closed', () => {
@@ -674,4 +753,5 @@ app.on('before-quit', () => {
   aiIPC.stopAll();
   terminalIPC.destroyAll();
   browserIPC.closeBrowser();
+  badgeWindow.destroy();       // the one case the badge actually goes away — real app exit
 });

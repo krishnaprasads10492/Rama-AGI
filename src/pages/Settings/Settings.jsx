@@ -47,6 +47,7 @@ export default function Settings() {
 
   const [tab,          setTab]          = useState('ai');
   const [autoStart,    setAutoStart]    = useState(false);
+  const [badgeEnabled, setBadgeEnabled] = useState(true);
   const [vaultStatus,  setVaultStatus]  = useState(null);
   const [oldPasscode,  setOldPasscode]  = useState('');
   const [newPasscode,  setNewPasscode]  = useState('');
@@ -65,6 +66,10 @@ export default function Settings() {
     window.rama.vault.status().then(r => {
       if (r?.ok) setVaultStatus(r);
     });
+    // Badge (floating status indicator) enabled state
+    window.rama.badge?.getEnabled?.().then(r => {
+      if (r?.ok) setBadgeEnabled(r.enabled);
+    });
     // Version
     const v = window.rama.appControl?.getVersion?.() || '1.0.0';
     setAppVersion(v);
@@ -75,6 +80,13 @@ export default function Settings() {
     setAutoStart(val);
     if (isElectron) {
       await window.rama.appControl?.setLoginItem?.(val);
+    }
+  };
+
+  const toggleBadge = async (val) => {
+    setBadgeEnabled(val);
+    if (isElectron) {
+      await window.rama.badge?.setEnabled?.(val);
     }
   };
 
@@ -185,6 +197,12 @@ export default function Settings() {
               label="Start with Windows"
               desc="Launch Rāma AGI automatically when you log into Windows. Opens silently in system tray.">
               <Toggle value={autoStart} onChange={toggleAutoStart} />
+            </SettingRow>
+
+            <SettingRow
+              label="Floating status badge"
+              desc='Always-on-top orb showing live/paused/closed status — click to reopen the app. Also toggleable by voice: "enable badge" / "disable badge" (disabling makes it click-through, not invisible).'>
+              <Toggle value={badgeEnabled} onChange={toggleBadge} />
             </SettingRow>
 
             {/* Both of these were previously rendered as toggles fixed at "on"

@@ -479,6 +479,12 @@ export default function CommandPalette({ extraPages = [] }) {
         } else if (matched.action === 'mute-mic') {
           setMicMuted(true);
           engine.setMicMuted(true);
+        } else if (matched.action === 'badge-enable') {
+          window.rama?.badge?.setEnabled(true);
+        } else if (matched.action === 'badge-disable') {
+          window.rama?.badge?.setEnabled(false);
+        } else if (matched.action === 'bring-to-front') {
+          window.rama?.badge?.bringToFront();
         } else if (matched.action === 'inject-message') {
           if (!activeSessionId) createSession();
           addMessage({ role: 'user', content: matched.message, id: Date.now() });

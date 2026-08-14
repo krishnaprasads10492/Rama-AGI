@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Rāma</title>
+<style>
+  :root {
+    color-scheme: dark;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 72px;
+    height: 72px;
+    background: transparent;
+    overflow: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+    cursor: pointer;
+  }
+  /* The whole surface is the OS-level drag handle — Electron moves the
+     window itself, no manual delta tracking needed. */
+  #stage {
+    width: 100%;
+    height: 100%;
+    -webkit-app-region: drag;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #orb {
+    position: relative;
+    width: 48px;
+    height: 48px;
+  }
+  #ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid var(--ring-color, #00c8ff);
+    opacity: 0.7;
+    transition: border-color 0.3s ease, opacity 0.3s ease;
+    animation: pulse 2.4s ease infinite;
+  }
+  #core {
+    position: absolute;
+    inset: 10px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #4dd9ff, #00c8ff 55%, #001a33);
+    box-shadow: 0 0 10px rgba(0,200,255,0.55), 0 0 20px rgba(0,200,255,0.25);
+    transition: background 0.3s ease, box-shadow 0.3s ease;
+  }
+  #spark {
+    position: absolute;
+    top: 40%;
+    left: 38%;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.9);
+  }
+
+  /* ── Status variants ── */
+  body.status-live   #ring { border-color: #00c8ff; }
+  body.status-live   #core { background: radial-gradient(circle at 35% 35%, #4dd9ff, #00c8ff 55%, #001a33); }
+
+  body.status-paused #ring { border-color: #d4a940; animation-duration: 3.6s; }
+  body.status-paused #core { background: radial-gradient(circle at 35% 35%, #e8c874, #d4a940 55%, #2a1f00); }
+
+  body.status-closed  #ring { border-color: #6d8296; opacity: 0.4; animation: none; }
+  body.status-closed  #core { background: radial-gradient(circle at 35% 35%, #7a8ea0, #4a5a68 55%, #0a1018);
+                               box-shadow: none; }
+
+  @keyframes pulse {
+    0%, 100% { transform: scale(1);    opacity: 0.7; }
+    50%      { transform: scale(1.12); opacity: 0.35; }
+  }
+</style>
+</head>
+<body class="status-live">
+  <div id="stage" title="Rāma AGI">
+    <div id="orb">
+      <div id="ring"></div>
+      <div id="core"></div>
+      <div id="spark"></div>
+    </div>
+  </div>
+
+  <script>
+    const stage = document.getElementById('stage');
+
+    // A click that is not the tail end of a native window drag. Electron's
+    // drag region does not fire mousedown/mouseup asymmetrically in a way
+    // that's trivial to distinguish, so this uses a short movement/time
+    // threshold: if the mouse didn't move between down and up, it's a click.
+    let downAt = null;
+    let downPos = null;
+
+    stage.addEventListener('mousedown', (e) => {
+      downAt = Date.now();
+      downPos = { x: e.screenX, y: e.screenY };
+    });
+
+    stage.addEventListener('mouseup', (e) => {
+      if (downAt === null) return;
+      const dt = Date.now() - downAt;
+      const moved = downPos && (Math.abs(e.screenX - downPos.x) > 3 || Math.abs(e.screenY - downPos.y) > 3);
+      downAt = null;
+      downPos = null;
+      if (!moved && dt < 400) {
+        window.badgeAPI?.notifyClick();
+      }
+    });
+
+    window.badgeAPI?.onStatus(({ status }) => {
+      document.body.classList.remove('status-live', 'status-paused', 'status-closed');
+      document.body.classList.add(`status-${status}`);
+    });
+  </script>
+</body>
+</html>

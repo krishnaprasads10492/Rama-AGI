@@ -23,19 +23,45 @@
 
 import { matchVoiceToRoute } from '@config/registry.js';
 
-const WAKE_WORDS = ['hey rama', 'hey rāma', 'hey roma', 'hey lama'];
+// "hey buddy" is a casual nickname alias master asked for — treated as a
+// second wake phrase, not a separate command, since a bare "buddy" address
+// has no discrete action of its own (and a bare word, unlike a full phrase,
+// would false-trigger on ordinary sentences that happen to contain it).
+const WAKE_WORDS = ['hey rama', 'hey rāma', 'hey roma', 'hey lama', 'hey buddy'];
 
 // Non-navigation UI actions. Navigation phrases live on each PageDef.
 const VOICE_ACTIONS = [
   { patterns: ['close palette', 'close menu', 'dismiss', 'cancel'],    action: 'close-palette' },
   { patterns: ['open menu', 'open palette', 'show commands'],          action: 'open-palette'  },
   { patterns: ['identify yourself', 'who are you', 'reveal identity'], action: 'identify'      },
-  // Speech mute: Rāma stops talking but keeps listening
-  { patterns: ['stop talking', 'be quiet', 'silence', 'mute yourself'], action: 'mute-speech'  },
-  { patterns: ['you can talk', 'speak again', 'unmute yourself'],       action: 'unmute-speech' },
+  // Speech mute: Rāma stops talking but keeps listening. Casual synonyms
+  // ("shut up", "no convo") sit alongside the formal phrasing rather than
+  // as a separate action, since they mean the same thing.
+  { patterns: ['stop talking', 'be quiet', 'silence', 'mute yourself', 'shut up', 'no convo', 'stop the conversation'],
+    action: 'mute-speech' },
+  { patterns: ['you can talk', 'speak again', 'unmute yourself', 'convo yes', 'lets talk', "let's talk"],
+    action: 'unmute-speech' },
   // Mic mute. Unmuting by voice is impossible once muted — the device is
   // released and nothing is listening — so only muting is offered here.
   { patterns: ['mute the mic', 'mute microphone', 'stop listening'],    action: 'mute-mic'      },
+
+  // ── Status badge (spec: always-on-top presence indicator) ────────────────
+  // Enable = clickable, opens the full app on click. Disable = click-through,
+  // dims to the "closed" ring — it stays visible the whole time, this only
+  // changes whether it can be interacted with. Generous synonyms per
+  // master's explicit request that plain "enable"/"disable" and casual
+  // phrasing both work.
+  { patterns: ['enable badge', 'enable the badge', 'turn on the badge', 'badge on', 'show the badge', 'wake up the badge'],
+    action: 'badge-enable' },
+  { patterns: ['disable badge', 'disable the badge', 'turn off the badge', 'badge off', 'hide the badge'],
+    action: 'badge-disable' },
+
+  // Bring the whole app forward regardless of current visibility — the
+  // "still voice listener only could be on, then bring back entire thing
+  // live" behaviour. Works whether the window is hidden, minimized to the
+  // badge, or the tray icon itself is hidden.
+  { patterns: ['come back', 'come to front', 'show yourself', "i'm here", 'im here', 'bring rama forward', 'wake up rama'],
+    action: 'bring-to-front' },
 ];
 
 export const VOICE_LEVELS = {

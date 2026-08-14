@@ -38,6 +38,17 @@ const RAMA_API = {
     },
   },
 
+  // ── Floating status badge (always-on-top presence indicator) ──────────────
+  // Pure UI visibility control, same sensitivity class as window minimize —
+  // no capability gate. Voice actions (badge-enable/disable, bring-to-front)
+  // in CommandPalette.jsx call these directly.
+  badge: {
+    setEnabled:   (enabled) => ipcRenderer.invoke('badge:set-enabled', enabled),
+    getEnabled:   ()        => ipcRenderer.invoke('badge:get-enabled'),
+    bringToFront: ()        => ipcRenderer.invoke('badge:bring-to-front'),
+    setHideTray:  (hide)    => ipcRenderer.invoke('badge:set-hide-tray', hide),
+  },
+
   // ── System / OS ───────────────────────────────────────────────────────────
   // getProcesses/getNetworkStats need user (gated on os.process-list);
   // killProcess needs user (os.process-kill); cleanTemp needs user
@@ -693,7 +704,7 @@ const RAMA_API = {
 // This exposes a SAFE, allow-listed subset — not the raw ipcRenderer object.
 // Only channels registered by our own IPC modules can be invoked.
 const ALLOWED_PREFIXES = [
-  'window:', 'nav:', 'system:', 'fs:', 'git:', 'terminal:', 'apps:', 'ai:',
+  'window:', 'nav:', 'badge:', 'system:', 'fs:', 'git:', 'terminal:', 'apps:', 'ai:',
   'updater:', 'shell:', 'notify', 'orchestrator:', 'evolution:', 'intel:',
   'session:', 'store:', 'nucleus:', 'ipc-enc:', 'bus:', 'ast:', 'regen:',
   'vector:', 'sandbox:', 'graph:', 'selfcare:', 'vault:', 'models:',
