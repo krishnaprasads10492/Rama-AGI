@@ -34,48 +34,57 @@ async function ipc(path, ...args) {
 }
 
 // ─── System ───────────────────────────────────────────────────────────────────
+// getProcesses/killProcess/getNetworkStats/cleanTemp need `user` first —
+// system.cjs gates them on os.process-list/os.process-kill/os.temp-clean.
+// getMetrics/getDiskUsage/getTempTargets/getOwnFootprint stay open to every
+// signed-in tier — same sensitivity class as the Home dashboard.
 export const systemClient = {
   getMetrics:     ()             => ipc('system.getMetrics'),
-  getProcesses:   ()             => ipc('system.getProcesses'),
-  killProcess:    (pid)          => ipc('system.killProcess', pid),
-  getNetworkStats: ()            => ipc('system.getNetworkStats'),
+  getProcesses:   (user)         => ipc('system.getProcesses', user),
+  killProcess:    (user, pid)    => ipc('system.killProcess', user, pid),
+  getNetworkStats: (user)        => ipc('system.getNetworkStats', user),
   getDiskUsage:   ()             => ipc('system.getDiskUsage'),
   getTempTargets: ()             => ipc('system.getTempTargets'),
-  cleanTemp:      (targets)      => ipc('system.cleanTemp', targets),
+  cleanTemp:      (user, targets) => ipc('system.cleanTemp', user, targets),
   getOwnFootprint: ()            => ipc('system.getOwnFootprint'),
 };
 
 // ─── Filesystem ───────────────────────────────────────────────────────────────
+// Every method needs `user` first — filesystem.cjs gates reads/writes/deletes
+// on os.filesystem-read/write/delete. See RAMA_AGI_MASTER_SPEC.md's fix pass:
+// these handlers previously had no capability check at all.
 export const fsClient = {
-  readFile:      (p)             => ipc('fs.readFile', p),
-  writeFile:     (p, c)          => ipc('fs.writeFile', p, c),
-  deleteFile:    (p)             => ipc('fs.deleteFile', p),
-  listDir:       (p)             => ipc('fs.listDir', p),
-  createDir:     (p)             => ipc('fs.createDir', p),
-  rename:        (o, n)          => ipc('fs.rename', o, n),
-  copyFile:      (s, d)          => ipc('fs.copyFile', s, d),
-  moveFile:      (s, d)          => ipc('fs.moveFile', s, d),
-  getStats:      (p)             => ipc('fs.getStats', p),
-  searchFiles:   (d, q)          => ipc('fs.searchFiles', d, q),
-  getDiskSizes:  (d)             => ipc('fs.getDiskSizes', d),
-  findDupes:     (d)             => ipc('fs.findDupes', d),
-  showInExplorer:(p)             => ipc('fs.showInExplorer', p),
-  selectPath:    (opts)          => ipc('fs.selectPath', opts),
+  readFile:      (user, p)             => ipc('fs.readFile', user, p),
+  writeFile:     (user, p, c)          => ipc('fs.writeFile', user, p, c),
+  deleteFile:    (user, p)             => ipc('fs.deleteFile', user, p),
+  listDir:       (user, p)             => ipc('fs.listDir', user, p),
+  createDir:     (user, p)             => ipc('fs.createDir', user, p),
+  rename:        (user, o, n)          => ipc('fs.rename', user, o, n),
+  copyFile:      (user, s, d)          => ipc('fs.copyFile', user, s, d),
+  moveFile:      (user, s, d)          => ipc('fs.moveFile', user, s, d),
+  getStats:      (user, p)             => ipc('fs.getStats', user, p),
+  searchFiles:   (user, d, q)          => ipc('fs.searchFiles', user, d, q),
+  getDiskSizes:  (user, d)             => ipc('fs.getDiskSizes', user, d),
+  findDupes:     (user, d)             => ipc('fs.findDupes', user, d),
+  showInExplorer:(user, p)             => ipc('fs.showInExplorer', user, p),
+  selectPath:    (opts)                => ipc('fs.selectPath', opts),   // no user needed — dialog only
 };
 
 // ─── Git ──────────────────────────────────────────────────────────────────────
+// Every method needs `user` first — git.cjs gates reads on git.read,
+// stage/commit/pull/checkout on git.commit, push/clone on git.push.
 export const gitClient = {
-  status:       (repo)           => ipc('git.status', repo),
-  diff:         (repo)           => ipc('git.diff', repo),
-  log:          (repo, limit)    => ipc('git.log', repo, limit),
-  stage:        (repo, files)    => ipc('git.stage', repo, files),
-  commit:       (repo, msg)      => ipc('git.commit', repo, msg),
-  push:         (repo, branch)   => ipc('git.push', repo, branch),
-  pull:         (repo)           => ipc('git.pull', repo),
-  clone:        (url, dest)      => ipc('git.clone', url, dest),
-  getBranches:  (repo)           => ipc('git.getBranches', repo),
-  checkout:     (repo, branch)   => ipc('git.checkout', repo, branch),
-  getRemotes:   (repo)           => ipc('git.getRemotes', repo),
+  status:       (user, repo)           => ipc('git.status', user, repo),
+  diff:         (user, repo)           => ipc('git.diff', user, repo),
+  log:          (user, repo, limit)    => ipc('git.log', user, repo, limit),
+  stage:        (user, repo, files)    => ipc('git.stage', user, repo, files),
+  commit:       (user, repo, msg)      => ipc('git.commit', user, repo, msg),
+  push:         (user, repo, branch)   => ipc('git.push', user, repo, branch),
+  pull:         (user, repo)           => ipc('git.pull', user, repo),
+  clone:        (user, url, dest)      => ipc('git.clone', user, url, dest),
+  getBranches:  (user, repo)           => ipc('git.getBranches', user, repo),
+  checkout:     (user, repo, branch)   => ipc('git.checkout', user, repo, branch),
+  getRemotes:   (user, repo)           => ipc('git.getRemotes', user, repo),
 };
 
 // ─── Terminal ─────────────────────────────────────────────────────────────────

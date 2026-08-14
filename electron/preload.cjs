@@ -39,14 +39,18 @@ const RAMA_API = {
   },
 
   // ── System / OS ───────────────────────────────────────────────────────────
+  // getProcesses/getNetworkStats need user (gated on os.process-list);
+  // killProcess needs user (os.process-kill); cleanTemp needs user
+  // (os.temp-clean). getMetrics/getDiskUsage/getTempTargets stay open to
+  // every signed-in tier — same sensitivity class as the Home dashboard.
   system: {
     getMetrics:       ()              => ipcRenderer.invoke('system:get-metrics'),
-    getProcesses:     ()              => ipcRenderer.invoke('system:get-processes'),
-    killProcess:      (pid)           => ipcRenderer.invoke('system:kill-process', pid),
-    getNetworkStats:  ()              => ipcRenderer.invoke('system:get-network-stats'),
+    getProcesses:     (user)          => ipcRenderer.invoke('system:get-processes', { user }),
+    killProcess:      (user, pid)     => ipcRenderer.invoke('system:kill-process', { user, pid }),
+    getNetworkStats:  (user)          => ipcRenderer.invoke('system:get-network-stats', { user }),
     getDiskUsage:     ()              => ipcRenderer.invoke('system:get-disk-usage'),
     getOwnFootprint:  ()              => ipcRenderer.invoke('system:get-own-footprint'),
-    cleanTemp:        (targets)       => ipcRenderer.invoke('system:clean-temp', targets),
+    cleanTemp:        (user, targetPaths) => ipcRenderer.invoke('system:clean-temp', { user, targetPaths }),
     getTempTargets:   ()              => ipcRenderer.invoke('system:get-temp-targets'),
     streamMetrics:    (cb) => {
       const handler = (_e, data) => cb(data);
@@ -60,36 +64,40 @@ const RAMA_API = {
   },
 
   // ── Filesystem ────────────────────────────────────────────────────────────
+  // Every call takes { user, ... } — filesystem.cjs gates reads/writes/
+  // deletes on os.filesystem-read/write/delete respectively.
   fs: {
-    readFile:     (filePath)            => ipcRenderer.invoke('fs:read-file',     filePath),
-    writeFile:    (filePath, content)   => ipcRenderer.invoke('fs:write-file',    filePath, content),
-    deleteFile:   (filePath)            => ipcRenderer.invoke('fs:delete-file',   filePath),
-    listDir:      (dirPath)             => ipcRenderer.invoke('fs:list-dir',      dirPath),
-    createDir:    (dirPath)             => ipcRenderer.invoke('fs:create-dir',    dirPath),
-    rename:       (oldPath, newPath)    => ipcRenderer.invoke('fs:rename',        oldPath, newPath),
-    copyFile:     (src, dest)           => ipcRenderer.invoke('fs:copy-file',     src, dest),
-    moveFile:     (src, dest)           => ipcRenderer.invoke('fs:move-file',     src, dest),
-    getStats:     (filePath)            => ipcRenderer.invoke('fs:get-stats',     filePath),
-    searchFiles:  (dir, query)          => ipcRenderer.invoke('fs:search-files',  dir, query),
-    getDiskSizes: (dir)                 => ipcRenderer.invoke('fs:get-disk-sizes', dir),
-    findDupes:    (dir)                 => ipcRenderer.invoke('fs:find-dupes',    dir),
-    showInExplorer: (filePath)          => ipcRenderer.invoke('fs:show-in-explorer', filePath),
-    selectPath:   (opts)                => ipcRenderer.invoke('fs:select-path',   opts),
+    readFile:     (user, filePath)            => ipcRenderer.invoke('fs:read-file',     { user, filePath }),
+    writeFile:    (user, filePath, content)   => ipcRenderer.invoke('fs:write-file',    { user, filePath, content }),
+    deleteFile:   (user, filePath)            => ipcRenderer.invoke('fs:delete-file',   { user, filePath }),
+    listDir:      (user, dirPath)             => ipcRenderer.invoke('fs:list-dir',      { user, dirPath }),
+    createDir:    (user, dirPath)             => ipcRenderer.invoke('fs:create-dir',    { user, dirPath }),
+    rename:       (user, oldPath, newPath)    => ipcRenderer.invoke('fs:rename',        { user, oldPath, newPath }),
+    copyFile:     (user, src, dest)           => ipcRenderer.invoke('fs:copy-file',     { user, src, dest }),
+    moveFile:     (user, src, dest)           => ipcRenderer.invoke('fs:move-file',     { user, src, dest }),
+    getStats:     (user, filePath)            => ipcRenderer.invoke('fs:get-stats',     { user, filePath }),
+    searchFiles:  (user, dir, query)          => ipcRenderer.invoke('fs:search-files',  { user, dir, query }),
+    getDiskSizes: (user, dir)                 => ipcRenderer.invoke('fs:get-disk-sizes', { user, dir }),
+    findDupes:    (user, dir)                 => ipcRenderer.invoke('fs:find-dupes',    { user, dir }),
+    showInExplorer: (user, filePath)          => ipcRenderer.invoke('fs:show-in-explorer', { user, filePath }),
+    selectPath:   (opts)                      => ipcRenderer.invoke('fs:select-path',   opts),
   },
 
   // ── Git ───────────────────────────────────────────────────────────────────
+  // Every call takes user first — git.cjs gates reads on git.read, stage/
+  // commit/pull/checkout on git.commit, push/clone on git.push.
   git: {
-    status:       (repoPath)            => ipcRenderer.invoke('git:status',       repoPath),
-    diff:         (repoPath)            => ipcRenderer.invoke('git:diff',         repoPath),
-    log:          (repoPath, limit)     => ipcRenderer.invoke('git:log',          repoPath, limit),
-    stage:        (repoPath, files)     => ipcRenderer.invoke('git:stage',        repoPath, files),
-    commit:       (repoPath, message)   => ipcRenderer.invoke('git:commit',       repoPath, message),
-    push:         (repoPath, branch)    => ipcRenderer.invoke('git:push',         repoPath, branch),
-    pull:         (repoPath)            => ipcRenderer.invoke('git:pull',         repoPath),
-    clone:        (url, dest)           => ipcRenderer.invoke('git:clone',        url, dest),
-    getBranches:  (repoPath)            => ipcRenderer.invoke('git:get-branches', repoPath),
-    checkout:     (repoPath, branch)    => ipcRenderer.invoke('git:checkout',     repoPath, branch),
-    getRemotes:   (repoPath)            => ipcRenderer.invoke('git:get-remotes',  repoPath),
+    status:       (user, repoPath)            => ipcRenderer.invoke('git:status',       { user, repoPath }),
+    diff:         (user, repoPath)            => ipcRenderer.invoke('git:diff',         { user, repoPath }),
+    log:          (user, repoPath, limit)     => ipcRenderer.invoke('git:log',          { user, repoPath, limit }),
+    stage:        (user, repoPath, files)     => ipcRenderer.invoke('git:stage',        { user, repoPath, files }),
+    commit:       (user, repoPath, message)   => ipcRenderer.invoke('git:commit',       { user, repoPath, message }),
+    push:         (user, repoPath, branch)    => ipcRenderer.invoke('git:push',         { user, repoPath, branch }),
+    pull:         (user, repoPath)            => ipcRenderer.invoke('git:pull',         { user, repoPath }),
+    clone:        (user, url, dest)           => ipcRenderer.invoke('git:clone',        { user, url, dest }),
+    getBranches:  (user, repoPath)            => ipcRenderer.invoke('git:get-branches', { user, repoPath }),
+    checkout:     (user, repoPath, branch)    => ipcRenderer.invoke('git:checkout',     { user, repoPath, branch }),
+    getRemotes:   (user, repoPath)            => ipcRenderer.invoke('git:get-remotes',  { user, repoPath }),
     startWatch:   (repoPath, cb) => {
       const handler = (_e, data) => cb(data);
       ipcRenderer.on('git:watch-event', handler);
@@ -502,10 +510,13 @@ const RAMA_API = {
   },
 
   // ── Sandbox (safe code execution — tiered safety, never replaces terminal) ──
+  // execute/kill gate on sandbox.execute (tier 1, same trust level as
+  // terminal.open); approve (the ELEVATED-tier master sign-off) gates
+  // master-only on sandbox.approve (tier 0). Previously unchecked entirely.
   sandbox: {
-    execute:  (opts)             => ipcRenderer.invoke('sandbox:execute', opts),
-    approve:  (opts)             => ipcRenderer.invoke('sandbox:approve', opts),
-    kill:     (execId)           => ipcRenderer.invoke('sandbox:kill',    execId),
+    execute:  (user, opts)       => ipcRenderer.invoke('sandbox:execute', { user, ...opts }),
+    approve:  (user, opts)       => ipcRenderer.invoke('sandbox:approve', { user, ...opts }),
+    kill:     (user, execId)     => ipcRenderer.invoke('sandbox:kill',    { user, execId }),
     audit:    ()                 => ipcRenderer.invoke('sandbox:audit'),
     health:   ()                 => ipcRenderer.invoke('sandbox:health'),
     onApprovalNeeded: (cb) => {
@@ -576,15 +587,19 @@ const RAMA_API = {
   removeListener: (channel, cb) => ipcRenderer.removeListener(channel, cb),
 
   // ── Credential Vault ──────────────────────────────────────────────────────
+  // unlock/lock/set/get/list/delete/has all gate on vault.unlock/read/write
+  // (tier 0, master-only) — every credential in here is master's, not a
+  // per-user store. `status` alone stays user-less: it exposes no secret
+  // (just locked/unlocked + a count), matching os.metrics-read's openness.
   vault: {
-    unlock:  (password)           => ipcRenderer.invoke('vault:unlock', password),
-    lock:    ()                   => ipcRenderer.invoke('vault:lock'),
-    status:  ()                   => ipcRenderer.invoke('vault:status'),
-    set:     (service, value, meta) => ipcRenderer.invoke('vault:set', service, value, meta),
-    get:     (service)            => ipcRenderer.invoke('vault:get', service),
-    list:    ()                   => ipcRenderer.invoke('vault:list'),
-    delete:  (service)            => ipcRenderer.invoke('vault:delete', service),
-    has:     (service)            => ipcRenderer.invoke('vault:has', service),
+    unlock:  (user, password)        => ipcRenderer.invoke('vault:unlock', { user, password }),
+    lock:    (user)                  => ipcRenderer.invoke('vault:lock', { user }),
+    status:  ()                      => ipcRenderer.invoke('vault:status'),
+    set:     (user, service, value, meta) => ipcRenderer.invoke('vault:set', { user, service, value, meta }),
+    get:     (user, service)         => ipcRenderer.invoke('vault:get', { user, service }),
+    list:    (user)                  => ipcRenderer.invoke('vault:list', { user }),
+    delete:  (user, service)         => ipcRenderer.invoke('vault:delete', { user, service }),
+    has:     (user, service)         => ipcRenderer.invoke('vault:has', { user, service }),
   },
 
   // ── Model Router ──────────────────────────────────────────────────────────
@@ -597,10 +612,10 @@ const RAMA_API = {
     checkCredentials: ()           => ipcRenderer.invoke('models:check-credentials'),
     needsForTask:     (task)       => ipcRenderer.invoke('models:needs-for-task', task),
     ollamaList:       ()           => ipcRenderer.invoke('models:ollama-list'),
-    ollamaPull:       (name, cb) => {
+    ollamaPull:       (opts, cb) => {
       const handler = (_e, data) => cb(data);
       ipcRenderer.on('models:ollama-pull-progress', handler);
-      const promise = ipcRenderer.invoke('models:ollama-pull', name);
+      const promise = ipcRenderer.invoke('models:ollama-pull', opts);
       return promise.finally(() => ipcRenderer.removeListener('models:ollama-pull-progress', handler));
     },
     // Custom OpenAI-compatible providers — master-only (models.add-key).
@@ -610,15 +625,18 @@ const RAMA_API = {
   },
 
   // ── Agent Orchestrator ────────────────────────────────────────────────────
+  // spawn/kill/killAll/setGovernor gate on agents.spawn/kill-own/kill-all/
+  // governor-config — spawning and killing agents that can call models and
+  // browse on master's behalf is not read-only, and was previously unchecked.
   agents: {
-    spawn:        (opts)       => ipcRenderer.invoke('agents:spawn', opts),
-    kill:         (id)         => ipcRenderer.invoke('agents:kill', id),
-    killAll:      ()           => ipcRenderer.invoke('agents:kill-all'),
+    spawn:        (user, opts) => ipcRenderer.invoke('agents:spawn', { user, ...opts }),
+    kill:         (user, id)   => ipcRenderer.invoke('agents:kill', { user, agentId: id }),
+    killAll:      (user)       => ipcRenderer.invoke('agents:kill-all', { user }),
     list:         ()           => ipcRenderer.invoke('agents:list'),
     get:          (id)         => ipcRenderer.invoke('agents:get', id),
     getAudit:     ()           => ipcRenderer.invoke('agents:get-audit'),
     getResources: ()           => ipcRenderer.invoke('agents:get-resources'),
-    setGovernor:  (limits)     => ipcRenderer.invoke('agents:set-governor', limits),
+    setGovernor:  (user, limits) => ipcRenderer.invoke('agents:set-governor', { user, ...limits }),
     getReputation:()           => ipcRenderer.invoke('agents:get-reputation'),
     onSpawned:    (cb) => {
       const h = (_e, d) => cb(d);
