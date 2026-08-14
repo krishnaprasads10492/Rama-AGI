@@ -214,6 +214,7 @@ function LocalUpdatePanel({ repoPath }) {
 }
 
 export default function GitSync() {
+  const { currentUser } = useUserStore();
   const [repoPath,  setRepoPath]  = useState('');
   const [status,    setStatus]    = useState(null);
   const [log,       setLog]       = useState([]);
@@ -227,15 +228,15 @@ export default function GitSync() {
     if (!path) return;
     setLoading(true);
     const [sRes, lRes, dRes] = await Promise.all([
-      gitClient.status(path),
-      gitClient.log(path, 30),
-      gitClient.diff(path),
+      gitClient.status(currentUser, path),
+      gitClient.log(currentUser, path, 30),
+      gitClient.diff(currentUser, path),
     ]);
     if (sRes.ok) setStatus(sRes.data);
     if (lRes.ok) setLog(lRes.data);
     if (dRes.ok) setDiff(dRes.data);
     setLoading(false);
-  }, []);
+  }, [currentUser]);
 
   const pickRepo = async () => {
     const res = await fsClient.selectPath({ directory: true, title: 'Select Git Repository' });
@@ -247,7 +248,7 @@ export default function GitSync() {
 
   const stageAll = async () => {
     setFeedback('Staging all files...');
-    const res = await gitClient.stage(repoPath, []);
+    const res = await gitClient.stage(currentUser, repoPath, []);
     if (res.ok) { setFeedback('Staged.'); loadRepo(repoPath); }
     else setFeedback(`Error: ${res.error}`);
   };
@@ -255,21 +256,21 @@ export default function GitSync() {
   const commit = async () => {
     if (!msg.trim()) { setFeedback('Enter a commit message.'); return; }
     setFeedback('Committing...');
-    const res = await gitClient.commit(repoPath, msg);
+    const res = await gitClient.commit(currentUser, repoPath, msg);
     if (res.ok) { setMsg(''); setFeedback('Committed.'); loadRepo(repoPath); }
     else setFeedback(`Error: ${res.error}`);
   };
 
   const push = async () => {
     setFeedback('Pushing...');
-    const res = await gitClient.push(repoPath, status?.branch);
+    const res = await gitClient.push(currentUser, repoPath, status?.branch);
     if (res.ok) { setFeedback('Pushed successfully.'); loadRepo(repoPath); }
     else setFeedback(`Error: ${res.error}`);
   };
 
   const pull = async () => {
     setFeedback('Pulling...');
-    const res = await gitClient.pull(repoPath);
+    const res = await gitClient.pull(currentUser, repoPath);
     if (res.ok) { setFeedback('Pulled.'); loadRepo(repoPath); }
     else setFeedback(`Error: ${res.error}`);
   };

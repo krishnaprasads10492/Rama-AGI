@@ -3,15 +3,23 @@
 const simpleGit = require('simple-git');
 const chokidar  = require('chokidar');
 const path      = require('path');
+const capability = require('../lib/capability.cjs');
 
 // Active watchers per repo path
 const watchers = {};
 
 // ─── Register all git IPC handlers ───────────────────────────────────────────
+// Reads (status/diff/log/branches/remotes) gate on git.read (tier 3);
+// stage/commit gate on git.commit (tier 2); push gates on git.push (tier 1);
+// clone writes to an arbitrary destination so it uses git.push's tier too.
+// These capabilities already existed in shared/capabilities.json but nothing
+// here checked them before this fix.
 function register(ipcMain) {
 
   // ── Status ────────────────────────────────────────────────────────────────
-  ipcMain.handle('git:status', async (_e, repoPath) => {
+  ipcMain.handle('git:status', async (_e, { user, repoPath } = {}) => {
+    const denied = capability.deny(user, 'git.read');
+    if (denied) return denied;
     try {
       const git    = simpleGit(repoPath);
       const status = await git.status();
@@ -39,7 +47,9 @@ function register(ipcMain) {
   });
 
   // ── Diff ──────────────────────────────────────────────────────────────────
-  ipcMain.handle('git:diff', async (_e, repoPath) => {
+  ipcMain.handle('git:diff', async (_e, { user, repoPath } = {}) => {
+    const denied = capability.deny(user, 'git.read');
+    if (denied) return denied;
     try {
       const git  = simpleGit(repoPath);
       const diff = await git.diff();
@@ -50,7 +60,9 @@ function register(ipcMain) {
   });
 
   // ── Log ───────────────────────────────────────────────────────────────────
-  ipcMain.handle('git:log', async (_e, repoPath, limit = 50) => {
+  ipcMain.handle('git:log', async (_e, { user, repoPath, limit = 50 } = {}) => {
+    const denied = capability.deny(user, 'git.read');
+    if (denied) return denied;
     try {
       const git = simpleGit(repoPath);
       const log = await git.log({ maxCount: limit });
@@ -61,7 +73,9 @@ function register(ipcMain) {
   });
 
   // ── Stage files ───────────────────────────────────────────────────────────
-  ipcMain.handle('git:stage', async (_e, repoPath, files) => {
+  ipcMain.handle('git:stage', async (_e, { user, repoPath, files } = {}) => {
+    const denied = capability.deny(user, 'git.commit');
+    if (denied) return denied;
     try {
       const git = simpleGit(repoPath);
       if (Array.isArray(files) && files.length > 0) {
@@ -76,7 +90,9 @@ function register(ipcMain) {
   });
 
   // ── Commit ────────────────────────────────────────────────────────────────
-  ipcMain.handle('git:commit', async (_e, repoPath, message) => {
+  ipcMain.handle('git:commit', async (_e, { user, repoPath, message } = {}) => {
+    const denied = capability.deny(user, 'git.commit');
+    if (denied) return denied;
     try {
       const git    = simpleGit(repoPath);
       const result = await git.commit(message);
@@ -87,7 +103,9 @@ function register(ipcMain) {
   });
 
   // ── Push ──────────────────────────────────────────────────────────────────
-  ipcMain.handle('git:push', async (_e, repoPath, branch = 'HEAD') => {
+  ipcMain.handle('git:push', async (_e, { user, repoPath, branch = 'HEAD' } = {}) => {
+    const denied = capability.deny(user, 'git.push');
+    if (denied) return denied;
     try {
       const git    = simpleGit(repoPath);
       const result = await git.push('origin', branch);
@@ -98,7 +116,9 @@ function register(ipcMain) {
   });
 
   // ── Pull ──────────────────────────────────────────────────────────────────
-  ipcMain.handle('git:pull', async (_e, repoPath) => {
+  ipcMain.handle('git:pull', async (_e, { user, repoPath } = {}) => {
+    const denied = capability.deny(user, 'git.commit');
+    if (denied) return denied;
     try {
       const git    = simpleGit(repoPath);
       const result = await git.pull();
@@ -109,7 +129,9 @@ function register(ipcMain) {
   });
 
   // ── Clone ─────────────────────────────────────────────────────────────────
-  ipcMain.handle('git:clone', async (_e, url, dest) => {
+  ipcMain.handle('git:clone', async (_e, { user, url, dest } = {}) => {
+    const denied = capability.deny(user, 'git.push');
+    if (denied) return denied;
     try {
       const git = simpleGit();
       await git.clone(url, dest);
@@ -120,7 +142,9 @@ function register(ipcMain) {
   });
 
   // ── Get branches ─────────────────────────────────────────────────────────
-  ipcMain.handle('git:get-branches', async (_e, repoPath) => {
+  ipcMain.handle('git:get-branches', async (_e, { user, repoPath } = {}) => {
+    const denied = capability.deny(user, 'git.read');
+    if (denied) return denied;
     try {
       const git      = simpleGit(repoPath);
       const branches = await git.branchLocal();
@@ -139,7 +163,9 @@ function register(ipcMain) {
   });
 
   // ── Checkout branch ───────────────────────────────────────────────────────
-  ipcMain.handle('git:checkout', async (_e, repoPath, branch) => {
+  ipcMain.handle('git:checkout', async (_e, { user, repoPath, branch } = {}) => {
+    const denied = capability.deny(user, 'git.commit');
+    if (denied) return denied;
     try {
       const git = simpleGit(repoPath);
       await git.checkout(branch);
@@ -150,7 +176,9 @@ function register(ipcMain) {
   });
 
   // ── Get remotes ───────────────────────────────────────────────────────────
-  ipcMain.handle('git:get-remotes', async (_e, repoPath) => {
+  ipcMain.handle('git:get-remotes', async (_e, { user, repoPath } = {}) => {
+    const denied = capability.deny(user, 'git.read');
+    if (denied) return denied;
     try {
       const git     = simpleGit(repoPath);
       const remotes = await git.getRemotes(true);
