@@ -5,12 +5,26 @@ const path    = require('path');
 const crypto  = require('crypto');
 const os      = require('os');
 const { dialog } = require('electron');
+const capability = require('../lib/capability.cjs');
 
 // ─── Register all filesystem IPC handlers ────────────────────────────────────
+// Reads gate on os.filesystem-read (tier 2), writes/renames/copies on
+// os.filesystem-write (tier 1), and deletes on os.filesystem-delete (tier 0,
+// master-only) — these capabilities already existed in
+// shared/capabilities.json but nothing here checked them.
+//
+// SIGNATURE CHANGE: every handler now takes ({ user, ...args }) instead of
+// positional arguments, since the gate needs a user to check. preload.cjs's
+// per-call wrappers already forward opts objects unchanged for most of these
+// (fs.readFile(p) etc. still pass a single positional arg in some call
+// sites) — see the accompanying preload.cjs/ipcClient.js/*.jsx updates for
+// the full set of call-site fixes this required.
 function register(ipcMain) {
 
   // ── Read file ─────────────────────────────────────────────────────────────
-  ipcMain.handle('fs:read-file', async (_e, filePath) => {
+  ipcMain.handle('fs:read-file', async (_e, { user, filePath } = {}) => {
+    const denied = capability.deny(user, 'os.filesystem-read');
+    if (denied) return denied;
     try {
       const content = await fs.promises.readFile(filePath, 'utf-8');
       return { ok: true, content };
@@ -20,7 +34,9 @@ function register(ipcMain) {
   });
 
   // ── Write file ────────────────────────────────────────────────────────────
-  ipcMain.handle('fs:write-file', async (_e, filePath, content) => {
+  ipcMain.handle('fs:write-file', async (_e, { user, filePath, content } = {}) => {
+    const denied = capability.deny(user, 'os.filesystem-write');
+    if (denied) return denied;
     try {
       await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
       await fs.promises.writeFile(filePath, content, 'utf-8');
@@ -31,7 +47,9 @@ function register(ipcMain) {
   });
 
   // ── Delete file/dir ───────────────────────────────────────────────────────
-  ipcMain.handle('fs:delete-file', async (_e, filePath) => {
+  ipcMain.handle('fs:delete-file', async (_e, { user, filePath } = {}) => {
+    const denied = capability.deny(user, 'os.filesystem-delete');
+    if (denied) return denied;
     try {
       await fs.promises.rm(filePath, { recursive: true, force: true });
       return { ok: true };
@@ -41,7 +59,9 @@ function register(ipcMain) {
   });
 
   // ── List directory ────────────────────────────────────────────────────────
-  ipcMain.handle('fs:list-dir', async (_e, dirPath) => {
+  ipcMain.handle('fs:list-dir', async (_e, { user, dirPath } = {}) => {
+    const denied = capability.deny(user, 'os.filesystem-read');
+    if (denied) return denied;
     try {
       const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
       const items = await Promise.all(
@@ -77,7 +97,9 @@ function register(ipcMain) {
   });
 
   // ── Create directory ──────────────────────────────────────────────────────
-  ipcMain.handle('fs:create-dir', async (_e, dirPath) => {
+  ipcMain.handle('fs:create-dir', async (_e, { user, dirPath } = {}) => {
+    const denied = capability.deny(user, 'os.filesystem-write');
+    if (denied) return denied;
     try {
       await fs.promises.mkdir(dirPath, { recursive: true });
       return { ok: true };
@@ -87,7 +109,9 @@ function register(ipcMain) {
   });
 
   // ── Rename ────────────────────────────────────────────────────────────────
-  ipcMain.handle('fs:rename', async (_e, oldPath, newPath) => {
+  ipcMain.handle('fs:rename', async (_e, { user, oldPath, newPath } = {}) => {
+    const denied = capability.deny(user, 'os.filesystem-write');
+    if (denied) return denied;
     try {
       await fs.promises.rename(oldPath, newPath);
       return { ok: true };
@@ -97,7 +121,9 @@ function register(ipcMain) {
   });
 
   // ── Copy file ─────────────────────────────────────────────────────────────
-  ipcMain.handle('fs:copy-file', async (_e, src, dest) => {
+  ipcMain.handle('fs:copy-file', async (_e, { user, src, dest } = {}) => {
+    const denied = capability.deny(user, 'os.filesystem-write');
+    if (denied) return denied;
     try {
       await fs.promises.mkdir(path.dirname(dest), { recursive: true });
       await fs.promises.copyFile(src, dest);
@@ -108,7 +134,9 @@ function register(ipcMain) {
   });
 
   // ── Move file ─────────────────────────────────────────────────────────────
-  ipcMain.handle('fs:move-file', async (_e, src, dest) => {
+  ipcMain.handle('fs:move-file', async (_e, { user, src, dest } = {}) => {
+    const denied = capability.deny(user, 'os.filesystem-write');
+    if (denied) return denied;
     try {
       await fs.promises.mkdir(path.dirname(dest), { recursive: true });
       await fs.promises.rename(src, dest);
@@ -126,7 +154,9 @@ function register(ipcMain) {
   });
 
   // ── Get file stats ────────────────────────────────────────────────────────
-  ipcMain.handle('fs:get-stats', async (_e, filePath) => {
+  ipcMain.handle('fs:get-stats', async (_e, { user, filePath } = {}) => {
+    const denied = capability.deny(user, 'os.filesystem-read');
+    if (denied) return denied;
     try {
       const stat = await fs.promises.stat(filePath);
       return {
@@ -147,7 +177,9 @@ function register(ipcMain) {
   });
 
   // ── Search files ──────────────────────────────────────────────────────────
-  ipcMain.handle('fs:search-files', async (_e, dir, query) => {
+  ipcMain.handle('fs:search-files', async (_e, { user, dir, query } = {}) => {
+    const denied = capability.deny(user, 'os.filesystem-read');
+    if (denied) return denied;
     try {
       const results = [];
       const q = query.toLowerCase();
@@ -173,7 +205,9 @@ function register(ipcMain) {
   });
 
   // ── Disk sizes (folder analysis) ──────────────────────────────────────────
-  ipcMain.handle('fs:get-disk-sizes', async (_e, dir) => {
+  ipcMain.handle('fs:get-disk-sizes', async (_e, { user, dir } = {}) => {
+    const denied = capability.deny(user, 'os.filesystem-read');
+    if (denied) return denied;
     try {
       const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []);
       const results = await Promise.all(
@@ -197,7 +231,9 @@ function register(ipcMain) {
   });
 
   // ── Find duplicate files (by MD5 hash) ───────────────────────────────────
-  ipcMain.handle('fs:find-dupes', async (_e, dir) => {
+  ipcMain.handle('fs:find-dupes', async (_e, { user, dir } = {}) => {
+    const denied = capability.deny(user, 'os.filesystem-read');
+    if (denied) return denied;
     try {
       const hashes = {};
       const walk = async (p, depth = 0) => {
@@ -226,7 +262,11 @@ function register(ipcMain) {
   });
 
   // ── Show in OS explorer ───────────────────────────────────────────────────
-  ipcMain.handle('fs:show-in-explorer', async (_e, filePath) => {
+  // Read-only in effect (opens the OS file manager) — gated at the same level
+  // as a filesystem read, not write.
+  ipcMain.handle('fs:show-in-explorer', async (_e, { user, filePath } = {}) => {
+    const denied = capability.deny(user, 'os.filesystem-read');
+    if (denied) return denied;
     try {
       const { shell } = require('electron');
       shell.showItemInFolder(filePath);
@@ -237,6 +277,10 @@ function register(ipcMain) {
   });
 
   // ── Native file/folder picker ─────────────────────────────────────────────
+  // Just opens a dialog — no filesystem access happens here (the caller
+  // still has to go through fs:read-file etc. with the chosen path, which is
+  // gated on its own), so this stays ungated to avoid blocking basic file
+  // pickers (e.g. choosing a repo path) for lower tiers.
   ipcMain.handle('fs:select-path', async (_e, opts = {}) => {
     try {
       const props = opts.directory

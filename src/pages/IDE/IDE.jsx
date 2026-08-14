@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRamaStore }  from '@store/ramaStore.js';
+import { useUserStore }  from '@store/userStore.js';
 import { ramaChat }      from '@services/ramaClient.js';
 import { getSystemPrompt } from '@services/consciousness.js';
 import { emitActivity }  from '@components/ActivityStream.jsx';
@@ -103,9 +104,9 @@ function FileTree({ onFileOpen, activeFile }) {
 
   const listDir = useCallback(async (p) => {
     if (!isElectron || !p) return [];
-    const res = await window.rama.fs.listDir(p);
+    const res = await window.rama.fs.listDir(currentUser, p);
     return res.ok ? res.data : [];
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     if (!cwd) return;
@@ -480,6 +481,7 @@ function ASTPanel({ astData, loading }) {
 
 // ─── Main IDE ──────────────────────────────────────────────────────────────
 export default function IDE() {
+  const { currentUser } = useUserStore();
   const [tabs,        setTabs]        = useState([]);      // { file, content, dirty, id }
   const [activeTabId, setActiveTabId] = useState(null);
   const [pendingPatch,setPendingPatch] = useState(null);
@@ -498,7 +500,7 @@ export default function IDE() {
 
     let content = `// ${item.name}\n// Open in Electron to edit`;
     if (isElectron) {
-      const res = await window.rama.fs.readFile(item.path);
+      const res = await window.rama.fs.readFile(currentUser, item.path);
       if (res.ok) content = res.content;
     }
 
@@ -533,12 +535,12 @@ export default function IDE() {
   const saveFile = useCallback(async () => {
     if (!activeTab || !isElectron) return;
     const content = monacoEditor ? monacoEditor.getValue() : activeTab.content;
-    const res = await window.rama.fs.writeFile(activeTab.file.path, content);
+    const res = await window.rama.fs.writeFile(currentUser, activeTab.file.path, content);
     if (res.ok) {
       setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, content, dirty: false } : t));
       emitActivity('complete', `Saved: ${activeTab.file.name}`);
     }
-  }, [activeTab, activeTabId, monacoEditor]);
+  }, [activeTab, activeTabId, monacoEditor, currentUser]);
 
   // ── Close tab ─────────────────────────────────────────────────────────────
   const closeTab = useCallback((tabId) => {
@@ -561,10 +563,10 @@ export default function IDE() {
     onContentChange(pendingPatch.content);
     setPendingPatch(null);
     if (activeTab && isElectron) {
-      await window.rama.fs.writeFile(activeTab.file.path, pendingPatch.content);
+      await window.rama.fs.writeFile(currentUser, activeTab.file.path, pendingPatch.content);
       setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, content: pendingPatch.content, dirty: false } : t));
     }
-  }, [pendingPatch, monacoEditor, activeTab, activeTabId, onContentChange]);
+  }, [pendingPatch, monacoEditor, activeTab, activeTabId, onContentChange, currentUser]);
 
   // Keyboard shortcuts
   useEffect(() => {
