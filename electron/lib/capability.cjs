@@ -52,9 +52,26 @@ function isMaster(user) {
   return user?.tier === TIERS.MASTER;
 }
 
+/**
+ * Non-throwing gate for the common `{ ok:false, error }` IPC response shape.
+ * Returns null when allowed, or the denial object to return immediately when
+ * not. Introduced because most IPC files were hand-rolling this exact check
+ * inconsistently (some checked, most didn't) — see
+ * RAMA_AGI_MASTER_SPEC.md's fix pass for the systemic gap this closes.
+ *
+ * Usage:
+ *   const denied = capability.deny(user, 'fs.write');
+ *   if (denied) return denied;
+ */
+function deny(user, cap) {
+  if (can(user, cap)) return null;
+  const who = TIER_LABELS[String(user?.tier)] ?? 'This account';
+  return { ok: false, error: `${who} may not do this (needs "${cap}")` };
+}
+
 module.exports = {
   TIERS, TIER_LABELS, TIER_COLORS, MATRIX,
-  can, getCaps, isMaster,
+  can, getCaps, isMaster, deny,
   requireCap: require_,
   version: spec.version,
 };

@@ -219,10 +219,66 @@ function getCircuitStatus() {
   }]));
 }
 
+/**
+ * Streaming POST for endpoints that emit newline-delimited JSON progress
+ * before completing (Ollama's /api/pull, /api/chat with stream:true). The
+ * plain `request()` above buffers the whole response, which is the wrong
+ * shape for a progress callback and would also hold a pull's entire output
+ * in memory. No retry/circuit-breaker here — a partially-streamed response
+ * cannot be safely retried from the start without the caller possibly
+ * double-processing progress events.
+ *
+ * @param {string} url
+ * @param {object} body   JSON-serializable request body
+ * @param {(line: object) => void} onLine  called once per parsed JSON line
+ * @param {object} opts   { timeout }
+ * @returns {Promise<{ ok, status, error? }>}
+ */
+async function postStreamingJsonLines(url, body, onLine, opts = {}) {
+  const { timeout = 120000, headers = {} } = opts;
+
+  let parsed;
+  try { parsed = new URL(url); }
+  catch { return { ok: false, status: 0, error: `Invalid URL: ${url}` }; }
+
+  const mod = parsed.protocol === 'https:' ? https : http;
+  const payload = typeof body === 'string' ? body : JSON.stringify(body);
+
+  return new Promise((resolve) => {
+    const req = mod.request({
+      hostname: parsed.hostname,
+      port:     parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+      path:     parsed.pathname + parsed.search,
+      method:   'POST',
+      headers:  { 'Content-Type': 'application/json', ...ramaHeaders(), ...headers },
+    }, (res) => {
+      let buffer = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        buffer += chunk;
+        let idx;
+        while ((idx = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, idx).trim();
+          buffer = buffer.slice(idx + 1);
+          if (!line) continue;
+          try { onLine(JSON.parse(line)); } catch { /* partial/non-JSON line, skip */ }
+        }
+      });
+      res.on('end', () => resolve({ ok: res.statusCode >= 200 && res.statusCode < 400, status: res.statusCode }));
+    });
+
+    req.on('error',   (err) => resolve({ ok: false, status: 0, error: err.message }));
+    req.setTimeout(timeout, () => { req.destroy(); resolve({ ok: false, status: 0, error: `Timeout after ${timeout}ms` }); });
+    req.write(payload);
+    req.end();
+  });
+}
+
 module.exports = {
   request, get, post, getJson, postJson,
   getHuman, getJsonHuman,
   humanHeaders, ramaHeaders,
   getCircuitStatus, delay,
+  postStreamingJsonLines,
   MAX_RESPONSE_SIZE,
 };
