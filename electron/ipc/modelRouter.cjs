@@ -130,29 +130,26 @@ function register(ipcMain) {
   });
 
   // ── Pull Ollama model ─────────────────────────────────────────────────────
-  ipcMain.handle('models:ollama-pull', async (event, modelName) => {
-    return new Promise((resolve) => {
-      const req = http.request({
-        hostname: 'localhost',
-        port:     11434,
-        path:     '/api/pull',
-        method:   'POST',
-        headers:  { 'Content-Type': 'application/json' },
-      }, (res) => {
-        res.on('data', (chunk) => {
-          try {
-            const data = JSON.parse(chunk.toString());
-            event.sender.send('models:ollama-pull-progress', data);
-          } catch { /* chunked */ }
-        });
-        res.on('end', () => {
-          resolve({ ok: true });
-        });
-      });
-      req.on('error', (err) => resolve({ ok: false, error: err.message }));
-      req.write(JSON.stringify({ name: modelName, stream: true }));
-      req.end();
-    });
+  // Was a raw `http.request` call with no `http` ever required in this file —
+  // a live ReferenceError on the first real pull attempt (invariant I9 also
+  // requires this to go through the one shared client, not a second one-off
+  // implementation). Fixed onto lib/http.cjs's postStreamingJsonLines, which
+  // exists for exactly this shape (newline-delimited JSON progress).
+  ipcMain.handle('models:ollama-pull', async (event, { user, modelName } = {}) => {
+    const capability = require('../lib/capability.cjs');
+    if (!capability.can(user, 'models.ollama-pull')) {
+      const who = capability.TIER_LABELS[String(user?.tier)] ?? 'This account';
+      return { ok: false, error: `${who} may not pull Ollama models (needs "models.ollama-pull")` };
+    }
+    if (!modelName?.trim()) return { ok: false, error: 'modelName is required' };
+
+    const res = await net.postStreamingJsonLines(
+      `${ollamaBaseUrl}/api/pull`,
+      { name: modelName, stream: true },
+      (line) => event.sender.send('models:ollama-pull-progress', line),
+      { timeout: 600000 }   // model downloads can run several minutes
+    );
+    return res;
   });
 
   // ── List Ollama models ────────────────────────────────────────────────────

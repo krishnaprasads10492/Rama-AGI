@@ -172,24 +172,16 @@ function applyCsp() {
  * the same as serving the entry — a dev server with a missing index.html returns
  * 404 on every request while looking perfectly alive to a port check.
  */
-function probeVite(timeoutMs = 1500) {
-  return new Promise((resolve) => {
-    const req = require('http').get(
-      { host: 'localhost', port: VITE_PORT, path: '/', timeout: timeoutMs },
-      (res) => {
-        if (res.statusCode !== 200) { res.resume(); resolve(false); return; }
-        let body = '';
-        res.setEncoding('utf8');
-        res.on('data', (c) => {
-          body += c;
-          if (body.length > 8192) { req.destroy(); resolve(body.includes('id="root"')); }
-        });
-        res.on('end', () => resolve(body.includes('id="root"')));
-      }
-    );
-    req.on('error',   () => resolve(false));
-    req.on('timeout', () => { req.destroy(); resolve(false); });
+async function probeVite(timeoutMs = 1500) {
+  // Routed through lib/http.cjs (invariant I9 — one main-process HTTP
+  // client) rather than a raw require('http').get. maxSize keeps this cheap
+  // even if the dev server ever answered with something huge.
+  const net = require('./lib/http.cjs');
+  const res = await net.get(`http://localhost:${VITE_PORT}/`, {
+    timeout: timeoutMs, retries: 0, maxSize: 16384,
   });
+  if (!res.ok || res.status !== 200) return false;
+  return (res.body || '').includes('id="root"');
 }
 
 /**
