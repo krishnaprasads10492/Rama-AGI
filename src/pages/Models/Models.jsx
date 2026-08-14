@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useUserStore } from '@store/userStore.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -73,6 +74,89 @@ function ModelRow({ model, status, primary, onSetPrimary, onAddKey }) {
   );
 }
 
+function AddCustomProviderModal({ onSave, onClose }) {
+  const [name,      setName]      = useState('');
+  const [baseUrl,   setBaseUrl]   = useState('');
+  const [apiKey,    setApiKey]    = useState('');
+  const [modelsStr, setModelsStr] = useState('');
+  const [allowLocal, setAllowLocal] = useState(false);
+  const [busy,   setBusy]   = useState(false);
+  const [error,  setError]  = useState(null);
+
+  const save = async () => {
+    const models = modelsStr.split(',').map(s => s.trim()).filter(Boolean);
+    if (!name.trim() || !baseUrl.trim() || models.length === 0) {
+      setError('Name, base URL, and at least one model id are required.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const res = await onSave({ name: name.trim(), baseUrl: baseUrl.trim(), apiKey: apiKey.trim() || null, models, allowLocal });
+    setBusy(false);
+    if (res?.ok) onClose();
+    else setError(res?.error || 'Failed to add provider');
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500 }}>
+      <div className="hud-card" style={{ width: '520px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span style={{ fontWeight: 700, color: 'var(--accent)' }}>ADD CUSTOM OPENAI-COMPATIBLE PROVIDER</span>
+          <button className="btn btn-sm" onClick={onClose}>✕</button>
+        </div>
+
+        <div style={{ fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.7 }}>
+          Works for any endpoint that speaks the OpenAI <code>/v1/chat/completions</code> shape —
+          OpenRouter, Together, Fireworks, DeepSeek, a local LM Studio/vLLM server, and most
+          new providers. A provider with a different API shape (Anthropic, Gemini) needs
+          dedicated code, not this form.
+        </div>
+
+        <div>
+          <div className="section-label" style={{ marginBottom: '6px' }}>NAME</div>
+          <input className="input" placeholder="e.g. Together AI" value={name} onChange={e => setName(e.target.value)} />
+        </div>
+
+        <div>
+          <div className="section-label" style={{ marginBottom: '6px' }}>BASE URL</div>
+          <input className="input" placeholder="https://api.together.xyz" value={baseUrl} onChange={e => setBaseUrl(e.target.value)} />
+        </div>
+
+        <div>
+          <div className="section-label" style={{ marginBottom: '6px' }}>MODEL IDS (comma-separated)</div>
+          <input className="input" placeholder="meta-llama/Llama-3-70b, mistralai/Mixtral-8x7B"
+            value={modelsStr} onChange={e => setModelsStr(e.target.value)} />
+        </div>
+
+        <div>
+          <div className="section-label" style={{ marginBottom: '6px' }}>API KEY (optional — leave blank for a keyless local server)</div>
+          <input className="input" type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} />
+          <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '4px' }}>
+            Stored AES-256-GCM encrypted in your local vault, same as any other provider key.
+          </div>
+        </div>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--text-dim)', cursor: 'pointer' }}>
+          <input type="checkbox" checked={allowLocal} onChange={e => setAllowLocal(e.target.checked)} />
+          This is a local/private server I run myself (localhost, LAN IP, etc.)
+        </label>
+
+        {error && (
+          <div style={{ fontSize: '11px', color: 'var(--red)' }}>✕ {error}</div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+          <button className="btn btn-sm" onClick={onClose}>Cancel</button>
+          <button className="btn btn-sm btn-primary" disabled={busy} onClick={save}>
+            {busy ? 'Adding...' : '+ Add Provider'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AddKeyModal({ credKey, info, onSave, onClose }) {
   const [value, setValue] = useState('');
   const [busy,  setBusy]  = useState(false);
@@ -126,6 +210,7 @@ function AddKeyModal({ credKey, info, onSave, onClose }) {
 }
 
 export default function Models() {
+  const { currentUser } = useUserStore();
   const [models,      setModels]      = useState([]);
   const [credentials, setCredentials] = useState({});
   const [primary,     setPrimary]     = useState('gpt-4o');
@@ -136,21 +221,26 @@ export default function Models() {
   const [vaultLocked, setVaultLocked] = useState(true);
   const [password,    setPassword]    = useState('');
   const [tab,         setTab]         = useState('cloud');
+  const [customProviders,   setCustomProviders]   = useState([]);
+  const [showAddCustom,     setShowAddCustom]     = useState(false);
+  const [customError,       setCustomError]       = useState(null);
 
   const load = useCallback(async () => {
     if (!isElectron) return;
-    const [mRes, pRes, vRes] = await Promise.all([
+    const [mRes, pRes, vRes, cpRes] = await Promise.all([
       window.rama.models.list(),
       window.rama.models.getPrimary(),
       window.rama.vault.status(),
+      window.rama.models.listCustomProviders({ user: currentUser }),
     ]);
     if (mRes.ok) { setModels(mRes.data); setOllamaModels(mRes.ollama || []); }
     if (pRes.ok) setPrimary(pRes.model);
     if (vRes.ok) setVaultLocked(!vRes.unlocked);
+    if (cpRes.ok) setCustomProviders(cpRes.data);
 
     const cRes = await window.rama.models.checkCredentials();
     if (cRes.ok) setCredentials(cRes.data);
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -182,6 +272,21 @@ export default function Models() {
     load();
   };
 
+  const addCustomProvider = async (def) => {
+    if (!isElectron) return { ok: false, error: 'Desktop app required' };
+    const res = await window.rama.models.addCustomProvider({ user: currentUser, ...def });
+    if (res.ok) load();
+    return res;
+  };
+
+  const removeCustomProvider = async (id) => {
+    if (!isElectron) return;
+    setCustomError(null);
+    const res = await window.rama.models.removeCustomProvider({ user: currentUser, id });
+    if (!res.ok) setCustomError(res.error);
+    load();
+  };
+
   const cloudModels = models.filter(m => m.type === 'cloud');
   const localModels = models.filter(m => m.type === 'local');
 
@@ -193,6 +298,13 @@ export default function Models() {
           info={PROVIDER_LINKS[addKeyFor]}
           onSave={saveKey}
           onClose={() => setAddKeyFor(null)}
+        />
+      )}
+
+      {showAddCustom && (
+        <AddCustomProviderModal
+          onSave={addCustomProvider}
+          onClose={() => setShowAddCustom(false)}
         />
       )}
 
@@ -220,7 +332,7 @@ export default function Models() {
 
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
-        {['cloud', 'local', 'keys'].map(t => (
+        {['cloud', 'local', 'custom', 'keys'].map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '9px 18px', border: 'none', background: 'transparent',
             color: tab === t ? 'var(--accent)' : 'var(--muted)',
@@ -283,6 +395,55 @@ export default function Models() {
                 </span>
               </div>
             </div>
+          </div>
+        )}
+
+        {tab === 'custom' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div className="hud-card" style={{ padding: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                <div className="section-label">CUSTOM OPENAI-COMPATIBLE PROVIDERS</div>
+                <div style={{ flex: 1 }} />
+                <button className="btn btn-sm btn-primary" onClick={() => setShowAddCustom(true)}>
+                  + Add Provider
+                </button>
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.7 }}>
+                Add any endpoint that speaks the OpenAI <code>/v1/chat/completions</code> shape —
+                covers most current and future LLM hosts without a code change. Once added,
+                these models participate in the same routing, fallback, and rate-limit logic
+                as every built-in provider.
+              </div>
+              {customError && (
+                <div style={{ marginTop: 8, fontSize: 11, color: 'var(--red)' }}>✕ {customError}</div>
+              )}
+            </div>
+
+            {customProviders.length === 0 ? (
+              <div style={{ color: 'var(--muted)', fontSize: '12px', padding: '12px' }}>
+                No custom providers added yet.
+              </div>
+            ) : (
+              <div className="hud-card" style={{ overflow: 'hidden' }}>
+                {customProviders.map(p => (
+                  <div key={p.id} style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)',
+                    display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text)' }}>
+                        {p.name} {p.hasKey && <span style={{ fontSize: 9, color: 'var(--green)' }}>🔒 keyed</span>}
+                      </div>
+                      <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '2px' }}>{p.baseUrl}</div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px' }}>
+                        {p.models.join(', ')}
+                      </div>
+                    </div>
+                    <button className="btn btn-sm btn-danger" onClick={() => removeCustomProvider(p.id)}>
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

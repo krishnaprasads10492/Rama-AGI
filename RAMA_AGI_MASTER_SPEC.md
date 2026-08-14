@@ -1689,6 +1689,8 @@ authenticated **Master session**, not merely an open store.
 
 | 55 | Publish an applied self-modify proposal to its own branch, with release notes | done | Section 41. `electron/lib/publishProposal.cjs` — pushes an already-`applied` proposal's changes to `self-modify/<date>-<slug>-<id>` (never `dev`/`source` directly), with generated release notes (structured facts always; AI explanation appended opportunistically via `modelRouter.cjs`, degrading silently to structured-only). Master-only (`release.cut`, same gate as cutting a version release — I6 unchanged, ledger approval already happened before this runs). Verified end-to-end against a disposable scratch repo: `dev` untouched, new branch has the files + notes, working tree returns to the starting branch automatically. Wired into `Evolution.jsx`'s ProposalCard as "⎇ Publish branch". `npm run audit` clean (78 bridge calls). Not yet exercised against a real remote with `push:true`, and not yet surfaced in `Resources.jsx`'s research tab for RESOURCE-kind proposals. |
 
+| 56 | Custom OpenAI-compatible LLM providers — any current/future model host, without a code change | done | Section 42. `electron/lib/customProviders.cjs` (`add`/`remove`/`list`/`toRegistryEntries`) + `modelRouter.cjs`'s new `customChat()` generic adapter, merged into `MODEL_REGISTRY` at `models:list`/`selectModel` time so every existing routing/fallback/rate-limit mechanism applies with no special-casing. Security: no agent-callable path (verified — not referenced in `agentOrchestrator.cjs`'s closed action switch), master-only via `models.add-key` (tier 1, same gate as any provider key), credentials never leave `credentialVault.cjs`, SSRF-guarded base-URL validation (rejects localhost/private/link-local/169.254.169.254 unless explicitly allowed), no `proposals.cjs`/self-modify path. `node --check` clean on all 5 touched `.cjs`, `npm run audit` clean (81 bridge calls). New "Custom" tab on `Models.jsx`. Not exercised against a real third-party endpoint in this session — verified by mocked add/list/remove round-trip and 8 URL-validation cases, not a live call. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -2907,3 +2909,94 @@ resumed cold: exercise `push:true` against a real fork/test remote once one
 is available, and consider whether `RemoteEngine` proposals from
 `resourceResearchEngine.cjs` should surface the same "Publish branch" action
 in `Resources.jsx`'s research tab (currently only wired into `Evolution.jsx`).
+
+
+---
+
+## SECTION 42 — Any OpenAI-compatible LLM provider, current or future, without a code change
+
+> Master's ask: Rāma should be able to include ALL kinds of LLM models to
+> enhance all kinds of functions available now and in the future — an
+> upgrade path, not a fixed list — WITHOUT COMPROMISING SECURITY AND DATA
+> EVEN IF ADVANCED AI MIGHT TRY TO DO IT.
+
+### Why "OpenAI-compatible" genuinely covers "all kinds," and what it doesn't
+
+`/v1/chat/completions` with a `{model, messages}` request and a
+`choices[0].message.content` response is the de facto standard almost every
+LLM host now speaks — `modelRouter.cjs`'s own `groqChat`/`mistralChat`
+already use exactly this shape for two "different" providers. One generic
+adapter (`customChat()`) therefore covers OpenRouter, Together, Fireworks,
+DeepSeek, Perplexity, and local llama.cpp/vLLM/LM Studio servers, plus most
+providers that appear after this was written — a real, open-ended "future
+models" path, not a fixed list re-typed as a promise.
+
+**Disclosed limit, not glossed over**: a provider with a genuinely different
+API shape (Anthropic's own format, Gemini's) still needs its own adapter
+function, the same as `anthropicChat`/`geminiChat` today. "All kinds" is
+true for the overwhelming majority of the market, not literally every API
+shape that could ever exist.
+
+### The security boundary — structural, not a behavioural promise
+
+Master's phrasing ("even if advanced AI might try to do it") was taken as: do
+not rely on a model behaving itself — make the unsafe path not exist.
+
+1. **No agent-callable path.** `customProviders.cjs`'s `add()`/`remove()` are
+   reached only via `models:add-custom-provider`/`models:remove-custom-provider`
+   IPC handlers, called from `Models.jsx`'s UI form. `agentOrchestrator.cjs`'s
+   `parseActions`/`executeAction` — the only place a model's own text output
+   is ever parsed as an instruction — has a closed, hardcoded switch
+   (`search`/`read`, default `not auto-executable`). Verified by grep: no
+   reference to either handler name anywhere in `agentOrchestrator.cjs`.
+2. **Same tier gate as adding any provider's API key.** Both handlers require
+   `models.add-key` (tier 1, master/superadmin only) — adding a custom
+   provider is not a lower-privilege action than adding an OpenAI key.
+3. **Credentials never leave the vault.** The non-secret record (name,
+   base URL, model list, credential-key NAME) lives in `dataStore.cjs`'s
+   `config` domain (encrypted at rest); the secret itself goes through
+   `credentialVault.cjs`'s existing AES-256-GCM store under a generated
+   `credKey`. `add()` rolls back its own record if the vault write fails,
+   so a provider entry can never reference a credential that doesn't exist.
+4. **No SSRF into this machine's own services.** `validateBaseUrl()` refuses
+   loopback/private/link-local hosts (including the `169.254.169.254`
+   cloud-metadata pattern) unless master explicitly passes `allowLocal:true`
+   — verified against 8 cases (public HTTPS accepted, localhost/127.0.0.1/
+   169.254.169.254/malformed/wrong-protocol all rejected, LAN IP accepted
+   only with `allowLocal`). Without this, a "provider" entry could otherwise
+   be used to quietly redirect Rāma's own calls at its own unauthenticated
+   Express API (`localhost:4097`, invariant I2) or other local services.
+5. **No self-modification path.** Registering a provider changes runtime
+   state and one encrypted domain record only — no `changes[]`, no file
+   write, no `proposals.cjs` entry anywhere in `customProviders.cjs`. It
+   cannot be used as a route around invariant I6.
+6. **Honest failure.** An unreachable or non-compliant custom endpoint fails
+   the same way any provider call fails elsewhere in `modelRouter.cjs` — the
+   fallback chain moves on; nothing is assumed to have worked.
+
+### How it plugs into the existing router, with zero special-casing
+
+`customProviders.toRegistryEntries()` projects every stored custom provider
+into `MODEL_REGISTRY`'s exact shape (`refreshCustomProviders()`, called at
+`models:list` and `selectModel` time, mutates `MODEL_REGISTRY` in place so
+`resourceOrchestrator.cjs`'s direct reference to the same object object stays
+in sync). From that point on, a custom model is just another registry entry
+— the existing fallback chain, capability caps, and rate-limit accounting
+in `modelRouter.cjs`/`resourceOrchestrator.cjs` apply to it with no new
+branching logic anywhere else in the codebase.
+
+### Status
+
+Built and verified. `node --check` clean on all five touched `.cjs` files.
+`validateBaseUrl()` verified against 8 cases (public/local/malformed/
+wrong-protocol). `add()`/`list()`/`remove()` verified end-to-end against a
+mocked dataStore+vault (not the real encrypted store): secret correctly
+lands only in the vault mock, never in the plain record; localhost correctly
+refused without `allowLocal`; `toRegistryEntries()` output matches
+`MODEL_REGISTRY`'s shape; remove cleans up both the record and the vault
+entry. `npm run audit` clean (81 bridge calls resolve, up from 78). UI: new
+"Custom" tab on `Models.jsx` with an add-provider form and a list with
+remove. Not yet exercised against a real custom endpoint (no test API key
+available in this session) — the generic adapter's request/response
+handling was verified by code review against the already-proven
+`groqChat`/`mistralChat` shape it mirrors, not by a live call.

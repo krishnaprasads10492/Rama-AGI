@@ -601,6 +601,10 @@ const RAMA_API = {
       const promise = ipcRenderer.invoke('models:ollama-pull', name);
       return promise.finally(() => ipcRenderer.removeListener('models:ollama-pull-progress', handler));
     },
+    // Custom OpenAI-compatible providers — master-only (models.add-key).
+    listCustomProviders:   (opts)  => ipcRenderer.invoke('models:list-custom-providers', opts),
+    addCustomProvider:     (opts)  => ipcRenderer.invoke('models:add-custom-provider', opts),
+    removeCustomProvider:  (opts)  => ipcRenderer.invoke('models:remove-custom-provider', opts),
   },
 
   // ── Agent Orchestrator ────────────────────────────────────────────────────

@@ -201,4 +201,29 @@ function isUnlocked() {
   return vaultUnlocked;
 }
 
-module.exports = { register, getCredential, isUnlocked };
+/**
+ * Direct (non-IPC) write/delete for other main-process modules that need to
+ * store a credential as part of a larger operation (e.g.
+ * customProviders.cjs's add(), which must roll back its own record if the
+ * vault write fails). Same unlocked-check and storage path as `vault:set`/
+ * `vault:delete` — this is not a second, looser write path, it is the one
+ * path called either from IPC or directly within the main process.
+ */
+function setCredentialDirect(service, value, meta = {}) {
+  if (!vaultUnlocked) return { ok: false, error: 'Vault locked' };
+  vaultData[service] = { value, meta, addedAt: Date.now() };
+  saveVault();
+  return { ok: true };
+}
+
+function deleteCredentialDirect(service) {
+  if (!vaultUnlocked) return { ok: false, error: 'Vault locked' };
+  delete vaultData[service];
+  saveVault();
+  return { ok: true };
+}
+
+module.exports = {
+  register, getCredential, isUnlocked,
+  setCredentialDirect, deleteCredentialDirect,
+};

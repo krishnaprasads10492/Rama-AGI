@@ -9,6 +9,7 @@
 
 const { getCredential } = require('./credentialVault.cjs');
 const net = require('../lib/http.cjs');
+const customProviders = require('../lib/customProviders.cjs');
 
 // ─── Model registry ────────────────────────────────────────────────────────────
 const MODEL_REGISTRY = {
@@ -56,11 +57,32 @@ let detectedOllamaModels  = [];
 let primaryModel          = 'gpt-4o';
 let ollamaBaseUrl         = 'http://localhost:11434';
 
+// Track which model ids came from customProviders.cjs so a removed provider's
+// entries can be cleared before the next merge, rather than accumulating
+// stale ids across store refreshes.
+let _customIds = new Set();
+
+/**
+ * Merge master-added custom OpenAI-compatible providers into MODEL_REGISTRY
+ * (mutated in place — other modules hold a direct reference to this object,
+ * e.g. resourceOrchestrator.cjs's selectOptimalModel, so replacing it wholesale
+ * would silently desync them). Every existing routing/fallback/capability
+ * mechanism then applies to a custom model with no special-casing, because
+ * it is, from this point on, just another MODEL_REGISTRY entry.
+ */
+function refreshCustomProviders() {
+  for (const id of _customIds) delete MODEL_REGISTRY[id];
+  const entries = customProviders.toRegistryEntries();
+  Object.assign(MODEL_REGISTRY, entries);
+  _customIds = new Set(Object.keys(entries));
+}
+
 // ─── Register IPC ─────────────────────────────────────────────────────────────
 function register(ipcMain) {
 
   // ── List available models ─────────────────────────────────────────────────
   ipcMain.handle('models:list', async () => {
+    refreshCustomProviders();
     await refreshOllamaModels();
     const available = Object.entries(MODEL_REGISTRY).map(([id, info]) => ({
       id,
@@ -152,6 +174,40 @@ function register(ipcMain) {
     return { ok: true, data: status };
   });
 
+  // ── Custom OpenAI-compatible providers ────────────────────────────────────
+  // Master-only (models.add-key, tier 1 — same gate as adding any provider's
+  // API key). No agent/model-output path reaches these handlers; see the
+  // security-boundary comment at the top of customProviders.cjs.
+  ipcMain.handle('models:list-custom-providers', async (_e, { user } = {}) => {
+    const capability = require('../lib/capability.cjs');
+    if (!capability.can(user, 'models.use')) {
+      return { ok: false, error: 'Access denied: "models.use" required' };
+    }
+    return { ok: true, data: customProviders.list() };
+  });
+
+  ipcMain.handle('models:add-custom-provider', async (_e, { user, ...def } = {}) => {
+    const capability = require('../lib/capability.cjs');
+    if (!capability.can(user, 'models.add-key')) {
+      const who = capability.TIER_LABELS[String(user?.tier)] ?? 'This account';
+      return { ok: false, error: `${who} may not add a custom provider (needs "models.add-key")` };
+    }
+    const res = customProviders.add(def);
+    if (res.ok) refreshCustomProviders();
+    return res;
+  });
+
+  ipcMain.handle('models:remove-custom-provider', async (_e, { user, id } = {}) => {
+    const capability = require('../lib/capability.cjs');
+    if (!capability.can(user, 'models.add-key')) {
+      const who = capability.TIER_LABELS[String(user?.tier)] ?? 'This account';
+      return { ok: false, error: `${who} may not remove a custom provider (needs "models.add-key")` };
+    }
+    const res = customProviders.remove(id);
+    if (res.ok) refreshCustomProviders();
+    return res;
+  });
+
   // ── Ask Rāma what credentials it needs for a task ────────────────────────
   ipcMain.handle('models:needs-for-task', async (_e, taskDescription) => {
     const needs = analyzeCredentialNeeds(taskDescription);
@@ -161,6 +217,7 @@ function register(ipcMain) {
 
 // ─── Model selection logic ────────────────────────────────────────────────────
 function selectModel(taskType) {
+  refreshCustomProviders();
   const caps = TASK_ROUTING[taskType] || ['general'];
 
   // If offline task — prefer local
@@ -213,8 +270,38 @@ async function chatCompletion(messages, modelId) {
     case 'mistral':   return mistralChat(messages, modelId, info);
     case 'groq':      return groqChat(messages, modelId, info);
     case 'ollama':    return ollamaChat(messages, modelId.replace('ollama/', ''));
+    case 'custom':    return customChat(messages, modelId, info);
     default:          throw new Error(`Unsupported provider: ${info.provider}`);
   }
+}
+
+/**
+ * Generic OpenAI-compatible adapter — the same `/chat/completions` request/
+ * response shape `groqChat`/`mistralChat` above already use. Covers any
+ * provider master registers via customProviders.cjs, current or future,
+ * without a new function per vendor. A provider whose API is NOT
+ * OpenAI-compatible (Anthropic's own format, Gemini's) is a real, disclosed
+ * limit of this adapter — it would need its own function above, same as
+ * anthropicChat/geminiChat.
+ */
+async function customChat(messages, modelId, info) {
+  const apiKey = info.credKey ? getCredential(info.credKey) : null;
+  if (info.credKey && !apiKey) throw new Error(`Custom provider key not set for ${modelId}`);
+
+  const base = info.customProviderId;   // full base URL, set by toRegistryEntries()
+  const url  = new URL('/v1/chat/completions', base);
+  const body = JSON.stringify({ model: modelId, messages });
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+  const res = await net.request(url.toString(), { method: 'POST', body, headers, timeout: 60000, retries: 1 });
+  if (!res.ok || !res.body) throw new Error(res.error || `Custom provider HTTP ${res.status}`);
+
+  const parsed = JSON.parse(res.body);
+  if (parsed.error) throw new Error(parsed.error.message || JSON.stringify(parsed.error));
+  const content = parsed.choices?.[0]?.message?.content;
+  if (content === undefined) throw new Error('Custom provider response did not match the OpenAI-compatible shape (choices[0].message.content)');
+  return { content, usage: parsed.usage };
 }
 
 async function openaiChat(messages, modelId, info) {

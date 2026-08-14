@@ -170,6 +170,7 @@ function getDefaultData(domain) {
       theme:         'cyberpunk',
       vaultCreatedAt: null,
       version:       '1.0.0',
+      customProviders: [],   // { id, name, baseUrl, models[], credKey, addedAt } — see electron/lib/customProviders.cjs. Never a secret value.
     },
     instances: {
       registry:   [],   // Rāma instances — each carries the full genome
