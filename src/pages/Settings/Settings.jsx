@@ -187,17 +187,17 @@ export default function Settings() {
               <Toggle value={autoStart} onChange={toggleAutoStart} />
             </SettingRow>
 
-            <SettingRow
-              label="Minimize to tray"
-              desc="Closing the window keeps Rāma running in the system tray (always-on)">
-              <Toggle value={true} onChange={() => {}} />
-            </SettingRow>
-
-            <SettingRow
-              label="Voice wake word"
-              desc='"Hey Rāma" — passive listening for voice commands'>
-              <Toggle value={true} onChange={() => {}} />
-            </SettingRow>
+            {/* Both of these were previously rendered as toggles fixed at "on"
+                with a no-op onChange — implying a control that did not exist.
+                Neither is user-configurable today: closing the window always
+                minimizes to tray (electron/main.cjs's `close` handler), and
+                the wake word is an auto-detected device capability, not a
+                manual switch — see Settings > Voice, or CommandPalette's mic
+                mode picker, for what actually controls listening mode. */}
+            <div style={{ padding: '10px 0', fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.7 }}>
+              Closing the window always minimizes Rāma to the system tray rather than quitting —
+              use the tray icon or "Quit Rāma" to fully exit.
+            </div>
           </div>
         )}
 
