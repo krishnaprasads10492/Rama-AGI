@@ -122,15 +122,16 @@ const RAMA_API = {
   },
 
   // ── App Assimilation ──────────────────────────────────────────────────────
+  // Every call takes { user, ... } — appAssimilation.cjs gates each handler
+  // on the apps.* capabilities (view / execute-safe / execute-all).
   apps: {
-    scanInstalled:  ()              => ipcRenderer.invoke('apps:scan-installed'),
-    getRegistry:    ()              => ipcRenderer.invoke('apps:get-registry'),
-    getCapabilities:(appId)         => ipcRenderer.invoke('apps:get-capabilities',  appId),
-    execute:        (appId, action, params) =>
-                                       ipcRenderer.invoke('apps:execute',  appId, action, params),
-    getAuditLog:    ()              => ipcRenderer.invoke('apps:get-audit-log'),
-    setWhitelist:   (list)          => ipcRenderer.invoke('apps:set-whitelist',  list),
-    setBlacklist:   (list)          => ipcRenderer.invoke('apps:set-blacklist',  list),
+    scanInstalled:   (opts)                    => ipcRenderer.invoke('apps:scan-installed', opts),
+    getRegistry:     (opts)                    => ipcRenderer.invoke('apps:get-registry', opts),
+    getCapabilities: (opts)                    => ipcRenderer.invoke('apps:get-capabilities', opts),
+    execute:         (opts)                    => ipcRenderer.invoke('apps:execute', opts),
+    getAuditLog:     (opts)                    => ipcRenderer.invoke('apps:get-audit-log', opts),
+    setWhitelist:    (opts)                    => ipcRenderer.invoke('apps:set-whitelist', opts),
+    setBlacklist:    (opts)                    => ipcRenderer.invoke('apps:set-blacklist', opts),
   },
 
   // ── AI Process Manager ────────────────────────────────────────────────────

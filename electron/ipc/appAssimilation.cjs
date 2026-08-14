@@ -14,10 +14,26 @@ let blacklist    = [];        // Apps blocked from assimilation
 const auditLog   = [];        // All assimilation actions
 
 // ─── Register all app assimilation IPC handlers ───────────────────────────────
+// Every handler is gated on the apps.* capabilities already defined in
+// shared/capabilities.json (apps.view=2, apps.execute-safe=2,
+// apps.execute-all=0) — none of them were enforced before this, so any
+// caller reaching these channels at all had unrestricted access regardless
+// of tier. See RAMA_AGI_MASTER_SPEC.md Section 44.
+function denyUnless(user, cap) {
+  const capability = require('../lib/capability.cjs');
+  if (!capability.can(user, cap)) {
+    const who = capability.TIER_LABELS[String(user?.tier)] ?? 'This account';
+    return { ok: false, error: `${who} may not do this (needs "${cap}")` };
+  }
+  return null;
+}
+
 function register(ipcMain) {
 
   // ── Scan installed apps ────────────────────────────────────────────────────
-  ipcMain.handle('apps:scan-installed', async () => {
+  ipcMain.handle('apps:scan-installed', async (_e, { user } = {}) => {
+    const denied = denyUnless(user, 'apps.view');
+    if (denied) return denied;
     try {
       appRegistry = await scanInstalledApps();
       return { ok: true, data: appRegistry };
@@ -27,7 +43,9 @@ function register(ipcMain) {
   });
 
   // ── Get registry ───────────────────────────────────────────────────────────
-  ipcMain.handle('apps:get-registry', async () => {
+  ipcMain.handle('apps:get-registry', async (_e, { user } = {}) => {
+    const denied = denyUnless(user, 'apps.view');
+    if (denied) return denied;
     if (appRegistry.length === 0) {
       appRegistry = await scanInstalledApps().catch(() => []);
     }
@@ -35,15 +53,23 @@ function register(ipcMain) {
   });
 
   // ── Get capabilities for a specific app ───────────────────────────────────
-  ipcMain.handle('apps:get-capabilities', async (_e, appId) => {
+  ipcMain.handle('apps:get-capabilities', async (_e, { user, appId } = {}) => {
+    const denied = denyUnless(user, 'apps.view');
+    if (denied) return denied;
     const app = appRegistry.find(a => a.id === appId);
     if (!app) return { ok: false, error: 'App not found in registry' };
     return { ok: true, data: app };
   });
 
   // ── Execute an assimilation action ────────────────────────────────────────
-  // ALL destructive actions must be pre-confirmed by master in the renderer
-  ipcMain.handle('apps:execute', async (_e, appId, action, params = {}) => {
+  // ALL destructive actions must be pre-confirmed by master in the renderer.
+  // spawn-cli runs an arbitrary command line, so it needs the higher
+  // apps.execute-all gate; launch/query are the lower apps.execute-safe gate.
+  ipcMain.handle('apps:execute', async (_e, { user, appId, action, params = {} } = {}) => {
+    const requiredCap = action === 'spawn-cli' ? 'apps.execute-all' : 'apps.execute-safe';
+    const denied = denyUnless(user, requiredCap);
+    if (denied) return denied;
+
     const app = appRegistry.find(a => a.id === appId);
     if (!app) return { ok: false, error: 'App not found in registry' };
 
@@ -90,18 +116,26 @@ function register(ipcMain) {
   });
 
   // ── Get audit log ─────────────────────────────────────────────────────────
-  ipcMain.handle('apps:get-audit-log', async () => {
+  ipcMain.handle('apps:get-audit-log', async (_e, { user } = {}) => {
+    const denied = denyUnless(user, 'apps.view');
+    if (denied) return denied;
     return { ok: true, data: auditLog };
   });
 
   // ── Set whitelist ─────────────────────────────────────────────────────────
-  ipcMain.handle('apps:set-whitelist', async (_e, list) => {
+  // Changing which apps CAN be executed against is itself a capability
+  // change, so it needs the higher gate — same tier as spawn-cli.
+  ipcMain.handle('apps:set-whitelist', async (_e, { user, list } = {}) => {
+    const denied = denyUnless(user, 'apps.execute-all');
+    if (denied) return denied;
     whitelist = Array.isArray(list) ? list : [];
     return { ok: true };
   });
 
   // ── Set blacklist ─────────────────────────────────────────────────────────
-  ipcMain.handle('apps:set-blacklist', async (_e, list) => {
+  ipcMain.handle('apps:set-blacklist', async (_e, { user, list } = {}) => {
+    const denied = denyUnless(user, 'apps.execute-all');
+    if (denied) return denied;
     blacklist = Array.isArray(list) ? list : [];
     return { ok: true };
   });

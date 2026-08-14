@@ -1691,6 +1691,9 @@ authenticated **Master session**, not merely an open store.
 
 | 56 | Custom OpenAI-compatible LLM providers — any current/future model host, without a code change | done | Section 42. `electron/lib/customProviders.cjs` (`add`/`remove`/`list`/`toRegistryEntries`) + `modelRouter.cjs`'s new `customChat()` generic adapter, merged into `MODEL_REGISTRY` at `models:list`/`selectModel` time so every existing routing/fallback/rate-limit mechanism applies with no special-casing. Security: no agent-callable path (verified — not referenced in `agentOrchestrator.cjs`'s closed action switch), master-only via `models.add-key` (tier 1, same gate as any provider key), credentials never leave `credentialVault.cjs`, SSRF-guarded base-URL validation (rejects localhost/private/link-local/169.254.169.254 unless explicitly allowed), no `proposals.cjs`/self-modify path. `node --check` clean on all 5 touched `.cjs`, `npm run audit` clean (81 bridge calls). New "Custom" tab on `Models.jsx`. Not exercised against a real third-party endpoint in this session — verified by mocked add/list/remove round-trip and 8 URL-validation cases, not a live call. |
 
+| 57 | Metrics no longer stale; Rāma's own resource footprint | done | Section 43. Root cause: `systeminformation` spawns a fresh `powershell.exe` per call on Windows without a persistent session (2-13s cold vs 150ms-2s warm, measured). `sysinfo.cjs` now starts one at load, released on quit. Both polling loops (streaming handler, `System.jsx`'s 5s poll) now self-pace instead of firing on a fixed timer regardless of latency. New `system:get-own-footprint` (Electron's `app.getAppMetrics()` + Rāma's external child PIDs looked up live) + a "Rāma's own footprint" panel on the System page. Verified end-to-end via direct handler invocation; not tested on the specific machine that reported the symptom. |
+| 58 | App assimilation capability gate — missing | not started | Section 44. `appAssimilation.cjs` is complete and wired into `main.cjs`/`preload.cjs`, but has no `capability.can()` check anywhere and no UI page/registry entry — reachable by nothing today, and unguarded if it were. Next step: add the three existing `apps.*` capability gates to its handlers. UI is a separate, deferred follow-up. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -3000,3 +3003,102 @@ remove. Not yet exercised against a real custom endpoint (no test API key
 available in this session) — the generic adapter's request/response
 handling was verified by code review against the already-proven
 `groqChat`/`mistralChat` shape it mirrors, not by a live call.
+
+
+---
+
+## SECTION 43 — Metrics stopped reflecting reality; Rāma's own resource footprint
+
+> Master's observation running on another PC: resource status/PC params were
+> not reflecting properly. Also asked for the total system metrics to be
+> shown alongside what's due to Rāma running in foreground and background.
+
+### Root cause
+
+`systeminformation` on Windows shells out to a fresh `powershell.exe` per
+call unless a persistent session is kept open via `si.powerShellStart()`.
+Measured directly on a real machine: 2-13 seconds per cold call
+(`osInfo`/`graphics`/`battery`/`cpuTemperature`/`fsStats`/`networkStats`),
+150ms-2s once a session is warm. `sysinfo.cjs` never called
+`powerShellStart()`. `system.cjs`'s `get-metrics` fires 8 such calls; both
+the (unused) streaming handler and `System.jsx`'s actual 5s poll used a
+fixed `setInterval`/`setTimeout` that fires the next call on schedule
+regardless of whether the previous one has returned. On a machine where a
+call takes longer than the poll interval, calls pile up and results arrive
+stale and out of order — that is what "not reflecting properly" was.
+
+### Fix
+
+- `sysinfo.cjs` starts the persistent PowerShell session at load
+  (Windows only), released via new `shutdown()` from `main.cjs`'s
+  `before-quit`.
+- Both polling loops are now self-paced: schedule the next call only after
+  the current one resolves. Verified: cannot get more than one sample behind
+  reality regardless of how slow a given call is.
+
+### Rāma's own footprint, separate from total system load
+
+New `system:get-own-footprint`: `app.getAppMetrics()` (Electron's own
+accounting for main/renderer/GPU/utility processes — real per-process
+CPU%/memory) combined with Rāma's external child processes Electron doesn't
+see — the Python prediction backend (`aiProcess.cjs`), open terminal PTYs
+(`terminal.cjs`), the Playwright browser (`browserEngine.cjs`) — looked up
+by PID in the live `systeminformation` process list. A PID that has already
+exited reports "not found" rather than being silently dropped or estimated.
+New "Rāma's own footprint" panel on the System page, broken down by process
+type, next to the machine-wide gauges.
+
+### Status
+
+Verified end-to-end: `system:get-own-footprint` invoked directly inside a
+real Electron process (not the renderer round-trip) — confirmed real
+per-process CPU/memory for the main process, graceful empty result when no
+external child process is running. `sysinfo.cjs`'s persistent-session
+speedup measured directly (multi-second cold calls → 150ms-2s warm).
+`node --check` clean on all 6 touched `.cjs`. `npm run audit` clean (81
+bridge calls — `getOwnFootprint` goes through `systemClient`, not the
+`window.rama.*` surface the audit tracks). Not tested on the specific other
+machine that reported the original symptom — the fix addresses the
+mechanism (spawn cost + fixed-interval polling), not that machine directly.
+
+---
+
+## SECTION 44 — App assimilation: built, but not reachable from the running app
+
+> Master asked whether "already-installed OS apps assimilated into
+> capability when run" is a capability ingrained in Rāma.
+
+### What exists
+
+`electron/ipc/appAssimilation.cjs` is real, complete backend code: scans
+installed apps (Windows registry / macOS `/Applications` / Linux
+`.desktop` files), assigns a capability tier per app (`full-control` for
+apps with known automation surfaces — Office via COM, Chrome/Edge via CDP;
+`spawn-only` for CLI-capable apps; `data-only` otherwise), and can
+launch/query/spawn-cli against a scanned app with an audit log. It is
+registered in `main.cjs` (`appsIPC.register(ipcMain)`) and exposed in
+`preload.cjs` as `window.rama.apps.*`.
+
+### What's missing — this is not reachable today
+
+1. **No capability gate.** `capabilities.json` defines `apps.view` (tier 2),
+   `apps.execute-safe` (tier 2), `apps.execute-all` (tier 0), but nothing in
+   `appAssimilation.cjs` calls `capability.can()` — every handler is
+   currently open to any caller regardless of tier.
+2. **No UI.** No page in `src/config/registry.js` references it, and no
+   `.jsx` file calls any `window.rama.apps.*` method. The engine has no
+   front door — a user cannot reach it from the running app.
+
+So: real, working capability, currently dead code from the user's
+perspective, and unguarded if something did call it directly. Wiring the
+capability gate is the immediate fix regardless of whether/when a UI is
+built; a UI is a separate, larger follow-up (a page showing the scanned
+registry, per-app tier, and a launch/query action gated the same way).
+
+### Status
+
+Documented, not yet fixed. Next step: add `capability.can()` gates to
+`appAssimilation.cjs`'s handlers (`apps.view` for scan/registry/audit reads,
+`apps.execute-safe` for `launch`/`query`, `apps.execute-all` for
+`spawn-cli`), matching the tiers already defined. UI is a separate,
+explicitly deferred follow-up.
