@@ -121,13 +121,22 @@ export async function activateGhostMode() {
 
 /**
  * Wipe all server-side encrypted data.
- * Requires master session token.
+ *
+ * `serverToken` is the per-boot shared secret (RAMA_SERVER_TOKEN) the
+ * launcher hands to the Electron main process — NOT the user's session
+ * token. The endpoint used to accept any non-empty `x-session-token` value
+ * from a local caller, which validated nothing; it now requires this boot
+ * token via `requireLocalToken` (server/routes/auth.cjs), the same guard
+ * every other locally-privileged-but-HTTP-reachable route uses. Not yet
+ * wired to a caller in the UI — exposing it needs a way to hand the
+ * renderer this boot token first (e.g. via `window.rama`), which does not
+ * exist yet.
  * POST /api/ghost/wipe
  */
-export async function wipeServerData(token) {
+export async function wipeServerData(serverToken) {
   const res = await apiFetch('/api/ghost/wipe', {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json', 'x-session-token': token },
+    headers: { 'Content-Type': 'application/json', 'x-rama-token': serverToken },
     body:    JSON.stringify({ confirm: true }),
     timeoutMs: 15000,
   });

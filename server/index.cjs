@@ -56,11 +56,19 @@ app.use('/api/system', systemRoutes);
 app.use('/api',        healthRoutes);
 
 // ─── Ghost Mode — master-only zero-trace wipe ────────────────────────────────
-app.post('/api/ghost/wipe', (req, res) => {
-  // Validate master token before wiping
-  const token = req.headers['x-session-token'];
-  if (!token) return res.status(401).json({ ok: false, error: 'Token required' });
-  // TODO Phase 5: validate against sessionManager — for now accept any token from localhost
+// The previous check ("accept any token from localhost") validated nothing —
+// any local process presenting an X-Session-Token header of any value at all
+// passed. The real fix is NOT to fabricate a session check here: this server
+// cannot open the AES-256-GCM store authCore.cjs's sessions live in (see
+// auth.cjs's own docstring on why /api/auth/* is closed) — pretending
+// otherwise would be a worse hole than this one. `requireLocalToken` is the
+// mechanism this project already built for exactly this situation: a
+// per-boot shared secret (RAMA_SERVER_TOKEN) that only the launcher hands to
+// the Electron main process and its own renderer, so an arbitrary local
+// process can no longer wipe data with a guessed or empty token.
+const { requireLocalToken } = require('./routes/auth.cjs');
+
+app.post('/api/ghost/wipe', requireLocalToken, (req, res) => {
   const ip = req.ip || '';
   if (!ip.includes('127.0.0.1') && !ip.includes('::1') && !ip.includes('localhost')) {
     return res.status(403).json({ ok: false, error: 'Ghost mode only available locally' });
