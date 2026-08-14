@@ -11,6 +11,7 @@ const path  = require('path');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
+const capability = require('../lib/capability.cjs');
 
 let streamInterval = null;
 
@@ -167,7 +168,12 @@ function register(ipcMain) {
   });
 
   // ── Process list ─────────────────────────────────────────────────────────
-  ipcMain.handle('system:get-processes', async () => {
+  // Enumerates every process on the machine (name, pid, owning user) — more
+  // sensitive than the aggregate CPU/RAM numbers get-metrics returns, so this
+  // gates on os.process-list (tier 2) rather than staying open to Viewer.
+  ipcMain.handle('system:get-processes', async (_e, { user } = {}) => {
+    const denied = capability.deny(user, 'os.process-list');
+    if (denied) return denied;
     try {
       const { list } = await si.processes();
       const sorted = list
@@ -188,7 +194,9 @@ function register(ipcMain) {
   });
 
   // ── Kill process ─────────────────────────────────────────────────────────
-  ipcMain.handle('system:kill-process', async (_e, pid) => {
+  ipcMain.handle('system:kill-process', async (_e, { user, pid } = {}) => {
+    const denied = capability.deny(user, 'os.process-kill');
+    if (denied) return denied;
     try {
       process.kill(pid, 'SIGTERM');
       return { ok: true };
@@ -198,7 +206,11 @@ function register(ipcMain) {
   });
 
   // ── Network active connections ────────────────────────────────────────────
-  ipcMain.handle('system:get-network-stats', async () => {
+  // Lists every process's network connections — same sensitivity class as
+  // the process list.
+  ipcMain.handle('system:get-network-stats', async (_e, { user } = {}) => {
+    const denied = capability.deny(user, 'os.process-list');
+    if (denied) return denied;
     try {
       const [conns, stats] = await Promise.all([
         si.networkConnections(),
@@ -273,7 +285,9 @@ function register(ipcMain) {
   });
 
   // ── Clean temp files ──────────────────────────────────────────────────────
-  ipcMain.handle('system:clean-temp', async (_e, targetPaths) => {
+  ipcMain.handle('system:clean-temp', async (_e, { user, targetPaths } = {}) => {
+    const denied = capability.deny(user, 'os.temp-clean');
+    if (denied) return denied;
     const results = [];
     for (const p of targetPaths) {
       try {

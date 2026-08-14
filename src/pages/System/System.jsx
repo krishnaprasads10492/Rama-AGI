@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { systemClient }  from '@services/ipcClient.js';
 import { formatBytes }   from '@services/ramaClient.js';
+import { useUserStore }  from '@store/userStore.js';
 
 // ─── Gauge bar ────────────────────────────────────────────────────────────────
 function GaugeBar({ value, max = 100, color = 'var(--accent)', height = 6 }) {
@@ -127,6 +128,7 @@ function RamaFootprintPanel() {
 
 // ─── Temp cleaner modal ───────────────────────────────────────────────────────
 function TempCleaner({ onClose }) {
+  const { currentUser } = useUserStore();
   const [targets,  setTargets]  = useState([]);
   const [selected, setSelected] = useState(new Set());
   const [loading,  setLoading]  = useState(true);
@@ -150,7 +152,7 @@ function TempCleaner({ onClose }) {
   const clean = async () => {
     setCleaning(true);
     const paths = targets.filter(t => selected.has(t.path)).map(t => t.path);
-    const res   = await systemClient.cleanTemp(paths);
+    const res   = await systemClient.cleanTemp(currentUser, paths);
     if (res.ok) setResults(res.data);
     setCleaning(false);
   };
@@ -251,6 +253,7 @@ function TempCleaner({ onClose }) {
 
 // ─── Main System page ─────────────────────────────────────────────────────────
 export default function System() {
+  const { currentUser } = useUserStore();
   const [metrics,    setMetrics]   = useState(null);
   const [processes,  setProcesses] = useState([]);
   const [showCleaner, setShowCleaner] = useState(false);
@@ -264,7 +267,7 @@ export default function System() {
     // which surfaces as an unhandled rejection with no explanation on screen.
     const [mRes, pRes] = await Promise.all([
       systemClient.getMetrics().catch(err => ({ ok: false, error: err.message })),
-      systemClient.getProcesses().catch(err => ({ ok: false, error: err.message })),
+      systemClient.getProcesses(currentUser).catch(err => ({ ok: false, error: err.message })),
     ]);
 
     if (mRes?.ok && mRes.data) {
@@ -276,7 +279,7 @@ export default function System() {
     }
 
     if (pRes?.ok && Array.isArray(pRes.data)) setProcesses(pRes.data);
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     // Self-paced polling, not a fixed setInterval: on a machine where a
@@ -297,9 +300,9 @@ export default function System() {
   }, [load]);
 
   const killProcess = useCallback(async (pid) => {
-    await systemClient.killProcess(pid);
+    await systemClient.killProcess(currentUser, pid);
     setTimeout(load, 800);
-  }, [load]);
+  }, [load, currentUser]);
 
   // `p.name` can be absent for some OS processes; `p.name.toLowerCase()` then
   // throws during render, which used to take the whole shell down with it.
