@@ -28,6 +28,7 @@ const path         = require('path');
 const fs           = require('fs');
 const crypto       = require('crypto');
 const os           = require('os');
+const capability   = require('../lib/capability.cjs');
 
 // ─── Execution limits ─────────────────────────────────────────────────────────
 const LIMITS = {
@@ -185,7 +186,13 @@ function runChildProcess(code, language, timeoutMs) {
 function register(ipcMain) {
 
   // ── Execute code ──────────────────────────────────────────────────────────
-  ipcMain.handle('sandbox:execute', async (event, { code, language, approved = false }) => {
+  // Arbitrary code execution up to ELEVATED tier (file writes, system
+  // commands) had NO capability check at all before this pass — gated on
+  // sandbox.execute (tier 1), the same trust level as terminal.open, since
+  // both ultimately run commands on the host.
+  ipcMain.handle('sandbox:execute', async (event, { user, code, language, approved = false } = {}) => {
+    const denied = capability.deny(user, 'sandbox.execute');
+    if (denied) return denied;
     if (!code?.trim()) return { ok: false, error: 'No code provided' };
 
     const lang  = (language || 'javascript').toLowerCase();
@@ -258,7 +265,12 @@ function register(ipcMain) {
   });
 
   // ── Approve a pending ELEVATED execution ──────────────────────────────────
-  ipcMain.handle('sandbox:approve', async (_e, { execId, code, language }) => {
+  // This is the master-approval step itself (file writes/system commands
+  // that classifyCode() deferred) — gated master-only (tier 0), same as
+  // self-modify.apply, not the lower sandbox.execute bar the initial request used.
+  ipcMain.handle('sandbox:approve', async (_e, { user, execId, code, language } = {}) => {
+    const denied = capability.deny(user, 'sandbox.approve');
+    if (denied) return denied;
     const result = await runChildProcess(code, language || 'javascript', LIMITS.STANDARD_TIMEOUT_MS);
     const entry  = execAudit.find(e => e.id === execId);
     if (entry) { entry.result = result.ok ? 'approved+success' : 'approved+error'; }
@@ -266,7 +278,9 @@ function register(ipcMain) {
   });
 
   // ── Kill execution ────────────────────────────────────────────────────────
-  ipcMain.handle('sandbox:kill', async (_e, execId) => {
+  ipcMain.handle('sandbox:kill', async (_e, { user, execId } = {}) => {
+    const denied = capability.deny(user, 'sandbox.execute');
+    if (denied) return denied;
     const exec = activeExecs.get(execId);
     if (exec) { exec.proc.kill('SIGTERM'); activeExecs.delete(execId); }
     return { ok: true };

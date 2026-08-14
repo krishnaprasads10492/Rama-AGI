@@ -54,6 +54,9 @@
     "terminal.open": 1,
     "terminal.unrestricted": 0,
 
+    "sandbox.execute": 1,
+    "sandbox.approve": 0,
+
     "git.read": 3,
     "git.commit": 2,
     "git.push": 1,
