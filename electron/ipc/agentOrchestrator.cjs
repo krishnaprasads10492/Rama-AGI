@@ -8,7 +8,8 @@
 
 const { chatCompletion, selectModel } = require('./modelRouter.cjs');
 const { getCredential }               = require('./credentialVault.cjs');
-const resources = require('../resourceOrchestrator.cjs');
+const resources  = require('../resourceOrchestrator.cjs');
+const capability = require('../lib/capability.cjs');
 const os    = require('os');
 const { v4: uuidv4 } = (() => {
   try { return require('uuid'); }
@@ -97,7 +98,12 @@ function register(ipcMain) {
   ipcMainRef = ipcMain;
 
   // ── Spawn agent ───────────────────────────────────────────────────────────
-  ipcMain.handle('agents:spawn', async (event, { type, task, config = {} }) => {
+  // Spawning a sub-agent that can call models, browse, and take actions on
+  // master's behalf is not a read-only capability — gated on agents.spawn
+  // (tier 3) per shared/capabilities.json, unenforced before this pass.
+  ipcMain.handle('agents:spawn', async (event, { user, type, task, config = {} } = {}) => {
+    const denied = capability.deny(user, 'agents.spawn');
+    if (denied) return denied;
     // Governor: max agent check
     const activeCount = Object.values(agents).filter(a => a.status === 'running').length;
     if (activeCount >= GOVERNOR.MAX_AGENTS) {
@@ -158,7 +164,9 @@ function register(ipcMain) {
   });
 
   // ── Kill agent ────────────────────────────────────────────────────────────
-  ipcMain.handle('agents:kill', async (_e, agentId) => {
+  ipcMain.handle('agents:kill', async (_e, { user, agentId } = {}) => {
+    const denied = capability.deny(user, 'agents.kill-own');
+    if (denied) return denied;
     const agent = agents[agentId];
     if (!agent) return { ok: false, error: 'Agent not found' };
     agent.status = 'killed';
@@ -170,7 +178,9 @@ function register(ipcMain) {
   });
 
   // ── Kill all agents ───────────────────────────────────────────────────────
-  ipcMain.handle('agents:kill-all', async () => {
+  ipcMain.handle('agents:kill-all', async (_e, { user } = {}) => {
+    const denied = capability.deny(user, 'agents.kill-all');
+    if (denied) return denied;
     let count = 0;
     for (const [id, agent] of Object.entries(agents)) {
       if (agent.status === 'running') {
@@ -235,7 +245,9 @@ function register(ipcMain) {
   // ── Configure limits ──────────────────────────────────────────────────────
   // Agent-count/timeout live here; CPU/RAM caps are forwarded to the single
   // resource authority so both views stay consistent.
-  ipcMain.handle('agents:set-governor', async (_e, limits = {}) => {
+  ipcMain.handle('agents:set-governor', async (_e, { user, ...limits } = {}) => {
+    const denied = capability.deny(user, 'agents.governor-config');
+    if (denied) return denied;
     if (limits.MAX_AGENTS)       GOVERNOR.MAX_AGENTS       = Math.min(20, Math.max(1, limits.MAX_AGENTS));
     if (limits.AGENT_TIMEOUT_MS) GOVERNOR.AGENT_TIMEOUT_MS = Math.max(30000, limits.AGENT_TIMEOUT_MS);
     if (limits.TOTAL_CPU_CAP) {

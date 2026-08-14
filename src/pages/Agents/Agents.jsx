@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAgentStore } from '@store/agentStore.js';
+import { useUserStore } from '@store/userStore.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -239,6 +240,7 @@ function SpawnModal({ onClose, onSpawn }) {
 // ─── Main Agents page ─────────────────────────────────────────────────────────
 export default function Agents() {
   useAgentEvents();
+  const { currentUser } = useUserStore();
   const { agents, approvalQueue, resolveApproval, resources } = useAgentStore();
   const [showSpawn, setShowSpawn] = useState(false);
   const [filter, setFilter]       = useState('all');
@@ -250,18 +252,18 @@ export default function Agents() {
 
   const killAgent = useCallback(async (id) => {
     if (!isElectron) return;
-    await window.rama.agents.kill(id);
-  }, []);
+    await window.rama.agents.kill(currentUser, id);
+  }, [currentUser]);
 
   const killAll = useCallback(async () => {
     if (!isElectron) return;
-    await window.rama.agents.killAll();
-  }, []);
+    await window.rama.agents.killAll(currentUser);
+  }, [currentUser]);
 
   const spawnAgent = useCallback(async (opts) => {
     if (!isElectron) return;
-    await window.rama.agents.spawn(opts);
-  }, []);
+    await window.rama.agents.spawn(currentUser, opts);
+  }, [currentUser]);
 
   const handleResolve = useCallback((id, approved) => {
     resolveApproval(id);
