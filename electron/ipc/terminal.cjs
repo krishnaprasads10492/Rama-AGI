@@ -2,6 +2,7 @@
 
 const os   = require('os');
 const path = require('path');
+const capability = require('../lib/capability.cjs');
 
 // Active PTY sessions
 const sessions = {};
@@ -16,10 +17,16 @@ try {
 }
 
 // ─── Register all terminal IPC handlers ──────────────────────────────────────
+// terminal:create is the highest-risk single handler in this codebase — it
+// spawns a full interactive shell with the app's own environment. It had NO
+// capability check at all before this fix, despite `terminal.open` (tier 1)
+// already being defined in shared/capabilities.json for exactly this.
 function register(ipcMain) {
 
   // ── Create PTY session ───────────────────────────────────────────────────
-  ipcMain.handle('terminal:create', async (event, opts = {}) => {
+  ipcMain.handle('terminal:create', async (event, { user, ...opts } = {}) => {
+    const denied = capability.deny(user, 'terminal.open');
+    if (denied) return denied;
     if (!pty) {
       return { ok: false, error: 'node-pty not installed. Run: npm install node-pty' };
     }

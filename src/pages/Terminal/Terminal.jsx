@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { terminalClient } from '@services/ipcClient.js';
+import { useUserStore } from '@store/userStore.js';
 
 /**
  * Terminal page — wraps node-pty output in a simple xterm-style renderer.
@@ -7,6 +8,7 @@ import { terminalClient } from '@services/ipcClient.js';
  * This version provides a functional character-level terminal.
  */
 export default function Terminal() {
+  const { currentUser } = useUserStore();
   const [sessions, setSessions] = useState([]);  // { id, title, lines[] }
   const [activeId, setActiveId] = useState(null);
   const [input,    setInput]    = useState('');
@@ -26,7 +28,7 @@ export default function Terminal() {
   }, []);
 
   const createSession = useCallback(async () => {
-    const res = await terminalClient.create({ cols: 120, rows: 35 });
+    const res = await terminalClient.create({ user: currentUser, cols: 120, rows: 35 });
 
     if (!res.ok) {
       setPtyAvailable(false);
@@ -35,7 +37,7 @@ export default function Terminal() {
         id,
         title:  'Shell (Simulated)',
         lines:  [
-          { type: 'sys', text: '⚠ node-pty not available. Install it and rebuild to enable full PTY.' },
+          { type: 'sys', text: res.error?.includes('may not') ? `⚠ ${res.error}` : '⚠ node-pty not available. Install it and rebuild to enable full PTY.' },
           { type: 'sys', text: 'Simulated terminal mode active.' },
         ],
       }]);
