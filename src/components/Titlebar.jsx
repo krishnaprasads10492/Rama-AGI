@@ -60,6 +60,7 @@ function AuthModal({ onClose }) {
   const [password, setPassword] = useState('');
   const [error,    setError]    = useState('');
   const { setMasterAuth } = useUIStore();
+  const { currentUser } = useUserStore();
 
   const tryAuth = async () => {
     if (!password) return;
@@ -69,7 +70,7 @@ function AuthModal({ onClose }) {
       onClose();
       return;
     }
-    const res = await window.rama.vault.unlock(password);
+    const res = await window.rama.vault.unlock(currentUser, password);
     if (res.ok) {
       authenticateMaster(true);
       setMasterAuth(true);

@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const fs     = require('fs');
 const path   = require('path');
 const { app } = require('electron');
+const capability = require('../lib/capability.cjs');
 
 // ─── Vault state ──────────────────────────────────────────────────────────────
 let vaultKey      = null;   // 32-byte AES key derived from master password
@@ -105,10 +106,19 @@ function loadVault() {
 }
 
 // ─── Register IPC handlers ────────────────────────────────────────────────────
+// Every handler below gates on vault.read/vault.write/vault.unlock, which are
+// all tier 0 (master-only) in shared/capabilities.json. Before this pass none
+// of them checked the caller's tier at all — any signed-in user (Guest
+// included) could unlock, read, write, or delete ANY stored credential,
+// including other providers' API keys. That contradicted the capability
+// matrix's own definition and RAMA_AGI_MASTER_SPEC.md's "master-only" vault
+// design; this closes the gap rather than changing the intended policy.
 function register(ipcMain) {
 
   // ── Unlock vault ──────────────────────────────────────────────────────────
-  ipcMain.handle('vault:unlock', async (_e, password) => {
+  ipcMain.handle('vault:unlock', async (_e, { user, password } = {}) => {
+    const denied = capability.deny(user, 'vault.unlock');
+    if (denied) return denied;
     try {
       const vaultPath = getVaultPath();
       let salt;
@@ -136,7 +146,9 @@ function register(ipcMain) {
   });
 
   // ── Lock vault ────────────────────────────────────────────────────────────
-  ipcMain.handle('vault:lock', async () => {
+  ipcMain.handle('vault:lock', async (_e, { user } = {}) => {
+    const denied = capability.deny(user, 'vault.unlock');
+    if (denied) return denied;
     vaultKey      = null;
     vaultData     = {};
     vaultUnlocked = false;
@@ -144,12 +156,17 @@ function register(ipcMain) {
   });
 
   // ── Check vault status ────────────────────────────────────────────────────
+  // Whether the vault is locked/unlocked and how many entries it holds is not
+  // itself a secret (no values, no service names) — left open like
+  // os.metrics-read so the UI can show vault state before master authenticates.
   ipcMain.handle('vault:status', async () => {
     return { ok: true, unlocked: vaultUnlocked, entries: Object.keys(vaultData).length };
   });
 
   // ── Store credential ──────────────────────────────────────────────────────
-  ipcMain.handle('vault:set', async (_e, service, value, meta = {}) => {
+  ipcMain.handle('vault:set', async (_e, { user, service, value, meta = {} } = {}) => {
+    const denied = capability.deny(user, 'vault.write');
+    if (denied) return denied;
     if (!vaultUnlocked) return { ok: false, error: 'Vault locked' };
     vaultData[service] = { value, meta, addedAt: Date.now() };
     saveVault();
@@ -157,7 +174,9 @@ function register(ipcMain) {
   });
 
   // ── Get credential ────────────────────────────────────────────────────────
-  ipcMain.handle('vault:get', async (_e, service) => {
+  ipcMain.handle('vault:get', async (_e, { user, service } = {}) => {
+    const denied = capability.deny(user, 'vault.read');
+    if (denied) return denied;
     if (!vaultUnlocked) return { ok: false, error: 'Vault locked' };
     const entry = vaultData[service];
     if (!entry) return { ok: false, error: 'Not found' };
@@ -165,7 +184,9 @@ function register(ipcMain) {
   });
 
   // ── List services (no values exposed) ────────────────────────────────────
-  ipcMain.handle('vault:list', async () => {
+  ipcMain.handle('vault:list', async (_e, { user } = {}) => {
+    const denied = capability.deny(user, 'vault.read');
+    if (denied) return denied;
     if (!vaultUnlocked) return { ok: false, error: 'Vault locked' };
     const list = Object.entries(vaultData).map(([service, entry]) => ({
       service,
@@ -177,7 +198,9 @@ function register(ipcMain) {
   });
 
   // ── Delete credential ─────────────────────────────────────────────────────
-  ipcMain.handle('vault:delete', async (_e, service) => {
+  ipcMain.handle('vault:delete', async (_e, { user, service } = {}) => {
+    const denied = capability.deny(user, 'vault.write');
+    if (denied) return denied;
     if (!vaultUnlocked) return { ok: false, error: 'Vault locked' };
     delete vaultData[service];
     saveVault();
@@ -185,8 +208,14 @@ function register(ipcMain) {
   });
 
   // ── Check if service has credential ──────────────────────────────────────
-  ipcMain.handle('vault:has', async (_e, service) => {
-    if (!vaultUnlocked) return { ok: false, has: false };
+  // Existence-only, no value — same sensitivity class as vault:status, so it
+  // stays on vault.read but degrades to `has:false` rather than an error when
+  // locked, since callers (e.g. Models.jsx provider cards) use this to decide
+  // what to render before the vault may even be unlocked.
+  ipcMain.handle('vault:has', async (_e, { user, service } = {}) => {
+    const denied = capability.deny(user, 'vault.read');
+    if (denied) return denied;
+    if (!vaultUnlocked) return { ok: true, has: false };
     return { ok: true, has: !!vaultData[service]?.value };
   });
 }

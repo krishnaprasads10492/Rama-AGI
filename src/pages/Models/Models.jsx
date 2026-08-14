@@ -246,13 +246,13 @@ export default function Models() {
 
   const unlockVault = async () => {
     if (!isElectron || !password) return;
-    const res = await window.rama.vault.unlock(password);
+    const res = await window.rama.vault.unlock(currentUser, password);
     if (res.ok) { setVaultLocked(false); setPassword(''); load(); }
   };
 
   const saveKey = async (credKey, value) => {
     if (!isElectron) return;
-    await window.rama.vault.set(credKey, value, { label: PROVIDER_LINKS[credKey]?.label });
+    await window.rama.vault.set(currentUser, credKey, value, { label: PROVIDER_LINKS[credKey]?.label });
     load();
   };
 
@@ -265,7 +265,7 @@ export default function Models() {
   const pullOllama = async () => {
     if (!pullName.trim() || !isElectron) return;
     setPulling(true);
-    await window.rama.models.ollamaPull(pullName, (data) => {
+    await window.rama.models.ollamaPull({ user: currentUser, modelName: pullName }, (data) => {
       // Progress updates handled via event
     });
     setPulling(false);
