@@ -6,17 +6,42 @@
 
 ---
 
-## Quick Start (Development)
+## Quick Start (Windows)
 
+Double-click **`Rama.bat`** in the project root. It opens a simple menu:
+
+```
+  1. Start Rama              (normal use)
+  2. Build Windows installer (.exe)
+  3. Diagnose only           (check, fix nothing)
+  4. Exit
+```
+
+- **First time?** Pick option 1. `node start.cjs` underneath it installs
+  missing dependencies, checks ports, and heals what it can automatically —
+  you don't need to run `npm install` yourself first.
+- **On first launch**: set your master passcode (min 10 chars). This
+  passcode encrypts ALL data — store it securely.
+- **Want an installable app?** Pick option 2. This *builds* the installer
+  into `dist-electron\` — it does not install anything on your machine by
+  itself. Building and installing are two separate steps: after the build
+  finishes, double-click the generated `Rama AGI Setup <version>.exe` from
+  that folder the same way you'd run any downloaded installer, and *that*
+  is what actually puts Rāma into Program Files with a desktop shortcut.
+
+Everything below is the same functionality via raw commands, kept for
+reference / non-Windows platforms — `Rama.bat` is just a menu in front of it.
+
+### Manual commands (any platform)
 ```bash
-# 1. Install dependencies
+# Install dependencies
 npm install
 
-# 2. Start in development mode (Vite + server + Electron)
+# Start in development mode (Vite + server + Electron)
 node start.cjs
 
-# On first launch: set your master passcode (min 10 chars)
-# This passcode encrypts ALL data — store it securely
+# Diagnose only — report problems, change nothing
+node start.cjs --diagnose
 ```
 
 ---
@@ -28,7 +53,7 @@ node start.cjs
 - **macOS**: Xcode Command Line Tools (`xcode-select --install`)
 - **All platforms**: Node.js 18+
 
-### Add your icon (required before distributing)
+### Add your icon (optional — a placeholder is used otherwise)
 Place the Rāma logo PNG in the `assets/` folder:
 ```
 assets/logo-source.png   ← master logo (any resolution, 1024px+ recommended)
@@ -47,7 +72,7 @@ This generates:
 
 ### Build commands
 ```bash
-# Windows installer (.exe) + portable
+# Windows installer (.exe) + portable — same as Rama.bat option 2
 npm run build:win
 
 # macOS DMG
@@ -60,7 +85,8 @@ npm run build:linux
 npm run build:all
 ```
 
-Output goes to `dist-electron/`.
+Output goes to `dist-electron/`. **Building does not install anything** —
+run the generated installer from that folder to actually install the app.
 
 ### What the installer does (Windows)
 - Installs to `Program Files\Rama AGI\` (or user-chosen path)
