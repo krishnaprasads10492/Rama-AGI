@@ -11,7 +11,7 @@ echo     RAMA AGI
 echo   ============================================
 echo.
 echo     1. Start Rama  (normal use)
-echo     2. Build Windows installer  (.exe)
+echo     2. Build installer from source  (installs what is missing)
 echo     3. Diagnose only  (check, fix nothing)
 echo     4. Exit
 echo.
@@ -36,15 +36,15 @@ goto MENU
 
 :BUILD
 echo.
-echo   Building the Windows installer...
-echo   This can take several minutes the first time.
+echo   Building Rama from source...
+echo   Missing dependencies are installed automatically first, so this
+echo   works on a fresh copy of the source. The first run takes several
+echo   minutes and needs an internet connection.
 echo.
-call npm run build:win
+call node scripts\buildInstaller.cjs
 if errorlevel 1 (
     echo.
-    echo   Build failed - see the error above.
-    echo   Common causes: missing Visual Studio Build Tools ^(for native
-    echo   modules^), or no internet connection for the first npm install.
+    echo   Build did not complete - the reason is in the report above.
     pause
     goto MENU
 )
@@ -53,13 +53,10 @@ echo   ============================================
 echo     BUILD COMPLETE
 echo   ============================================
 echo.
-echo   Your installer is in the "dist-electron" folder:
-echo     - Rama AGI Setup ^<version^>.exe   ^(installer - run this to install^)
-echo     - Rama AGI ^<version^>.exe          ^(portable - runs without installing^)
-echo.
-echo   Double-click the Setup .exe to actually install Rama on this
-echo   machine ^(Program Files, desktop shortcut, Start Menu, uninstaller^).
-echo   This script only builds it - installing is a separate, manual step.
+echo   Everything produced is listed in the report above, in the
+echo   "dist-electron" folder. Installing is a separate, manual step:
+echo   double-click the Setup .exe if one was produced, or unzip the
+echo   portable archive and run "Rama AGI.exe" from it.
 echo.
 set /p OPENFOLDER="  Open the dist-electron folder now? (y/n): "
 if /i "%OPENFOLDER%"=="y" start "" "dist-electron"

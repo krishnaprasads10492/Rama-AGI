@@ -11,9 +11,9 @@
 Double-click **`Rama.bat`** in the project root. It opens a simple menu:
 
 ```
-  1. Start Rama              (normal use)
-  2. Build Windows installer (.exe)
-  3. Diagnose only           (check, fix nothing)
+  1. Start Rama                      (normal use)
+  2. Build installer from source     (installs what is missing)
+  3. Diagnose only                   (check, fix nothing)
   4. Exit
 ```
 
@@ -22,12 +22,21 @@ Double-click **`Rama.bat`** in the project root. It opens a simple menu:
   you don't need to run `npm install` yourself first.
 - **On first launch**: set your master passcode (min 10 chars). This
   passcode encrypts ALL data — store it securely.
-- **Want an installable app?** Pick option 2. This *builds* the installer
-  into `dist-electron\` — it does not install anything on your machine by
-  itself. Building and installing are two separate steps: after the build
-  finishes, double-click the generated `Rama AGI Setup <version>.exe` from
-  that folder the same way you'd run any downloaded installer, and *that*
-  is what actually puts Rāma into Program Files with a desktop shortcut.
+- **Want an installable app?** Pick option 2. Source code and Node.js are
+  all you need — it checks what's installed, installs whatever is missing,
+  builds the renderer, then packages the app. Nothing outside the project
+  folder is touched.
+- Option 2 *builds* into `dist-electron\`; it does not install anything by
+  itself. Building and installing are two separate steps: when it finishes,
+  double-click the generated `Rama AGI Setup <version>.exe` from that folder
+  the same way you'd run any downloaded installer, and *that* is what puts
+  Rāma into Program Files with a desktop shortcut.
+- If your machine's security policy blocks the bundled 7-Zip (electron-builder
+  needs it for installers), the build says so and produces a **portable zip**
+  instead — unzip it anywhere and run `Rama AGI.exe`. Installing a current
+  7-Zip machine-wide restores the installer targets automatically.
+- Just want to know what your machine can produce, without building?
+  `npm run package:check`
 
 Everything below is the same functionality via raw commands, kept for
 reference / non-Windows platforms — `Rama.bat` is just a menu in front of it.
@@ -71,22 +80,38 @@ This generates:
 - `public/favicon.ico`— Browser tab favicon
 
 ### Build commands
+
+Self-preparing (installs missing dependencies first — use these on a fresh
+clone). Same thing `Rama.bat` option 2 runs:
 ```bash
-# Windows installer (.exe) + portable — same as Rama.bat option 2
+npm run package          # this platform
+npm run package:win      # Windows installer (.exe) + portable
+npm run package:mac      # macOS DMG
+npm run package:linux    # Linux AppImage + .deb
+npm run package:check    # report what this machine can produce, build nothing
+```
+
+Raw (assumes dependencies are already installed):
+```bash
 npm run build:win
-
-# macOS DMG
 npm run build:mac
-
-# Linux AppImage + .deb
 npm run build:linux
-
-# All platforms (cross-compile, requires Docker for non-native)
-npm run build:all
+npm run build:all        # cross-compile, requires Docker for non-native
 ```
 
 Output goes to `dist-electron/`. **Building does not install anything** —
 run the generated installer from that folder to actually install the app.
+
+Useful flags on the self-preparing path
+(`node scripts/buildInstaller.cjs --help` for all of them):
+
+| Flag | Effect |
+|---|---|
+| `--dry-run` | Check the machine and stop. Builds nothing. |
+| `--dir` | Skip installers; produce the unpacked app + a portable zip. |
+| `--skip-install` | Fail on missing dependencies instead of installing them. |
+| `--skip-renderer` | Reuse the existing `build/` instead of rebuilding it. |
+| `--recheck-archiver` | Re-test a 7-Zip that was previously found to be blocked. |
 
 ### What the installer does (Windows)
 - Installs to `Program Files\Rama AGI\` (or user-chosen path)

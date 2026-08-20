@@ -1695,6 +1695,8 @@ authenticated **Master session**, not merely an open store.
 | 58 | App assimilation capability gate | done | Section 44. `appAssimilation.cjs`'s `apps:view`/`apps:execute-safe`/`apps:execute-all` handlers gated on the existing `apps.view`/`apps.execute-safe`/`apps.execute-all` capabilities via `capability.deny()`. `preload.cjs` updated to pass `user` through. UI page/registry entry remains a separate, deferred follow-up — not built this pass. |
 | 59 | Full codebase audit and security-gate pass toward the spec's own capability matrix | done | This pass closed the gap between `shared/capabilities.json`'s defined tiers and what was actually enforced. Fixed a live bug: `models:ollama-pull` referenced bare `http`, never required — `lib/http.cjs` gained `postStreamingJsonLines()` (I9-compliant) to fix it. Fixed an I9 violation in `main.cjs`'s `probeVite()` (raw `require('http').get()` → `lib/http.cjs`). Added `capability.deny()` (non-throwing `{ok:false,error}` gate) to stop each IPC file hand-rolling tier checks inconsistently. Gated, end to end (handler → `preload.cjs` → `ipcClient.js`/direct `window.rama.*` callers → every `.jsx` caller updated with `currentUser`): `terminal:create` (`terminal.open`), all of `filesystem.cjs` (`os.filesystem-read/write/delete`), all of `git.cjs` (`git.read/commit/push`), `system.cjs`'s process/kill/network/temp-clean handlers (`os.process-list/process-kill/temp-clean`; `get-metrics`/`get-disk-usage`/`get-temp-targets`/`get-own-footprint` deliberately left open, same sensitivity class as the Home dashboard's `VIEWER` tier), all of `credentialVault.cjs` (`vault.read/write/unlock` — previously ZERO check despite being tier-0/master-only in the matrix; any signed-in user could unlock/read/write/delete any credential before this fix), `agentOrchestrator.cjs`'s spawn/kill/kill-all/set-governor (`agents.spawn/kill-own/kill-all/governor-config`), `sandboxEngine.cjs`'s execute/approve/kill (new `sandbox.execute`=1 and `sandbox.approve`=0 capabilities added — arbitrary code execution up to ELEVATED tier had no gate at all). Fixed `server/index.cjs`'s Ghost Mode wipe endpoint: the prior check accepted any non-empty `x-session-token` from a local caller, validating nothing; now uses `requireLocalToken` (the per-boot `RAMA_SERVER_TOKEN` shared secret already built for exactly this case) instead of fabricating a session check the server has no way to honestly perform. Removed two dead UI toggles in `Settings.jsx` ("Minimize to tray", "Voice wake word") that rendered as fixed-on switches with no-op `onChange` — neither has real backing state; replaced with an explanatory note. `node --check` clean on every touched `.cjs`; `node scripts\auditRenderer.cjs` clean throughout (81 bridge calls resolve). **Not done in this pass** (deferred, see rows 30–32, 40, 47, 48, 52): the confirmed-not-started feature-gap rows are unrelated to this security pass and were left for a separate session. |
 
+| 60 | Build anywhere from source — self-preparing packaging pipeline | done (L2 verified; L0/L1 unverifiable here) | Section 45. Two faults found: (a) `Rama.bat` option 2 called `npm run build:win` directly, so a fresh clone with no `node_modules` died on `'vite' is not recognized` — the packaging path never used `start.cjs`'s existing diagnose/install machinery; (b) on the work machine the real blocker is BeyondTrust endpoint policy refusing to start `7zip-bin@5.2.0`'s `7za.exe` (7-Zip 21.07, flagged "Vulnerable Application Version") — the process is never created, and no system 7-Zip exists. Confirmed by reading installed `electron-builder@24.13.3`: `nsis` and `portable` both need 7za (`archive.js:48/173`, `NsisTarget.js:217`), `--dir` does not. `vite build` succeeds here, so the renderer half was never at fault. Building `scripts/buildInstaller.cjs`: stage 0 toolchain/disk, stage 1 deps derived from `package.json` with exact-version checks and a 4-rung install ladder (`npm ci` → `install` → `--legacy-peer-deps` → `--ignore-scripts`), stage 2 unconditional `vite build`, stage 3 archiver capability ladder (bundled → system 7-Zip staged over `7zip-bin`'s path → none), stage 4 `electron-builder` with target set chosen by rung, stage 5 honest artefact report. `npm run build:win` kept unchanged as the raw escape hatch (I11). Built and verified: `Rama.bat` option 2 now calls the script; new `package`/`package:win`/`package:mac`/`package:linux`/`package:check` npm scripts. Three findings only running it could produce, all recorded in Section 45: (i) starting the blocked `7za.exe` **terminates the calling process** (0xC0000003, nothing after the `spawnSync` runs) — the probe had to be moved into a throwaway child process, since no error handling in-process could ever catch it; (ii) `electron-builder --dir` is **not** 7za-free as the first reading of the source suggested — it extracts `winCodeSign-2.6.0.7z` for the sign/edit-executable step even with no certificate, so the fallback rung also passes `-c.win.signAndEditExecutable=false` (cost: default `.exe` icon/metadata, stated in the report); (iii) the first native check gave a false positive — `require('node-pty')` succeeds while `node_modules/node-pty/build` holds no `.node` at all, so the check now looks for a real platform-matching binary. Also added a remembered-verdict memo (`data/system/archiver-probe.json`, gitignored, fingerprinted by size+mtime) so the blocked binary is started at most once ever and the master stops seeing BeyondTrust dialogs; `--recheck-archiver` forces a re-test. `node --check` clean. Verified end to end on the blocked machine: exit 0, 114.5 MB `Rama-AGI-1.0.0-win-unpacked-portable.zip`, 604 entries including `Rama AGI.exe` + `app.asar`, no dialog raised. Next step: one run on the master's personal machine to exercise L0 and the NSIS/portable targets, which are unreachable here — expect the report to read "installer + portable". Optional follow-up if the work machine ever needs installers: an opt-in rung that downloads a pinned, checksum-verified current 7-Zip; deliberately not built without master's say-so, since it means fetching and executing a binary. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -3103,3 +3105,228 @@ Documented, not yet fixed. Next step: add `capability.can()` gates to
 `apps.execute-safe` for `launch`/`query`, `apps.execute-all` for
 `spawn-cli`), matching the tiers already defined. UI is a separate,
 explicitly deferred follow-up.
+---
+
+## SECTION 45 — Build anywhere from source: a self-preparing packaging pipeline
+
+> Master's report: option 2 of `Rama.bat` ("Build Windows installer") does not
+> produce a build. Master's requirement: *"I should be able to generate build
+> anywhere if I have source code"* — on a personal machine it should check
+> whether the dependencies/modules exist, install them if they do not, and then
+> create the build.
+
+### What was actually wrong — two separate faults, only one of them a dependency
+
+**Fault 1 — the corporate machine blocks the archiver, not a dependency.**
+The failure on the work machine is not missing modules. It is BeyondTrust
+Privilege Management (Accenture endpoint policy) refusing to start
+`node_modules/7zip-bin/win/x64/7za.exe` — reported as *"Vulnerable Application
+Version Detected · 7-Zip Standalone Console · 21.07"*. Measured on this machine:
+
+- `7zip-bin@5.2.0` ships 7-Zip **21.07**, which is what the policy flags.
+- Executing that binary directly yields *"failed to run: No process is
+  associated with this object"* — the process is never created. Not a bad exit
+  code, not a missing file: blocked at `CreateProcess`.
+- No system 7-Zip is installed (`C:\Program Files\7-Zip\7z.exe` absent, nothing
+  named `7z`/`7za` on `PATH`).
+- `vite build` on the other hand **succeeds** here (88 modules, `build/` written).
+  So the renderer half of `build:win` was never the problem.
+
+Where electron-builder needs that binary, confirmed by reading the installed
+`electron-builder@24.13.3` rather than assuming:
+
+| Consumer | File | Needs 7za? |
+|---|---|---|
+| NSIS installer payload (`app.7z`) | `app-builder-lib/out/targets/archive.js:48` | yes |
+| NSIS archive inspection (`7za l`) | `app-builder-lib/out/targets/nsis/NsisTarget.js:217` | yes |
+| `portable`, `zip`, `7z` targets | `archive.js:173` | yes |
+| every `app-builder.exe` invocation (`SZA_PATH`) | `builder-util/out/util.js:336` | passes it through |
+| unpacking `winCodeSign-2.6.0.7z` for sign/edit-executable | cache fetch during `--dir` | **yes** |
+| packing the app tree itself (`--dir`) | — | no |
+
+**The fourth row was found by running it, not by reading it, and it contradicts
+what this section first claimed.** Reading the source suggested `--dir` needed no
+archiver. In practice `--dir` packs the tree, passes `afterPack`, and then
+downloads `winCodeSign-2.6.0.7z` and extracts it *with 7za* for the
+sign/edit-executable step — with no certificate configured — failing four times
+on retry and taking the whole build with it. So the fallback rung additionally
+passes `-c.win.signAndEditExecutable=false`, which removes that step and with it
+the last 7za dependency on the unpacked path. The cost is stated rather than
+hidden: `rcedit` is part of the skipped step, so the launcher `.exe` keeps
+Electron's default icon and version metadata. The application inside is complete.
+
+### Starting a blocked binary kills the caller, not the child
+
+The blocked `7za.exe` does not fail politely. Measured directly:
+
+```
+node -e "spawnSync('node_modules/7zip-bin/win/x64/7za.exe', ['i'])"
+  → AssignProcessToJobObject: (6) The handle is invalid.
+  → node exits 0xC0000003; the line after the spawn call never runs
+```
+
+`spawnSync` does not return an error object — **the calling process is
+terminated**. The first version of the archiver probe was therefore unfixable by
+any amount of error handling in this file: the pipeline died mid-stage-3 with no
+report, which is exactly the symptom that made the original failure look
+mysterious.
+
+**Decision:** the probe runs in a throwaway child `node` process, with the
+candidate path passed by environment variable so there is no argv or quoting
+ambiguity. A probe that does not survive is itself the evidence — a merely
+missing or corrupt file returns a normal spawn error instead, so "the probe
+died" reliably distinguishes a policy block from a broken file.
+
+### The verdict is remembered, because probing costs the master a dialog
+
+Probing means *starting* the binary, and each attempt raises a BeyondTrust
+dialog that the master has to dismiss. The answer only changes when the binary
+changes.
+
+**Decision:** verdicts are cached in `data/system/archiver-probe.json`, keyed by
+absolute path and fingerprinted by size + mtime, next to `start.cjs`'s scenario
+memory and for the same reason. A remembered block is reported as remembered and
+the binary is not started again. `--recheck-archiver` forces a re-test. Because
+the fingerprint changes when the file does, staging a replacement over
+`7zip-bin`'s path re-probes automatically without any cache invalidation logic.
+`data/` is gitignored, so the memo stays machine-local — which is correct, since
+the verdict is a property of the machine's policy, not of the source.
+
+**Fault 2 — the build path assumed a prepared machine.**
+`Rama.bat` option 2 called `npm run build:win` directly, which is
+`vite build && electron-builder --win --x64`. On a fresh clone with no
+`node_modules`, `vite` does not exist and the first command dies with a bare
+"'vite' is not recognized", which reads exactly like the "dependency issue"
+master described. `start.cjs` already knows how to diagnose and install — but
+nothing on the *packaging* path used it. Option 1 self-heals; option 2 did not.
+
+### Decision: `scripts/buildInstaller.cjs`, a staged packaging pipeline
+
+Same shape as `start.cjs` (stages, glyph vocabulary, scenario-free but
+diagnose-then-act), because packaging deserves the same self-healing that
+booting already has. `npm run build:win` is **kept unchanged** as the raw
+escape hatch (I11 — additive, never remove a capability); the batch file now
+routes through the new script.
+
+**Stage 0 — Toolchain.** Node ≥ 18, npm on `PATH`, project root sanity
+(`package.json` is really `rama-agi`), free disk. Packaging Electron needs room
+for the unpacked tree plus the installer, so under 3000 MB is a warning and
+under 1200 MB is fatal — failing here is far kinder than failing at 90%.
+
+**Stage 1 — Dependencies.** The expected set is **derived from
+`package.json`** (`dependencies` + `devDependencies`), not hardcoded, so the
+check cannot drift as the manifest changes. Because every version is pinned
+exact (I12), the check is presence **and exact version equality**:
+`node_modules/<name>/package.json`'s `version` must equal the spec. That also
+catches a stale `node_modules` left over from an older manifest, which a bare
+existence check misses.
+
+`argon2` and `node-pty` are classified **tolerated**: they are native, they may
+fail to compile without Visual Studio Build Tools, and both already have working
+fallbacks (scrypt; piped shell). A broken native binding degrades the build, it
+does not stop it.
+
+For those two, `require()` succeeding is **not** accepted as evidence. The first
+version of this check reported "node-pty native binding loads" while
+`node_modules/node-pty/build` contained no `.node` file whatsoever — node-pty
+resolves its addon lazily at terminal-construction time, so importing it proves
+nothing. A build on that evidence packages a module that cannot work, and the
+failure surfaces on the master's machine as a dead terminal instead of here as a
+warning. The check therefore looks for a **compiled binary this platform could
+load**: any `.node` outside a `prebuilds/` tree (compiled here, for here), or one
+inside `prebuilds/` whose path matches `<platform>-<arch>`. Measured on the work
+machine: `argon2` passes on `prebuilds/win32-x64/argon2.glibc.node` (Node-API, so
+ABI-stable under Electron with no rebuild), `node-pty` correctly fails.
+
+Install ladder, each rung tried only if the previous failed:
+
+1. `npm ci` — only when `package-lock.json` exists *and* `node_modules` is
+   absent. Lockfile-exact and clean, which is what pinned versions want.
+2. `npm install --no-audit --no-fund`.
+3. `npm install --no-audit --no-fund --legacy-peer-deps`.
+4. `npm install --no-audit --no-fund --ignore-scripts` — last resort. Skips
+   native compilation, so the app runs on its fallbacks; recorded as degraded
+   and reported, never silently.
+
+After installing, the check is **re-run**. If a required package is still
+missing the pipeline stops and prints the exact list. A half-installed installer
+is worse than no installer, because it fails on the master's machine instead of
+on the build machine.
+
+**Stage 2 — Renderer.** `vite build` always runs, never conditionally on
+staleness. Staleness heuristics are right for `start.cjs`, where the cost of a
+rebuild is felt on every launch; for a release artefact the only acceptable
+input is a bundle built from the current source (ledger row 43 is the record of
+what a stale bundle costs).
+
+**Stage 3 — Archiver.** A capability ladder, the same pattern as the voice
+ladder (row 38) and for the same reason: presence on disk is not capability.
+Each rung is **executed** and must identify itself as 7-Zip in its own output —
+a name match alone proved insufficient once already, when Whisper detection
+matched `C:\Windows\System32\main.cpl`.
+
+- **L0 bundled** — `7zip-bin`'s own binary. Normal case, nothing to do.
+- **L1 system** — search `%ProgramFiles%`, `%ProgramFiles(x86)%`,
+  `%LOCALAPPDATA%\Programs`, the `HKLM\SOFTWARE\7-Zip` registry `Path` value,
+  and `PATH`, preferring self-contained `7za.exe`, then `7z.exe` (copied
+  together with its `7z.dll`, which it cannot run without), then `7zr.exe`
+  (`.7z`-only, which is all NSIS actually needs). The winner is staged **over**
+  `node_modules/7zip-bin/win/<arch>/7za.exe`, with the original preserved once
+  as `7za.exe.bundled`.
+
+  Why overwrite the module file rather than use the documented
+  `USE_SYSTEM_7ZA=true`: that flag makes `7zip-bin` return the bare string
+  `"7za"`, and `builder-util/out/7za.js:7` then calls
+  `chmod("7za", 0o755)` on it before use. On Windows that resolves against the
+  CWD, finds no file literally named `7za`, and throws `ENOENT` — the flag is
+  unusable here. `7zip-bin`'s resolved path is the one interception point every
+  consumer shares, including the `SZA_PATH` handed to `app-builder.exe`.
+  The swap is idempotent and reversible.
+
+- **L2 none** — installers are impossible, so build what is still possible:
+  `electron-builder --dir` (no 7za on that path, per the table above) and then
+  zip `win-unpacked` with **.NET's** `ZipFile.CreateFromDirectory` via
+  PowerShell on Windows, `zip -r`/`tar` elsewhere. No external archiver, so
+  policy has nothing to block. The result is a genuine portable distributable —
+  unzip, run `Rama AGI.exe` — and it is labelled as exactly that, not as an
+  installer.
+
+**Stage 4 — Package.** `electron-builder` is invoked directly with the resolved
+target set, not through `npm run build:win`, so the renderer is not built twice.
+
+**Stage 5 — Report.** Lists what landed in `dist-electron/` with real sizes,
+states which archiver rung was used, and names anything degraded. On the work
+machine the honest output is "portable zip produced, NSIS installer blocked by
+endpoint policy" — a true partial result beats a green tick that is a lie.
+
+### Verified, and not verified
+
+Verified by running it on the work machine — the hostile case:
+
+- Stages 0–1: 30 pinned packages checked, `argon2` accepted on its win32-x64
+  prebuild, `node-pty` correctly reported as not compiled and degraded.
+- Stage 3: the block is detected without killing the pipeline, and on the second
+  run onward it is recalled from the memo with **no policy dialog raised**.
+- Stages 2, 4, 5 end to end: `vite build` → `electron-builder --dir
+  -c.win.signAndEditExecutable=false` → 114.5 MB
+  `Rama-AGI-1.0.0-win-unpacked-portable.zip`, exit code 0. Archive inspected:
+  604 entries including `Rama AGI.exe` and `resources/app.asar` (13.3 MB).
+
+**Not verified here, and it cannot be:** the L0 and L1 rungs, the NSIS and
+portable-exe targets, and therefore the whole `--dir`-free path. This machine has
+no runnable 7-Zip of any version, so every installer path is unreachable on it by
+construction. Next step is one run on the master's personal machine, where L0
+should succeed and the report should read "installer + portable".
+
+### What this does and does not fix
+
+- On a personal machine with source only: bare clone → `Rama.bat` → 2 →
+  installs, builds, packages. This is the requirement master asked for.
+- On the Accenture machine: the dependency half is fixed, and the archiver half
+  is worked around as far as an unprivileged process can go — a real portable
+  distributable is produced, and the policy dialog is raised at most once ever.
+  The NSIS and portable-exe targets stay blocked until a current 7-Zip is
+  installed machine-wide (which L1 then picks up with no further changes) or the
+  path is allow-listed. Rāma does not try to defeat an endpoint control; it names
+  it, remembers it, and delivers the artefact it can still produce.
+
