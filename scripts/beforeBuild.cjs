@@ -89,6 +89,14 @@ module.exports = async function(context) {
     console.warn('  ⚠ argon2/node-pty may not work in packaged app');
     console.warn('  ⚠ Install Visual Studio Build Tools on Windows to fix this\n');
   }
+
+  // Returning false tells electron-builder that native dependencies have been
+  // handled here, so it does not run its own rebuild pass on top of the one
+  // above. This is what the comment at the top of this file always described and
+  // never actually did: without it, argon2 and node-pty can be compiled twice in
+  // a single build, which on a machine with a real C++ toolchain is minutes of
+  // duplicated work for an identical result.
+  return false;
 };
 
 function generatePlaceholderIcon(iconPath, filename) {

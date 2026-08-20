@@ -32,6 +32,10 @@ const path = require('path');
 const ROOT  = path.join(__dirname, '..');
 const isWin = process.platform === 'win32';
 
+// Captured before anything is built, so the report can tell this run's artefacts
+// apart from leftovers of a previous one.
+const RUN_START = Date.now();
+
 // ─── Flags ────────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
 const has  = (f) => args.includes(f);
@@ -1039,17 +1043,31 @@ function report({ archiver, dirOnly, degraded, archive, salvaged, failureTail, n
   let entries = [];
   try { entries = fs.readdirSync(outDir); } catch { /* reported below */ }
 
+  // Anything older than this run is left over from a previous one. Listing it
+  // unqualified invites shipping a stale artefact: the salvaged portable zip from
+  // an earlier failed run sat in this list looking like current output.
   const artifacts = [];
+  let stale = 0;
   for (const name of entries) {
     const full = path.join(outDir, name);
     let st;
     try { st = fs.statSync(full); } catch { continue; }
+
+    const old = st.mtimeMs < RUN_START - 1000;
+
     if (st.isDirectory()) {
-      if (name.endsWith('-unpacked')) artifacts.push({ name: `${name}/`, note: 'unpacked app — run the .exe inside' });
+      if (!name.endsWith('-unpacked')) continue;
+      artifacts.push({
+        name: `${name}/`,
+        note: old ? 'from an earlier run' : 'unpacked app — run the .exe inside',
+        old,
+      });
+      if (old) stale++;
       continue;
     }
     if (/\.(exe|msi|zip|7z|dmg|appimage|deb|tar\.gz)$/i.test(name)) {
-      artifacts.push({ name, note: MB(st.size) });
+      artifacts.push({ name, note: `${MB(st.size)}${old ? '  (from an earlier run)' : ''}`, old });
+      if (old) stale++;
     }
   }
 
@@ -1060,7 +1078,13 @@ function report({ archiver, dirOnly, degraded, archive, salvaged, failureTail, n
 
   plain('');
   plain(`  ${C.bold}dist-electron/${C.reset}`);
-  for (const a of artifacts) plain(`    ${a.name.padEnd(46)} ${C.dim}${a.note}${C.reset}`);
+  for (const a of artifacts) {
+    const colour = a.old ? C.dim : C.reset;
+    plain(`    ${colour}${a.name.padEnd(46)}${C.reset} ${C.dim}${a.note}${C.reset}`);
+  }
+  if (stale > 0) {
+    plain(`    ${C.yellow}${stale} item(s) above predate this run — do not ship them by mistake.${C.reset}`);
+  }
   plain('');
 
   const rung = {

@@ -3,6 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "description": "Rama - Supreme AGI Desktop. Superset of StockMind AI.",
+  "author": "Krishna Prasad",
   "main": "electron/main.cjs",
   "scripts": {
     "dev":           "node start.cjs",
