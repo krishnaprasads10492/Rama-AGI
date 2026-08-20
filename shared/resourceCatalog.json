@@ -157,6 +157,82 @@
           "notes": "NOT WIRED. Free tier exists but reportedly tightened in 2026. Closed-source, no self-host option — conflicts with I11 (every engine needs a working fallback) unless paired with a local option anyway, which makes Qdrant the more consistent first choice."
         }
       ]
+    },
+    "design": {
+      "label": "Interface & Design System",
+      "_axisNote": "Different in kind from the API axes above: these are assets and libraries, not endpoints, so `credKey` is null throughout and `license` — not price — is the field that decides whether master can use it. Every entry here is free AND redistributable in a shipped desktop app; anything merely 'free to view' is excluded, because bundling it would be a licence breach dressed up as a saving. Licences are seed data like every price above and are re-verified at research time. Nothing here is applied without a ledger proposal master approves (I6), and anything that becomes an npm dependency must be pinned exact (I12).",
+      "resources": [
+        {
+          "id": "fluid-type-scale",
+          "name": "Fluid type scale (CSS clamp, Utopia method)",
+          "docsUrl": "https://utopia.fyi/type/calculator/",
+          "credKey": null,
+          "wiredAs": null,
+          "tier": "free",
+          "license": "no dependency — generated CSS is your own",
+          "notes": "NOT WIRED. Highest-value entry for the defect master actually reported: type that is physically tiny on a large panel and wide dead margins. A clamp()-based scale makes font size a function of viewport, so the interface adapts in CSS instead of relying on the zoom fit in appearanceState.cjs. The two are complementary — zoom scales everything uniformly, a fluid scale changes the ratios. Blocked on one real obstacle worth stating: the UI is built from hundreds of inline px fontSize values that no CSS scale can reach, so this needs those values tokenised first, which is a large mechanical change and exactly why it should be a reviewed proposal rather than a quiet edit."
+        },
+        {
+          "id": "lucide",
+          "name": "Lucide icons",
+          "docsUrl": "https://lucide.dev/",
+          "credKey": null,
+          "wiredAs": null,
+          "tier": "free",
+          "license": "ISC",
+          "notes": "NOT WIRED. The interface currently draws its icons from unicode glyphs (⬢ ◈ ▣ ↕ ↺ 🧹), which render differently on every machine and font fallback — a real cross-platform inconsistency, not a matter of taste. Lucide has a React package, tree-shakes to only what is imported, and ISC permits redistribution in a packaged app. Alternatives on the same licence class: Phosphor (MIT), Tabler (MIT), Remix Icon (Apache-2.0)."
+        },
+        {
+          "id": "radix-colors",
+          "name": "Radix Colors",
+          "docsUrl": "https://www.radix-ui.com/colors",
+          "credKey": null,
+          "wiredAs": null,
+          "tier": "free",
+          "license": "MIT",
+          "notes": "NOT WIRED. Dark-mode scales built for verified contrast, where each step has a defined purpose (background, border, text). Would keep Rāma's cyberpunk palette while giving the muted/dim greys an accessibility floor — the low-contrast greys are the reason the System page's own 'Loading disk info...' text was easy to miss. Worth pairing with a stated WCAG target so contrast becomes measurable rather than judged by eye."
+        },
+        {
+          "id": "open-color",
+          "name": "Open Color",
+          "docsUrl": "https://yeun.github.io/open-color/",
+          "credKey": null,
+          "wiredAs": null,
+          "tier": "free",
+          "license": "MIT",
+          "notes": "NOT WIRED. Smaller, simpler alternative to Radix Colors — a flat palette rather than a semantic scale. Lower effort to adopt, less help with contrast guarantees. Listed so the research report can compare the two rather than presenting one as the only option."
+        },
+        {
+          "id": "inter-font",
+          "name": "Inter (UI typeface)",
+          "docsUrl": "https://rsms.me/inter/",
+          "credKey": null,
+          "wiredAs": null,
+          "tier": "free",
+          "license": "SIL OFL 1.1 — embeddable in applications",
+          "notes": "NOT WIRED. Designed for screen UI at small sizes, with tabular figures that stop metric readouts jittering as digits change — directly relevant to the CPU/RAM pills and process tables. Would sit alongside JetBrains Mono rather than replacing it: mono for code and data, Inter for prose and labels. OFL 1.1 permits bundling the font files in the installer."
+        },
+        {
+          "id": "hud-display-fonts",
+          "name": "Orbitron / Rajdhani (HUD display faces)",
+          "docsUrl": "https://fonts.google.com/specimen/Orbitron",
+          "credKey": null,
+          "wiredAs": null,
+          "tier": "free",
+          "license": "SIL OFL 1.1",
+          "notes": "NOT WIRED. Squared, technical display faces that suit the existing HUD aesthetic for headings and section labels only — both are poor choices for body text and would hurt legibility if used broadly. Included because it matches the established design language, not because the interface needs another font; a proposal should argue for headings-only scope or drop it."
+        },
+        {
+          "id": "modern-css-reset",
+          "name": "Modern CSS reset + density scale",
+          "docsUrl": "https://piccalil.li/blog/a-more-modern-css-reset/",
+          "credKey": null,
+          "wiredAs": null,
+          "tier": "free",
+          "license": "MIT",
+          "notes": "NOT WIRED. Addresses the second half of master's complaint — the dead vertical space — by replacing ad-hoc inline padding/margin with a spacing scale. Cheap to adopt incrementally, page by page, and unlike the type-scale entry it does not require tokenising every inline font size first. Probably the lowest-risk starting point of this axis."
+        }
+      ]
     }
   }
 }

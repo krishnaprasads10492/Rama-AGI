@@ -70,8 +70,13 @@ function loadCatalog() {
  * break the catalog view.
  */
 function statusFor(entry) {
+  // Needing no credential is not the same as being adopted. This used to return
+  // 'no-key-needed' for an unwired entry, which the Resources page renders as a
+  // green "READY" — so Qdrant showed as ready while nothing in the codebase
+  // referenced it. The design axis would have made that claim about seven more
+  // resources at once. Absence of a key requirement is not adoption.
   if (!entry.credKey) {
-    return entry.wiredAs ? 'enabled' : 'no-key-needed';
+    return entry.wiredAs ? 'enabled' : 'researched-only';
   }
   const hasKey = isUnlocked() ? !!getCredential(entry.credKey) : null;
   if (entry.wiredAs && hasKey) return 'enabled';

@@ -169,7 +169,10 @@ const STATUS_STYLES = {
   'wired-no-key':       { color: 'var(--amber)',  label: 'WIRED — NO KEY' },
   'wired-vault-locked': { color: 'var(--amber)',  label: 'WIRED — VAULT LOCKED' },
   'keyed-not-wired':    { color: 'var(--amber)',  label: 'KEY SET — NOT WIRED' },
-  'no-key-needed':      { color: 'var(--green)',  label: 'READY' },
+  // 'no-key-needed' was removed: it was emitted for resources that need no
+  // credential *and are not wired*, and rendered as a green "READY" — claiming
+  // adoption that had not happened. Those now report 'researched-only'. Unknown
+  // statuses already fall back to that below, so nothing needs a style here.
   'researched-only':    { color: 'var(--muted)',  label: 'NOT ENABLED' },
 };
 
