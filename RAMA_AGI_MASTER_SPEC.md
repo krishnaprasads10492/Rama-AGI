@@ -3513,6 +3513,40 @@ A build that works can still be reporting badly:
    It now returns `false`, as documented. Verified here only to the extent this
    machine allows: a full `--dir` build still completes cleanly with the change.
 
+### Understating the cost of the unbranded fallback
+
+The first version of the unbranded-installer messaging said the `.exe` "carries
+Electron's default icon and version metadata", which reads like a metadata
+footnote. It is not. `rcedit` is what embeds the icon into the executable, and
+Windows derives the desktop shortcut and Start Menu icons from the executable —
+so skipping that step means **the installed app shows the Electron atom
+everywhere the user looks**, not merely in a properties dialog.
+
+That is a distribution-blocking cosmetic defect, not a footnote, and the report
+was quietly encouraging the master to accept it. Both the stage 0 prediction and
+the post-build warning now say so plainly and carry the one-line `reg add`
+remedy, so the choice is made with the real cost visible.
+
+The alternative — pre-extracting `winCodeSign` into electron-builder's cache with
+the `darwin/` tree excluded, so no symlink is ever created — was considered and
+**deliberately not built**. It needs a 5.6 MB binary download plus a guess at a
+private cache directory name that no JS in electron-builder spells out (the
+version comes from inside `app-builder.exe`), and it would silently rot on an
+electron-builder upgrade. A one-time Windows setting achieves the same result with
+none of that. Recorded so a later session does not rediscover the idea and build
+it without the reasoning.
+
+### Node patch line is now checked where it can actually bite
+
+`start.cjs` has long warned that Vite 5+ calls `crypto.hash`, which only exists on
+newer Node patch lines. `buildInstaller.cjs` checked only `major >= 18`, despite
+running `vite build` itself and therefore being exposed to the identical failure.
+The master's machine runs Node 20.10.0 — below the threshold — and got away with
+it, but an opaque "crypto.hash is not a function" was one patch line away. The
+same rule is now applied in stage 0 as a warning, not a block, since it demonstrably
+still builds. Rule verified across 20.10.0 / 20.19.0 / 22.11.0 / 22.12.0 / 22.17.0 /
+23.1.0 / 18.20.0.
+
 ### Verified, and not verified
 
 Verified by running it on the work machine — the hostile case:

@@ -220,13 +220,24 @@ function freeDiskMB() {
 function checkToolchain() {
   stage(0, 'TOOLCHAIN — can this machine package at all');
 
-  const major = Number(process.versions.node.split('.')[0]);
+  const [major, minor] = process.versions.node.split('.').map(Number);
   if (!Number.isFinite(major) || major < 18) {
     fail(`Node.js ${process.versions.node} — packaging needs v18 minimum, v22 LTS recommended.`);
     fail('Download: https://nodejs.org/en/download');
     return false;
   }
   ok(`Node.js ${process.versions.node}`);
+
+  // Same rule start.cjs applies, for the same reason: Vite 5+ calls crypto.hash,
+  // which only exists on the newer patch lines. Packaging runs `vite build`, so
+  // it is exposed to exactly the same failure — worth naming here rather than
+  // letting it surface as an opaque "crypto.hash is not a function".
+  const modernLine = (major === 20 && minor >= 19) || (major === 22 && minor >= 12) || major >= 23;
+  if (!modernLine) {
+    warn(`Node ${process.versions.node} is an older patch line than Vite 6 prefers.`);
+    warn('  If the renderer build fails on "crypto.hash is not a function", that is why —');
+    warn('  Node 22 LTS fixes it. Harmless otherwise.');
+  }
 
   const npm = tryRun('npm --version');
   if (!npm.ok) {
@@ -333,12 +344,16 @@ function checkInstallerScript() {
       warn('  electron-builder extracts winCodeSign during the installer targets, and');
       warn('  that archive holds macOS symlinks — so the installer step will fail with');
       warn('  "A required privilege is not held by the client" unless this is fixed.');
-      warn('  Either of these fixes it properly, keeping the branded .exe:');
+      warn('  The build still produces an installer, by skipping the step that brands');
+      warn('  the executable. Be clear about what that costs: rcedit is part of that');
+      warn('  step, so the app ships with Electron\'s default icon — on the .exe, on');
+      warn('  the desktop shortcut and in the Start Menu. Not just metadata.');
+      warn('  Either of these fixes it properly, and is needed only once:');
       warn('    · Settings > Privacy & security > For developers > Developer Mode = On');
-      warn('    · or run this build from an Administrator terminal');
-      warn('  Without one of those, the installer is retried unbranded and then, if');
-      warn('  that also fails, salvaged as a portable archive.');
-      notesOut.push(`no symlink privilege (${link.code}) — blocks winCodeSign extraction`);
+      warn('    · or, in an Administrator terminal:');
+      warn('      reg add "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock"' +
+           ' /t REG_DWORD /f /v AllowDevelopmentWithoutDevLicense /d 1');
+      notesOut.push(`no symlink privilege (${link.code}) — blocks winCodeSign, costs the app icon`);
     }
   }
 
@@ -1162,9 +1177,13 @@ function report({ archiver, dirOnly, degraded, archive, salvaged, failureTail, n
       warn('  Branding it needs the sign/edit-executable step, which had to be skipped:');
       warn('  this account cannot create symbolic links, so electron-builder could not');
       warn('  unpack winCodeSign. The installer itself is complete and correct.');
-      warn('  To get the branded .exe, enable Developer Mode (Settings > Privacy &');
-      warn('  security > For developers) or build from an Administrator terminal,');
-      warn('  then run this again.');
+      warn('  That means the app shows Electron\'s icon on the .exe, the desktop');
+      warn('  shortcut and the Start Menu entry — worth fixing before distributing.');
+      warn('  Grant the privilege once, then run this again:');
+      warn('    Settings > Privacy & security > For developers > Developer Mode = On');
+      warn('    or, in an Administrator terminal:');
+      warn('    reg add "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock"' +
+           ' /t REG_DWORD /f /v AllowDevelopmentWithoutDevLicense /d 1');
     }
   }
 
