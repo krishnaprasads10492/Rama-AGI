@@ -24,7 +24,7 @@
  *                                        [--skip-install] [--skip-renderer]
  */
 
-const { execSync, spawnSync } = require('child_process');
+const { execSync, spawnSync, spawn } = require('child_process');
 const fs   = require('fs');
 const path = require('path');
 
@@ -59,16 +59,50 @@ const C = {
   red: '\x1b[31m', violet: '\x1b[35m',
 };
 
+// ─── Transcript ───────────────────────────────────────────────────────────────
+// Packaging usually happens on a machine that is not the one with the editor
+// open, so "it failed" arrives without the output that says why. Everything
+// printed here, and everything printed by every command this runs, is also
+// written to a plain-text log that can simply be sent as a file.
+const LOG_FILE = path.join(ROOT, 'data', 'logs', `build-${new Date().toISOString().replace(/[:.]/g, '-')}.log`);
+let logStream = null;
+
+function openLog() {
+  try {
+    fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+    logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
+    logStream.on('error', () => { logStream = null; });
+    logStream.write(`Rāma AGI packaging log\n`);
+    logStream.write(`started  ${new Date().toISOString()}\n`);
+    logStream.write(`node     ${process.version} on ${process.platform}-${process.arch}\n`);
+    logStream.write(`root     ${ROOT}\n`);
+    logStream.write(`argv     ${args.join(' ') || '(none)'}\n\n`);
+  } catch { logStream = null; }
+}
+
+// ANSI escapes are for the terminal; a log file wants them gone.
+const strip = (s) => String(s).replace(/\x1b\[[0-9;]*m/g, '');
+
+function logWrite(text) {
+  if (!logStream) return;
+  try { logStream.write(strip(text)); } catch { /* the build matters more */ }
+}
+
+function emit(text) {
+  process.stdout.write(text);
+  logWrite(text);
+}
+
 const clock = () => new Date().toLocaleTimeString('en-GB', { hour12: false });
 const line  = (glyph, colour, msg) =>
-  process.stdout.write(`${C.dim}${clock()}${C.reset} ${colour}${glyph}${C.reset} ${msg}\n`);
+  emit(`${C.dim}${clock()}${C.reset} ${colour}${glyph}${C.reset} ${msg}\n`);
 
 const ok    = (m) => line('✓', C.green,  m);
 const warn  = (m) => line('!', C.yellow, m);
 const fail  = (m) => line('✕', C.red,    m);
 const info  = (m) => line('·', C.cyan,   m);
-const plain = (m) => process.stdout.write(`${m}\n`);
-const stage = (n, m) => process.stdout.write(
+const plain = (m) => emit(`${m}\n`);
+const stage = (n, m) => emit(
   `\n${C.violet}${C.bold}▸ STAGE ${n}${C.reset}  ${C.bold}${m}${C.reset}\n`);
 
 // ─── Shell helpers ────────────────────────────────────────────────────────────
@@ -79,8 +113,62 @@ function tryRun(cmd, opts = {}) {
   try { return { ok: true, out: run(cmd, opts) }; }
   catch (e) { return { ok: false, error: e.message ?? String(e), out: e.stdout?.toString?.() ?? '' }; }
 }
-function runLoud(cmd, timeoutMs = 30 * 60_000, opts = {}) {
-  execSync(cmd, { stdio: 'inherit', timeout: timeoutMs, cwd: ROOT, ...opts });
+/**
+ * Run a command, streaming its output live *and* into the transcript.
+ *
+ * Not execSync with stdio:'inherit', which shows the output but keeps no copy,
+ * and not spawnSync with piped stdio, which keeps a copy but shows nothing until
+ * the command finishes — unacceptable for a ten-minute npm install. Async spawn
+ * with a tee is the only shape that does both.
+ *
+ * Never rejects: the caller decides what a failure means.
+ * @returns {Promise<{ok:boolean, code:number|null, tail:string, error?:string}>}
+ */
+function runTee(cmd, timeoutMs = 30 * 60_000) {
+  return new Promise((resolve) => {
+    logWrite(`\n$ ${cmd}\n`);
+
+    let child;
+    try {
+      child = spawn(cmd, { cwd: ROOT, shell: true, windowsHide: true });
+    } catch (e) {
+      return resolve({ ok: false, code: null, tail: '', error: e.message ?? String(e) });
+    }
+
+    // The last few lines are what a failure report needs; the whole output can
+    // be megabytes and it is already in the log.
+    const recent = [];
+    const onData = (buf) => {
+      const s = buf.toString();
+      emit(s);
+      recent.push(s);
+      if (recent.length > 40) recent.shift();
+    };
+
+    child.stdout?.on('data', onData);
+    child.stderr?.on('data', onData);
+
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { child.kill(); } catch { /* already gone */ }
+    }, timeoutMs);
+
+    const tail = () => recent.join('').split(/\r?\n/).filter(Boolean).slice(-12).join('\n');
+
+    child.on('error', (e) => {
+      clearTimeout(timer);
+      resolve({ ok: false, code: null, tail: tail(), error: e.message ?? String(e) });
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        resolve({ ok: false, code, tail: tail(), error: `timed out after ${Math.round(timeoutMs / 60000)} minutes` });
+        return;
+      }
+      resolve({ ok: code === 0, code, tail: tail() });
+    });
+  });
 }
 
 // Native modules with working fallbacks: they may fail to compile without
@@ -262,7 +350,7 @@ function describe(d) {
   return `${d.name} — present but unreadable`;
 }
 
-function installLadder() {
+async function installLadder() {
   const hasLock = fs.existsSync(path.join(ROOT, 'package-lock.json'));
   const hasMods = fs.existsSync(path.join(ROOT, 'node_modules'));
 
@@ -275,23 +363,22 @@ function installLadder() {
   rungs.push('npm install --no-audit --no-fund --legacy-peer-deps');
   rungs.push('npm install --no-audit --no-fund --ignore-scripts');
 
+  let lastTail = '';
   for (const cmd of rungs) {
     info(cmd);
-    try {
-      runLoud(cmd);
+    const r = await runTee(cmd);
+    if (r.ok) {
       ok(`Dependencies installed via: ${cmd}`);
       return { ok: true, cmd, skippedScripts: cmd.includes('--ignore-scripts') };
-    } catch (e) {
-      warn(`Failed: ${cmd}`);
-      const msg = (e.message ?? '').split('\n')[0].slice(0, 200);
-      if (msg) warn(`  ${msg}`);
     }
+    warn(`Failed: ${cmd}${r.error ? ` (${r.error})` : ` (exit ${r.code})`}`);
+    lastTail = r.tail || lastTail;
   }
-  return { ok: false };
+  return { ok: false, tail: lastTail };
 }
 
-/** @returns {{ok:boolean, degraded:string[]}} */
-function ensureDependencies() {
+/** @returns {Promise<{ok:boolean, degraded:string[]}>} */
+async function ensureDependencies() {
   stage(1, 'DEPENDENCIES — what is missing, and installing it');
 
   const notes = [];
@@ -310,11 +397,16 @@ function ensureDependencies() {
       return { ok: false, degraded: notes };
     }
 
-    const installed = installLadder();
+    const installed = await installLadder();
     if (!installed.ok) {
       fail('Every install strategy failed. The most likely causes:');
       fail('  · no internet access, or a proxy that blocks the npm registry');
       fail('  · a corporate registry mirror that needs configuring (npm config get registry)');
+      if (installed.tail) {
+        plain('');
+        plain(`  ${C.bold}Last output from npm:${C.reset}`);
+        for (const l of installed.tail.split('\n')) plain(`    ${l}`);
+      }
       return { ok: false, degraded: notes };
     }
     if (installed.skippedScripts) {
@@ -364,7 +456,7 @@ function ensureDependencies() {
 // STAGE 2 — RENDERER
 // ══════════════════════════════════════════════════════════════════════════════
 
-function buildRenderer() {
+async function buildRenderer() {
   stage(2, 'RENDERER — building the production bundle');
 
   if (skipRenderer) {
@@ -380,15 +472,14 @@ function buildRenderer() {
   // Unconditional, never gated on a staleness heuristic. Ledger row 43 is the
   // record of what shipping a stale bundle costs: every fix looks ineffective.
   info('vite build');
-  try {
-    runLoud('npm run build', 15 * 60_000);
+  const r = await runTee('npm run build', 15 * 60_000);
+  if (r.ok) {
     ok('Renderer built → build/');
     return true;
-  } catch (e) {
-    fail(`Renderer build failed: ${(e.message ?? '').split('\n')[0].slice(0, 200)}`);
-    fail('Packaging stopped — there is no bundle to package.');
-    return false;
   }
+  fail(`Renderer build failed${r.error ? `: ${r.error}` : ` (exit ${r.code})`}`);
+  fail('Packaging stopped — there is no bundle to package.');
+  return false;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -676,7 +767,7 @@ function platformFlags() {
   return f;
 }
 
-function packageApp(dirOnly) {
+async function packageApp(dirOnly) {
   stage(4, dirOnly ? 'PACKAGE — unpacked application tree' : 'PACKAGE — installer');
 
   const flags = platformFlags();
@@ -698,14 +789,20 @@ function packageApp(dirOnly) {
   // `vite build` a second time.
   const cmd = `npx electron-builder ${flags.join(' ')}`;
   info(cmd);
-  try {
-    runLoud(cmd);
+  const r = await runTee(cmd);
+  if (r.ok) {
     ok(dirOnly ? 'Unpacked application built' : 'electron-builder finished');
     return { ok: true };
-  } catch (e) {
-    fail(`electron-builder failed: ${(e.message ?? '').split('\n')[0].slice(0, 200)}`);
-    return { ok: false };
   }
+
+  fail(`electron-builder failed${r.error ? `: ${r.error}` : ` (exit ${r.code})`}`);
+  if (r.tail) {
+    plain('');
+    plain(`  ${C.bold}Last output from electron-builder:${C.reset}`);
+    for (const l of r.tail.split('\n')) plain(`    ${l}`);
+    plain('');
+  }
+  return { ok: false, tail: r.tail };
 }
 
 const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
@@ -715,7 +812,7 @@ const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
  * (present on every supported Windows, nothing for a policy to block), zip/tar
  * elsewhere. This is what makes L2 still produce something distributable.
  */
-function zipUnpacked() {
+async function zipUnpacked() {
   const outDir = path.join(ROOT, 'dist-electron');
   let unpacked = [];
   try {
@@ -739,26 +836,31 @@ function zipUnpacked() {
   }
 
   info(`Zipping ${path.basename(src)} → ${path.basename(zip)} (this takes a minute)`);
-  try {
-    if (isWin) {
-      runLoud(
-        'powershell -NoProfile -NonInteractive -Command ' +
-        `"Add-Type -AssemblyName System.IO.Compression.FileSystem; ` +
-        `[System.IO.Compression.ZipFile]::CreateFromDirectory(${psQuote(src)}, ${psQuote(zip)}, ` +
-        `[System.IO.Compression.CompressionLevel]::Optimal, $true)"`,
-      );
-    } else if (tryRun('command -v zip').ok) {
-      runLoud(`cd "${outDir}" && zip -r -q "${path.basename(zip)}" "${path.basename(src)}"`);
-    } else {
-      const tgz = zip.replace(/\.zip$/, '.tar.gz');
-      runLoud(`tar -czf "${tgz}" -C "${outDir}" "${path.basename(src)}"`);
-      ok(`Archive written → ${path.relative(ROOT, tgz)}`);
-      return tgz;
-    }
-  } catch (e) {
-    fail(`Archiving failed: ${(e.message ?? '').split('\n')[0].slice(0, 200)}`);
+
+  let r;
+  let produced = zip;
+  if (isWin) {
+    r = await runTee(
+      'powershell -NoProfile -NonInteractive -Command ' +
+      `"Add-Type -AssemblyName System.IO.Compression.FileSystem; ` +
+      `[System.IO.Compression.ZipFile]::CreateFromDirectory(${psQuote(src)}, ${psQuote(zip)}, ` +
+      `[System.IO.Compression.CompressionLevel]::Optimal, $true)"`,
+    );
+  } else if (tryRun('command -v zip').ok) {
+    r = await runTee(`cd "${outDir}" && zip -r -q "${path.basename(zip)}" "${path.basename(src)}"`);
+  } else {
+    produced = zip.replace(/\.zip$/, '.tar.gz');
+    r = await runTee(`tar -czf "${produced}" -C "${outDir}" "${path.basename(src)}"`);
+  }
+
+  if (!r.ok) {
+    fail(`Archiving failed${r.error ? `: ${r.error}` : ` (exit ${r.code})`}`);
     warn(`The unpacked app is still usable directly: ${path.relative(ROOT, src)}`);
     return null;
+  }
+  if (produced !== zip) {
+    ok(`Archive written → ${path.relative(ROOT, produced)}`);
+    return produced;
   }
 
   if (!fs.existsSync(zip)) {
@@ -880,16 +982,17 @@ ${C.bold}What it does${C.reset}
 `);
 }
 
-function main() {
+async function main() {
   if (showHelp) { help(); return 0; }
 
-  process.stdout.write(`\n${C.violet}${C.bold}  ⬢ Rāma AGI — packaging${C.reset} ${C.dim}v${(() => {
+  openLog();
+  emit(`\n${C.violet}${C.bold}  ⬢ Rāma AGI — packaging${C.reset} ${C.dim}v${(() => {
     try { return appVersion(); } catch { return '?'; }
   })()}${C.reset}\n`);
 
   if (!checkToolchain()) return 1;
 
-  const deps = ensureDependencies();
+  const deps = await ensureDependencies();
   if (!deps.ok) return 1;
 
   if (dryRun) {
@@ -903,7 +1006,7 @@ function main() {
     return 0;
   }
 
-  if (!buildRenderer()) return 1;
+  if (!(await buildRenderer())) return 1;
 
   const archiver = forceDir ? { level: 2, reason: '--dir was requested' } : resolveArchiver();
   if (forceDir) {
@@ -913,33 +1016,42 @@ function main() {
 
   const dirOnly = archiver.level === 2;
 
-  const packaged = packageApp(dirOnly);
+  const packaged = await packageApp(dirOnly);
   if (!packaged.ok) {
-    // A full installer run can still fail at the archive step on a machine where
-    // the probe passed but the policy intervenes later. Falling back to the
-    // unpacked build is better than ending with nothing.
+    // A full installer run can still fail after the app tree is packed — the
+    // archive step, code signing, or a target-specific download. The unpacked
+    // tree is already on disk at that point, so salvaging it into a portable
+    // archive turns a total loss into a usable, clearly-labelled artefact.
     if (!dirOnly) {
       warn('Retrying as an unpacked build so this run still produces something.');
-      const retry = packageApp(true);
+      const retry = await packageApp(true);
       if (!retry.ok) return 1;
-      const archive = zipUnpacked();
+      const archive = await zipUnpacked();
       return report({
-        archiver: { ...archiver, level: 2, reason: 'electron-builder failed while archiving' },
+        archiver: { ...archiver, level: 2, reason: 'electron-builder failed after packing the app tree' },
         dirOnly: true, degraded: deps.degraded, archive,
       }) ? 0 : 1;
     }
     return 1;
   }
 
-  const archive = dirOnly ? zipUnpacked() : null;
+  const archive = dirOnly ? await zipUnpacked() : null;
 
   return report({ archiver, dirOnly, degraded: deps.degraded, archive }) ? 0 : 1;
 }
 
-try {
-  process.exitCode = main();
-} catch (e) {
-  fail(`Packaging aborted: ${e.message ?? String(e)}`);
-  console.error(e.stack ?? '');
-  process.exitCode = 1;
-}
+main()
+  .then((code) => { process.exitCode = code; })
+  .catch((e) => {
+    fail(`Packaging aborted: ${e.message ?? String(e)}`);
+    logWrite(`${e.stack ?? ''}\n`);
+    console.error(e.stack ?? '');
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    if (!logStream) return;
+    plain(`  ${C.dim}Full transcript: ${path.relative(ROOT, LOG_FILE)}${C.reset}`);
+    plain(`  ${C.dim}Send that file if a build fails somewhere else.${C.reset}`);
+    plain('');
+    try { logStream.end(); } catch { /* nothing left to do */ }
+  });
