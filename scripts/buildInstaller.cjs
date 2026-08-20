@@ -26,6 +26,7 @@
 
 const { execSync, spawnSync, spawn } = require('child_process');
 const fs   = require('fs');
+const os   = require('os');
 const path = require('path');
 
 const ROOT  = path.join(__dirname, '..');
@@ -155,18 +156,24 @@ function runTee(cmd, timeoutMs = 30 * 60_000) {
     }, timeoutMs);
 
     const tail = () => recent.join('').split(/\r?\n/).filter(Boolean).slice(-12).join('\n');
+    // The wider buffer is what failure *classification* matches against: the
+    // decisive line can sit further back than the twelve lines shown to a human.
+    const recentText = () => recent.join('');
 
     child.on('error', (e) => {
       clearTimeout(timer);
-      resolve({ ok: false, code: null, tail: tail(), error: e.message ?? String(e) });
+      resolve({ ok: false, code: null, tail: tail(), recentText: recentText(), error: e.message ?? String(e) });
     });
     child.on('close', (code) => {
       clearTimeout(timer);
       if (timedOut) {
-        resolve({ ok: false, code, tail: tail(), error: `timed out after ${Math.round(timeoutMs / 60000)} minutes` });
+        resolve({
+          ok: false, code, tail: tail(), recentText: recentText(),
+          error: `timed out after ${Math.round(timeoutMs / 60000)} minutes`,
+        });
         return;
       }
-      resolve({ ok: code === 0, code, tail: tail() });
+      resolve({ ok: code === 0, code, tail: tail(), recentText: recentText() });
     });
   });
 }
@@ -252,6 +259,142 @@ function checkToolchain() {
   }
 
   return true;
+}
+
+/**
+ * Can this account create a symbolic link?
+ *
+ * WHY PACKAGING CARES: electron-builder extracts its `winCodeSign` bundle during
+ * the Windows installer targets, and that archive contains macOS symlinks
+ * (`darwin/10.12/lib/libcrypto.dylib` and friends). Creating a symlink on Windows
+ * needs SeCreateSymbolicLinkPrivilege, which a standard account does not hold
+ * unless Developer Mode is on. Without it 7-Zip fails with "Cannot create
+ * symbolic link : A required privilege is not held by the client", four times
+ * over, and the installer build dies — after the app tree has already packed,
+ * which is what made it look like a packaging problem.
+ *
+ * @returns {{ok:boolean, code?:string}}
+ */
+function canCreateSymlink() {
+  let dir = null;
+  try {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rama-symlink-'));
+    const target = path.join(dir, 'target.txt');
+    fs.writeFileSync(target, 'probe');
+    fs.symlinkSync(target, path.join(dir, 'link.txt'), 'file');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, code: e.code ?? String(e) };
+  } finally {
+    if (dir) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* temp dir */ } }
+  }
+}
+
+/** Does this output carry the winCodeSign symlink-privilege signature? */
+function isSymlinkPrivilegeFailure(text) {
+  if (!text) return false;
+  return /cannot create symbolic link/i.test(text)
+      || /required privilege is not held/i.test(text);
+}
+
+/**
+ * Static checks on the custom NSIS include, before anything is built.
+ *
+ * WHY THIS EXISTS: `assets/installer.nsh` is compiled by `makensis`, which only
+ * runs when the NSIS target runs. On a machine where 7-Zip is blocked that step
+ * is never reached, so the file went unchecked for its whole life and shipped two
+ * real defects — a non-ASCII body with no BOM, and `${productName}`/`${version}`,
+ * which are electron-builder *artifactName* placeholders rather than NSIS
+ * defines. Both were invisible here and only surfaced as "electron-builder failed
+ * after packing the app tree" on a machine that could reach NSIS.
+ *
+ * These checks warn rather than block: none of them is *provably* fatal, and a
+ * portable build is still worth producing. They run in stage 0 so the warning
+ * arrives before ten minutes of installing and building, and they are repeated in
+ * the failure report where they are most useful.
+ *
+ * @returns {string[]} notes, empty when the file looks sane
+ */
+function checkInstallerScript() {
+  if (!wantWin) return [];
+
+  const notesOut = [];
+
+  if (isWin) {
+    const link = canCreateSymlink();
+    if (link.ok) {
+      ok('Symlink privilege present — winCodeSign will extract cleanly');
+    } else {
+      warn(`This account cannot create symbolic links (${link.code})`);
+      warn('  electron-builder extracts winCodeSign during the installer targets, and');
+      warn('  that archive holds macOS symlinks — so the installer step will fail with');
+      warn('  "A required privilege is not held by the client" unless this is fixed.');
+      warn('  Either of these fixes it properly, keeping the branded .exe:');
+      warn('    · Settings > Privacy & security > For developers > Developer Mode = On');
+      warn('    · or run this build from an Administrator terminal');
+      warn('  Without one of those, the installer is retried unbranded and then, if');
+      warn('  that also fails, salvaged as a portable archive.');
+      notesOut.push(`no symlink privilege (${link.code}) — blocks winCodeSign extraction`);
+    }
+  }
+
+  const file = path.join(ROOT, 'assets', 'installer.nsh');
+  if (!fs.existsSync(file)) return notesOut;
+
+  const rel = path.relative(ROOT, file);
+  let buf;
+  try { buf = fs.readFileSync(file); }
+  catch (e) {
+    warn(`${rel} could not be read (${e.message}) — NSIS will fail on it`);
+    return [`${rel} unreadable`];
+  }
+
+  const notes = [];
+
+  const hasBom   = buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF;
+  let nonAscii = 0;
+  for (const b of buf) if (b > 127) nonAscii++;
+
+  if (nonAscii > 0 && !hasBom) {
+    warn(`${rel} has ${nonAscii} non-ASCII byte(s) and no BOM`);
+    warn('  NSIS reads an included script in the system codepage unless a BOM says');
+    warn('  otherwise, so those bytes are mangled when makensis compiles it.');
+    warn('  Keep this file ASCII, or save it as UTF-8 with a BOM.');
+    notes.push(`${rel}: ${nonAscii} non-ASCII byte(s) without a BOM`);
+  }
+
+  // Comment lines are dropped first: this file documents the wrong spellings on
+  // purpose, and flagging its own explanation would be noise.
+  const code = buf.toString('utf8')
+    .split(/\r?\n/)
+    .filter(l => !/^\s*[;#]/.test(l))
+    .join('\n');
+
+  // electron-builder's NSIS defines are all UPPER_SNAKE_CASE. Anything else in
+  // ${...} is almost always an artifactName placeholder used by mistake, which
+  // NSIS leaves unexpanded — it writes the literal text and only warns.
+  const suspicious = new Set();
+  for (const m of code.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) {
+    if (!/^[A-Z0-9_]+$/.test(m[1])) suspicious.add(m[1]);
+  }
+  if (suspicious.size > 0) {
+    warn(`${rel} references ${suspicious.size} symbol(s) NSIS will not expand:`);
+    for (const s of suspicious) plain(`      \${${s}}`);
+    warn('  electron-builder defines PRODUCT_NAME, PRODUCT_FILENAME and VERSION');
+    warn('  (upper case). Lower-case spellings are artifactName placeholders and');
+    warn('  are not NSIS symbols — they end up in the installer as literal text.');
+    notes.push(`${rel}: unexpandable symbol(s) ${[...suspicious].join(', ')}`);
+  }
+
+  const opens  = (code.match(/^\s*!macro\b/gm)    ?? []).length;
+  const closes = (code.match(/^\s*!macroend\b/gm) ?? []).length;
+  if (opens !== closes) {
+    warn(`${rel} has ${opens} !macro and ${closes} !macroend — unbalanced, makensis will fail`);
+    notes.push(`${rel}: ${opens} !macro vs ${closes} !macroend`);
+  }
+
+  if (notes.length === 0) ok(`${rel} checks out (ASCII, symbols resolvable, macros balanced)`);
+  return notes;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -767,10 +910,19 @@ function platformFlags() {
   return f;
 }
 
-async function packageApp(dirOnly) {
-  stage(4, dirOnly ? 'PACKAGE — unpacked application tree' : 'PACKAGE — installer');
+async function packageApp(dirOnly, { noSignEdit = false } = {}) {
+  stage(4, dirOnly
+    ? 'PACKAGE — unpacked application tree'
+    : `PACKAGE — installer${noSignEdit ? ' (executable branding disabled)' : ''}`);
 
   const flags = platformFlags();
+
+  // Disabling sign/edit-executable is what keeps electron-builder from fetching
+  // and extracting winCodeSign, which is the step that needs a symlink privilege
+  // this account may not have. Verified on the work machine: with this flag the
+  // winCodeSign download does not happen at all.
+  if (noSignEdit && wantWin) flags.push('-c.win.signAndEditExecutable=false');
+
   if (dirOnly) {
     flags.push('--dir');
     // MEASURED, not assumed: `--dir` alone is still not enough on a machine where
@@ -877,7 +1029,7 @@ async function zipUnpacked() {
 
 const MB = (bytes) => `${(bytes / 1048576).toFixed(1)} MB`;
 
-function report({ archiver, dirOnly, degraded, archive, salvaged, failureTail }) {
+function report({ archiver, dirOnly, degraded, archive, salvaged, failureTail, nsisNotes = [], unbranded = false }) {
   stage(5, 'REPORT — what is on disk');
 
   const outDir = path.join(ROOT, 'dist-electron');
@@ -915,7 +1067,8 @@ function report({ archiver, dirOnly, degraded, archive, salvaged, failureTail })
   };
   plain(`  Archiver        ${rung[archiver.level]}`);
   plain(`  Output type     ${dirOnly ? 'portable only (no installer)' : 'installer + portable'}`);
-  if (salvaged) plain(`  Installer       attempted and failed — salvaged as portable`);
+  if (salvaged)  plain(`  Installer       attempted and failed — salvaged as portable`);
+  if (unbranded) plain(`  Installer       built, but the .exe is unbranded (no symlink privilege)`);
 
   if (degraded.length > 0) {
     plain(`  Degraded        ${degraded[0]}`);
@@ -934,6 +1087,19 @@ function report({ archiver, dirOnly, degraded, archive, salvaged, failureTail })
       plain('');
       plain(`  ${C.bold}Why electron-builder failed (last lines):${C.reset}`);
       for (const l of failureTail.split('\n')) plain(`    ${C.red}${l}${C.reset}`);
+    }
+    if (isSymlinkPrivilegeFailure(failureTail)) {
+      plain('');
+      plain(`  ${C.bold}That is the winCodeSign symlink-privilege problem. The fix:${C.reset}`);
+      plain('    Settings > Privacy & security > For developers > Developer Mode = On');
+      plain('    (or build from an Administrator terminal), then run this again.');
+      plain('    electron-builder unpacks a bundle containing macOS symlinks, and');
+      plain('    Windows needs that privilege to create them. Nothing here is at fault.');
+    }
+    if (nsisNotes.length > 0) {
+      plain('');
+      plain(`  ${C.bold}Also flagged before the build started:${C.reset}`);
+      for (const n of nsisNotes) plain(`    ${C.yellow}${n}${C.reset}`);
     }
     plain('');
     if (archive) {
@@ -957,6 +1123,16 @@ function report({ archiver, dirOnly, degraded, archive, salvaged, failureTail })
   } else {
     ok('Installer build complete.');
     plain('  Run the Setup .exe to install; the portable .exe runs without installing.');
+    if (unbranded) {
+      plain('');
+      warn('The .exe carries Electron\'s default icon and version metadata.');
+      warn('  Branding it needs the sign/edit-executable step, which had to be skipped:');
+      warn('  this account cannot create symbolic links, so electron-builder could not');
+      warn('  unpack winCodeSign. The installer itself is complete and correct.');
+      warn('  To get the branded .exe, enable Developer Mode (Settings > Privacy &');
+      warn('  security > For developers) or build from an Administrator terminal,');
+      warn('  then run this again.');
+    }
   }
 
   return true;
@@ -1013,6 +1189,8 @@ async function main() {
 
   if (!checkToolchain()) return 1;
 
+  const nsisNotes = checkInstallerScript();
+
   const deps = await ensureDependencies();
   if (!deps.ok) return 1;
 
@@ -1037,7 +1215,27 @@ async function main() {
 
   const dirOnly = archiver.level === 2;
 
-  const packaged = await packageApp(dirOnly);
+  let packaged = await packageApp(dirOnly);
+  let unbranded = false;
+
+  // Rung between "installer" and "give up on installers": the winCodeSign
+  // symlink-privilege failure is entirely avoidable, because the only reason
+  // winCodeSign is fetched is the sign/edit-executable step. Turning that off
+  // costs the .exe its icon and version metadata and yields a real, working
+  // installer — far better than dropping to a portable archive.
+  if (!packaged.ok && !dirOnly && isSymlinkPrivilegeFailure(packaged.recentText)) {
+    warn('That is the known winCodeSign symlink-privilege failure, not a code fault.');
+    warn('  Retrying the installer with executable branding disabled, which stops');
+    warn('  electron-builder fetching winCodeSign at all.');
+    const second = await packageApp(false, { noSignEdit: true });
+    if (second.ok) {
+      packaged  = second;
+      unbranded = true;
+    } else {
+      packaged = { ...second, tail: second.tail || packaged.tail };
+    }
+  }
+
   if (!packaged.ok) {
     // A full installer run can still fail after the app tree is packed — the
     // archive step, code signing, or a target-specific download. The unpacked
@@ -1058,6 +1256,7 @@ async function main() {
         failureTail: packaged.tail,
         degraded: deps.degraded,
         archive,
+        nsisNotes,
       }) ? 0 : 1;
     }
     return 1;
@@ -1065,7 +1264,7 @@ async function main() {
 
   const archive = dirOnly ? await zipUnpacked() : null;
 
-  return report({ archiver, dirOnly, degraded: deps.degraded, archive }) ? 0 : 1;
+  return report({ archiver, dirOnly, degraded: deps.degraded, archive, unbranded, nsisNotes }) ? 0 : 1;
 }
 
 main()
