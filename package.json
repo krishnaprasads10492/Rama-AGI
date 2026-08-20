@@ -16,6 +16,7 @@
     "package:mac":   "node scripts/buildInstaller.cjs --mac",
     "package:linux": "node scripts/buildInstaller.cjs --linux",
     "package:check": "node scripts/buildInstaller.cjs --dry-run",
+    "ship-log":      "node scripts/shipLog.cjs",
     "build:win":     "vite build && electron-builder --win --x64",
     "build:mac":     "vite build && electron-builder --mac",
     "build:linux":   "vite build && electron-builder --linux",

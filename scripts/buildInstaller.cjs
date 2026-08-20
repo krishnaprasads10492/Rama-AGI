@@ -49,6 +49,9 @@ const forceDir     = has('--dir');
 // raises a policy dialog at the master, and re-asking a settled question is not
 // worth interrupting them for.
 const recheck      = has('--recheck-archiver');
+// On any failure the transcript is shipped to the build-logs branch so it can be
+// read from another machine. Opt out for a run you do not want published.
+const noShipLog    = has('--no-ship-log');
 // Report what the machine can do and stop before anything is built. Exists so
 // the preparation stages can be verified on a machine where packaging itself is
 // blocked by policy — the situation that prompted this script.
@@ -102,9 +105,13 @@ const clock = () => new Date().toLocaleTimeString('en-GB', { hour12: false });
 const line  = (glyph, colour, msg) =>
   emit(`${C.dim}${clock()}${C.reset} ${colour}${glyph}${C.reset} ${msg}\n`);
 
+// Set by fail(). Anything that reports a failure — a blocked archiver, a failed
+// installer target, a salvage — makes this run worth shipping for later reading.
+let sawFailure = false;
+
 const ok    = (m) => line('✓', C.green,  m);
 const warn  = (m) => line('!', C.yellow, m);
-const fail  = (m) => line('✕', C.red,    m);
+const fail  = (m) => { sawFailure = true; return line('✕', C.red, m); };
 const info  = (m) => line('·', C.cyan,   m);
 const plain = (m) => emit(`${m}\n`);
 const stage = (n, m) => emit(
@@ -1321,18 +1328,60 @@ async function main() {
   return report({ archiver, dirOnly, degraded: deps.degraded, archive, unbranded, nsisNotes }) ? 0 : 1;
 }
 
-main()
-  .then((code) => { process.exitCode = code; })
-  .catch((e) => {
+/** Flush and close the transcript, so whatever reads it next sees a whole file. */
+function closeLog() {
+  return new Promise((resolve) => {
+    if (!logStream) return resolve();
+    const s = logStream;
+    logStream = null;                 // further logWrite() calls become no-ops
+    s.once('finish', resolve);
+    s.once('error', resolve);
+    try { s.end(); } catch { resolve(); }
+  });
+}
+
+/**
+ * Ship the transcript after a failed run.
+ *
+ * Runs as a child process on purpose: shipping touches git, and a fault in it
+ * must not change this build's exit code or throw past the reporting that already
+ * happened. The transcript is closed first so the shipped copy is complete.
+ */
+function shipTranscript() {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [path.join(__dirname, 'shipLog.cjs'), '--file', LOG_FILE], {
+      cwd: ROOT, shell: false, windowsHide: true,
+    });
+    child.stdout?.on('data', (b) => process.stdout.write(b.toString()));
+    child.stderr?.on('data', (b) => process.stdout.write(b.toString()));
+    child.on('error', () => resolve());
+    child.on('close', () => resolve());
+  });
+}
+
+(async () => {
+  let code = 1;
+  try {
+    code = await main();
+  } catch (e) {
     fail(`Packaging aborted: ${e.message ?? String(e)}`);
     logWrite(`${e.stack ?? ''}\n`);
     console.error(e.stack ?? '');
-    process.exitCode = 1;
-  })
-  .finally(() => {
-    if (!logStream) return;
+    code = 1;
+  }
+
+  const hadLog = logStream !== null;
+  if (hadLog) {
     plain(`  ${C.dim}Full transcript: ${path.relative(ROOT, LOG_FILE)}${C.reset}`);
-    plain(`  ${C.dim}Send that file if a build fails somewhere else.${C.reset}`);
+    if (sawFailure && !noShipLog) {
+      plain(`  ${C.dim}Shipping it to the build-logs branch — readable from any machine.${C.reset}`);
+    }
     plain('');
-    try { logStream.end(); } catch { /* nothing left to do */ }
-  });
+  }
+
+  await closeLog();
+
+  if (hadLog && sawFailure && !noShipLog && !dryRun) await shipTranscript();
+
+  process.exitCode = code;
+})();
