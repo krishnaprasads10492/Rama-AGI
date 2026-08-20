@@ -877,7 +877,7 @@ async function zipUnpacked() {
 
 const MB = (bytes) => `${(bytes / 1048576).toFixed(1)} MB`;
 
-function report({ archiver, dirOnly, degraded, archive }) {
+function report({ archiver, dirOnly, degraded, archive, salvaged, failureTail }) {
   stage(5, 'REPORT — what is on disk');
 
   const outDir = path.join(ROOT, 'dist-electron');
@@ -908,9 +908,14 @@ function report({ archiver, dirOnly, degraded, archive }) {
   for (const a of artifacts) plain(`    ${a.name.padEnd(46)} ${C.dim}${a.note}${C.reset}`);
   plain('');
 
-  const rung = { 0: 'bundled 7-Zip', 1: `system 7-Zip ${archiver.version ?? ''}`.trim(), 2: 'none available' };
+  const rung = {
+    0: `bundled 7-Zip ${archiver.version ?? ''}`.trim(),
+    1: `system 7-Zip ${archiver.version ?? ''}`.trim(),
+    2: 'none available',
+  };
   plain(`  Archiver        ${rung[archiver.level]}`);
   plain(`  Output type     ${dirOnly ? 'portable only (no installer)' : 'installer + portable'}`);
+  if (salvaged) plain(`  Installer       attempted and failed — salvaged as portable`);
 
   if (degraded.length > 0) {
     plain(`  Degraded        ${degraded[0]}`);
@@ -918,7 +923,23 @@ function report({ archiver, dirOnly, degraded, archive }) {
   }
   plain('');
 
-  if (dirOnly) {
+  if (salvaged) {
+    // Distinct from the no-archiver case: 7-Zip worked, the app tree packed
+    // cleanly, and electron-builder then failed building the installer targets.
+    // Blaming the archiver here sent the master chasing a non-existent problem.
+    fail('The installer targets failed. The archiver is NOT the cause —');
+    fail(`  this machine has a working ${rung[archiver.level]}, and the app tree packed fine.`);
+    fail('  What was salvaged is the unpacked app, zipped into a portable archive.');
+    if (failureTail) {
+      plain('');
+      plain(`  ${C.bold}Why electron-builder failed (last lines):${C.reset}`);
+      for (const l of failureTail.split('\n')) plain(`    ${C.red}${l}${C.reset}`);
+    }
+    plain('');
+    if (archive) {
+      ok(`Usable now: unzip ${path.basename(archive)} and run "Rama AGI.exe"`);
+    }
+  } else if (dirOnly) {
     warn('No installer was produced, and this is not a source problem:');
     warn(`  ${archiver.reason ?? 'no usable 7-Zip'}`);
     warn('  electron-builder needs 7-Zip for the NSIS payload, the portable .exe,');
@@ -1027,9 +1048,16 @@ async function main() {
       const retry = await packageApp(true);
       if (!retry.ok) return 1;
       const archive = await zipUnpacked();
+      // The archiver verdict is passed through unchanged. Overwriting it with
+      // level 2 here was wrong: it made the report blame 7-Zip and print advice
+      // about installing it on a machine whose 7-Zip worked perfectly well.
       return report({
-        archiver: { ...archiver, level: 2, reason: 'electron-builder failed after packing the app tree' },
-        dirOnly: true, degraded: deps.degraded, archive,
+        archiver,
+        dirOnly: true,
+        salvaged: true,
+        failureTail: packaged.tail,
+        degraded: deps.degraded,
+        archive,
       }) ? 0 : 1;
     }
     return 1;
