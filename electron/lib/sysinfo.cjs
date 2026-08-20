@@ -72,9 +72,25 @@ function status() {
 
 // ─── CPU load from os.cpus() ──────────────────────────────────────────────────
 // os.cpus() gives cumulative tick counters, so load is the delta between two
-// samples. A single reading tells you nothing, which is why the previous sample
-// is retained here.
-let _prevTicks = null;
+// samples. A single reading tells you nothing.
+//
+// WHY THIS TAKES ITS OWN TWO SAMPLES RATHER THAN KEEPING A MODULE-LEVEL BASELINE:
+// it used to retain `_prevTicks` in module scope, which looked cheaper and was
+// wrong for two measured reasons.
+//
+//   1. The first call had no baseline, so it returned 0 and set `firstSample:
+//      true` — but no caller ever read that flag. `system.cjs` shipped the zero
+//      as though it were a reading.
+//   2. One baseline was shared by three independent pollers: the titlebar every
+//      5s, the System page every 5s, and resourceOrchestrator. Whichever called
+//      second saw a `totalDelta` of nearly nothing — often <= 0 — and got 0% per
+//      core. With three consumers on one baseline, "CPU 0%" was the *expected*
+//      output of this design, not an anomaly.
+//
+// Sampling a fixed window inside the call is self-contained: no shared state, no
+// race between callers, no meaningless first reading. The cost is the sample
+// window itself, which is negligible against a 2-5s poll.
+const CPU_SAMPLE_MS = 120;
 
 function sampleTicks() {
   return os.cpus().map((c) => {
@@ -83,26 +99,27 @@ function sampleTicks() {
   });
 }
 
-function cpuLoadFallback() {
-  const now = sampleTicks();
+async function cpuLoadFallback() {
+  const before = sampleTicks();
+  await new Promise(r => setTimeout(r, CPU_SAMPLE_MS));
+  const after = sampleTicks();
 
-  if (!_prevTicks || _prevTicks.length !== now.length) {
-    _prevTicks = now;
-    // First call has no baseline. Report 0 rather than inventing a number.
-    return { currentLoad: 0, cpus: now.map(() => ({ load: 0 })), firstSample: true };
+  if (before.length !== after.length || after.length === 0) {
+    // Core count changed under us, or os.cpus() gave nothing. Say so rather
+    // than reporting a fabricated zero that looks like an idle machine.
+    return { currentLoad: null, cpus: [], measured: false };
   }
 
-  const cores = now.map((c, i) => {
-    const idleDelta  = c.idle  - _prevTicks[i].idle;
-    const totalDelta = c.total - _prevTicks[i].total;
+  const cores = after.map((c, i) => {
+    const idleDelta  = c.idle  - before[i].idle;
+    const totalDelta = c.total - before[i].total;
+    // A window this short can legitimately record no ticks on an idle core.
     if (totalDelta <= 0) return { load: 0 };
     return { load: Math.max(0, Math.min(100, ((totalDelta - idleDelta) / totalDelta) * 100)) };
   });
 
-  _prevTicks = now;
-
-  const avg = cores.reduce((a, c) => a + c.load, 0) / (cores.length || 1);
-  return { currentLoad: avg, cpus: cores };
+  const avg = cores.reduce((a, c) => a + c.load, 0) / cores.length;
+  return { currentLoad: avg, cpus: cores, measured: true };
 }
 
 // ─── Uniform accessors ────────────────────────────────────────────────────────

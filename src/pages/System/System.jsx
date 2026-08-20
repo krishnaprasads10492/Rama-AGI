@@ -472,10 +472,15 @@ export default function System() {
           </div>
         )}
 
-        {tab === 'disk' && m && (
+        {/* Deliberately NOT gated on `m`. The disk panel calls
+            system:get-disk-usage, which has nothing to do with the metrics
+            snapshot — but it used to be rendered behind `m &&`, so a failing
+            metrics call made the entire disk tab vanish: no card, no label, not
+            even its own loading text. Clicking DISK showed empty space, which is
+            what master reported. Each panel now stands or falls on its own call. */}
+        {tab === 'disk' && (
           <div className="hud-card" style={{ padding: '16px' }}>
             <div className="section-label" style={{ marginBottom: '12px' }}>DISK USAGE</div>
-            {/* Disk data loaded on demand */}
             <DiskPanel />
           </div>
         )}
@@ -484,15 +489,66 @@ export default function System() {
   );
 }
 
+/**
+ * Drive usage.
+ *
+ * Every outcome is rendered. The previous version did `if (res.ok) setDrives(...)`
+ * with no else and no catch, so a failed call left `drives` null and the panel sat
+ * on "Loading disk info..." forever, while a *successful* call returning `[]` —
+ * which `si.fsSize()` does on any failure and always does in the Node-only
+ * fallback — passed the `!drives` guard and rendered an empty list. Both looked
+ * identical on screen: nothing. Silence is not an acceptable state for a panel.
+ */
 function DiskPanel() {
-  const [drives, setDrives] = useState(null);
-  useEffect(() => {
-    systemClient.getDiskUsage().then(res => {
-      if (res.ok) setDrives(res.data);
-    });
+  const [drives, setDrives]   = useState(null);
+  const [error, setError]     = useState('');
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await systemClient.getDiskUsage()
+      .catch(err => ({ ok: false, error: err?.message ?? 'disk call failed' }));
+    if (res?.ok && Array.isArray(res.data)) {
+      setDrives(res.data);
+      setError('');
+    } else {
+      setDrives(null);
+      setError(res?.error ?? 'Disk usage unavailable');
+    }
+    setLoading(false);
   }, []);
 
-  if (!drives) return <div style={{ color: 'var(--muted)' }}>Loading disk info...</div>;
+  useEffect(() => { load(); }, [load]);
+
+  if (loading && !drives && !error) {
+    return <div style={{ color: 'var(--muted)', fontSize: '11px' }}>Reading drive usage...</div>;
+  }
+
+  if (error) {
+    return (
+      <div style={{ fontSize: '11px', lineHeight: 1.7 }}>
+        <div style={{ color: 'var(--amber)' }}>{error}</div>
+        <div style={{ color: 'var(--muted)', marginTop: '6px' }}>
+          Drive enumeration needs the optional <code>systeminformation</code> module;
+          Node alone cannot list filesystems. Everything else keeps working.
+        </div>
+        <button className="btn btn-sm" style={{ marginTop: '10px' }} onClick={load}>↺ Try again</button>
+      </div>
+    );
+  }
+
+  if (!drives || drives.length === 0) {
+    return (
+      <div style={{ fontSize: '11px', lineHeight: 1.7 }}>
+        <div style={{ color: 'var(--text-dim)' }}>No drives reported.</div>
+        <div style={{ color: 'var(--muted)', marginTop: '6px' }}>
+          The call succeeded but returned an empty list — typical when
+          <code> systeminformation </code> is running in its reduced mode.
+        </div>
+        <button className="btn btn-sm" style={{ marginTop: '10px' }} onClick={load}>↺ Try again</button>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>

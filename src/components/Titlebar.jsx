@@ -10,8 +10,18 @@ import RamaOrb from './RamaOrb.jsx';
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
 // ─── Live system metrics ─────────────────────────────────────────────────────
+/**
+ * Live CPU/RAM for the titlebar pills.
+ *
+ * These start as `null`, not 0. Seeding them at 0 meant a failing metrics call
+ * displayed a confident "CPU 0% · RAM 0%" forever — the initial state was
+ * indistinguishable from a real reading of an idle machine, and the `catch` threw
+ * the reason away. RAM in particular can never legitimately be 0 on a running
+ * machine, so "0%" was always a lie about something. `null` renders as "--" and
+ * carries the failure reason for the tooltip.
+ */
 function useMetrics() {
-  const [metrics, setMetrics] = useState({ cpu: 0, ram: 0 });
+  const [metrics, setMetrics] = useState({ cpu: null, ram: null, error: null });
 
   useEffect(() => {
     let active = true;
@@ -19,10 +29,21 @@ function useMetrics() {
       if (!isElectron) return;
       try {
         const res = await window.rama.system.getMetrics();
-        if (active && res.ok) {
-          setMetrics({ cpu: res.data.cpu.usage, ram: res.data.ram.usedPct });
+        if (!active) return;
+        if (res?.ok && res.data) {
+          const cpu = res.data.cpu?.usage;
+          const ram = res.data.ram?.usedPct;
+          setMetrics({
+            cpu: typeof cpu === 'number' ? cpu : null,
+            ram: typeof ram === 'number' ? ram : null,
+            error: null,
+          });
+        } else {
+          setMetrics(prev => ({ ...prev, error: res?.error ?? 'metrics unavailable' }));
         }
-      } catch { /* ignore */ }
+      } catch (err) {
+        if (active) setMetrics(prev => ({ ...prev, error: err?.message ?? 'metrics call failed' }));
+      }
     };
     poll();
     const id = setInterval(poll, 5000);   // 5s — was 3s, reduced for perf
@@ -45,12 +66,17 @@ function Clock() {
   );
 }
 
-function MetricPill({ label, value, warn = 70, danger = 90 }) {
-  const color = value >= danger ? 'var(--red)' : value >= warn ? 'var(--gold)' : 'var(--accent)';
+function MetricPill({ label, value, warn = 70, danger = 90, title }) {
+  const unread = typeof value !== 'number';
+  const color = unread
+    ? 'var(--muted)'
+    : value >= danger ? 'var(--red)' : value >= warn ? 'var(--gold)' : 'var(--accent)';
   return (
-    <div className="metric-pill no-drag" style={{ borderColor: color + '44' }}>
+    <div className="metric-pill no-drag" style={{ borderColor: color + '44' }} title={title}>
       <span style={{ color: 'var(--muted)', fontSize: '10px' }}>{label}</span>
-      <span style={{ color, fontWeight: 700, minWidth: '28px', textAlign: 'right' }}>{value}%</span>
+      <span style={{ color, fontWeight: 700, minWidth: '28px', textAlign: 'right' }}>
+        {unread ? '--' : `${value}%`}
+      </span>
     </div>
   );
 }
@@ -129,7 +155,7 @@ function TitleBtn({ onClick, label, title, hoverColor, isClose }) {
 
 // ─── Main Titlebar ────────────────────────────────────────────────────────────
 export default function Titlebar() {
-  const { cpu, ram } = useMetrics();
+  const { cpu, ram, error: metricsError } = useMetrics();
   const [maximized, setMaximized] = useState(false);
   const [showAuth,  setShowAuth]  = useState(false);
 
@@ -223,8 +249,10 @@ export default function Titlebar() {
 
         {/* Center — metrics */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', WebkitAppRegion: 'no-drag' }}>
-          <MetricPill label="CPU" value={cpu} />
-          <MetricPill label="RAM" value={ram} />
+          <MetricPill label="CPU" value={cpu}
+            title={metricsError ? `No reading: ${metricsError}` : 'CPU load'} />
+          <MetricPill label="RAM" value={ram}
+            title={metricsError ? `No reading: ${metricsError}` : 'Memory in use'} />
           <Clock />
           {voiceActive && (
             <div title="Voice active — say 'Hey Rāma'" style={{

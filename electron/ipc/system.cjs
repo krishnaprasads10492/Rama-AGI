@@ -118,7 +118,11 @@ function register(ipcMain) {
         ok: true,
         data: {
           cpu: {
-            usage:       Math.round(cpu.currentLoad),
+            // null, not 0, when the load could not actually be measured.
+            // Math.round(null) is 0, which is indistinguishable from a genuinely
+            // idle machine — the UI needs to be able to tell those apart and say
+            // "no reading" instead of confidently displaying 0%.
+            usage:       typeof cpu.currentLoad === 'number' ? Math.round(cpu.currentLoad) : null,
             cores:       cpu.cpus?.map(c => Math.round(c.load)) ?? [],
             temp:        temp.main ?? null,
             tempCores:   temp.cores ?? [],
@@ -320,8 +324,8 @@ function register(ipcMain) {
         const [cpu, mem] = await Promise.all([si.currentLoad(), si.mem()]);
         if (stopped) return;
         event.sender.send('system:metrics-stream', {
-          cpu:      Math.round(cpu.currentLoad),
-          ram:      Math.round((mem.used / mem.total) * 100),
+          cpu:      typeof cpu.currentLoad === 'number' ? Math.round(cpu.currentLoad) : null,
+          ram:      mem.total > 0 ? Math.round((mem.used / mem.total) * 100) : null,
           ts:       Date.now(),
           // How long this sample itself took to gather — surfaced so the UI
           // can show "stats may be delayed" honestly instead of pretending
