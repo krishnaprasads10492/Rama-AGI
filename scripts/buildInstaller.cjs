@@ -954,7 +954,10 @@ async function packageApp(dirOnly, { noSignEdit = false } = {}) {
     for (const l of r.tail.split('\n')) plain(`    ${l}`);
     plain('');
   }
-  return { ok: false, tail: r.tail };
+  // recentText must be carried through: the caller classifies the failure from
+  // it to decide whether the retry rung applies. Returning only `tail` left that
+  // classification permanently false.
+  return { ok: false, tail: r.tail, recentText: r.recentText };
 }
 
 const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
@@ -1029,7 +1032,7 @@ async function zipUnpacked() {
 
 const MB = (bytes) => `${(bytes / 1048576).toFixed(1)} MB`;
 
-function report({ archiver, dirOnly, degraded, archive, salvaged, failureTail, nsisNotes = [], unbranded = false }) {
+function report({ archiver, dirOnly, degraded, archive, salvaged, failureTail, nsisNotes = [], unbranded = false, symlinkCause = false }) {
   stage(5, 'REPORT — what is on disk');
 
   const outDir = path.join(ROOT, 'dist-electron');
@@ -1088,13 +1091,19 @@ function report({ archiver, dirOnly, degraded, archive, salvaged, failureTail, n
       plain(`  ${C.bold}Why electron-builder failed (last lines):${C.reset}`);
       for (const l of failureTail.split('\n')) plain(`    ${C.red}${l}${C.reset}`);
     }
-    if (isSymlinkPrivilegeFailure(failureTail)) {
+    if (symlinkCause || isSymlinkPrivilegeFailure(failureTail)) {
       plain('');
-      plain(`  ${C.bold}That is the winCodeSign symlink-privilege problem. The fix:${C.reset}`);
-      plain('    Settings > Privacy & security > For developers > Developer Mode = On');
-      plain('    (or build from an Administrator terminal), then run this again.');
-      plain('    electron-builder unpacks a bundle containing macOS symlinks, and');
-      plain('    Windows needs that privilege to create them. Nothing here is at fault.');
+      plain(`  ${C.bold}This is the winCodeSign symlink-privilege problem.${C.reset}`);
+      plain('  electron-builder unpacks a bundle containing macOS symlinks, and Windows');
+      plain('  needs a privilege for that which a standard account does not hold.');
+      plain('  Nothing in Rama\'s source causes it and no source change can grant it.');
+      plain('');
+      plain(`  ${C.bold}Pick either fix, then run this again:${C.reset}`);
+      plain('    1. Settings > Privacy & security > For developers > Developer Mode = On');
+      plain('    2. or, in an Administrator terminal, one line:');
+      plain(`       ${C.cyan}reg add "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock" ` +
+            `/t REG_DWORD /f /v AllowDevelopmentWithoutDevLicense /d 1${C.reset}`);
+      plain('    Either grants the privilege for good; this is not needed again.');
     }
     if (nsisNotes.length > 0) {
       plain('');
@@ -1254,6 +1263,8 @@ async function main() {
         dirOnly: true,
         salvaged: true,
         failureTail: packaged.tail,
+        // Classified from the wider buffer, not the twelve displayed lines.
+        symlinkCause: isSymlinkPrivilegeFailure(packaged.recentText ?? packaged.tail),
         degraded: deps.degraded,
         archive,
         nsisNotes,
