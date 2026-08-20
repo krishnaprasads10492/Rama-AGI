@@ -416,6 +416,10 @@ const RAMA_API = {
     getZoom:   ()      => ipcRenderer.invoke('appearance:get-zoom'),
     setZoom:   (f)     => ipcRenderer.invoke('appearance:set-zoom', f),
     nudgeZoom: (delta) => ipcRenderer.invoke('appearance:nudge-zoom', delta),
+    // Hand control back to the automatic display fit, and inspect what that fit
+    // would choose — no capability gate, same class as window minimize/maximize.
+    resetZoom:   ()    => ipcRenderer.invoke('appearance:reset-zoom'),
+    displayInfo: ()    => ipcRenderer.invoke('appearance:display-info'),
   },
 
   // ── Voice (progressive ladder: text → capture → local STT → cloud STT) ─────

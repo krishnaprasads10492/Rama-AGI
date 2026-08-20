@@ -52,6 +52,9 @@ const dataStore    = require('./dataStore.cjs');
 const badgeWindow  = require('./badgeWindow.cjs');
 const badgeState   = require('./lib/badgeState.cjs');
 
+// ─── Appearance (persisted zoom + first-run fit to the display) ──────────────
+const appearanceState = require('./lib/appearanceState.cjs');
+
 // ─── Constants ──────────────────────────────────────────────────────────────
 const isDev    = !app.isPackaged;
 const isHidden = process.argv.includes('--hidden');   // Launched by auto-start
@@ -365,17 +368,56 @@ function registerBadgeIpc(ipcMain) {
   });
 }
 
+/**
+ * Apply the zoom this display deserves, once the renderer has loaded.
+ *
+ * Must run after load: `setZoomFactor` is per-webContents and is reset by a
+ * navigation, so setting it at window-creation time would be silently undone by
+ * `loadRenderer`. Called from `did-finish-load`, which fires for the dev server,
+ * the built bundle and the diagnostic page alike.
+ */
+function applyResolvedZoom(reason = 'load') {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  try {
+    const { screen } = require('electron');
+    const display = screen.getPrimaryDisplay();
+    const resolved = appearanceState.resolveZoom(display.workAreaSize, display.scaleFactor);
+    mainWindow.webContents.setZoomFactor(resolved.zoom);
+    if (resolved.fitted) {
+      console.warn(
+        `[appearance] fitted zoom ${resolved.zoom} to ${display.workAreaSize.width}x${display.workAreaSize.height} DIP `
+        + `(scaleFactor ${display.scaleFactor}) — ${reason}`,
+      );
+    }
+    return resolved;
+  } catch (err) {
+    console.warn('[appearance] could not resolve zoom:', err.message);
+    return null;
+  }
+}
+
 function registerAppearance(ipcMain) {
+  // A zoom master sets by hand is remembered and stops the automatic fit from
+  // ever overriding it again. Previously nothing was written down at all, so the
+  // value reverted to 1.0 on the next launch and the setting looked broken.
   ipcMain.handle('appearance:set-zoom', async (_e, factor) => {
     if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'No window' };
     const z = clampZoom(factor);
     mainWindow.webContents.setZoomFactor(z);
-    return { ok: true, zoom: z, min: ZOOM_MIN, max: ZOOM_MAX };
+    appearanceState.rememberMasterZoom(z);
+    return { ok: true, zoom: z, min: ZOOM_MIN, max: ZOOM_MAX, source: 'master' };
   });
 
   ipcMain.handle('appearance:get-zoom', async () => {
     if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'No window' };
-    return { ok: true, zoom: mainWindow.webContents.getZoomFactor(), min: ZOOM_MIN, max: ZOOM_MAX };
+    const state = appearanceState.load();
+    return {
+      ok: true,
+      zoom: mainWindow.webContents.getZoomFactor(),
+      min: ZOOM_MIN, max: ZOOM_MAX,
+      source: state.source,
+      fittedFor: state.fittedFor,
+    };
   });
 
   // Nudge by a step — what "make the text bigger" resolves to at tier 0
@@ -384,10 +426,41 @@ function registerAppearance(ipcMain) {
     const current = mainWindow.webContents.getZoomFactor();
     const z = clampZoom(current + (Number(delta) || 0));
     mainWindow.webContents.setZoomFactor(z);
+    appearanceState.rememberMasterZoom(z);
     return {
-      ok: true, zoom: z, min: ZOOM_MIN, max: ZOOM_MAX,
+      ok: true, zoom: z, min: ZOOM_MIN, max: ZOOM_MAX, source: 'master',
       atLimit: z === ZOOM_MIN || z === ZOOM_MAX,
     };
+  });
+
+  // Hand control back to the automatic fit — the way out of a zoom master no
+  // longer wants, without having to guess what this display's default was.
+  ipcMain.handle('appearance:reset-zoom', async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'No window' };
+    appearanceState.clearMasterZoom();
+    const resolved = applyResolvedZoom('reset');
+    return {
+      ok: true,
+      zoom: resolved?.zoom ?? mainWindow.webContents.getZoomFactor(),
+      min: ZOOM_MIN, max: ZOOM_MAX, source: 'auto',
+    };
+  });
+
+  // What the fit would choose for the current display, without applying it.
+  ipcMain.handle('appearance:display-info', async () => {
+    try {
+      const { screen } = require('electron');
+      const d = screen.getPrimaryDisplay();
+      return {
+        ok: true,
+        workArea: d.workAreaSize,
+        scaleFactor: d.scaleFactor,
+        suggestedZoom: appearanceState.fitZoomFor(d.workAreaSize),
+        reference: { width: appearanceState.REF_WIDTH, height: appearanceState.REF_HEIGHT },
+      };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   });
 }
 
@@ -471,6 +544,11 @@ function createMainWindow() {
       { ok: false, what: 'Renderer', detail: `${desc} (${code}) — ${url}` },
     ]));
   });
+
+  // Zoom is per-webContents and a navigation resets it, so it is applied after
+  // every load rather than once at creation — otherwise loadRenderer's own
+  // navigation would silently undo it.
+  mainWindow.webContents.on('did-finish-load', () => applyResolvedZoom('did-finish-load'));
 
   // Show once ready to avoid white flash
   mainWindow.once('ready-to-show', () => {
