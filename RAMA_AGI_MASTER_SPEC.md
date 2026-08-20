@@ -1697,6 +1697,8 @@ authenticated **Master session**, not merely an open store.
 
 | 60 | Build anywhere from source — self-preparing packaging pipeline | done (installer + portable produced on master's machine; only the .exe branding needs a Windows privilege) | Section 45. Two faults found: (a) `Rama.bat` option 2 called `npm run build:win` directly, so a fresh clone with no `node_modules` died on `'vite' is not recognized` — the packaging path never used `start.cjs`'s existing diagnose/install machinery; (b) on the work machine the real blocker is BeyondTrust endpoint policy refusing to start `7zip-bin@5.2.0`'s `7za.exe` (7-Zip 21.07, flagged "Vulnerable Application Version") — the process is never created, and no system 7-Zip exists. Confirmed by reading installed `electron-builder@24.13.3`: `nsis` and `portable` both need 7za (`archive.js:48/173`, `NsisTarget.js:217`), `--dir` does not. `vite build` succeeds here, so the renderer half was never at fault. Building `scripts/buildInstaller.cjs`: stage 0 toolchain/disk, stage 1 deps derived from `package.json` with exact-version checks and a 4-rung install ladder (`npm ci` → `install` → `--legacy-peer-deps` → `--ignore-scripts`), stage 2 unconditional `vite build`, stage 3 archiver capability ladder (bundled → system 7-Zip staged over `7zip-bin`'s path → none), stage 4 `electron-builder` with target set chosen by rung, stage 5 honest artefact report. `npm run build:win` kept unchanged as the raw escape hatch (I11). Built and verified: `Rama.bat` option 2 now calls the script; new `package`/`package:win`/`package:mac`/`package:linux`/`package:check` npm scripts. Three findings only running it could produce, all recorded in Section 45: (i) starting the blocked `7za.exe` **terminates the calling process** (0xC0000003, nothing after the `spawnSync` runs) — the probe had to be moved into a throwaway child process, since no error handling in-process could ever catch it; (ii) `electron-builder --dir` is **not** 7za-free as the first reading of the source suggested — it extracts `winCodeSign-2.6.0.7z` for the sign/edit-executable step even with no certificate, so the fallback rung also passes `-c.win.signAndEditExecutable=false` (cost: default `.exe` icon/metadata, stated in the report); (iii) the first native check gave a false positive — `require('node-pty')` succeeds while `node_modules/node-pty/build` holds no `.node` at all, so the check now looks for a real platform-matching binary. Also added a remembered-verdict memo (`data/system/archiver-probe.json`, gitignored, fingerprinted by size+mtime) so the blocked binary is started at most once ever and the master stops seeing BeyondTrust dialogs; `--recheck-archiver` forces a re-test. `node --check` clean. Verified end to end on the blocked machine: exit 0, 114.5 MB `Rama-AGI-1.0.0-win-unpacked-portable.zip`, 604 entries including `Rama AGI.exe` + `app.asar`, no dialog raised. **Master's personal machine: the pipeline works, the installer step fails.** A photo of that run shows it completing into a 129.7 MB portable zip via the salvage path, failing *after* the app tree was packed — so dependencies, the renderer, the archiver and packing are all fine there, and only the NSIS/portable targets fail. Fixed as a result: (a) the salvage branch was overwriting the archiver verdict with level 2, so the report told a machine with a working 7-Zip that it had none and advised installing it — the verdict now passes through, salvage is its own reported state, and the failing command's last 12 lines print at the *end* of the run where a screenshot catches them (verified against a patched throwaway copy with a faked verdict, so nothing had to start the blocked binary); (b) two real defects in `assets/installer.nsh`, a file that had never been compiled by `makensis` anywhere — it used `productName`/`version`, which are electron-builder artifactName placeholders and not NSIS defines (correct names are `PRODUCT_NAME`/`PRODUCT_FILENAME`/`VERSION`, per `Defines.js:154-158`), so the `rama://` handler would have been registered pointing at a literal unexpanded filename; and it was UTF-8 with no BOM carrying 475 non-ASCII bytes, which NSIS reads in the system codepage. Now ASCII-only with the constraint documented in-file. Cleared as a suspect: `MUI_WELCOMEPAGE_*` cannot collide — electron-builder's templates never reference it. Neither `.nsh` defect is *confirmed* to be the failure; both are warnings-not-errors in principle. **CAUSE FOUND.** The fixed report earned its keep on the next run: `Cannot create symbolic link : A required privilege is not held by the client` while 7-Zip extracted `winCodeSign\...7z`. electron-builder's winCodeSign bundle contains macOS symlinks (`darwin/10.12/lib/*.dylib`), and creating a symlink on Windows needs `SeCreateSymbolicLinkPrivilege`, which a standard account lacks unless Developer Mode is on. It fails *after* the app tree is packed, which is why it read as a packaging fault for three rounds — and the misattribution was my reporting bug, not the environment. Three responses, all in `buildInstaller.cjs`: (1) stage 0 now probes symlink creation in a temp dir and, if denied, states before the build that the installer step will fail, with the two real fixes (Developer Mode, or an elevated terminal) — the probe reproduces `EPERM` on the work machine, so detection is verified against the very condition it targets; (2) a new rung between "installer" and "portable": on a failure matching the symlink signature the installer is retried with `-c.win.signAndEditExecutable=false`, which is the only reason winCodeSign is fetched, so this yields a **real NSIS installer** at the cost of an unbranded `.exe` (rcedit lives in the skipped step) — reported explicitly; portable-zip salvage is now the third rung; (3) the failure classifier matches the master's exact error text and not unrelated NSIS errors (both directions verified). Separately, stage 0 now statically validates `assets/installer.nsh` — encoding without BOM, `${lowerCase}` symbols that NSIS cannot expand, unbalanced `!macro`/`!macroend` — verified against a deliberately broken copy (107 non-ASCII bytes, `${productName}`, `${version}`, one unclosed macro all flagged; repaired file passes). **Rung 2 shipped dead in `35348f6` and is fixed in the follow-up:** `packageApp()` returned only `tail` while `main()` classified from `recentText`, so the check saw `undefined` and the retry could never fire — found by re-reading the wiring, not by another round trip. Both rungs are now verified against a stubbed `packageApp` (no archiver needed): symlink signature → unbranded retry fires, report reads "installer + portable, .exe unbranded"; both attempts failing → portable salvage plus the privilege remedy including the `reg add` one-liner. **DONE — the installer exists.** On the master's machine the ladder ran as designed: first attempt failed extracting `winCodeSign`, rung 2 retried with `signAndEditExecutable=false`, NSIS completed, yielding `Rama AGI Setup 1.0.0.exe` (93.1 MB) and `Rama AGI 1.0.0.exe` (92.7 MB portable). That confirms the inference previously carried as unverified: the flag avoids the `winCodeSign` fetch during a *full NSIS* build, not just `--dir`. Only cost is the unbranded `.exe` (rcedit is in the skipped step); Developer Mode removes it. Also learned there: that machine *does* have a working C++ toolchain — `argon2` and `node-pty` both compiled, so the `node-pty not compiled` degradation is specific to the work machine. Three defects the successful run exposed, all fixed: (i) the report listed the previous run's salvaged zip as if it were current output — `RUN_START` is now captured before building and older artefacts are marked `(from an earlier run)` with a "do not ship them by mistake" count (verified with a file back-dated two days); (ii) `author` was missing from `package.json`, warned about on every build; (iii) `beforeBuild.cjs` never returned `false` despite its own comment saying that is what suppresses electron-builder's second native-rebuild pass, so `argon2`/`node-pty` could be compiled twice — now returns `false`, and a full `--dir` build still completes here with the change. Remaining optional work, not blocking: enable Developer Mode for a branded `.exe`, and `electron-rebuild` is a redundant devDependency now that electron-builder is told natives are handled (electron-builder itself suggests `electron-builder install-app-deps`) — left in place deliberately, since it is the mechanism `beforeBuild.cjs` uses. **Still unverified anywhere:** a completed NSIS installer, since this machine has no runnable 7-Zip at all, and the rung-2 claim that `signAndEditExecutable=false` avoids winCodeSign during a *full NSIS* build — it is verified only for `--dir`. Optional follow-up if the work machine ever needs installers: an opt-in rung that downloads a pinned, checksum-verified current 7-Zip; deliberately not built without master's say-so, since it means fetching and executing a binary. |
 
+| 61 | Fleet awareness — Rāma on several devices, staying in touch | in-progress (designed, not implemented; one decision open for master) | Section 46. Researched first: there is **no cross-device anything today** — instances are objects in one in-process `Map` with no `host`/`machineId`/`deviceId`/`lastHeartbeat` field (`instanceManager.cjs:112-133`), "sibling" discovery is a `.filter()` over that same Map (`selfCare.cjs:144-145`), a "dead" gene means a local module path failed to resolve, the API server binds `127.0.0.1` explicitly (`server/index.cjs:101`), and there is no WebSocket/mDNS/discovery/peer code at all. Usable anchors that do exist: `authCore`'s `instanceMeta.instanceId` (stable per-install UUID) + `instanceName` (`<hostname>-rama`), and `cryptoCore`'s AES-256-GCM. **Decisions recorded in Section 46:** (a) the corporate-managed machine is *not* enrolled as a peer — Rāma's IPC surface (`terminal:create`, `fs:write/delete`, `vault:*`, `apps:execute` `spawn-cli`, `system:kill-process`, `regen:*`) makes a peer channel a wider remote-access path than the RDP that was declined a turn earlier; (b) first increment uses the **existing git remote as the fleet bus** — no listener, no inbound, no NAT traversal, same outbound traffic as a `git push`, auditable as commits, at the honest cost of minute-scale eventual consistency rather than live presence; (c) fleet payloads are **encrypted** with the existing `cryptoCore` path, because `build.publish` is `"private": false` and telemetry carries hostnames, paths and OS usernames — plaintext would be a leak created by a protective feature; (d) fleet messages are a closed status vocabulary (device id/name, liveness, genomeVersion+genomeHash for drift detection, selfCare summary, task/build headline, alerts) and the reader is **never** a proxy onto `ipcMain` — a remote device may inform, never act; (e) peer identity comes from the device record, never a caller-supplied `user` and never `authClient.getFingerprint()` (`userAgent+language+screen+timezone` collides across similar laptops). Next steps, in order: **(1) gate `instance:*` — worth doing regardless of this feature.** Those handlers have no `capability.deny()` at all (`instanceManager.cjs:300-341`) and `express(id, gene, null)` skips the tier check by design for `selfCare.cjs:158`'s self-heal; caps `instances.view/spawn/express/terminate` already exist in `capabilities.json` but are unenforced at the IPC boundary. This is the same class row 59 closed for `fs`/`vault`/`terminal`/`git`/`agents`/`sandbox` and missed here; needs `preload.cjs` + every `.jsx` caller threading `currentUser`, verified with `npm run audit`. (2) Add device fields (`deviceId`, `deviceName`, `lastHeartbeat`) to instance records, anchored on `instanceMeta.instanceId`. (3) Add `fleet.view`/`fleet.publish`/`fleet.enroll` capabilities. (4) Build publish/read over the `fleet` branch with encrypted payloads and explicit master enrolment. **Blocked on master confirming the enrolment scope** before (4). |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -3580,3 +3582,148 @@ step rather than a guess recorded here as fact.
   path is allow-listed. Rāma does not try to defeat an endpoint control; it names
   it, remembers it, and delivers the artefact it can still produce.
 
+---
+
+## SECTION 46 — Fleet awareness: Rāma on several devices, staying in touch
+
+> Master's ask: run Rāma on both laptops, have the instances connect to each
+> other across devices, keep themselves in the loop, and "keep an eye on master
+> for protecting him".
+
+### What exists today, measured rather than assumed
+
+The holonic language in Section 24 describes instances that can take over from
+one another, and it is easy to read that as multi-device. It is not. Verified by
+reading the code:
+
+| Assumption | Reality |
+|---|---|
+| Instances are processes or devices | Plain objects in one `Map` inside a single Electron main process (`instanceManager.cjs:30`) |
+| Instance records identify a machine | **No `host`, `machineId`, `deviceId`, `pid`, `address` or `lastHeartbeat` field exists** (record shape, `instanceManager.cjs:112-133`) |
+| "Sibling" discovery is a network operation | A `.filter()` over the same in-process `Map` (`selfCare.cjs:144-145`) |
+| A "dead" gene means a peer stopped answering | It means a **module path failed to resolve on this filesystem** (`genome.verify()`) |
+| The API server is reachable from another device | It binds loopback explicitly: `app.listen(PORT, '127.0.0.1')` (`server/index.cjs:101`) |
+| Some transport exists to build on | None. No WebSocket, no mDNS, no discovery, no peer code. `lib/http.cjs` is outbound-only |
+
+So this is a genuinely new capability, not the wiring-up of a dormant one. Two
+useful things *do* already exist: `authCore`'s `instanceMeta` carries a stable
+per-install `instanceId` (`crypto.randomUUID()`) and an `instanceName`
+(`<hostname>-rama`), which is a real device anchor; and `dataStore` already
+encrypts everything at rest with AES-256-GCM.
+
+### The boundary that decides the whole design
+
+**One of master's two machines is corporate-managed.** BeyondTrust blocking
+`7za.exe` is proof of active endpoint policy on it. That single fact constrains
+this feature more than any technical consideration:
+
+Rāma's IPC surface includes `terminal:create` (a full interactive shell with the
+app's environment — its own source comments call it the highest-risk handler in
+the codebase), `fs:write-file` / `fs:delete-file` on arbitrary paths, the
+credential vault, `apps:execute` with `spawn-cli`, `system:kill-process`, and
+`regen:*` self-modification. A peer channel that can reach any of that is a
+remote-access path into a managed corporate endpoint with a **larger** capability
+surface than RDP — the very thing declined one exchange earlier, rebuilt in-house.
+
+**Decision: the corporate machine is not enrolled as a peer.** Fleet membership
+is for master's own devices. This is recorded as a design constraint rather than a
+configuration default, because a default can be changed casually and this should
+not be.
+
+A second, subtler trap specific to this codebase: `instance:*` handlers carry
+**no `capability.deny()` gate at all** (`instanceManager.cjs:300-341`), and
+`express(id, geneId, user)` skips its tier check when `user` is `null` — which
+`selfCare.cjs:158` relies on deliberately for self-heal. That is defensible while
+the only caller is our own renderer. It becomes privilege escalation the moment
+anything remote can influence instance state. **Gating `instance:*` is a
+prerequisite, and is worth doing regardless of whether fleet linking is ever
+built** (ledger row 59 closed this class of gap across `fs`, `vault`, `terminal`,
+`git`, `agents`, `sandbox`; `instance:*` was missed).
+
+### Transport: the git remote is already a working, sanctioned channel
+
+The obvious design is a socket between devices. It is the wrong first increment:
+it needs an inbound listener, a hole through two firewalls, NAT traversal or a
+relay, and a new mutual-authentication protocol — and on the corporate machine it
+is precisely the prohibited shape.
+
+**Decision: the first increment uses the existing git remote as the fleet bus.**
+Both machines already push and pull to it over outbound HTTPS; that is how the
+source reaches the personal laptop today. Properties this buys for free:
+
+- no listener, no inbound connection, no new attack surface
+- no discovery protocol — membership is whoever can push to the branch, which is
+  already an authenticated act
+- works from behind corporate egress filtering, because it is the same traffic as
+  a `git push`
+- fully auditable after the fact: every fleet update is a commit
+
+The cost, stated plainly: it is **eventually consistent, on the order of minutes**,
+not a live socket. For "are my devices well, what is each one doing, tell me if
+something needs me" that is sufficient. Real-time presence is a later increment
+and personal-devices-only.
+
+Shape: a dedicated `fleet` branch, one file per device keyed by
+`instanceMeta.instanceId`, holding an **encrypted** payload. Encryption is not
+decoration here — the publish repo is configured `"private": false`
+(`package.json` build.publish), and device telemetry contains hostnames,
+filesystem paths and OS usernames. Plaintext fleet state in a public repo would be
+an information leak created by a feature meant to protect master. Payloads are
+sealed with the existing `cryptoCore` AES-256-GCM path so only a holder of
+master's passcode can read them, and the branch is useless to anyone else.
+
+### What is shared, enumerated closed
+
+A fleet message is a **status report, not a command channel**. The verb set is
+explicitly closed, and nothing in it can reach `ipcMain`:
+
+- device identity: `deviceId`, `deviceName`, OS, app version
+- liveness: `lastSeen`, uptime
+- genome: `genomeVersion`, `genomeHash` — so drift between devices becomes
+  visible, which `stats().genomeConsistent` currently cannot see past one process
+- health: the `selfCare` sweep *summary* — counts and severities
+- activity: current task/build status, at a headline level
+- alerts master should see
+
+Never in a fleet message: file contents, credential material, terminal output,
+screen captures, keystrokes, or anything resembling covert observation.
+
+**The fleet reader must never be a transparent proxy onto IPC.** Peers cannot
+invoke `fs:*`, `terminal:*`, `vault:*`, `apps:execute`, `system:kill-process`,
+`regen:*`, `sandbox:*`, or `instance:express`. A remote device can *inform*, and
+master can then act locally; a remote device cannot *act*.
+
+Peer identity is derived from the signed/encrypted payload and the device record,
+**never** from a caller-supplied `user` object and **never** from
+`authClient.getFingerprint()` — that fingerprint is `userAgent + language +
+screen size + timezone offset`, which two similar laptops produce identically. It
+is replay-resistance for a stolen token, not device attestation.
+
+New capabilities, following the three-step pattern in `capability.cjs`:
+`fleet.view` (tier 2, read the fleet panel), `fleet.publish` (tier 0),
+`fleet.enroll` (tier 0). Enrolment is an explicit master act with a pairing step —
+never automatic discovery, so a device can never quietly join.
+
+### "Keep an eye on master" — what that honestly means here
+
+Master is both the subject and the person asking, so consent is not in question.
+What matters is that it stays the kind of watching that protects rather than the
+kind that surveils, and the line is **transparency to master**, which is already
+a governing invariant of this project.
+
+In scope: noticing a device is unwell (disk nearly full — the personal machine
+was at 9835 MB free), that a build failed, that the vault was opened, that
+threatShield saw something, that a task started on one device is unfinished; and
+telling master, on whichever device he is at. Out of scope, permanently:
+keystroke capture, screen recording, covert location or activity tracking, or any
+collection master cannot himself inspect. If Rāma ever holds a fact about master
+that master cannot see, the loyalty model is broken, whatever the intent was.
+
+### Status
+
+Design recorded, **not implemented**. Deliberately not built in the same pass
+that recorded it: the enrolment boundary above is master's call, not Rāma's, and
+building a device-linking mechanism before that answer is settled would be
+building the thing whose scope is the open question. See ledger row 61 for the
+ordered next steps, of which the first — gating `instance:*` — stands on its own
+merits.
