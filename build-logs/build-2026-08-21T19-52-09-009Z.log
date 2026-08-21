@@ -1,0 +1,297 @@
+Rāma AGI packaging log
+started  2026-08-21T19:52:09.011Z
+node     v20.10.0 on win32-x64
+root     C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI
+argv     (none)
+
+
+  ⬢ Rāma AGI — packaging v1.0.0
+
+▸ STAGE 0  TOOLCHAIN — can this machine package at all
+01:22:09 ✓ Node.js 20.10.0
+01:22:09 ! Node 20.10.0 is an older patch line than Vite 6 prefers.
+01:22:09 !   If the renderer build fails on "crypto.hash is not a function", that is why —
+01:22:09 !   Node 22 LTS fixes it. Harmless otherwise.
+01:22:09 ✓ npm 10.4.0
+01:22:09 ✓ Project rama-agi v1.0.0 at C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI
+01:22:10 ✓ Disk space 6063 MB free
+01:22:10 ✓ Symlink privilege present — winCodeSign will extract cleanly
+01:22:10 ✓ assets\installer.nsh checks out (ASCII, symbols resolvable, macros balanced)
+
+▸ STAGE 1  DEPENDENCIES — what is missing, and installing it
+01:22:10 ✓ All 30 pinned packages present at the pinned versions
+01:22:10 ✓ argon2 native binary present — bin/win32-x64-125/argon2.node
+01:22:10 ✓ node-pty native binary present — bin/win32-x64-125/node-pty.node
+
+▸ STAGE 2  RENDERER — building the production bundle
+01:22:10 · vite build
+
+$ npm run build
+
+> rama-agi@1.0.0 build
+> vite build
+
+The CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.
+vite v6.3.5 building for production...
+transforming...
+✓ 88 modules transformed.
+Generated an empty chunk: "vendor-react".
+rendering chunks...
+computing gzip size...
+build/index.html                           1.54 kB │ gzip:  0.77 kB
+build/assets/index-DuFH6W7d.css           10.42 kB │ gzip:  3.07 kB
+build/assets/vendor-react-l0sNRNKZ.js      0.00 kB │ gzip:  0.02 kB
+build/assets/selfModify-CKHX_jEM.js        0.54 kB │ gzip:  0.32 kB
+build/assets/vendor-zustand-D9Bq3YzB.js    0.61 kB │ gzip:  0.39 kB
+build/assets/ipcClient-Cl_qFDlK.js         2.26 kB │ gzip:  0.81 kB
+build/assets/Knowledge-Be9FGkMt.js         2.67 kB │ gzip:  1.17 kB
+build/assets/ramaClient-BCajMRQx.js        3.03 kB │ gzip:  1.53 kB
+build/assets/Home-DRMhVk4N.js              4.11 kB │ gzip:  1.68 kB
+build/assets/Terminal-D6EyD0Jc.js          4.25 kB │ gzip:  1.90 kB
+build/assets/StockMind-D825ht6U.js         7.67 kB │ gzip:  2.51 kB
+build/assets/Introspect-DVMQyRJ9.js        9.39 kB │ gzip:  2.92 kB
+build/assets/Settings-Dy0N2-pC.js          9.99 kB │ gzip:  3.55 kB
+build/assets/Genome-Cd0ab3aV.js           10.29 kB │ gzip:  3.35 kB
+build/assets/Agents-DhgIQZHi.js           11.50 kB │ gzip:  3.72 kB
+build/assets/Users-BBBsDGW2.js            12.81 kB │ gzip:  3.91 kB
+build/assets/GitSync-NVodRtnD.js          13.63 kB │ gzip:  4.06 kB
+build/assets/Chat-CnpDy2kd.js             14.16 kB │ gzip:  5.11 kB
+build/assets/Intelligence-DZegDA5c.js     15.11 kB │ gzip:  4.36 kB
+build/assets/Models-BohU1JCp.js           15.89 kB │ gzip:  4.62 kB
+build/assets/System-NF6pQE9c.js           16.98 kB │ gzip:  4.99 kB
+build/assets/RamaMind-DwyU2Q1i.js         17.18 kB │ gzip:  5.87 kB
+build/assets/Evolution-qOco2ND2.js        18.23 kB │ gzip:  5.31 kB
+build/assets/IDE-XIvGwB21.js              20.61 kB │ gzip:  6.80 kB
+build/assets/Resources-UEEg6-ii.js        21.33 kB │ gzip:  6.15 kB
+build/assets/vendor-router-CPDDBH_g.js    43.79 kB │ gzip: 15.77 kB
+build/assets/index-BzRiaZxU.js           282.68 kB │ gzip: 86.79 kB
+✓ built in 1.19s
+01:22:12 ✓ Renderer built → build/
+
+▸ STAGE 3  ARCHIVER — is a usable 7-Zip actually reachable
+01:22:12 ✓ L0 bundled 7-Zip 21.07 (remembered from 2026-08-20 11:56) — installer targets available
+01:22:12 ✓ Build manifest written — the app will know its own limits at runtime
+
+▸ STAGE 4  PACKAGE — installer
+01:22:12 · npx electron-builder --win --x64
+
+$ npx electron-builder --win --x64
+  • electron-builder  version=24.13.3 os=10.0.26200
+  • loaded configuration  file=package.json ("build" field)
+  • @electron/rebuild not required if you use electron-builder, please consider to remove excess dependency from devDependencies
+
+To ensure your native dependencies are always matched electron version, simply add script `"postinstall": "electron-builder install-app-deps" to your `package.json`
+
+⬢ Rāma AGI — Pre-build checks...
+
+  ✓ icon.ico found
+
+  ⬢ Rebuilding native modules for Electron...
+- Searching dependency tree
+Building the projects in this solution one at a time. To enable parallel build, please add the "-m" switch.
+  opt.c
+  argon2.c
+  blake2b.c
+  core.c
+  encoding.c
+  thread.c
+  win_delay_load_hook.cc
+  libargon2.vcxproj -> C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\argon2\build\Release\\libargon2.lib
+  argon2.cpp
+  win_delay_load_hook.cc
+     Creating library C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\argon2\build\Release\argon2.lib and object C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\argon2\build\Release\argon2.exp
+  Generating code
+  Previous IPDB not found, fall back to full compilation.
+  All 416 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  Finished generating code
+  argon2.vcxproj -> C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\argon2\build\Release\\argon2.node
+Warning: Do not know how to convert MSVS attribute SpectreMitigation
+Warning: Do not know how to convert MSVS attribute SpectreMitigation
+Warning: Do not know how to convert MSVS attribute SpectreMitigation
+Warning: Do not know how to convert MSVS attribute SpectreMitigation
+Warning: Do not know how to convert MSVS attribute SpectreMitigation
+Warning: Do not know how to convert MSVS attribute SpectreMitigation
+Warning: Do not know how to convert MSVS attribute SpectreMitigation
+Warning: Do not know how to convert MSVS attribute SpectreMitigation
+Warning: Do not know how to convert MSVS attribute SpectreMitigation
+Warning: Do not know how to convert MSVS attribute SpectreMitigation
+Warning: Do not know how to convert MSVS attribute SpectreMitigation
+Warning: Do not know how to convert MSVS attribute SpectreMitigation
+Building the projects in this solution one at a time. To enable parallel build, please add the "-m" switch.
+  conpty.cc
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(407,61): warning C4003: not enough arguments for function-like macro invocation 'min' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(408,61): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(438,62): warning C4003: not enough arguments for function-like macro invocation 'min' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(439,62): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(446,74): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(457,74): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\nan\nan.h(709,37): warning C4996: 'v8::Isolate::IdleNotificationDeadline': Use MemoryPressureNotification() to influence the GC schedule. [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty.vcxproj]
+  path_util.cc
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(407,61): warning C4003: not enough arguments for function-like macro invocation 'min' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(408,61): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(438,62): warning C4003: not enough arguments for function-like macro invocation 'min' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(439,62): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(446,74): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(457,74): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\nan\nan.h(709,37): warning C4996: 'v8::Isolate::IdleNotificationDeadline': Use MemoryPressureNotification() to influence the GC schedule. [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty.vcxproj]
+  win_delay_load_hook.cc
+  Generating code
+  Previous IPDB not found, fall back to full compilation.
+  All 1039 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  Finished generating code
+  conpty.vcxproj -> C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\Release\\conpty.node
+  conpty_console_list.cc
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(407,61): warning C4003: not enough arguments for function-like macro invocation 'min' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty_console_list.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(408,61): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty_console_list.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(438,62): warning C4003: not enough arguments for function-like macro invocation 'min' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty_console_list.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(439,62): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty_console_list.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(446,74): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty_console_list.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(457,74): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty_console_list.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\nan\nan.h(709,37): warning C4996: 'v8::Isolate::IdleNotificationDeadline': Use MemoryPressureNotification() to influence the GC schedule. [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\conpty_console_list.vcxproj]
+  win_delay_load_hook.cc
+  Generating code
+  Previous IPDB not found, fall back to full compilation.
+  All 242 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  Finished generating code
+  conpty_console_list.vcxproj -> C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\Release\\conpty_console_list.node
+  Agent.cc
+  AgentCreateDesktop.cc
+  ConsoleFont.cc
+  ConsoleInput.cc
+  ConsoleInputReencoding.cc
+  ConsoleLine.cc
+  DebugShowInput.cc
+  DefaultInputMap.cc
+  EventLoop.cc
+  InputMap.cc
+  LargeConsoleRead.cc
+  NamedPipe.cc
+  Scraper.cc
+  Terminal.cc
+  Win32Console.cc
+  Win32ConsoleBuffer.cc
+  main.cc
+  BackgroundDesktop.cc
+  Buffer.cc
+  DebugClient.cc
+  GenRandom.cc
+  OwnedHandle.cc
+  StringUtil.cc
+  WindowsSecurity.cc
+  WindowsVersion.cc
+  WinptyAssert.cc
+  WinptyException.cc
+  WinptyVersion.cc
+  win_delay_load_hook.cc
+  Generating code
+  Previous IPDB not found, fall back to full compilation.
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\deps\winpty\src\agent\Agent.cc(231): warning C4722: 'Agent::~Agent': destructor never returns, potential memory leak [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\deps\winpty\src\winpty-agent.vcxproj]
+  All 1772 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  Finished generating code
+  winpty-agent.vcxproj -> C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\Release\\winpty-agent.exe
+  AgentLocation.cc
+  winpty.cc
+  BackgroundDesktop.cc
+  Buffer.cc
+  DebugClient.cc
+  GenRandom.cc
+  OwnedHandle.cc
+  StringUtil.cc
+  WindowsSecurity.cc
+  WindowsVersion.cc
+  WinptyAssert.cc
+  WinptyException.cc
+  WinptyVersion.cc
+  win_delay_load_hook.cc
+     Creating library C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\Release\winpty.lib and object C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\Release\winpty.exp
+  Generating code
+  Previous IPDB not found, fall back to full compilation.
+  All 1056 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  Finished generating code
+  winpty.vcxproj -> C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\Release\\winpty.dll
+  winpty.cc
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(407,61): warning C4003: not enough arguments for function-like macro invocation 'min' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(408,61): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(438,62): warning C4003: not enough arguments for function-like macro invocation 'min' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(439,62): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(446,74): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(457,74): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\nan\nan.h(709,37): warning C4996: 'v8::Isolate::IdleNotificationDeadline': Use MemoryPressureNotification() to influence the GC schedule. [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\src\win\winpty.cc(43,55): warning C4311: 'type cast': pointer truncation from 'HANDLE' to 'int' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\src\win\winpty.cc(43,55): warning C4302: 'type cast': truncation from 'HANDLE' to 'int' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\src\win\winpty.cc(54,8): warning C4311: 'type cast': pointer truncation from 'HANDLE' to 'int' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\src\win\winpty.cc(54,8): warning C4302: 'type cast': truncation from 'HANDLE' to 'int' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\src\win\winpty.cc(109,26): warning C4018: '<': signed/unsigned mismatch [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\src\win\winpty.cc(220,110): warning C4311: 'type cast': pointer truncation from 'HANDLE' to 'int' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\src\win\winpty.cc(220,110): warning C4302: 'type cast': truncation from 'HANDLE' to 'int' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\src\win\winpty.cc(221,117): warning C4311: 'type cast': pointer truncation from 'HANDLE' to 'int' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\src\win\winpty.cc(221,117): warning C4302: 'type cast': truncation from 'HANDLE' to 'int' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\src\win\winpty.cc(238,1): warning C4533: initialization of 'marshal' is skipped by 'goto cleanup' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\src\win\winpty.cc(218): message : see declaration of 'marshal' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\src\win\winpty.cc(238): message : see declaration of 'cleanup' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\src\win\winpty.cc(285,91): warning C4312: 'type cast': conversion from 'T' to 'HANDLE' of greater size [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+          with
+          [
+              T=int32_t
+          ]
+  path_util.cc
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(407,61): warning C4003: not enough arguments for function-like macro invocation 'min' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(408,61): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(438,62): warning C4003: not enough arguments for function-like macro invocation 'min' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(439,62): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(446,74): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+<HOME>\.electron-gyp\31.7.7\include\node\v8-function-callback.h(457,74): warning C4003: not enough arguments for function-like macro invocation 'max' [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\nan\nan.h(709,37): warning C4996: 'v8::Isolate::IdleNotificationDeadline': Use MemoryPressureNotification() to influence the GC schedule. [C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\pty.vcxproj]
+  win_delay_load_hook.cc
+  Generating code
+  Previous IPDB not found, fall back to full compilation.
+  All 853 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  Finished generating code
+  pty.vcxproj -> C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\node-pty\build\Release\\pty.node
+√ Rebuild Complete
+  ✓ Native modules rebuilt
+
+  • packaging       platform=win32 arch=x64 electron=31.7.7 appOutDir=dist-electron\win-unpacked
+
+⬢ Rāma AGI — Post-pack verification...
+
+  ✓ resources/app.asar
+  ✓ app.asar (packed)
+
+  ✓ Pack verification passed
+
+  • building        target=nsis file=dist-electron\Rama AGI Setup 1.0.0.exe archs=x64 oneClick=false perMachine=false
+  • building block map  blockMapFile=dist-electron\Rama AGI Setup 1.0.0.exe.blockmap
+  • building        target=portable file=dist-electron\Rama AGI 1.0.0.exe archs=x64
+01:24:26 ✓ electron-builder finished
+01:24:26 · verifying the packaged app can resolve its dependencies
+
+$ node "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\scripts\\auditPackage.cjs"
+
+  ⬢ Rāma AGI — packaged dependency audit
+  · reading dist-electron\win-unpacked\resources\app.asar
+  · 12497 entries, 743 package dirs
+  · entry points: electron/main.cjs, electron/preload.cjs, server/index.cjs
+
+  · walked 301 reachable file(s) from 3 entry point(s)
+  ! 1 optional package(s) absent — guarded by try/catch, so they degrade:
+      osx-temperature-sensor  (wanted by node_modules/systeminformation/lib/cpu.js)
+
+  ✓ every package on a real load path is present
+
+01:24:26 ✓ Packaged app resolves every dependency on its load path
+
+▸ STAGE 5  REPORT — what is on disk
+
+  dist-electron/
+    Rama AGI 1.0.0.exe                             103.9 MB
+    Rama AGI Setup 1.0.0.exe                       104.3 MB
+    win-unpacked/                                  unpacked app — run the .exe inside
+
+  Archiver        bundled 7-Zip 21.07
+  Output type     installer + portable
+
+01:24:26 ✓ Installer build complete.
+  Run the Setup .exe to install; the portable .exe runs without installing.
+  Full transcript: data\logs\build-2026-08-21T19-52-09-009Z.log
+

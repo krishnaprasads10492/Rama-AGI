@@ -1,0 +1,19 @@
+{
+  "ts": "2026-08-21T19:56:00.847Z",
+  "origin": "boot-check",
+  "packaged": true,
+  "fatalKind": "boot-incomplete",
+  "missingModule": null,
+  "message": "Boot path incomplete: session:is-first-run, session:unlock, session:status, store:get",
+  "code": null,
+  "requireStack": [],
+  "stack": [
+    "Error: Boot path incomplete: session:is-first-run, session:unlock, session:status, store:get",
+    "    at <HOME>\\AppData\\Local\\Temp\\3IEuUaG6qOQ7wJizMnV8mLx4hoB\\resources\\app.asar\\electron\\main.cjs:1144:29"
+  ],
+  "versions": {
+    "node": "20.18.0",
+    "electron": "31.7.7"
+  },
+  "platform": "win32-x64"
+}
