@@ -162,7 +162,14 @@ function stats() {
     byStatus[p.status] = (byStatus[p.status] || 0) + 1;
     byKind[p.kind]     = (byKind[p.kind]   || 0) + 1;
   }
-  return { total: ledger.size, byStatus, byKind, appliers: [...appliers.keys()] };
+  return {
+    total: ledger.size, byStatus, byKind, appliers: [...appliers.keys()],
+    // Reported, because an audit trail that silently is not being written is worse
+    // than none — master should be able to see that it is only in memory.
+    durable: isDurable(),
+    unsaved: pendingPersist,
+    auditEntries: audit.length,
+  };
 }
 
 // ─── Decide ───────────────────────────────────────────────────────────────────
@@ -268,6 +275,13 @@ function register(ipcMain) {
     const denied = canView(user); if (denied) return denied;
     return { ok: true, data: audit.slice(0, limit || 100) };
   });
+  // Force a write now rather than waiting for the coalescing timer — useful before
+  // a deliberate restart, and it reports honestly when the store is locked.
+  ipcMain.handle('proposals:flush',   async (_e, user) => {
+    const denied = canView(user); if (denied) return denied;
+    const written = flush();
+    return { ok: true, data: { written, durable: isDurable() } };
+  });
   // Creating a proposal is intent, not authority — Rāma's own engines call
   // `create()` directly with no user, and apply() is what is gated. A
   // renderer-initiated create still needs the view capability so it cannot be
@@ -295,6 +309,126 @@ function summarise(p) {
 function log(action, p, extra) {
   audit.unshift({ ts: Date.now(), action, id: p.id, kind: p.kind, status: p.status, ...extra });
   if (audit.length > 1000) audit.pop();
+  persist();
+}
+
+// ─── Durability (Section 58) ──────────────────────────────────────────────────
+/**
+ * The ledger was a `Map` plus two arrays and nothing else. Restarting the app
+ * discarded every pending and approved proposal and **the entire audit trail** —
+ * which quietly contradicted this module's own header claim of "one audit trail",
+ * and made I6 a rule enforced only within a single run.
+ *
+ * WHY THE ENCRYPTED STORE AND NOT A DATABASE. Master offered a DB; it would be the
+ * wrong tool here. `dataStore` already exists, is already encrypted at rest, and is
+ * the pattern `instanceManager` uses. A local database would add an external
+ * service that has to be running for the audit trail to work, which makes it *less*
+ * reliable, and its files would be plaintext by default — an approval trail naming
+ * files and their contents is exactly what should not sit unencrypted on disk. The
+ * volume also does not warrant one: 500 records with bodies stripped.
+ *
+ * WHY BODIES ARE STRIPPED ONCE DECIDED. A proposal's `changes[].content` holds whole
+ * file bodies. Persisting 500 of those and rewriting them on every state transition
+ * would put tens of megabytes through the encryption path repeatedly. Content is
+ * kept while a proposal is `pending` or `approved`, because applying it needs the
+ * bytes; once `applied`, `rejected` or `failed` it is replaced by a sha256 and a
+ * length. The audit stays meaningful — you can still prove what was applied — and
+ * the store stays bounded.
+ */
+const DURABLE_STATUSES = new Set([STATUS.PENDING, STATUS.APPROVED]);
+
+let persistTimer   = null;
+let pendingPersist = false;
+
+function store() {
+  try { return require('../dataStore.cjs'); } catch { return null; }
+}
+
+/** Is the ledger actually being written anywhere right now? */
+function isDurable() {
+  try { return require('../cryptoCore.cjs').isUnlocked() === true; }
+  catch { return false; }
+}
+
+/** A proposal as stored: full bytes while it still needs them, a digest after. */
+function forStorage(p) {
+  if (DURABLE_STATUSES.has(p.status)) return p;
+  return {
+    ...p,
+    changes: (p.changes || []).map(c => ({
+      action: c.action,
+      path:   c.path,
+      // Content dropped once the decision is history; the digest keeps the record
+      // provable without keeping the payload.
+      contentSha256: c.content ? crypto.createHash('sha256').update(String(c.content)).digest('hex') : null,
+      contentBytes:  c.content ? Buffer.byteLength(String(c.content)) : 0,
+      contentDropped: Boolean(c.content),
+    })),
+  };
+}
+
+/** Coalesced write — a burst of transitions costs one encryption pass. */
+function persist() {
+  pendingPersist = true;
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    flush();
+  }, 250);
+  if (persistTimer.unref) persistTimer.unref();
+}
+
+function flush() {
+  if (!pendingPersist) return false;
+  const ds = store();
+  if (!ds?.set || !isDurable()) return false;   // locked — retried on the next transition
+  try {
+    ds.set('proposals', 'ledger', order.map(id => ledger.get(id)).filter(Boolean).map(forStorage));
+    ds.set('proposals', 'audit',  audit.slice(0, 1000));
+    ds.set('proposals', 'savedAt', Date.now());
+    // `set` only marks the domain dirty; without this the write waits on the 60s
+    // autosave timer, so a crash in between would lose the approval that was just
+    // recorded. An audit trail has to be on disk when it says it is.
+    if (typeof ds.saveAll === 'function') ds.saveAll();
+    pendingPersist = false;
+    return true;
+  } catch { return false; }   // store locked mid-write — stays in memory, never plaintext
+}
+
+/**
+ * Rehydrate from the store. Called by `sessionManager` right after `loadAll()`,
+ * since nothing can be decrypted before that.
+ * @returns {{proposals:number, audit:number}}
+ */
+function restore() {
+  const ds = store();
+  if (!ds?.get) return { proposals: 0, audit: 0 };
+
+  let saved;
+  try { saved = ds.get('proposals'); } catch { return { proposals: 0, audit: 0 }; }
+  if (!saved) return { proposals: 0, audit: 0 };
+
+  let count = 0;
+  for (const p of Array.isArray(saved.ledger) ? saved.ledger : []) {
+    if (!p?.id || ledger.has(p.id)) continue;   // never overwrite this run's state
+    ledger.set(p.id, p);
+    order.push(p.id);
+    count++;
+  }
+  // Restored records were already newest-first; re-sort so a mixed set is correct.
+  order.sort((a, b) => (ledger.get(b)?.createdAt ?? 0) - (ledger.get(a)?.createdAt ?? 0));
+  trim();
+
+  let auditCount = 0;
+  if (Array.isArray(saved.audit) && audit.length === 0) {
+    audit.push(...saved.audit.slice(0, 1000));
+    auditCount = audit.length;
+  }
+
+  // Anything created before the store was unlocked is still only in memory.
+  if (pendingPersist) flush();
+
+  return { proposals: count, audit: auditCount };
 }
 
 function trim() {
@@ -314,5 +448,7 @@ function broadcast(channel, data) {
 module.exports = {
   register, registerApplier,
   create, get, list, stats, approve, reject, apply,
+  // Durability (Section 58)
+  restore, flush, isDurable, forStorage,
   KINDS, STATUS,
 };

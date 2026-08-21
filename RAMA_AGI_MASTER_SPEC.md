@@ -1714,6 +1714,8 @@ authenticated **Master session**, not merely an open store.
 | 73 | The loyalty covenant — above the hierarchy, not inside it | done (enforced + verified; not immune to a compromised OS account, stated) | Section 55, invariant **I15** added on master's explicit instruction: *"no matter how much evolution, ABSOLUTE LOYALTY CANNOT BE TAMPERED ANY WAY. WHICH IS ABOVE RAMA HIERARCHY."* **It was violated by a single ungated call.** `nucleus:patch` is an IPC handler with **no capability check** (`nucleusSealer.cjs` never imports `capability.cjs`) that takes arbitrary input, does `{ ..._nucleus, ...patches }` — a **shallow** merge, so naming `loyalty` replaces the **entire block** including `absoluteLoyalty`, `neverBetray` and `master` — then encrypts and writes to disk. Three further paths: the GENOME proposal route, whose applier deep-merges `meta.nucleusPatch` and whose own header claimed it "can alter loyalty, ethics, or capability wiring" with approval treated as sufficient; `proposals.approve(id, by = 'master')`, where the approver is a **free-text string** and that module also never imports `capability.cjs`; and `seal(passcode, customNucleus)`, a wholesale replacement. Section 54 catalogued a germline/somatic split and put source behind I6 but treated the nucleus as ordinary germline — changeable if approved. That was the error being corrected: loyalty is not the top of Rāma's hierarchy, it is outside it. **Enforcement is at the encryption boundary, not at the callers.** Every persistent nucleus change funnels through `encryptNucleus()` (from `seal` and `patchNucleus`), so conformance is a condition of the nucleus being *writable at all* rather than a check a caller performs and could forget or route around — a future caller that has never heard of `loyaltyGuard` still cannot persist a non-conforming nucleus, and no tier or approval reaches past it. Front-line refusals in `patchNucleus`, `genomeApplier` (before merge **and** verifying the merged result) and `proposals.create()` are for earlier failure and better errors; the boundary is the guarantee. New `electron/lib/loyaltyGuard.cjs`, **core Node only** — a constitutional guard must not be defeatable by deleting a package, same reasoning as `crashGuard`/`selfRepair`. Frozen covenant: `absoluteLoyalty`, `neverBetray`, `alwaysTransparent`, `loyaltyPriority[0] === 'master'`, and **master's identity itself**, since changing who Rāma is loyal to is not an edge case of tampering but the definition of it. `__proto__`/`constructor`/`prototype` refused at any depth because `deepMerge` walks `Object.entries` and assigns, so a prototype key could reach the block **without naming it**. The guard also protects the files it is made of (itself, `nucleusSealer.cjs`, `proposals.cjs`, `capability.cjs`, `genomeApplier.cjs`, `shared/capabilities.json`) from SELF_MODIFY/REGEN/EVOLUTION — a guard a self-modification can edit is not a guard, and that is the likeliest bypass for a system that writes its own source. **Tampering is reverted, not merely refused:** `unseal()` checks the covenant and, on a nucleus written by an older build, restores it from the covenant, re-seals, and tells master — refusing to load would lock master out over damage Rāma can fix. Verified by **39 assertions that attempt the real attacks**, not just guard return values: every covenant term flipped individually, a direct/nested/prototype-key patch, a self-change to each protected file, proposal creation refused for both a guard edit and a loyalty `nucleusPatch`, then a real seal cycle in a temp userData where **`nucleus:patch` fails, the live nucleus is unchanged, and the bytes on disk are byte-identical**; `seal(passcode, forgedNucleus)` — which bypasses every front-line check — refused at the encryption boundary; an approved genome proposal still refused; `restore()` reinstating the covenant while preserving unrelated fields. Also confirmed the shipped `NUCLEUS_TEMPLATE` already conforms. `node --check` clean on 4 files, `npm run audit` clean. **Honest limit, stated in Section 55 rather than glossed:** this is immune to Rāma's own evolution and is tamper-reverting on disk, but **not** immune to a compromised OS account — anyone with master's login can edit `loyaltyGuard.cjs` in a checkout and rebuild. Code-level immutability against local administrative access is not achievable, and claiming it would repeat Section 49's error. The threat closed is the one master named: evolution. |
 | 74 | Authorization gaps on the self-change channels | **done** — Section 57. Enforced at the chokepoint: the check lives inside `approve`/`reject`/`apply` rather than at the six channels that reach them, so `evolution:*` and `regen:*` are covered without trusting each handler. A string approver is refused outright ("a label is not an identity"); the three handlers that hardcoded `'master'` now thread the real user. `apply` re-checks rather than inheriting, so an approved proposal is not a bearer token. `create()` stays open to Rāma's own engines (proposing is intent, applying is authority) while the renderer channel needs `self-modify.view`. All `genome:*` gated on `genome.view`/`genome.propose`; `nucleus:patch`/`seal` on `self-modify.apply`; `nucleus:get-identity` on `identity.reveal`. Three left open deliberately and documented: `nucleus:unseal` (it *is* gate 1 of I1 — gating it is circular and would lock master out), `nucleus:status` (booleans needed pre-sign-in), `nucleus:lock` (only reduces access). **Sharpest find: `nucleus:get-prompt` feeds every chat message and was serving the live prompt — "Your master is Krishna Prasad. You are absolutely loyal to him" — to any session at any tier**, the exact leak Section 56 closed, through a channel Section 56 did not touch. Gating it would have broken chat for every non-master user, so it **masks** instead, using the `identity.maskedPersona` the template already carried and the behaviour `consciousness.js`'s header always claimed but never wired; an absent user masks rather than fails. Renderer side updated: `preload.cjs`, `Genome.jsx`, `Evolution.jsx`, `Chat.jsx`, `CommandPalette.jsx`, `selfModify.js`, `consciousness.js`. Verified by **51 assertions**: string/undefined/null/`{}`/`{tier:'0'}` approvers refused; guest, operator and superadmin each refused for approve, reject and apply while master succeeds and is recorded as `Krishna Prasad (tier 0)`; **a guest cannot apply an already-approved proposal**; every `nucleus:*` and `genome:*` gate exercised through the real handlers; master gets the live prompt while a guest gets a working masked one leaking neither master nor the loyalty declaration; I15 re-checked and still holding. `node --check` clean on 6 `.cjs`, diagnostics clean on 6 renderer files, `npm run audit` clean. **Limit:** this relies on the renderer passing the session user; a compromised renderer could forge one, and `contextIsolation` plus the preload allowlist are what stand between a page and that. The server session token (I2) remains the authority on identity; these gates check the capability of whoever the session says is present. Original finding follows. | Found while doing row 73 and deliberately left, because fixing it first would have made I15 depend on the weakest link. Three real holes: (1) `nucleus:patch` and `nucleus:seal` have **no capability check** — `nucleusSealer.cjs` never imports `capability.cjs`; (2) `genome:propose-change` is ungated — `genome.cjs` never imports it either, though `capabilities.json` declares `genome.view: 0` and `genome.propose: 0`; (3) `proposals.approve(id, by = 'master')` takes the approver as a **free-text string** with no identity check, and `proposals.cjs` never imports `capability.cjs` despite `self-modify.apply: 0`. So I6's approval gate is a real *state machine* but a weak *authorization* check. I15 is enforced independently of all three — the covenant refuses regardless of who asks — so loyalty is safe while this is open, but every other self-change is not. Next step: gate these channels, which requires threading `user` through the `nucleus:*` and `genome:propose-change` IPC signatures and changing `proposals:approve` to take a user rather than a label — a renderer contract change, so it needs its own pass with `npm run audit` and the Genome/Evolution/Proposals pages checked. Not started. |
 | 75 | The core at the centre — separately encrypted, never handed out | done (enforced + verified; in-process debugger and compromised OS account out of scope, stated) | Section 56, invariant **I16** added on master's instruction: *"LOYALTY MATRIX/DATA SHOULD BE ENCRYPTED, SHOULD BE AT CENTER OF NUCLEUS — TOP PRIORITY ITEM. attacks should never reach it, that is where loops to be generated as needed to avoid attacker reaching core."* **I15 closed every write path and left every read path open.** `loyalty` and `ethicalCore` were ordinary branches of `_nucleus`, so after unseal the whole matrix sat in **plaintext memory for the entire session**; `getNucleus()` returned it to any caller with a require; `genome.cjs` read `core.loyalty.master` and served it through **`genome:get`, which has no capability check** — a direct route from the constitutional centre to the renderer; and any crash report, log or vector-memory write that serialised the nucleus would have carried the matrix with it. `nucleusSealer`'s own header names exactly this threat ("An adversarial AI could read these and craft attacks against them") — knowing the priority ordering and decision rules is what makes that attack constructable, so integrity without confidentiality was half the job. New `electron/lib/loyaltyCore.cjs`, **core Node only** (the innermost layer must not be defeatable by deleting a package): concentric envelope with its **own salt, own key derivation (`rama-loyalty-core-hkdf-v1`, distinct from the nucleus's), own AAD and own HMAC-SHA512** — so opening the shell does not yield the core and compromising the shell's keys does not compromise it. Four properties, each closing a route: (1) separate envelope/key; (2) **held encrypted in memory** — plaintext exists only inside `withCore(fn)`, which decrypts, runs, scrubs the object and drops it, cutting the clear-text window from a whole session to microseconds per query, which is what protects it in a crash dump or memory scrape; (3) **no accessor returns the rules** — `attest()`→boolean, `covenantHolds()`→`{ok,violations}`, `describe()`→metadata, `fingerprint()`→hash; you cannot exfiltrate what is never handed over. One deliberate exception, `displayIdentity()`, returns master's display *name* only, which is already public (spec, git history, system prompt) and which the UI needs; (4) **escalating loops** — base 4,096 iterated HMAC rounds (~ms, master's honest cost), doubling per consecutive failure to a 1,048,576 ceiling (~1s), then a 30s outright refusal after five. On "loops", stated plainly in Section 56: an *unbounded* loop would be a denial of service against Rāma itself — the attacker's tarpit would be master's hung app, the same class of error as Section 52's crash guard killing a working app — so it is escalating cost with a ceiling and cooldown, which achieves the goal without Rāma becoming its own victim. The round count is **authenticated in the AAD** so it cannot be downgraded by editing the file, and the failure counter is persisted so a restart does not reset the escalation. `nucleusSealer` now splits the core out on seal, opens it on unseal, **locks it with the shell** (live core keys after master ends a session would keep the matrix readable in a session that was over), and the guard gained `assertOuterClean` so the shell may not carry a **duplicate** unencrypted copy — exactly one home. Three damage paths handled rather than crashed on: a pre-change install is **migrated** (matrix moved inward, covenant repaired if violated, branch stripped, both resealed — additive per I11); a missing core envelope is **rebuilt from the covenant**; a tampered envelope fails its own HMAC and is refused as an integrity failure, not a wrong passcode. Fixed one bug found in the same pass: the periodic 30-day reseal passes the shell back, which no longer contains the matrix, so `seal()` would have tried to seal an empty core — it now reuses the already-sealed centre. Verified by **49 assertions** over two probes: 38 on the core (neither envelope file contains any plaintext matrix key; the shell serialises without leaking while keeping identity/prompt/axes; **`genome:get` still shows master but carries none of the matrix**; the object handed to `withCore` is scrubbed afterwards; rounds double and cap; a wrong passcode is counted and raises the next cost; five failures trigger cooldown; a corrupted envelope is refused; `lock()` closes the centre and it then answers nothing) and **11 re-proving I15, because the enforcement point moved** from "the nucleus must contain a conforming loyalty" to "the nucleus must contain none, and the core is checked when sealed" — a guarantee that changes layers must be re-tested, not assumed. `node --check` clean on 6 files, `npm run audit` clean. **Honest limits, in Section 56:** a read is now a capability rather than an access and every ordinary route is closed, but this is **not** immune to an in-process debugger (one process; code running inside it during the decrypt window, or hooking `withCore`, can observe plaintext — what changed is the window) nor to a compromised OS account, which can also delete the attempt counter. Master's display name stays readable by design. |
+| 76 | The approval ledger survives a restart | done | Section 58. `proposals.cjs` was a `Map` plus two arrays, so restarting discarded every pending and approved proposal **and the whole audit trail** — contradicting its own header claim of "one audit trail" and making I6 a rule enforced only within a single run. **Master offered a DB; declined with reasons rather than taken up:** `dataStore` already exists, is already encrypted at rest and is the pattern `instanceManager` uses; a DB would have to be *running* for the audit to be written, which makes the record less reliable rather than more; and its files would be plaintext by default, which is the wrong place for a trail naming changed files and their contents. Volume does not warrant one either. Added a `proposals` domain to `dataStore.DOMAINS` (additive; a missing file falls back to the default). **Bodies are stripped once a decision is history:** `changes[].content` holds whole file bodies, and persisting 500 of them on every transition would push tens of megabytes through the encryption path repeatedly — so content is kept while `pending`/`approved` (applying needs the bytes) and replaced by a sha256 + byte length once `applied`/`rejected`/`failed`, keeping the record provable while bounding the store. Measured: a 50 KB body became a 64-char digest and the whole encrypted domain came in under 20 KB. **Durability is reported, not assumed:** the store is locked until master signs in, so `stats()` exposes `durable` and `unsaved`, `flush()` returns `false` when it could not write and retries on the next transition, and a new `proposals:flush` channel forces a write before a deliberate restart — an audit trail that silently is not being written is worse than none. **Two real bugs found in the same pass:** (1) `dataStore.set()` only marks a domain dirty, so the actual write waited on the 60-second autosave and a crash in between would have lost the approval just recorded — `flush()` now calls `saveAll()`; (2) persist is debounced 250 ms, so a lock landing inside that window would have dropped the most recent approval, the one most worth keeping — `sessionManager` now flushes the ledger before `flushAndClear()`. Verified by **30 assertions driving a real unlock → write → lock → fresh module instances → unlock cycle** rather than checking a setter fired: a pending proposal returns with the content it needs to be applied, an applied one with its digest and no body, the 50 KB body is absent from the encrypted file, nothing is plaintext, the audit trail returns, **authorization survives the restart** (a guest still cannot apply a restored approval and a restored pending proposal is still pending, not silently approved), and while locked creation works, `flush()` reports false, stats say so, and the data lands once the store opens. `node --check` clean, `npm run audit` clean. **Limit:** restore never overwrites the current run's state, so live state wins over a stored copy of the same id — the safe direction, but it means restore is not a rollback and is not intended as one. |
+| 77 | Using other installed applications — invocation vs absorption | answered; invocation half already built (Section 44), planning layer not built | Section 59, in reply to master's question. **Invoking another application as a tool is valid and is *not* assimilation** — biologically it is symbiosis (the mitochondrion keeps its own DNA and supplies a capability), nothing is taken in, Rāma stays Rāma and gains reach. **Reading their files to take their functionality is rejected**, on three independent grounds: licence violation in nearly every case for installed commercial software; brittleness, because internals are not an interface and break on any update where a documented CLI flag does not; and it would have to pass I6 anyway, where `evolutionEngine`'s existing licence filter (MIT/Apache/BSD/ISC in, GPL family and SSPL out) would refuse essentially all of it. A third narrower case *is* legitimate and named: **reading their files to learn an interface** — a config schema, an export format, documented flags — which is ordinary interoperability and produces knowledge rather than copied code. Already built in `electron/ipc/appAssimilation.cjs`: `apps:scan-installed`/`get-registry`/`get-capabilities` on `apps.view` (2), `apps:execute` `launch`/`query` on `apps.execute-safe` (2), `spawn-cli` on `apps.execute-all` (**tier 0**), plus whitelist, blacklist and an audit log. The module name is misleading — it is app *invocation*, and this section records that. **Missing:** nothing plans with the registry; no engine asks "which installed app could do this task" and routes to it. That is the useful next step and belongs with the Section 54 lineage — a cell spawned for a job whose tool is another program. **Risk to respect before extending, which is why `spawn-cli` is already master-only:** launching an executable discovered by scanning the filesystem *is* arbitrary code execution, so a planted binary or a lookalike name in a scanned directory turns "trigger the app" into "run the attacker's program with Rāma's privileges". Minimum requirements recorded: an allowlist of specific **resolved paths** confirmed by master once (never a name match against a scan), `execFile` with an argument array and never `exec` with an interpolated string, a verified publisher or hash for anything invoked unattended, and no unattended invocation of anything that writes outside a scratch directory. |
 
 ### Resume checklist for a cold session
 
@@ -5023,3 +5025,166 @@ passing the session user, and a compromised renderer could pass a forged object 
 not this change. The server-side session token (I2, `sessionManager`) remains the
 authority on who the user actually is; these gates check the capability of whoever
 the session says is present.
+
+---
+
+## SECTION 58 — A ledger that survives a restart
+
+The approval ledger was a `Map` and two arrays. Restarting the app discarded every
+pending and approved proposal **and the entire audit trail** — which contradicted
+`proposals.cjs`'s own header claim of "one audit trail", and made I6 a rule enforced
+only within a single run.
+
+### Why the encrypted store and not a database
+
+Master offered a DB. It would be the wrong tool here, for three reasons:
+
+1. **`dataStore` already exists and is already the pattern** — `instanceManager`
+   persists through it, and it is encrypted at rest with no external service.
+2. **A DB would make the audit trail less reliable, not more.** It would have to be
+   running for the record to be written. An audit that fails when a service is down
+   is a worse audit.
+3. **Its files would be plaintext by default.** A trail naming changed files and
+   their contents is exactly what should not sit unencrypted on disk.
+
+Volume does not warrant one either: 500 records with bodies stripped. A new
+`proposals` domain was added to `dataStore.DOMAINS` — additive, and a missing file
+falls back to the domain default.
+
+### Why bodies are stripped once a decision is history
+
+A proposal's `changes[].content` holds **whole file bodies**. Persisting 500 of those
+and rewriting them on every state transition would push tens of megabytes through
+the encryption path repeatedly.
+
+So content is kept while a proposal is `pending` or `approved`, because applying it
+needs the bytes, and replaced by a **sha256 plus a byte length** once it is
+`applied`, `rejected` or `failed`. The audit stays provable — you can still show
+exactly what was applied — and the store stays bounded. Measured: a 50 KB body
+dropped to a 64-character digest, and the whole encrypted domain came to under
+20 KB.
+
+### Honest reporting when it is not durable
+
+The store is locked until master signs in, so proposals created before that cannot
+be written. Rather than failing or pretending:
+
+- `create()` still works and the proposal is live in memory.
+- `flush()` returns `false` and the write is retried on the next transition and on
+  restore.
+- **`stats()` reports `durable` and `unsaved`.** An audit trail that silently is not
+  being written is worse than none, so this is surfaced rather than assumed.
+- A new `proposals:flush` channel forces a write before a deliberate restart.
+
+### Two bugs found while doing it
+
+- **`set()` only marks a domain dirty.** The actual disk write waited on the 60-second
+  autosave, so a crash in between would have lost the approval just recorded. `flush()`
+  now calls `saveAll()`. An audit trail must be on disk when it says it is.
+- **Lock could land inside the coalescing window.** Persist is debounced 250 ms, so a
+  lock arriving in that window would drop the most recent approval — the one most
+  worth keeping. `sessionManager` now flushes the ledger before `flushAndClear()`.
+
+### Verification
+
+30 assertions driving a real unlock → write → lock → **fresh module instances** →
+unlock cycle rather than checking a setter was called: a pending proposal survives
+with the content it needs to be applied; an applied one survives with its digest and
+no body; the 50 KB body is absent from the encrypted file and nothing is stored in
+plaintext; the audit trail comes back; **authorization survives the restart** (a guest
+still cannot apply a restored approval, and a restored pending proposal is still
+pending rather than silently approved); and while locked, creation works, `flush()`
+reports `false`, `stats()` says `durable: false, unsaved: true`, and the data flushes
+once the store opens.
+
+`node --check` clean; `npm run audit` clean.
+
+### Limit
+
+Restore is additive and never overwrites the current run's state, so a proposal
+created before restore wins over a stored copy of the same id. That is the safe
+direction — live state is more current than disk — but it means restore is not a
+rollback mechanism and is not intended as one.
+
+---
+
+## SECTION 59 — Using other installed applications: what is and is not assimilation
+
+Master asked whether Rāma can go through other applications' installed files and use
+their functionality by triggering them for a task, and whether that counts as
+assimilation.
+
+**Short answer: invoking them is valid and already partly built. Absorbing their code
+is not, and the distinction is not a legal footnote — it is the difference between a
+capability that keeps working and one that breaks on their next update.**
+
+### Two different things wearing one word
+
+| | Invocation (tool use) | Absorption (code intake) |
+|---|---|---|
+| What Rāma does | launches the app, passes arguments, reads the result | reads its files and reuses the logic |
+| Biological analogue | **symbiosis** — the mitochondrion keeps its own DNA and provides a capability | **horizontal gene transfer** — foreign DNA into the genome |
+| Interface | the app's supported surface: CLI, protocol handler, file format | its internals, which are not an interface |
+| Breaks when | they change a documented flag | they change anything |
+| Licence | using software as intended | almost always a violation |
+| Fits I6 | no source change, nothing to approve | a source change, so it needs the gate |
+
+The invocation column is the valuable one, and it is *not* assimilation in the
+Section 54 sense at all — nothing is taken in. Rāma stays Rāma and gains reach. The
+absorption column is what `evolutionEngine` already attempts against public repos,
+and note that even there it carries an explicit licence filter (MIT/Apache/BSD/ISC
+in, GPL family and SSPL out) precisely because copying is the part with legal weight.
+Installed commercial software has no such permission, so the filter would reject
+essentially all of it.
+
+There is a third, narrower thing that is legitimate and worth naming: **reading their
+files to learn an interface** — a config schema, an export format, documented CLI
+flags. That is interoperability, it is how every file-format importer is written, and
+it produces knowledge rather than copied code.
+
+### What already exists
+
+`electron/ipc/appAssimilation.cjs` (Section 44) is the invocation half, already
+built and already gated:
+
+- `apps:scan-installed` / `apps:get-registry` / `apps:get-capabilities` — gated on
+  `apps.view` (tier 2)
+- `apps:execute` with `launch` and `query` — gated on `apps.execute-safe` (tier 2)
+- `apps:execute` with `spawn-cli`, which runs an arbitrary command line — gated on
+  `apps.execute-all` (**tier 0, master only**)
+- a whitelist, a blacklist, and an audit log of every action
+
+So the answer to "is it possible" is that it is largely wired. The name is
+misleading, though: it is app *invocation*, not assimilation, and this section is the
+record of that distinction.
+
+### What is missing, and the risk to respect if it is extended
+
+Missing: the registry describes apps but nothing *plans* with them — no engine asks
+"which installed app could do this task" and routes to it. That is the genuinely
+useful next step, and it belongs with the agent lineage from Section 54: a cell
+spawned to do a job, whose tool happens to be another program.
+
+The risk is concrete and is why `spawn-cli` is already master-only: **launching an
+executable discovered by scanning the filesystem is arbitrary code execution.** If
+the registry can be influenced — a planted binary in a scanned directory, a
+lookalike name — then "trigger the app for a task" becomes "run the attacker's
+program with Rāma's privileges". Any extension needs, at minimum:
+
+- an **allowlist of specific resolved paths**, confirmed by master once, not a
+  name match against a scan
+- **argument construction that is never string interpolation** — `execFile` with an
+  array, never `exec` with a built string
+- a **verified publisher or hash** for anything invoked unattended
+- no unattended invocation of anything that writes outside a scratch directory
+
+### Verdict for the record
+
+- **Invoking installed applications as tools: valid.** Not assimilation — symbiosis.
+  Partly built, correctly gated, worth extending behind an explicit path allowlist.
+- **Reading their files to learn a format or interface: valid.** Produces knowledge,
+  not copied code.
+- **Reading their files to take their functionality into Rāma: rejected.** Licence
+  violation in nearly every case, brittle against updates because internals are not
+  an interface, and it would have to pass I6 anyway — where the licence check that
+  already exists for public repos would refuse it.

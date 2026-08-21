@@ -39,7 +39,9 @@ const cache  = {};
 const dirty  = new Set();
 let autoSaveTimer = null;
 
-const DOMAINS = ['users', 'conversations', 'knowledge', 'memory', 'worldmodel', 'agents', 'config', 'instances'];
+// `proposals` added in Section 58: the self-change approval ledger was in-memory
+// only, so every pending approval and the entire audit trail vanished on restart.
+const DOMAINS = ['users', 'conversations', 'knowledge', 'memory', 'worldmodel', 'agents', 'config', 'instances', 'proposals'];
 
 // ─── Load all domains on unlock ───────────────────────────────────────────────
 function loadAll() {
@@ -175,6 +177,11 @@ function getDefaultData(domain) {
     instances: {
       registry:   [],   // Rāma instances — each carries the full genome
       genomeHash: null, // hash of the genome the instances were created against
+    },
+    proposals: {
+      ledger: [],   // every self-change proposal, newest-first (see lib/proposals.cjs)
+      audit:  [],   // every state transition, newest-first — the I6 audit trail
+      savedAt: null,
     },
   };
   return defaults[domain] || {};

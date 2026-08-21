@@ -528,6 +528,7 @@ const RAMA_API = {
     apply:   (id, opts)         => ipcRenderer.invoke('proposals:apply',   id, opts),
     stats:   (user)             => ipcRenderer.invoke('proposals:stats',   user),
     audit:   (limit, user)      => ipcRenderer.invoke('proposals:audit',   limit, user),
+    flush:   (user)             => ipcRenderer.invoke('proposals:flush',   user),
     on: (event, cb) => {
       const channel = `proposals:${event}`;
       const h = (_e, d) => cb(d);

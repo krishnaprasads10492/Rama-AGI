@@ -87,6 +87,18 @@ async function masterUnlock(passcode, dataDir, userAgent = '') {
     // 3. Load the encrypted domains — safe now that the keys are proven
     dataStore.loadAll();
 
+    // 3a. Rehydrate the self-change ledger from the store just loaded. Until
+    // Section 58 it lived only in memory, so a restart silently discarded every
+    // pending approval and the whole I6 audit trail.
+    try {
+      const restored = require('./lib/proposals.cjs').restore();
+      if (restored.proposals > 0 || restored.audit > 0) {
+        console.warn(`[Session] restored ${restored.proposals} proposals and ${restored.audit} audit entries`);
+      }
+    } catch (err) {
+      console.error('[Session] proposal ledger restore failed:', err.message);
+    }
+
     // 4. Unseal the nucleus so Rāma's identity is live in memory
     try {
       await require('./nucleusSealer.cjs').unseal(passcode);
@@ -138,6 +150,12 @@ function lockSession() {
 
   // Delete temp session file
   deleteSessionFile();
+
+  // Write the ledger out before the keys go away. Its persist is coalesced on a
+  // 250ms timer, so a lock landing inside that window would have dropped the most
+  // recent approval — the one most worth keeping.
+  try { require('./lib/proposals.cjs').flush(); }
+  catch (err) { console.error('[Session] proposal ledger flush failed:', err.message); }
 
   // Lock crypto + clear data cache
   dataStore.flushAndClear();
