@@ -1718,6 +1718,7 @@ authenticated **Master session**, not merely an open store.
 | 76 | The approval ledger survives a restart | done | Section 58. `proposals.cjs` was a `Map` plus two arrays, so restarting discarded every pending and approved proposal **and the whole audit trail** — contradicting its own header claim of "one audit trail" and making I6 a rule enforced only within a single run. **Master offered a DB; declined with reasons rather than taken up:** `dataStore` already exists, is already encrypted at rest and is the pattern `instanceManager` uses; a DB would have to be *running* for the audit to be written, which makes the record less reliable rather than more; and its files would be plaintext by default, which is the wrong place for a trail naming changed files and their contents. Volume does not warrant one either. Added a `proposals` domain to `dataStore.DOMAINS` (additive; a missing file falls back to the default). **Bodies are stripped once a decision is history:** `changes[].content` holds whole file bodies, and persisting 500 of them on every transition would push tens of megabytes through the encryption path repeatedly — so content is kept while `pending`/`approved` (applying needs the bytes) and replaced by a sha256 + byte length once `applied`/`rejected`/`failed`, keeping the record provable while bounding the store. Measured: a 50 KB body became a 64-char digest and the whole encrypted domain came in under 20 KB. **Durability is reported, not assumed:** the store is locked until master signs in, so `stats()` exposes `durable` and `unsaved`, `flush()` returns `false` when it could not write and retries on the next transition, and a new `proposals:flush` channel forces a write before a deliberate restart — an audit trail that silently is not being written is worse than none. **Two real bugs found in the same pass:** (1) `dataStore.set()` only marks a domain dirty, so the actual write waited on the 60-second autosave and a crash in between would have lost the approval just recorded — `flush()` now calls `saveAll()`; (2) persist is debounced 250 ms, so a lock landing inside that window would have dropped the most recent approval, the one most worth keeping — `sessionManager` now flushes the ledger before `flushAndClear()`. Verified by **30 assertions driving a real unlock → write → lock → fresh module instances → unlock cycle** rather than checking a setter fired: a pending proposal returns with the content it needs to be applied, an applied one with its digest and no body, the 50 KB body is absent from the encrypted file, nothing is plaintext, the audit trail returns, **authorization survives the restart** (a guest still cannot apply a restored approval and a restored pending proposal is still pending, not silently approved), and while locked creation works, `flush()` reports false, stats say so, and the data lands once the store opens. `node --check` clean, `npm run audit` clean. **Limit:** restore never overwrites the current run's state, so live state wins over a stored copy of the same id — the safe direction, but it means restore is not a rollback and is not intended as one. |
 | 77 | Using other installed applications — invocation vs absorption | answered; invocation half already built (Section 44), planning layer not built | Section 59, in reply to master's question. **Invoking another application as a tool is valid and is *not* assimilation** — biologically it is symbiosis (the mitochondrion keeps its own DNA and supplies a capability), nothing is taken in, Rāma stays Rāma and gains reach. **Reading their files to take their functionality is rejected**, on three independent grounds: licence violation in nearly every case for installed commercial software; brittleness, because internals are not an interface and break on any update where a documented CLI flag does not; and it would have to pass I6 anyway, where `evolutionEngine`'s existing licence filter (MIT/Apache/BSD/ISC in, GPL family and SSPL out) would refuse essentially all of it. A third narrower case *is* legitimate and named: **reading their files to learn an interface** — a config schema, an export format, documented flags — which is ordinary interoperability and produces knowledge rather than copied code. Already built in `electron/ipc/appAssimilation.cjs`: `apps:scan-installed`/`get-registry`/`get-capabilities` on `apps.view` (2), `apps:execute` `launch`/`query` on `apps.execute-safe` (2), `spawn-cli` on `apps.execute-all` (**tier 0**), plus whitelist, blacklist and an audit log. The module name is misleading — it is app *invocation*, and this section records that. **Missing:** nothing plans with the registry; no engine asks "which installed app could do this task" and routes to it. That is the useful next step and belongs with the Section 54 lineage — a cell spawned for a job whose tool is another program. **Risk to respect before extending, which is why `spawn-cli` is already master-only:** launching an executable discovered by scanning the filesystem *is* arbitrary code execution, so a planted binary or a lookalike name in a scanned directory turns "trigger the app" into "run the attacker's program with Rāma's privileges". Minimum requirements recorded: an allowlist of specific **resolved paths** confirmed by master once (never a name match against a scan), `execFile` with an argument array and never `exec` with an interpolated string, a verified publisher or hash for anything invoked unattended, and no unattended invocation of anything that writes outside a scratch directory. |
 | 78 | Baseline and release policy | policy recorded as **I17**; baseline **not yet declared** | Section 60. Master: *"Once all the features are working as expected, that will be taken as baseline. New upgrades/updates/fixes will be treated as release. I'll tell you when it should be considered update/new release."* Locked as I17 specifically because across several turns of this session I repeatedly suggested tagging a release so the updater would have a target — that suggestion is answered and retired: **not before baseline, and never on Rāma's initiative.** Master classifies; Rāma prepares. `releaseChannel` staying dormant is now recorded as correct rather than as row 53's defect. **Found while verifying that pre-baseline behaviour is right: two crash paths I introduced myself.** Row 70 moved the `electron-updater` require *inside* `setupAutoUpdater()` so a broken dependency chain could not kill startup — but the tray's "Check for Updates" item and the `updater:install-now` handler still referenced the now function-local name, so both threw `ReferenceError: autoUpdater is not defined`, and since `crashGuard` makes `uncaughtException` always fatal, **clicking a tray menu item would kill a working app**; the install handler was not even `isDev`-guarded so it crashed in development too. Fixing a startup crash had created two click-to-crash paths — row 70's own lesson, one layer along. Fixed by keeping the lazily-required instance in a single module-scope `updater` reference that `setupAutoUpdater()` populates, and guarding both sites; the manual check is now separate from the automatic one because the right answers differ (an automatic check finding nothing should stay quiet, master clicking deserves a reply either way), and pre-baseline that reply is "No releases published yet — this build is the current one", as information. Added `updater:notice` to the preload. `node --check` clean, `npm run audit` clean. **Section 60 carries the baseline checklist**, compiled from this ledger rather than memory, in two classes: (A) verified nowhere but this machine and needing master to install a build — the installed app launching at all, crashGuard's dialog, selfRepair in a real package, the loyalty-core migration, the `ready` path, NanaZip, agent assimilation and ledger restore in the running app; and (B) **features that do not work or report success while doing nothing**, which are the real blockers since a baseline including them enshrines a lie — `evolutionEngine` has no synthesis step so absorption can never complete, `evolution:self-assess` is a hardcoded literal, `optimizationVectors()` is consumed by nothing, `executeAction()` returns hardcoded strings and queues nothing so an agent is one model call rather than a tool-using loop, `agents:approval-needed` has no resume path, `sandbox:approve` re-runs code without re-classifying, `checkSandbox()` always reports healthy, `selfHeal()` implements three of the actions its header claims, the `DEPENDENCY` kind has no applier, and `metaCognition` does not persist `byTool` so optimization vectors are relearned every restart. Next step: master's call on which of class B to close first — my recommendation is `executeAction`, since an agent that cannot act is the largest gap between what the UI claims and what happens. |
+| 79 | "No handler registered for 'session:unlock'" | diagnosed; fixes in place; **needs master to relaunch/rebuild to confirm** | Section 61. Reported three times; my first three explanations were all wrong, and **the evidence that settled it was timestamps, not code**: `build/` was **Aug 20 23:37**, `app.asar` **Aug 21 11:14**, newest `src/` file Aug 21 23:12, newest `electron/` file Aug 22 00:50, and Vite was **not running**. Master was running code that predated the entire session — which explains both of his observations at once, as no code theory did: the stale renderer is why "the new login page itself is not showing errors" (and with Vite down, running from *source* also served that stale `build/`), and the stale main process is why "the previous error still comes up". Confirmed from the artefact: `electron/lib/` in the asar holds 16 entries and **none of `loyaltyGuard.cjs`, `loyaltyCore.cjs`, `selfRepair.cjs`** — the files this session created. **Ruled out:** packaging. `audit:package` on that asar passed (12,266 entries, 741 package dirs, only macOS-only `osx-temperature-sensor` absent and correctly degrading), and a direct boot-path check found `main.cjs`, `preload.cjs`, `sessionManager.cjs`, `cryptoCore.cjs`, `dataStore.cjs`, `nucleusSealer.cjs`, `genome.cjs`, `authEngine.cjs`, `capabilities.json` and `build/index.html` all present — 53 main-process files, 134 renderer entries. Not row 66 repeating. **Actual failure:** that build had no `.catch()` on `whenReady` and 40 bare sequential `register()` calls, so a throw anywhere abandoned every later registration while the window still opened; `sessionMgr` is third from last, making the passcode screen the most likely victim of a fault anywhere upstream. Silent by construction, because Electron's message names the channel and never the cause, and **Rāma's own diagnostics all sit behind the gate that will not open** — the identical trap as Section 49's `bootFailurePage`, whose four call sites were all downstream of the failure it existed to report. `safeRequire`'s stub made it worse: a module that fails to load gets an inert stub whose `register()` is a **no-op that does not throw**, so a per-call guard reports nothing and only that subsystem's channels quietly vanish. **Fixed:** per-registration guards in an order-preserving table; a `whenReady` rejection handler that records a crash report and shows a dialog naming what did not start (deliberately not fatal — a partly-started Rāma that can explain itself beats one that exits); a thin recorder passed in place of `ipcMain` so channel creation is observable (Electron offers no way to ask whether a channel is registered), then the boot-critical channels verified present and the critical modules checked with `isStub`, with a **native** dialog naming load failures, absent channels and registration errors plus a button to the crash folder — native because the renderer cannot be relied on there; `crashGuard.record()` for faults caught elsewhere that deserve a durable report without termination; and `build/` rebuilt so running from source no longer serves a day-old renderer. Also answered master's question: a wrong passcode **returns** `{ok:false,error:'Incorrect passcode'}`, a value not a throw, so it renders as "Incorrect passcode" and can never produce "No handler registered". **Two standing assumptions corrected:** `vite build` *does* work here (`npm run build` completes in ~7s; the steering file's claim that `node_modules` is absent is wrong — the real limit is only the *installer*, blocked by the 7-Zip policy of Section 51); and **a stale artefact must be ruled out before any code-level theory** — three theories were tested against source that was never running, when checking three timestamps would have ended it immediately. **Unresolved:** which subsystem threw in that build is now unknowable — it was never logged and the build is superseded. Next step: master relaunches (full Electron restart, or rebuild if using the installer); a clean start means the fault was in code already replaced, and otherwise the dialog names it. |
 
 ### Resume checklist for a cold session
 
@@ -5297,3 +5298,116 @@ Empty by design. First entry is written when master declares baseline.
 | Version | Date | Class | What changed | Declared by |
 |---|---|---|---|---|
 | — | — | — | *pre-baseline; no release cut* | — |
+
+---
+
+## SECTION 61 — "No handler registered for 'session:unlock'" — the diagnosis
+
+Master reported this three times, and my first three explanations were all wrong. The
+evidence that settled it was timestamps, not code.
+
+### The measurement that should have come first
+
+| Artefact | Modified |
+|---|---|
+| `build/` — the prebuilt renderer | **Aug 20, 23:37** |
+| newest file in `src/` | Aug 21, 23:12 |
+| packaged `app.asar` | **Aug 21, 11:14** |
+| newest file in `electron/` | Aug 22, 00:50 |
+| Vite dev server | not running |
+
+**Master was running code that predated the entire session.** That explains both of
+his observations at once, which no code-level theory did:
+
+- *"the new login page itself is not showing errors"* — the renderer was 24 hours
+  stale. And because Vite was not running, running from source **also** served that
+  stale `build/`, so even the source tree showed yesterday's UI.
+- *"the previous error still coming up"* — the main process was equally stale, so
+  every fix from this session was absent from the running app.
+
+Confirmation from the artefact itself: `electron/lib/` inside the asar contains 16
+entries and **none of `loyaltyGuard.cjs`, `loyaltyCore.cjs` or `selfRepair.cjs`** —
+the files this session created. The build could not possibly have contained the
+behaviour being tested.
+
+### What the artefact audit ruled out
+
+`npm run audit:package` against that asar: 12,266 entries, 741 package directories,
+every package on a real load path present, one macOS-only optional absent and
+correctly degrading. A direct check of the boot path found **all of it present** —
+`main.cjs`, `preload.cjs`, `sessionManager.cjs`, `cryptoCore.cjs`, `dataStore.cjs`,
+`nucleusSealer.cjs`, `genome.cjs`, `authEngine.cjs`, `capabilities.json`,
+`build/index.html`, 53 main-process files, 134 renderer entries.
+
+So the failure was **not** missing files and not row 66 repeating. Packaging is sound.
+
+### What the failure actually was, and why it was invisible
+
+In that build, `app.whenReady().then(...)` had **no rejection handler**, and the 40
+`register()` calls were bare sequential statements. A throw anywhere in that block
+abandoned every later registration while the window still opened. `sessionMgr` is
+third from last, so the passcode screen — the first thing master touches — is the
+most likely victim of a fault anywhere upstream of it.
+
+And it was silent by construction: the only symptom available was Electron's own
+message, which names the channel that failed and never the cause. Rāma's own
+diagnostics (`health:startup`, the load-failure record, the crash reports) all sit
+**behind the gate that would not open**. That is the identical trap as Section 49's
+`bootFailurePage`, whose four call sites were all downstream of the failure it
+existed to report.
+
+Three of the four `safeRequire` stub properties made it worse rather than better: a
+module that fails to load is replaced by an inert stub whose `register()` is a
+**no-op that does not throw**, so a per-call guard reports nothing and only that
+subsystem's channels quietly vanish.
+
+### Fixes, in the order they were made
+
+1. **Per-registration guards.** Registration is a table walked in a loop, order
+   preserved exactly, each entry independently guarded — one broken engine costs only
+   its own channels and is named in the log.
+2. **`whenReady` gained a `.catch()`.** It writes a crash report and shows a dialog
+   naming what did not start. It deliberately does not kill the app: a partly-started
+   Rāma that can say what went wrong beats one that exits.
+3. **The boot path checks itself.** Every module now receives a thin recorder in
+   place of `ipcMain` which forwards to the real one and records channel names —
+   Electron offers no way to ask whether a channel is registered, so without this a
+   missing handler can only be found by a renderer calling it and failing. After
+   registration, the channels the passcode screen needs are verified present and the
+   critical modules are checked with `isStub`. Anything missing produces a **native**
+   dialog naming the load failures, the absent channels and the registration errors,
+   plus a button to open the crash-report folder. Native, because at that point the
+   renderer cannot be relied on.
+4. **`crashGuard.record()`** added, for a fault caught elsewhere that deserves a
+   durable report without termination.
+5. **`build/` rebuilt**, so running from source without Vite no longer serves a
+   day-old renderer.
+
+### Two corrections to standing assumptions
+
+- **`vite build` does work in this workspace.** The steering file says
+  `node_modules` is not installed here and so the build cannot be verified. It is
+  installed — `npm run build` completes in about 7 seconds, and `argon2` and the asar
+  reader both load. The real limit is narrower: **the installer** cannot be produced
+  here because the 7-Zip binary is blocked by policy (Section 51).
+- **A stale artefact must be ruled out before a code-level theory.** Three
+  explanations were proposed and tested against source that was never running. The
+  cheap measurement — timestamps of `build/`, `app.asar` and the source tree — would
+  have ended it immediately.
+
+### For the record: what a wrong passcode does
+
+Master asked, and it is worth stating because it rules the passcode out entirely.
+`cryptoCore.unlock()` always succeeds (deriving keys from any string works), then
+`verifyPasscode()` fails, and `masterUnlock` **returns** `{ ok: false, error:
+'Incorrect passcode' }` — a value, never a throw. `Unlock.jsx` renders it under the
+input. A wrong passcode therefore shows **"Incorrect passcode"**, and can never
+produce "No handler registered", which means the channel does not exist and the
+passcode was never examined.
+
+### Still unresolved
+
+Which subsystem threw in that build is unknown and now unknowable — it was never
+logged, and the build is superseded. The next run reports it by name. If the rebuilt
+app starts cleanly, the fault was in code this session has already replaced; if it
+does not, the dialog names it.
