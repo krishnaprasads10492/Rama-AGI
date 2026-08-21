@@ -193,7 +193,11 @@ function getGenome() {
       identity = {
         name:      core.identity?.name,
         fullForm:  core.identity?.fullForm,
-        master:    core.loyalty?.master,
+        // From the sealed core via a predicate, not by reading the matrix: the
+        // loyalty branch is no longer in the nucleus shell at all, and `genome:get`
+        // is ungated — so reading it here would have piped the core straight to the
+        // renderer. See spec Section 56.
+        master:    nucleus.displayIdentity?.().master ?? null,
         sealedAt:  core.sealedAt,
         masked:    false,
       };

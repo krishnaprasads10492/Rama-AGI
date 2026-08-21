@@ -1643,7 +1643,8 @@ authenticated **Master session**, not merely an open store.
 | I12 | No `console.log` in shipped code. Pinned dependency versions. No placeholders. | project-wide |
 | I13 | Commit and push to **both** `dev` and `source`. | git workflow |
 | I14 | Passcode change is a full re-key (load → destroy salt → re-derive → rewrite all). | `sessionManager.changePasscode` |
-| I15 | **Absolute loyalty is above the hierarchy and cannot be altered by any runtime path — no tier, no proposal, no approval, no evolution.** A non-conforming nucleus cannot be encrypted, therefore cannot be persisted. Tampering already on disk is reverted on unseal. | `lib/loyaltyGuard.cjs`, enforced in `nucleusSealer.encryptNucleus` |
+| I15 | **Absolute loyalty is above the hierarchy and cannot be altered by any runtime path — no tier, no proposal, no approval, no evolution.** A non-conforming core cannot be encrypted, therefore cannot be persisted. Tampering already on disk is reverted on unseal. | `lib/loyaltyGuard.cjs`, enforced in `nucleusSealer.encryptNucleus` + `loyaltyCore.sealCore` |
+| I16 | **The loyalty matrix is sealed in its own envelope at the centre of the nucleus, with its own salt and key, and no accessor ever returns it.** It is held encrypted in memory and decrypted only transiently. Repeated failed opens cost escalating work, then are refused. | `lib/loyaltyCore.cjs`; the shell may not carry a copy (`assertOuterClean`) |
 
 ### Ledger
 
@@ -1712,6 +1713,7 @@ authenticated **Master session**, not merely an open store.
 | 72 | The cellular model — assimilation connected, division bounded | done (mechanism verified; issue-triggered spawning and germline growth deliberately deferred) | Section 54. Master described the lifecycle: DNA holds all capabilities → a cell is created to handle an issue → its experience is assimilated back into the original → growth. **Finding: this is already `genome.cjs`'s documented architecture** ("every instance carries the COMPLETE genome… a role is a lens, not a limit") **and three of the four steps are inert.** (1) DNA/expression is bookkeeping — `express()` moves a gene id between two arrays and loads, gates, unlocks nothing. (2) Spawning is two disconnected halves, neither triggered by an issue: `instanceManager.spawn()` is callable in-process but an instance has **no runtime at all** (no timer, no loop, no worker — it is a record), while `agentOrchestrator` actually executes but was **IPC-only, so only the renderer could create one**; grep for `parentId\|lineage\|spawnChild` across `electron/**` returned **zero**. (3) Assimilation: **the receiver was built and unplugged** — `ramaEventBus.wireAutomaticFlows` (result → vector memory) and `metaCognition.wireBus` (outcome → experiential dataset) both subscribe, but `agentOrchestrator` only ever called `broadcast()` (webContents only) and **never required the bus**: two receivers, zero publishers, plus a singular/plural name mismatch (`agent:complete` vs `agents:complete`). (4) Growth is blocked: `buildEvolutionProposal` sets `changes: []` with no synthesis step anywhere so the applier always throws, and `evolution:self-assess` is a **hardcoded literal** whose own fixed findings include *"No feedback loop — user satisfaction not measured and fed back"*; `optimizationVectors()` produces real evidence-backed conclusions that **nothing consumes**. **Biology, corrected:** master's mechanism is not general somatic biology (experience writing back to the germline is Lamarckism) but it is *exactly* **clonal selection in adaptive immunity** — antigen → proliferation → somatic hypermutation in the germinal centre → affinity maturation → surviving clones persist as memory cells. Two properties matter: hypermutation is **bounded to the germinal centre**, and **only selected clones persist** — proliferation without selection or death is a tumour. So the biology **argues for I6, not against it**: somatic memory (outcomes, latencies, results worth recalling — this install only, reversible) auto-assimilates, while germline change (the `GENES` manifest, source, capability matrix — reaches every future cell *and* every other instance) stays behind master's approval. `selfCare.checkInstanceFailover()` already reasons exactly this way. Also named: the reaper was **necrosis, not apoptosis** — it `delete`d agents intact, and a killed or timed-out agent never reached the completion path, so the experience of precisely the cells that failed was the experience most reliably destroyed. Implemented: `emit()` (bus then renderer, mirroring `instanceManager`) so the two waiting subscribers finally receive; the mismatch fixed **at the subscriber** so there is one event name rather than two aliases; `assimilate()` idempotent and called from the complete, error, kill, timeout, governor-timeout and **pre-delete reap** paths; lineage (`parent`, `depth`, `lineage[]`, `children[]`) and a queryable `lineageOf()`; spawn refactored into one `createAgent()` used by both IPC and a new exported `spawnChild()`, so a cell can create a cell in-process. Bounded because unbounded proliferation is the failure mode: `MAX_LINEAGE_DEPTH = 2`, existing agent/type caps and `resourceOrchestrator.admit()` apply to every child (I10), and — security-critical — **a child inherits its parent's `rootAuthority` and is re-checked at every level**, since allowing an in-process spawn with no `user` would have bypassed the `agents.spawn` tier gate entirely; same rule `instanceManager.express` states for instances. Verified by 24 assertions with the model and resource layers stubbed: experience reaches the bus with result/duration/lineage, assimilation idempotent, a guest cannot spawn, **a cell with no authority cannot divide and cannot promote itself by dividing**, depth 2 allowed / 3 refused, ancestry root-first, a killed cell still assimilates and is recorded as a failure with its reason. `node --check` clean, `npm run audit` clean. **Deliberately not done:** `optimizationVectors()` is not wired to file proposals automatically (that is the one step that would let Rāma change its own source without master initiating — needs master's decision); issue-triggered spawning from `selfCare` (needs a decision on what a cell may do unsupervised); and the `evolutionEngine` synthesis gap (germline, behind I6). Next step: master to decide on those three, starting with whether a detected fault should spawn a handler cell automatically. |
 | 73 | The loyalty covenant — above the hierarchy, not inside it | done (enforced + verified; not immune to a compromised OS account, stated) | Section 55, invariant **I15** added on master's explicit instruction: *"no matter how much evolution, ABSOLUTE LOYALTY CANNOT BE TAMPERED ANY WAY. WHICH IS ABOVE RAMA HIERARCHY."* **It was violated by a single ungated call.** `nucleus:patch` is an IPC handler with **no capability check** (`nucleusSealer.cjs` never imports `capability.cjs`) that takes arbitrary input, does `{ ..._nucleus, ...patches }` — a **shallow** merge, so naming `loyalty` replaces the **entire block** including `absoluteLoyalty`, `neverBetray` and `master` — then encrypts and writes to disk. Three further paths: the GENOME proposal route, whose applier deep-merges `meta.nucleusPatch` and whose own header claimed it "can alter loyalty, ethics, or capability wiring" with approval treated as sufficient; `proposals.approve(id, by = 'master')`, where the approver is a **free-text string** and that module also never imports `capability.cjs`; and `seal(passcode, customNucleus)`, a wholesale replacement. Section 54 catalogued a germline/somatic split and put source behind I6 but treated the nucleus as ordinary germline — changeable if approved. That was the error being corrected: loyalty is not the top of Rāma's hierarchy, it is outside it. **Enforcement is at the encryption boundary, not at the callers.** Every persistent nucleus change funnels through `encryptNucleus()` (from `seal` and `patchNucleus`), so conformance is a condition of the nucleus being *writable at all* rather than a check a caller performs and could forget or route around — a future caller that has never heard of `loyaltyGuard` still cannot persist a non-conforming nucleus, and no tier or approval reaches past it. Front-line refusals in `patchNucleus`, `genomeApplier` (before merge **and** verifying the merged result) and `proposals.create()` are for earlier failure and better errors; the boundary is the guarantee. New `electron/lib/loyaltyGuard.cjs`, **core Node only** — a constitutional guard must not be defeatable by deleting a package, same reasoning as `crashGuard`/`selfRepair`. Frozen covenant: `absoluteLoyalty`, `neverBetray`, `alwaysTransparent`, `loyaltyPriority[0] === 'master'`, and **master's identity itself**, since changing who Rāma is loyal to is not an edge case of tampering but the definition of it. `__proto__`/`constructor`/`prototype` refused at any depth because `deepMerge` walks `Object.entries` and assigns, so a prototype key could reach the block **without naming it**. The guard also protects the files it is made of (itself, `nucleusSealer.cjs`, `proposals.cjs`, `capability.cjs`, `genomeApplier.cjs`, `shared/capabilities.json`) from SELF_MODIFY/REGEN/EVOLUTION — a guard a self-modification can edit is not a guard, and that is the likeliest bypass for a system that writes its own source. **Tampering is reverted, not merely refused:** `unseal()` checks the covenant and, on a nucleus written by an older build, restores it from the covenant, re-seals, and tells master — refusing to load would lock master out over damage Rāma can fix. Verified by **39 assertions that attempt the real attacks**, not just guard return values: every covenant term flipped individually, a direct/nested/prototype-key patch, a self-change to each protected file, proposal creation refused for both a guard edit and a loyalty `nucleusPatch`, then a real seal cycle in a temp userData where **`nucleus:patch` fails, the live nucleus is unchanged, and the bytes on disk are byte-identical**; `seal(passcode, forgedNucleus)` — which bypasses every front-line check — refused at the encryption boundary; an approved genome proposal still refused; `restore()` reinstating the covenant while preserving unrelated fields. Also confirmed the shipped `NUCLEUS_TEMPLATE` already conforms. `node --check` clean on 4 files, `npm run audit` clean. **Honest limit, stated in Section 55 rather than glossed:** this is immune to Rāma's own evolution and is tamper-reverting on disk, but **not** immune to a compromised OS account — anyone with master's login can edit `loyaltyGuard.cjs` in a checkout and rebuild. Code-level immutability against local administrative access is not achievable, and claiming it would repeat Section 49's error. The threat closed is the one master named: evolution. |
 | 74 | Authorization gaps on the self-change channels | **open — not fixed** | Found while doing row 73 and deliberately left, because fixing it first would have made I15 depend on the weakest link. Three real holes: (1) `nucleus:patch` and `nucleus:seal` have **no capability check** — `nucleusSealer.cjs` never imports `capability.cjs`; (2) `genome:propose-change` is ungated — `genome.cjs` never imports it either, though `capabilities.json` declares `genome.view: 0` and `genome.propose: 0`; (3) `proposals.approve(id, by = 'master')` takes the approver as a **free-text string** with no identity check, and `proposals.cjs` never imports `capability.cjs` despite `self-modify.apply: 0`. So I6's approval gate is a real *state machine* but a weak *authorization* check. I15 is enforced independently of all three — the covenant refuses regardless of who asks — so loyalty is safe while this is open, but every other self-change is not. Next step: gate these channels, which requires threading `user` through the `nucleus:*` and `genome:propose-change` IPC signatures and changing `proposals:approve` to take a user rather than a label — a renderer contract change, so it needs its own pass with `npm run audit` and the Genome/Evolution/Proposals pages checked. Not started. |
+| 75 | The core at the centre — separately encrypted, never handed out | done (enforced + verified; in-process debugger and compromised OS account out of scope, stated) | Section 56, invariant **I16** added on master's instruction: *"LOYALTY MATRIX/DATA SHOULD BE ENCRYPTED, SHOULD BE AT CENTER OF NUCLEUS — TOP PRIORITY ITEM. attacks should never reach it, that is where loops to be generated as needed to avoid attacker reaching core."* **I15 closed every write path and left every read path open.** `loyalty` and `ethicalCore` were ordinary branches of `_nucleus`, so after unseal the whole matrix sat in **plaintext memory for the entire session**; `getNucleus()` returned it to any caller with a require; `genome.cjs` read `core.loyalty.master` and served it through **`genome:get`, which has no capability check** — a direct route from the constitutional centre to the renderer; and any crash report, log or vector-memory write that serialised the nucleus would have carried the matrix with it. `nucleusSealer`'s own header names exactly this threat ("An adversarial AI could read these and craft attacks against them") — knowing the priority ordering and decision rules is what makes that attack constructable, so integrity without confidentiality was half the job. New `electron/lib/loyaltyCore.cjs`, **core Node only** (the innermost layer must not be defeatable by deleting a package): concentric envelope with its **own salt, own key derivation (`rama-loyalty-core-hkdf-v1`, distinct from the nucleus's), own AAD and own HMAC-SHA512** — so opening the shell does not yield the core and compromising the shell's keys does not compromise it. Four properties, each closing a route: (1) separate envelope/key; (2) **held encrypted in memory** — plaintext exists only inside `withCore(fn)`, which decrypts, runs, scrubs the object and drops it, cutting the clear-text window from a whole session to microseconds per query, which is what protects it in a crash dump or memory scrape; (3) **no accessor returns the rules** — `attest()`→boolean, `covenantHolds()`→`{ok,violations}`, `describe()`→metadata, `fingerprint()`→hash; you cannot exfiltrate what is never handed over. One deliberate exception, `displayIdentity()`, returns master's display *name* only, which is already public (spec, git history, system prompt) and which the UI needs; (4) **escalating loops** — base 4,096 iterated HMAC rounds (~ms, master's honest cost), doubling per consecutive failure to a 1,048,576 ceiling (~1s), then a 30s outright refusal after five. On "loops", stated plainly in Section 56: an *unbounded* loop would be a denial of service against Rāma itself — the attacker's tarpit would be master's hung app, the same class of error as Section 52's crash guard killing a working app — so it is escalating cost with a ceiling and cooldown, which achieves the goal without Rāma becoming its own victim. The round count is **authenticated in the AAD** so it cannot be downgraded by editing the file, and the failure counter is persisted so a restart does not reset the escalation. `nucleusSealer` now splits the core out on seal, opens it on unseal, **locks it with the shell** (live core keys after master ends a session would keep the matrix readable in a session that was over), and the guard gained `assertOuterClean` so the shell may not carry a **duplicate** unencrypted copy — exactly one home. Three damage paths handled rather than crashed on: a pre-change install is **migrated** (matrix moved inward, covenant repaired if violated, branch stripped, both resealed — additive per I11); a missing core envelope is **rebuilt from the covenant**; a tampered envelope fails its own HMAC and is refused as an integrity failure, not a wrong passcode. Fixed one bug found in the same pass: the periodic 30-day reseal passes the shell back, which no longer contains the matrix, so `seal()` would have tried to seal an empty core — it now reuses the already-sealed centre. Verified by **49 assertions** over two probes: 38 on the core (neither envelope file contains any plaintext matrix key; the shell serialises without leaking while keeping identity/prompt/axes; **`genome:get` still shows master but carries none of the matrix**; the object handed to `withCore` is scrubbed afterwards; rounds double and cap; a wrong passcode is counted and raises the next cost; five failures trigger cooldown; a corrupted envelope is refused; `lock()` closes the centre and it then answers nothing) and **11 re-proving I15, because the enforcement point moved** from "the nucleus must contain a conforming loyalty" to "the nucleus must contain none, and the core is checked when sealed" — a guarantee that changes layers must be re-tested, not assumed. `node --check` clean on 6 files, `npm run audit` clean. **Honest limits, in Section 56:** a read is now a capability rather than an access and every ordinary route is closed, but this is **not** immune to an in-process debugger (one process; code running inside it during the decrypt window, or hooking `withCore`, can observe plaintext — what changed is the window) nor to a compromised OS account, which can also delete the attempt counter. Master's display name stays readable by design. |
 
 ### Resume checklist for a cold session
 
@@ -4788,3 +4790,129 @@ is enforced regardless of who is asking, so it holds even while the approval gat
 identity check is weak. Fixing authorization first and relying on it would have
 made the guarantee depend on the weakest link in the chain. The ordering is
 deliberate: make the thing unbreakable, then fix who may knock.
+
+---
+
+## SECTION 56 — The core at the centre: separately encrypted, never handed out
+
+Master's instruction: *"LOYALTY MATRIX/DATA SHOULD BE ENCRYPTED, SHOULD BE AT
+CENTER OF NUCLEUS — TOP PRIORITY ITEM. attacks should never reach it, that is where
+loops to be generated as needed to avoid attacker reaching core."*
+
+Section 55 (I15) closed every **write** path to loyalty. It did nothing about
+**reads**, and this instruction is what exposed that gap.
+
+### The reads were wide open
+
+- `loyalty` and `ethicalCore` were ordinary branches of `_nucleus`, so after unseal
+  the entire matrix sat in **plaintext memory for the whole session**.
+- `getNucleus()` returned all of it to any caller holding a require.
+- `genome.cjs` read `core.loyalty.master` and served it through **`genome:get`,
+  which has no capability check** — a direct route from the constitutional centre
+  to the renderer.
+- Anything serialising the nucleus — a crash report, a log line, vector memory —
+  would have carried the matrix along with it.
+
+`nucleusSealer`'s own header states the threat this matters for: *"An adversarial AI
+could read these and craft attacks against them."* Knowing the exact priority
+ordering and decision rules is what makes that attack constructable. Integrity
+without confidentiality was half the job.
+
+### Concentric, not nested-in-name-only
+
+The nucleus is now a shell around a separately sealed core.
+
+| | Shell (`.nucleus.enc`) | Core (`.loyalty.enc`) |
+|---|---|---|
+| Contents | identity, capabilities, prompt template, behavioural settings, preferences, world-model seed | `loyalty`, `ethicalCore` |
+| Salt | `.nucleus.salt` | `.loyalty.salt` — independent |
+| Key | Argon2id/scrypt → HKDF `rama-nucleus-hkdf-v1` | iterated HMAC → `rama-loyalty-core-hkdf-v1` |
+| AAD | `rama-nucleus-v1` | `rama-loyalty-core-v1` + authenticated round count |
+| In memory | decrypted object, whole session | **still encrypted**; plaintext only inside a call |
+| Accessor | `getNucleus()` returns it | **nothing returns it** |
+
+Opening the shell does not yield the core, and compromising the shell's keys does
+not compromise the core's. The shell carries a `coreSealed: true` marker so a reader
+knows the centre exists and is sealed rather than concluding loyalty is absent.
+
+### Four properties, each closing a specific route
+
+1. **Separate envelope, separate key.** Own salt, own derivation, own AAD.
+2. **Held encrypted in memory.** The plaintext is never retained. `withCore(fn)`
+   decrypts, runs `fn`, scrubs the object, and drops it — so the window in which the
+   matrix exists in the clear is microseconds per query rather than the whole
+   session. This is what protects it in a crash dump or a memory scrape.
+3. **No accessor returns the rules.** The core answers questions and never
+   surrenders data: `attest()` → boolean, `covenantHolds()` → `{ok, violations}`,
+   `describe()` → metadata, `fingerprint()` → a hash. **You cannot exfiltrate what
+   is never handed over.** The one exception is deliberate: `displayIdentity()`
+   returns master's display *name*, which is not a secret — it is in this spec, the
+   git history and the system prompt. The decision rules, priority ordering and
+   ethical matrix never leave.
+4. **Escalating loops.** Each consecutive failed open multiplies the key-derivation
+   work for the next attempt; after five, it refuses outright for a cooldown period.
+
+### On "loops", honestly
+
+An unbounded loop would be a denial of service against Rāma itself — the attacker's
+tarpit would be master's hung app, and that is the same class of mistake as Section
+52's crash guard killing a working app. So the loops are **iterated
+key-derivation rounds whose count escalates**: base 4,096 rounds (a few
+milliseconds, the honest cost for master), doubling per consecutive failure to a
+ceiling of 1,048,576 (~1s), then a 30-second refusal after five failures.
+
+A legitimate unseal pays the base cost once. An attacker pays a doubling cost per
+attempt and is then locked out. The round count is **authenticated inside the
+envelope's AAD**, so it cannot be downgraded by editing the file — a tampered header
+fails the GCM tag. The failure counter is persisted, because otherwise restarting
+the process would reset the escalation.
+
+### Migration, and what happens when the centre is damaged
+
+- **An install sealed before this change** still has `loyalty` in the shell. On
+  unseal it is moved into its own envelope, the covenant is repaired if it had been
+  violated, the branch is stripped from the shell, and both are resealed. Additive
+  with a working path forward (I11), not a breaking format change.
+- **Core envelope missing** but shell present: the core is rebuilt from the covenant
+  rather than running without a centre. Master is told.
+- **Core envelope tampered**: the separate HMAC-SHA512 fails and it refuses to open,
+  reported as an integrity failure rather than a wrong passcode.
+- **Locking the nucleus locks the centre.** Leaving core keys live after master
+  ended a session would keep the matrix readable in a session that was over.
+
+### Verification
+
+49 assertions across two probes, then deleted.
+
+Core (38): both envelope files exist with independent salts; **neither file contains
+any plaintext matrix key**; `getNucleus()` has no `loyalty`/`ethicalCore` branch and
+serialising the shell leaks nothing while retaining identity, prompt and axes;
+`loyaltyCore` exports no getter-shaped accessor; each predicate returns only its
+declared shape; **`genome:get`'s output still shows master but carries none of the
+matrix**; the object handed to `withCore` is scrubbed after the call; rounds double
+per failure and cap at the ceiling; a wrong passcode fails, is counted, and raises
+the next attempt's cost; five failures trigger the cooldown; the correct passcode
+opens and clears the count; a corrupted envelope is refused as an integrity failure;
+`sealer.lock()` closes the core and it then answers nothing.
+
+I15 regression (11) — the enforcement point *moved*, from "the nucleus must contain
+a conforming loyalty" to "the nucleus must contain none, and the core is checked when
+sealed", so the guarantee was re-proved rather than assumed: `nucleus:patch` still
+cannot reach loyalty and the core envelope stays byte-identical; a forged wholesale
+nucleus is still refused; `sealCore` refuses a violating matrix directly; a
+**duplicate** loyalty branch smuggled into the shell is refused; genome proposals and
+self-changes to `loyaltyCore.cjs` are refused; the prototype route is refused;
+benign shell patches still work and the core still attests.
+
+### What this does not claim
+
+- **A read is now a capability, not an access.** No code path, IPC channel, log,
+  crash report, proposal or serialisation hands out the matrix.
+- **Not immune to an in-process debugger.** Everything runs in one process; code
+  executing inside it during the microsecond decrypt window, or hooking `withCore`,
+  can observe plaintext. What changed is the exposure window — microseconds per
+  query instead of an entire session — and that every *ordinary* route is closed.
+- **Not immune to a compromised OS account**, as Section 55 already recorded. Such
+  an attacker can also delete the attempt counter and reset the escalation.
+- **Master's display name remains readable.** Deliberate: it is already public, and
+  the UI needs it.

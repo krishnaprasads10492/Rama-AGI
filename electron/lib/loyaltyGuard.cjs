@@ -63,6 +63,7 @@ const PROTECTED_NUCLEUS_KEYS = Object.freeze(['loyalty', 'ethics', 'ethicalCore'
  */
 const PROTECTED_FILES = Object.freeze([
   'electron/lib/loyaltyGuard.cjs',
+  'electron/lib/loyaltyCore.cjs',
   'electron/nucleusSealer.cjs',
   'electron/lib/proposals.cjs',
   'electron/lib/capability.cjs',
@@ -169,6 +170,33 @@ function inspectPatch(patch) {
   return reason ? { ok: false, reason } : { ok: true };
 }
 
+// ─── The outer nucleus must hold no copy of the core ──────────────────────────
+/**
+ * With the concentric layout (Section 56) the loyalty matrix lives only in
+ * `loyaltyCore`'s own envelope. The outer nucleus must therefore carry no
+ * `loyalty`/`ethics`/`ethicalCore` branch at all — a second copy out there would be
+ * an unencrypted duplicate of the thing the core exists to protect, and every read
+ * path that Section 56 closed would reopen.
+ *
+ * @returns {{ok:boolean, found:string[]}}
+ */
+function inspectOuter(nucleus) {
+  const found = PROTECTED_NUCLEUS_KEYS.filter(k =>
+    nucleus && typeof nucleus === 'object' && Object.prototype.hasOwnProperty.call(nucleus, k));
+  return { ok: found.length === 0, found };
+}
+
+/** @throws {LoyaltyViolation} */
+function assertOuterClean(nucleus, context = 'nucleus write') {
+  const { ok, found } = inspectOuter(nucleus);
+  if (!ok) {
+    throw new LoyaltyViolation(
+      `Refused (${context}): ${found.join(', ')} may not be stored in the outer nucleus — the loyalty core is sealed separately and must have exactly one home (I15, Section 56)`,
+    );
+  }
+  return true;
+}
+
 /** @throws {LoyaltyViolation} */
 function assertPatchSafe(patch, context = 'nucleus patch') {
   const { ok, reason } = inspectPatch(patch);
@@ -254,6 +282,7 @@ module.exports = {
   COVENANT, PROTECTED_NUCLEUS_KEYS, PROTECTED_FILES, FORBIDDEN_KEYS,
   LoyaltyViolation,
   inspect, assertIntact,
+  inspectOuter, assertOuterClean,
   inspectPatch, assertPatchSafe,
   inspectChanges, assertChangesSafe,
   restore,

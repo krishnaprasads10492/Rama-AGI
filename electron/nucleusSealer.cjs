@@ -195,8 +195,21 @@ function encryptNucleus(nucleusObj, encKey, hmacKey) {
   // patchNucleus(). Checking here rather than at each caller makes conformance a
   // condition of the nucleus being writable at all: a future caller that has never
   // heard of loyaltyGuard still cannot persist a non-conforming nucleus, and no
-  // tier, proposal or approval reaches past it. See spec Section 55.
-  require('./lib/loyaltyGuard.cjs').assertIntact(nucleusObj, 'sealing the nucleus');
+  // tier, proposal or approval reaches past it. See spec Sections 55 and 56.
+  //
+  // Two assertions now, because the core moved inward (Section 56): the outer
+  // nucleus must hold no copy of the loyalty matrix, and the separately sealed core
+  // must still attest. The first stops an unencrypted duplicate being created; the
+  // second stops the outer shell being rewritten while the core is compromised.
+  const guard = require('./lib/loyaltyGuard.cjs');
+  guard.assertOuterClean(nucleusObj, 'sealing the nucleus');
+
+  const innerCore = require('./lib/loyaltyCore.cjs');
+  if (innerCore.isOpen() && !innerCore.attest()) {
+    throw new guard.LoyaltyViolation(
+      'Refused (sealing the nucleus): the loyalty core no longer satisfies the covenant (I15)',
+    );
+  }
 
   const plain   = Buffer.from(JSON.stringify(nucleusObj), 'utf8');
   const iv      = crypto.randomBytes(12);
@@ -272,12 +285,35 @@ async function seal(passcode, customNucleus = null) {
 
   const { encKey, hmacKey } = await deriveNucleusKey(passcode, salt);
 
-  const nucleusToSeal = customNucleus || {
+  const requested = customNucleus || {
     ...NUCLEUS_TEMPLATE,
     sealedAt:    new Date().toISOString(),
     sealVersion: (_sealVersion || 0) + 1,
   };
 
+  // ── Split the core out of the shell (Section 56) ────────────────────────────
+  // The loyalty matrix and ethical core are sealed into their OWN envelope with
+  // their own salt and their own key, so opening the nucleus does not yield them.
+  // What stays here is the shell: identity, capabilities, prompt, preferences.
+  const { shell, core } = splitCore(requested);
+  const loyaltyCore = require('./lib/loyaltyCore.cjs');
+
+  let coreRes;
+  if (core.loyalty) {
+    // A nucleus carrying the matrix: first seal, or a migration.
+    coreRes = await loyaltyCore.sealCore(passcode, core);
+    if (!coreRes.ok) throw new Error(`Loyalty core seal failed: ${coreRes.error}`);
+  } else if (loyaltyCore.isOpen()) {
+    // Resealing the shell only — the periodic 30-day reseal passes the shell back,
+    // which by design no longer contains the matrix. The centre is already sealed
+    // in its own envelope and is deliberately left untouched: re-deriving it here
+    // would be pointless churn on the one thing that must not move.
+    coreRes = { ok: true, bytes: loyaltyCore.describe()?.bytes ?? 0, reused: true };
+  } else {
+    throw new Error('Cannot seal the nucleus: no loyalty core supplied and none is open');
+  }
+
+  const nucleusToSeal = shell;
   const encrypted = encryptNucleus(nucleusToSeal, encKey, hmacKey);
   fs.writeFileSync(nucleusPath, encrypted, { mode: 0o600 });
 
@@ -286,8 +322,32 @@ async function seal(passcode, customNucleus = null) {
   _isSealed    = true;
   _sealVersion = nucleusToSeal.sealVersion;
 
-  console.warn(`[Nucleus] ✓ Sealed — version ${_sealVersion}, ${encrypted.length} bytes`);
-  return { ok: true, version: _sealVersion };
+  console.warn(`[Nucleus] ✓ Sealed — version ${_sealVersion}, shell ${encrypted.length} bytes, core ${coreRes.bytes} bytes sealed separately`);
+  return { ok: true, version: _sealVersion, coreSealed: true };
+}
+
+/**
+ * Separate the constitutional centre from the shell.
+ *
+ * The core is what an adversary must never read — the loyalty matrix and the
+ * ethical decision rules. `nucleusSealer`'s own header names that threat: "An
+ * adversarial AI could read these and craft attacks against them." The shell is
+ * everything an attacker learning it would gain little from.
+ */
+function splitCore(nucleus) {
+  const shell = { ...(nucleus ?? {}) };
+  const core  = {
+    coreVersion: 1,
+    loyalty:     shell.loyalty,
+    ethicalCore: shell.ethicalCore,
+  };
+  delete shell.loyalty;
+  delete shell.ethicalCore;
+  delete shell.ethics;
+  // A marker so anything reading the shell knows the centre exists and is sealed,
+  // rather than concluding loyalty is simply absent.
+  shell.coreSealed = true;
+  return { shell, core };
 }
 
 // ─── Unseal the nucleus ───────────────────────────────────────────────────────
@@ -312,26 +372,52 @@ async function unseal(passcode) {
     const buf    = fs.readFileSync(nucleusPath);
     let nucleus = decryptNucleus(buf, encKey, hmacKey);
 
-    // ── Tampering is reverted, not merely refused (I15) ──────────────────────
-    // A nucleus written by an older build, or by a path that predates the guard,
-    // is repaired rather than rejected — refusing to load would lock master out of
-    // his own system over damage Rāma can fix. Master is always told.
-    const guard = require('./lib/loyaltyGuard.cjs');
-    const check = guard.inspect(nucleus);
-    if (!check.ok) {
-      const { nucleus: healed, restored } = guard.restore(nucleus);
-      nucleus = healed;
-      console.error(`[Nucleus] loyalty covenant had been violated — restored: ${restored.join('; ')}`);
+    const guard       = require('./lib/loyaltyGuard.cjs');
+    const loyaltyCore = require('./lib/loyaltyCore.cjs');
+
+    // ── Migration: an install sealed before the core moved inward ────────────
+    // Such a nucleus still carries `loyalty`/`ethicalCore` in the shell. Move them
+    // into their own envelope, repair the covenant if it had been violated, strip
+    // them from the shell, and reseal. Additive with a working path forward (I11)
+    // rather than a breaking format change.
+    const stillInShell = !guard.inspectOuter(nucleus).ok;
+    if (stillInShell) {
+      const repair = guard.restore(nucleus);
+      if (repair.restored.length) {
+        console.error(`[Nucleus] loyalty covenant had been violated — restored: ${repair.restored.join('; ')}`);
+        notifyRestored(repair.restored);
+      }
       _nucleusKey = { encKey, hmacKey };
-      _nucleus    = nucleus;
       _isSealed   = true;
-      await seal(passcode, { ...nucleus, sealedAt: new Date().toISOString(), sealVersion: (nucleus.sealVersion || 1) + 1 });
-      try {
-        const { BrowserWindow } = require('electron');
-        BrowserWindow.getAllWindows().forEach(w => w.webContents.send('nucleus:loyalty-restored', {
-          ts: Date.now(), restored,
-        }));
-      } catch { /* no window yet — the console.error above still stands */ }
+      console.warn('[Nucleus] migrating the loyalty core into its own sealed envelope');
+      await seal(passcode, {
+        ...repair.nucleus,
+        sealedAt: new Date().toISOString(),
+        sealVersion: (nucleus.sealVersion || 1) + 1,
+      });
+      return { ok: true, version: _sealVersion, migrated: true };
+    }
+
+    // ── Open the separately sealed core ─────────────────────────────────────
+    const opened = await loyaltyCore.openCore(passcode);
+    if (!opened.ok && !opened.absent) {
+      // The shell decrypted, so the passcode is right — a core that will not open
+      // means the core envelope itself is damaged or was tampered with.
+      throw new Error(`Loyalty core could not be opened: ${opened.error}`);
+    }
+    if (opened.absent) {
+      // Shell exists, core does not — reconstruct it from the covenant rather than
+      // running without a centre.
+      console.error('[Nucleus] loyalty core envelope missing — rebuilding it from the covenant');
+      const rebuilt = guard.restore({ loyalty: null });
+      _nucleusKey = { encKey, hmacKey };
+      _isSealed   = true;
+      await loyaltyCore.sealCore(passcode, {
+        coreVersion: 1,
+        loyalty:     rebuilt.nucleus.loyalty,
+        ethicalCore: NUCLEUS_TEMPLATE.ethicalCore,
+      });
+      notifyRestored(['the loyalty core envelope was missing and has been rebuilt']);
     }
 
     _nucleusKey  = { encKey, hmacKey };
@@ -385,6 +471,16 @@ async function patchNucleus(patches) {
   return { ok: true };
 }
 
+/** Tell master when the covenant had to be repaired. Never silent. */
+function notifyRestored(restored) {
+  try {
+    const { BrowserWindow } = require('electron');
+    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('nucleus:loyalty-restored', {
+      ts: Date.now(), restored,
+    }));
+  } catch { /* no window yet — the console.error at the call site still stands */ }
+}
+
 // ─── Lock nucleus ─────────────────────────────────────────────────────────────
 function lock() {
   if (_nucleusKey?.encKey)  _nucleusKey.encKey.fill(0);
@@ -392,6 +488,9 @@ function lock() {
   _nucleusKey  = null;
   _nucleus     = null;
   _isSealed    = false;
+  // The centre locks with the shell — leaving core keys live after the nucleus is
+  // locked would keep the matrix readable in a session master had ended.
+  try { require('./lib/loyaltyCore.cjs').lock(); } catch { /* already gone */ }
 }
 
 // ─── Register IPC ─────────────────────────────────────────────────────────────
@@ -445,5 +544,27 @@ module.exports = {
   getLiveSystemPrompt,
   patchNucleus,
   isSealed:  () => _isSealed,
+  /**
+   * The SHELL only. The loyalty matrix and ethical core are not in this object —
+   * they live in `loyaltyCore`'s own envelope and no accessor returns them
+   * (Section 56). Anything that previously read `getNucleus().loyalty` must ask the
+   * core a question instead; `displayIdentity()` covers the one field the UI needs.
+   */
   getNucleus: () => _nucleus,
+  /** Master's display name, from the core, without exposing the matrix. */
+  displayIdentity: () => {
+    try { return require('./lib/loyaltyCore.cjs').displayIdentity(); }
+    catch { return { master: null }; }
+  },
+  /** Does the sealed core still satisfy the covenant? */
+  attestLoyalty: () => {
+    try { return require('./lib/loyaltyCore.cjs').attest(); }
+    catch { return false; }
+  },
+  /** Core metadata — presence, rounds, failed attempts. Never contents. */
+  describeCore: () => {
+    try { return require('./lib/loyaltyCore.cjs').describe(); }
+    catch { return null; }
+  },
+  splitCore,
 };
