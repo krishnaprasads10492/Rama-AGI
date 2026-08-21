@@ -1,56 +1,80 @@
 'use strict';
 
+// ─── Crash guard — FIRST, before anything else can throw ─────────────────────
+// This must precede every other require. The installed app once died on
+// `Cannot find module 'debug'` thrown from a module-scope require below, and
+// Electron showed its own raw stack dialog because nothing had claimed the
+// exception — every one of Rāma's diagnostics is registered inside
+// app.whenReady(), hundreds of lines downstream of the throw. A guard installed
+// after the require that fails protects nothing. See spec Section 49.
+const crashGuard = require('./lib/crashGuard.cjs');
+crashGuard.install();
+
+const { safeRequire, loadFailures, isStub } = require('./lib/safeRequire.cjs');
+
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog, Notification } = require('electron');
 const path = require('path');
 const fs   = require('fs');
-const { autoUpdater } = require('electron-updater');
+// electron-updater is NOT required here. It was, at module scope, and its
+// dependency chain (builder-util-runtime -> debug) is what killed the installed
+// app. setupAutoUpdater() guards its *invocation* with `if (isDev) return`, but
+// that check sits ~550 lines further down — far too late to prevent a require
+// from throwing. It is now loaded lazily, inside the function that uses it.
 
 // ─── IPC Handlers ───────────────────────────────────────────────────────────
-const systemIPC    = require('./ipc/system.cjs');
-const fsIPC        = require('./ipc/filesystem.cjs');
-const gitIPC       = require('./ipc/git.cjs');
-const terminalIPC  = require('./ipc/terminal.cjs');
-const appsIPC      = require('./ipc/appAssimilation.cjs');
-const aiIPC        = require('./ipc/aiProcess.cjs');
-const marketIPC    = require('./ipc/marketIntel.cjs');
-const browserIPC   = require('./ipc/browserEngine.cjs');
-const vaultIPC     = require('./ipc/credentialVault.cjs');
-const modelIPC     = require('./ipc/modelRouter.cjs');
-const agentIPC         = require('./ipc/agentOrchestrator.cjs');
-const intelligenceIPC  = require('./ipc/intelligenceEngine.cjs');
-const evolutionIPC         = require('./ipc/evolutionEngine.cjs');
-const resourceResearchIPC  = require('./ipc/resourceResearchEngine.cjs');
-const resourceOrchestrator = require('./resourceOrchestrator.cjs');
+// Loaded through safeRequire: a subsystem that cannot load degrades to an inert
+// stub that reports its own absence, instead of aborting startup for the other
+// thirty capabilities that are perfectly intact. This is invariant I11 applied at
+// the loading boundary — the engines already had internal fallbacks, but a fatal
+// require meant those fallbacks never got the chance to run.
+const systemIPC    = safeRequire('./ipc/system.cjs',            'System sensing');
+const fsIPC        = safeRequire('./ipc/filesystem.cjs',        'Filesystem');
+const gitIPC       = safeRequire('./ipc/git.cjs',               'Version control');
+const terminalIPC  = safeRequire('./ipc/terminal.cjs',          'Terminal');
+const appsIPC      = safeRequire('./ipc/appAssimilation.cjs',   'App assimilation');
+const aiIPC        = safeRequire('./ipc/aiProcess.cjs',         'AI backend process');
+const marketIPC    = safeRequire('./ipc/marketIntel.cjs',       'Market intelligence');
+const browserIPC   = safeRequire('./ipc/browserEngine.cjs',     'Browser engine');
+const vaultIPC     = safeRequire('./ipc/credentialVault.cjs',   'Credential vault');
+const modelIPC     = safeRequire('./ipc/modelRouter.cjs',       'Model router');
+const agentIPC         = safeRequire('./ipc/agentOrchestrator.cjs',    'Agent orchestrator');
+const intelligenceIPC  = safeRequire('./ipc/intelligenceEngine.cjs',   'Intelligence engine');
+const evolutionIPC         = safeRequire('./ipc/evolutionEngine.cjs',  'Evolution engine');
+const resourceResearchIPC  = safeRequire('./ipc/resourceResearchEngine.cjs', 'Resource research');
+const resourceOrchestrator = safeRequire('./resourceOrchestrator.cjs', 'Resource orchestrator');
 // ─── Upgrade layer (additive — wraps existing, never replaces) ───────────────
-const vectorMemoryIPC  = require('./ipc/vectorMemory.cjs');
-const sandboxIPC       = require('./ipc/sandboxEngine.cjs');
-const graphIPC         = require('./ipc/graphReasoner.cjs');
-const selfCareIPC      = require('./ipc/selfCare.cjs');
+const vectorMemoryIPC  = safeRequire('./ipc/vectorMemory.cjs',   'Vector memory');
+const sandboxIPC       = safeRequire('./ipc/sandboxEngine.cjs',  'Execution sandbox');
+const graphIPC         = safeRequire('./ipc/graphReasoner.cjs',  'Graph planner');
+const selfCareIPC      = safeRequire('./ipc/selfCare.cjs',       'Self-care monitor');
 // ─── Neural Lattice Nexus + Code Intelligence ─────────────────────────────────
-const eventBus         = require('./ramaEventBus.cjs');
-const astIPC           = require('./ipc/astEngine.cjs');
-const codeRegenIPC     = require('./ipc/codeRegenEngine.cjs');
+const eventBus         = safeRequire('./ramaEventBus.cjs',       'Event bus');
+const astIPC           = safeRequire('./ipc/astEngine.cjs',      'Code comprehension');
+const codeRegenIPC     = safeRequire('./ipc/codeRegenEngine.cjs','Self-modification');
 // ─── Immutable Encryption Foundry ────────────────────────────────────────────
-const nucleusSealer    = require('./nucleusSealer.cjs');
-const ipcEncryption    = require('./ipcEncryption.cjs');
+// These two are load-bearing for identity and encryption. They are still loaded
+// through safeRequire so the failure is *reported* rather than silent, but the
+// startup doctor treats their absence as fatal rather than degraded.
+const nucleusSealer    = safeRequire('./nucleusSealer.cjs',      'Nucleus (identity)');
+const ipcEncryption    = safeRequire('./ipcEncryption.cjs',      'IPC encryption');
 // ─── Shared foundations (one HTTP client, one approval ledger) ────────────────
-const proposalLedger   = require('./lib/proposals.cjs');
+const proposalLedger   = safeRequire('./lib/proposals.cjs',      'Approval ledger');
 // ─── Genome / Instance layer (holonic architecture) ───────────────────────────
-const genomeIPC        = require('./genome.cjs');
-const genomeApplier    = require('./lib/genomeApplier.cjs');
-const releaseChannel   = require('./lib/releaseChannel.cjs');
-const localUpdateEngine = require('./lib/localUpdateEngine.cjs');
-const publishProposal  = require('./lib/publishProposal.cjs');
-const authIPC          = require('./ipc/authEngine.cjs');
-const instanceIPC      = require('./ipc/instanceManager.cjs');
-const metaCognitionIPC = require('./ipc/metaCognition.cjs');
-const timelineIPC      = require('./ipc/timeline.cjs');
-const voiceIPC         = require('./ipc/voiceEngine.cjs');
-const sessionMgr   = require('./sessionManager.cjs');
-const dataStore    = require('./dataStore.cjs');
+const genomeIPC        = safeRequire('./genome.cjs',             'Genome');
+const genomeApplier    = safeRequire('./lib/genomeApplier.cjs',  'Genome applier');
+const releaseChannel   = safeRequire('./lib/releaseChannel.cjs', 'Release channel');
+const localUpdateEngine = safeRequire('./lib/localUpdateEngine.cjs', 'Local self-update');
+const publishProposal  = safeRequire('./lib/publishProposal.cjs','Proposal publishing');
+const authIPC          = safeRequire('./ipc/authEngine.cjs',     'Authentication');
+const instanceIPC      = safeRequire('./ipc/instanceManager.cjs','Instance lifecycle');
+const metaCognitionIPC = safeRequire('./ipc/metaCognition.cjs',  'Meta-cognition');
+const timelineIPC      = safeRequire('./ipc/timeline.cjs',       'Timeline');
+const voiceIPC         = safeRequire('./ipc/voiceEngine.cjs',    'Voice');
+const sessionMgr   = safeRequire('./sessionManager.cjs',         'Session manager');
+const dataStore    = safeRequire('./dataStore.cjs',              'Encrypted store');
 // ─── Floating status badge (always-on-top presence indicator) ────────────────
-const badgeWindow  = require('./badgeWindow.cjs');
-const badgeState   = require('./lib/badgeState.cjs');
+const badgeWindow  = safeRequire('./badgeWindow.cjs',            'Status badge');
+const badgeState   = safeRequire('./lib/badgeState.cjs',         'Badge state');
 
 // ─── Appearance (persisted zoom + first-run fit to the display) ──────────────
 const appearanceState = require('./lib/appearanceState.cjs');
@@ -65,10 +89,28 @@ const BUILD_INDEX = path.join(__dirname, '..', 'build', 'index.html');
 
 let mainWindow = null;
 let tray       = null;
+// Filled by the startup doctor inside whenReady, and exposed to the renderer over
+// `health:startup` so the UI can show what degraded instead of leaving master to
+// discover it feature by feature.
+let startupHealth = null;
 
 // ─── Auto Updater ────────────────────────────────────────────────────────────
 function setupAutoUpdater() {
   if (isDev) return;
+
+  // Lazily required, and guarded. For an installed app the updater is the ONLY
+  // real repair channel — a corrected build can replace a broken one — so losing
+  // it is a genuine degradation worth reporting. But it must never be the reason
+  // the app cannot start, which is exactly what happened when this was a
+  // module-scope require.
+  let autoUpdater;
+  try {
+    ({ autoUpdater } = require('electron-updater'));
+  } catch (err) {
+    console.warn(`[Updater] unavailable (${err.message}) — Rāma cannot self-update this install`);
+    return;
+  }
+  if (!autoUpdater) return;
 
   autoUpdater.autoDownload    = true;
   autoUpdater.autoInstallOnAppQuit = true;
@@ -394,6 +436,41 @@ function applyResolvedZoom(reason = 'load') {
     console.warn('[appearance] could not resolve zoom:', err.message);
     return null;
   }
+}
+
+/**
+ * Startup health, readable from the UI.
+ *
+ * No capability gate: this is the same sensitivity class as the aggregate CPU/RAM
+ * numbers the Home dashboard already shows to any signed-in tier, and withholding
+ * "your installation is incomplete" from the person looking at a broken feature
+ * would be the opposite of useful. It reports absence, never contents.
+ */
+function registerHealthIpc(ipcMain) {
+  ipcMain.handle('health:startup', async () => {
+    if (!startupHealth) return { ok: false, error: 'Startup diagnosis has not run yet' };
+    return {
+      ok: true,
+      data: {
+        healthy:       startupHealth.ok,
+        fatal:         startupHealth.fatal,
+        degraded:      startupHealth.degraded,
+        checks:        startupHealth.report,
+        previousCrash: startupHealth.previousCrash,
+        packaged:      app.isPackaged,
+      },
+    };
+  });
+
+  // Past crashes, so a fault that killed a previous launch is visible now rather
+  // than only in a file master would have to know to look for.
+  ipcMain.handle('health:crash-reports', async (_e, limit) => {
+    return { ok: true, data: crashGuard.recentReports(Number(limit) || 5) };
+  });
+
+  ipcMain.handle('health:crash-dir', async () => {
+    return { ok: true, data: crashGuard.reportDir() };
+  });
 }
 
 function registerAppearance(ipcMain) {
@@ -744,6 +821,26 @@ ipcMain.handle('notify', async (_e, { title, body }) => {
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
+  // ── Self-diagnosis, in the app, before anything depends on it ──────────────
+  // The packaged equivalent of start.cjs's diagnose stage, which does not ship.
+  // Runs first so the findings are available to everything after it, and so a
+  // fatally incomplete installation is reported by Rāma rather than discovered by
+  // master when a feature silently does nothing. See spec Section 49.
+  const doctor = require('./lib/startupDoctor.cjs');
+  startupHealth = doctor.diagnose({
+    safeRequireFailures: loadFailures(),
+    crashReports:        crashGuard.recentReports(3),
+    appRoot:             path.join(__dirname, '..'),
+  });
+
+  console.warn(`[doctor] startup ${doctor.summarise(startupHealth)}`);
+  for (const f of startupHealth.fatal)    console.error(`[doctor] FATAL: ${f.detail}`);
+  for (const d of startupHealth.degraded) console.warn(`[doctor] degraded: ${d.detail}`);
+
+  if (startupHealth.previousCrash) {
+    console.warn(`[doctor] the previous run ended in a crash: ${startupHealth.previousCrash.message}`);
+  }
+
   // Initialize session manager (check first-run, etc.)
   const dataDir = dataStore.getDataDir();
   await sessionMgr.init(dataDir);
@@ -780,6 +877,7 @@ app.whenReady().then(async () => {
   registerLocalUpdate(ipcMain);       // local pull → install → build → apply — see Section 40
   publishProposal.register(ipcMain);  // applied self-modify proposals → new branch, never dev/source directly
   registerAppearance(ipcMain);
+  registerHealthIpc(ipcMain);         // startup diagnosis + past crashes, readable from the UI
   // Genome layer — registered after the engines it describes so verify() is honest
   genomeIPC.register(ipcMain);
   instanceIPC.register(ipcMain);

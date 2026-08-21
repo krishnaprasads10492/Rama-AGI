@@ -1702,6 +1702,7 @@ authenticated **Master session**, not merely an open store.
 | 64 | Fit the interface to the display; remember master's zoom | done | Section 47. `electron/lib/appearanceState.cjs` persists `{zoom, source, fittedFor}` beside `badge-state.json`. Two causes behind master's tiny-text screenshot: zoom was never written down, so every launch reverted to 1.0 and the setting looked broken; and nothing adapted to the display. The fit keys on **DIP** work-area size because Chromium has already applied the OS scale factor by then — a display reporting a large DIP area is one the OS is *not* scaling, which is exactly the case needing help, and a 4K panel at 200% correctly reports 1920×1080 DIP and gets the same treatment as native 1080p. Scaling uses the smaller of width/height ratios against a 1600×900 reference so an ultrawide is not flattered by its width. Auto range 1.0–1.4, deliberately narrower than the 0.6–2.0 the IPC allows: a guess should never shrink the UI and should stay clear of the bound where the fixed-height titlebar clips. Ownership is explicit — `source` flips to `'master'` the moment a zoom is set by hand and the fit never overrides it again, on any display; `appearance:reset-zoom` hands control back and `appearance:display-info` reports what the fit would choose without applying it. Applied on `did-finish-load`, not at window creation, because `setZoomFactor` is per-`webContents` and `loadRenderer`'s navigation would silently undo it. Verified by two probes: fit maths across eight geometries (1366×768→1.0 never shrunk, 1920×1080→1.15, 2560×1440→1.4, 3440×1440→1.4 height-limited, 4K@200%→1.15 identical to native 1080p, garbage→1.0) and a 14-assertion state machine (first run fits, same display reused not re-fitted, changed display re-fits while auto, master's value returned exactly and surviving a display change, out-of-range clamped not rejected, reset returns to auto, corrupt state file falls back cleanly). **Not verified: how it looks on master's screen** — the maths is checked, the judgement is master's. |
 | 65 | Free design resources, adopted only on master's decision | in-progress (catalog seeded; no design change proposed yet) | Section 47. Added a `design` axis to `shared/resourceCatalog.json` — 7 entries, all free *and* redistributable in a shipped app, each carrying a new `license` field because licence, not price, is what decides a design asset. Anything merely "free to view" is excluded: bundling it would be a licence breach dressed as a saving. `resourceResearchEngine.cjs` iterates axes generically, so no engine change was needed. Entries, ordered by how directly they address what master reported: `modern-css-reset` (density scale — the dead vertical space; lowest-risk starting point), `fluid-type-scale` (CSS `clamp()`, Utopia method — the tiny type, complementary to row 64's zoom since zoom scales uniformly while a fluid scale changes ratios; **blocked on tokenising hundreds of inline `px` font sizes**, which is precisely why it must be a reviewed proposal), `lucide` (ISC — replaces unicode glyphs `⬢ ◈ ▣ ↕ ↺` that render differently per machine; a real cross-platform inconsistency, not taste), `radix-colors` (MIT, contrast-verified dark scales) vs `open-color` (MIT, simpler, listed so the report compares rather than presents one option), `inter-font` (OFL 1.1, tabular figures stop metric readouts jittering), `hud-display-fonts` (OFL 1.1, headings only — poor for body text, and a proposal should argue that scope or drop it). Fixed a live bug the axis would have amplified: `statusFor()` returned `'no-key-needed'` for entries needing no credential *and not wired*, which `Resources.jsx` renders as a green **"READY"** — so Qdrant claimed to be ready while nothing referenced it, and all seven design entries would have claimed the same. Absence of a key requirement is not adoption; those now report `'researched-only'` ("NOT ENABLED"), and the dead style key was removed since unknown statuses already fall back to it. Next step: run `resource:research` on `modern-css-reset` and `lucide`, then file the first `KINDS.RESOURCE` proposal for master to approve or reject — nothing here touches the UI without that (I6). |
 | 66 | Installed app died on launch — `Cannot find module 'debug'` | done | Section 48. `build.files` used `!node_modules/**/*` plus a hand-written allowlist of 18 packages. npm hoists transitive dependencies to top-level `node_modules`, so the exclusion stripped everything the list did not name: **211 of a 229-package production closure were absent from the asar** — `express` without `body-parser`, `axios` without `follow-redirects`, `argon2` without `node-gyp-build`. `debug` was just the first one the loader reached. The allowlist could never have been correct, because it enumerates direct dependencies while npm's layout is decided by hoisting; any upgrade could move a package from nested to hoisted and break it again. Fixed by letting electron-builder resolve the production tree itself: `files` now includes `node_modules/**/*` and excludes only renderer-only libraries (verified by grep that nothing in `electron/`/`server/` requires them), the build toolchain, and test/doc directories. The remaining risk direction is deliberate — a wrong exclusion makes the package bigger, a missing allowlist entry makes the app not start. Two incidental findings: specifying any `files` pattern replaces electron-builder's default `**/*`, so omitting `node_modules/**/*` produced an asar with **zero** packages; and a stale `win-unpacked` causes `ENOENT: rename electron.exe`. New `scripts/auditPackage.cjs` + `npm run audit:package`, wired into `buildInstaller.cjs` as a stage that fails the build: it opens the built asar and walks outward from the real entry points, so it reads the artefact rather than the config — which is the actual lesson, since every stage had reported success while the artefact was unloadable. Three refinements each came from a wrong first attempt: reachability instead of a full scan (a full scan reported 65 misses, nearly all third-party `test.js` noise; reachability walks 831 files instead of 7,790), splitting misses on local presence so `chromium-bidi` — absent from `node_modules` entirely, so failing in dev too — is not blamed on packaging, and treating `try/catch`-guarded requires as degrading rather than fatal since that is this project's deliberate optional-dependency pattern. It also fails when it cannot read most of the archive: the first version normalised the asar's Windows backslash paths before `extractFile`, read **13 of 7,790 files and reported success**. Verified against the bug by rebuilding with the old allowlist — exit 1, 51 packages flagged with load paths including `debug`; fixed config exits 0 with `fsevents`/`osx-temperature-sensor` correctly degrading. **Not verified: that the installed app now launches** — that needs master to install it. |
+| 67 | Self-heal that survives being packaged | done (containment + honest reporting; autonomous repair still needs the updater live) | Section 49. Master's challenge was correct and the evidence was that an external assistant diagnosed four consecutive failures Rāma should have reported itself. Measured boundary: `main` is `electron/main.cjs`, so the installer loads it directly — and **every repair capability lives in `start.cjs`, which is not matched by any `build.files` glob**. It could not work there anyway: every repair shells out to npm against a writable tree, and an install has no npm, no `vite`, and a read-only asar. So the packaged app inherited monitoring and lost repair, with **no `uncaughtException` handler anywhere in `electron/**`** and ~45 unguarded module-scope requires. `bootFailurePage()` — the right tool, dependency-free — was unreachable because all four call sites sit downstream of `createMainWindow()`. The `isDev` check inside `setupAutoUpdater()` shows the shape of the error exactly: it guards the *invocation* ~550 lines after the *require* that throws. Three new dependency-free modules: `lib/crashGuard.cjs` installed as the first statement of `main.cjs` (a guard after the failing require protects nothing) — claims both handlers, turns `MODULE_NOT_FOUND` into "Rāma is missing a component: debug" rather than a stack, writes a report to writable `userData/crash/` keeping 20, and offers Relaunch/Show report/Quit via native `dialog` rather than a BrowserWindow *because* the fault may be a missing module and a window needs the renderer and preload that could be equally absent; `lib/safeRequire.cjs` wrapping every engine require, returning an **inert stub rather than null** since callers do `engine.register()` unconditionally and null would just be a worse crash — stub `register()` is a no-op so startup completes, other methods return `{ok:false,degraded:true}`; `lib/startupDoctor.cjs`, the diagnose stage inside the app, checking that runtime dependencies actually resolve (`genome.verify()` only resolves *first-party* engine paths, which is why a missing npm package never showed as a dead gene), the renderer bundle, and the capability matrix — whose absence does not throw, since `capability.can()` fails closed, so the app would start and deny every action, reading as a permissions bug. Guidance is build-aware: `bootFailurePage` told installed users to run `npm install && npm run build && node start.cjs --prod`, impossible from an install — advice that cannot be followed is worse than none. Exposed as `health:startup`/`health:crash-reports`/`health:crash-dir`, ungated (same class as the Home dashboard's metrics; withholding "your installation is incomplete" from someone staring at a broken feature would be perverse). Verified by 27 assertions with `electron` stubbed: the original error classified as missing module `debug` while an unrelated error is not, require stack preserved, packaged advice free of `npm install` while dev advice has it, stub refuses politely, missing renderer fatal when packaged but degraded in dev, previous crash surfaced on next start, every fatal finding carrying a remedy. `npm run audit` + `audit:package` clean. **Honest limit: this buys survival and honesty, not autonomy.** Rāma still cannot repair a broken install — only degrade cleanly, say exactly what is wrong, and offer the update channel. Real autonomous recovery needs the auto-updater live (row 53, dormant: needs a release cut + GitHub Actions). **Not verified: that the installed app shows this dialog rather than Electron's** — needs master to install a build. Next step: surface `health:startup` on the System page so degradation is visible in the UI, not just the terminal. |
 | 61 | Fleet awareness — Rāma on several devices, staying in touch | in-progress (designed, not implemented; one decision open for master) | Section 46. Researched first: there is **no cross-device anything today** — instances are objects in one in-process `Map` with no `host`/`machineId`/`deviceId`/`lastHeartbeat` field (`instanceManager.cjs:112-133`), "sibling" discovery is a `.filter()` over that same Map (`selfCare.cjs:144-145`), a "dead" gene means a local module path failed to resolve, the API server binds `127.0.0.1` explicitly (`server/index.cjs:101`), and there is no WebSocket/mDNS/discovery/peer code at all. Usable anchors that do exist: `authCore`'s `instanceMeta.instanceId` (stable per-install UUID) + `instanceName` (`<hostname>-rama`), and `cryptoCore`'s AES-256-GCM. **Decisions recorded in Section 46:** (a) the corporate-managed machine is *not* enrolled as a peer — Rāma's IPC surface (`terminal:create`, `fs:write/delete`, `vault:*`, `apps:execute` `spawn-cli`, `system:kill-process`, `regen:*`) makes a peer channel a wider remote-access path than the RDP that was declined a turn earlier; (b) first increment uses the **existing git remote as the fleet bus** — no listener, no inbound, no NAT traversal, same outbound traffic as a `git push`, auditable as commits, at the honest cost of minute-scale eventual consistency rather than live presence; (c) fleet payloads are **encrypted** with the existing `cryptoCore` path, because `build.publish` is `"private": false` and telemetry carries hostnames, paths and OS usernames — plaintext would be a leak created by a protective feature; (d) fleet messages are a closed status vocabulary (device id/name, liveness, genomeVersion+genomeHash for drift detection, selfCare summary, task/build headline, alerts) and the reader is **never** a proxy onto `ipcMain` — a remote device may inform, never act; (e) peer identity comes from the device record, never a caller-supplied `user` and never `authClient.getFingerprint()` (`userAgent+language+screen+timezone` collides across similar laptops). Next steps, in order: **(1) gate `instance:*` — worth doing regardless of this feature.** Those handlers have no `capability.deny()` at all (`instanceManager.cjs:300-341`) and `express(id, gene, null)` skips the tier check by design for `selfCare.cjs:158`'s self-heal; caps `instances.view/spawn/express/terminate` already exist in `capabilities.json` but are unenforced at the IPC boundary. This is the same class row 59 closed for `fs`/`vault`/`terminal`/`git`/`agents`/`sandbox` and missed here; needs `preload.cjs` + every `.jsx` caller threading `currentUser`, verified with `npm run audit`. (2) Add device fields (`deviceId`, `deviceName`, `lastHeartbeat`) to instance records, anchored on `instanceMeta.instanceId`. (3) Add `fleet.view`/`fleet.publish`/`fleet.enroll` capabilities. (4) Build publish/read over the `fleet` branch with encrypted payloads and explicit master enrolment. **Blocked on master confirming the enrolment scope** before (4). |
 
 ### Resume checklist for a cold session
@@ -3959,3 +3960,137 @@ and `node-gyp-build`. Confirmed absent: `electron`, `electron-builder`, `vite`,
 **Not verified:** that the installed app now launches. That needs master to
 install it. What is verified is that the specific failure — an unresolvable
 `require` on a load path — can no longer leave this machine undetected.
+---
+
+## SECTION 49 — Self-heal that survives being packaged
+
+> Master's challenge: "the self-repair & self-heal modules, shouldn't these be
+> available for our app? … from point of build generation onwards the self-repair
+> and self-heal scenario should be active or else instead of being an asset RĀMA
+> will be burden for user."
+
+The criticism is correct, and the evidence is that an external assistant had to
+diagnose four consecutive failures that Rāma should have reported about itself.
+
+### The boundary, measured
+
+`main` is `electron/main.cjs` (`package.json:9`). The installed executable loads
+that file directly — there is no intermediate Node process. So:
+
+| Capability | Where it lives | In the installer? |
+|---|---|---|
+| `diagnose()`, `selfHeal()`, `installDeps()`, `rebuildNative()`, `buildFrontend()`, `freePort()`, scenario memory | `start.cjs` | **No** — not matched by any `build.files` glob |
+| `runHealthSweep()` monitoring | `selfCare.cjs` | Yes, but registered inside `whenReady` |
+| `selfHeal(component, action)` | `selfCare.cjs:262-300` | Yes — and handles exactly **three** actions, all in-memory flag flips |
+| `uncaughtException` / `unhandledRejection` handler | nowhere | **None existed anywhere in `electron/**`** |
+
+`start.cjs` could not work in an install even if it were packaged: every repair
+shells out to `npm` against a writable source tree, and an install has no npm, no
+`vite` (a devDependency, excluded), and a read-only asar.
+
+So the packaged app inherited **monitoring and lost repair**. Worse, it had no
+crash containment at all: `main.cjs` opened with ~45 module-scope requires, every
+one unguarded, including `require('electron-updater')` on line 6 whose dependency
+chain reaches `debug`. When that threw, Electron killed the process and printed a
+stack. `bootFailurePage()` — a dependency-free data-URL diagnostic that is exactly
+the right tool — was unreachable, because all four of its call sites sit downstream
+of `createMainWindow()`.
+
+The `isDev` guard inside `setupAutoUpdater()` illustrates the shape of the mistake
+precisely: it guards the *invocation*, ~550 lines after the *require* that
+actually throws.
+
+### What self-repair can honestly mean in an install
+
+A packaged app **cannot** npm-install a module into its own read-only archive, and
+claiming otherwise would be a lie told by the component whose whole purpose is
+honesty. The `asar` is read-only, so `codeRegenEngine`'s `fs.writeFileSync` cannot
+touch shipped source either. `localUpdateEngine` needs an explicit `repoPath` plus
+git, npm and vite — inoperable for an install.
+
+What genuinely exists:
+
+- **degrade** — every engine already had an internal fallback; the fatal require
+  simply never let it run
+- **explain** — name the missing piece in master's language
+- **record** — `userData` is writable, so a report survives the crash
+- **update** — `autoUpdater` *is* configured with a working GitHub publish target,
+  and replacing the whole build is the one true code repair an install has
+
+So the doctrine is **contain → explain → record → recover**, and the spec says so
+rather than promising healing that physics forbids.
+
+### Three modules, all dependency-free by necessity
+
+**`lib/crashGuard.cjs`** — installed as the *first statement* of `main.cjs`, before
+any other require, because a guard installed after the failing require protects
+nothing. Claims `uncaughtException` and `unhandledRejection`, classifies the fault
+(a `MODULE_NOT_FOUND` becomes "Rāma is missing a component: debug", not a stack),
+writes a JSON report to `userData/crash/` keeping the newest 20, and offers master
+*Relaunch / Show the report / Quit*.
+
+It uses a native `dialog` rather than a BrowserWindow deliberately: the fault being
+reported may be a missing module, and a window needs the renderer, the preload
+bridge and possibly the very packages that are absent — so it could fail in exactly
+the situation it exists for. Reliability beats presentation on a crash path.
+
+Its guidance is **build-aware**, which is not cosmetic. `bootFailurePage` told
+installed users to run `npm install && npm run build && node start.cjs --prod` — a
+command that cannot be run from an installation, with no npm and no source. Advice
+that cannot be followed is worse than none, because it spends trust it cannot repay.
+
+**`lib/safeRequire.cjs`** — every engine in `main.cjs` now loads through it. A
+failed load returns an **inert stub, not null**: callers do
+`engine.register(ipcMain)` unconditionally, so null would convert a missing module
+into `TypeError: Cannot read properties of null` — the same crash with a worse
+message. The stub's `register()` is a no-op so startup completes, and every other
+method returns `{ok:false, error, degraded:true}` — the shape every IPC response
+already has, so a dead engine refuses politely instead of exploding. One absent
+transitive package can no longer take down the thirty capabilities that are intact.
+
+**`lib/startupDoctor.cjs`** — the diagnose stage, inside the app. Checks that
+declared runtime dependencies actually resolve (`genome.verify()` looks like it
+does this but resolves only *first-party* engine paths, which is why a missing npm
+package never registered as a dead gene), that the renderer bundle exists, that the
+capability matrix is readable — a missing matrix does not throw, because
+`capability.can()` fails closed, so the app would start and then deny every action,
+which reads as a permissions bug rather than a missing file — plus whatever
+degraded during load, plus any crash from the previous run. Every fatal finding
+carries a remedy, because a diagnosis with no action is a complaint.
+
+Exposed to the UI as `health:startup`, `health:crash-reports` and
+`health:crash-dir`, ungated: the same sensitivity class as the aggregate metrics
+the Home dashboard already shows, and withholding "your installation is
+incomplete" from the person staring at a broken feature would be perverse.
+
+### Verified
+
+27 assertions against the modules, with `electron` stubbed and `userData` pointed
+at a temp directory:
+
+- the exact original error is classified as a missing module named `debug`, and an
+  unrelated error is **not** misclassified
+- the report preserves the require stack, so *which part wanted it* survives
+- packaged advice contains no `npm install`; development advice does
+- a missing module returns a stub whose `register()` is a safe no-op and whose
+  other methods return `{ok:false, degraded:true}` rather than throwing
+- a packaged build with no renderer bundle is fatal; the same condition in
+  development is merely degraded
+- the previous run's crash surfaces on the next start
+- every fatal finding carries a remedy
+
+`npm run audit` clean (85 bridge calls), `npm run audit:package` clean.
+
+**Not verified: that the installed app now shows this dialog rather than
+Electron's.** That needs master to install a build. What is verified is that the
+handlers are installed before the first risky require, and that the classification
+and messaging are correct for the exact error that occurred.
+
+### What is still missing, stated plainly
+
+This increment buys survival and honesty, not autonomy. Rāma still cannot repair a
+broken installation by itself — it can only degrade cleanly, say exactly what is
+wrong, and offer the update channel. Genuine autonomous recovery for an install
+means the auto-updater path being live, which needs a release cut and GitHub
+Actions enabled (ledger row 53, still dormant). Until then the honest claim is
+"Rāma will never again die silently", not "Rāma fixes itself".

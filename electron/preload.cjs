@@ -412,6 +412,13 @@ const RAMA_API = {
   },
 
   // ── Appearance (whole-surface scaling — reaches inline pixel values) ───────
+  // ── Startup health (what loaded, what degraded, what crashed last time) ───
+  health: {
+    startup:      ()      => ipcRenderer.invoke('health:startup'),
+    crashReports: (limit) => ipcRenderer.invoke('health:crash-reports', limit),
+    crashDir:     ()      => ipcRenderer.invoke('health:crash-dir'),
+  },
+
   appearance: {
     getZoom:   ()      => ipcRenderer.invoke('appearance:get-zoom'),
     setZoom:   (f)     => ipcRenderer.invoke('appearance:set-zoom', f),
@@ -714,6 +721,7 @@ const ALLOWED_PREFIXES = [
   'vector:', 'sandbox:', 'graph:', 'selfcare:', 'vault:', 'models:',
   'agents:', 'browser:', 'app:', 'capability:', 'genome:', 'instance:',
   'proposals:', 'meta:', 'timeline:', 'auth:', 'voice:', 'appearance:',
+  'health:', 'resource:', 'release:', 'update:', 'stockmind:',
 ];
 
 function isAllowed(channel) {
