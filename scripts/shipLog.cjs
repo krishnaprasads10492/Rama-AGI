@@ -56,6 +56,11 @@ const noPush    = has('--no-push');
 const pruneOnly = has('--prune-only');
 const showHelp  = has('--help') || has('-h');
 const keepCount = Math.max(1, Number(valueOf('--keep', 20)) || 20);
+// Crash reports from the installed app travel by default — they are the reason
+// this script is usually run. These narrow it when only one kind is wanted.
+const crashesOnly     = has('--crashes-only');
+const transcriptsOnly = has('--transcripts-only');
+const crashKeep       = Math.max(1, Number(valueOf('--crash-count', 10)) || 10);
 
 const C = {
   reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m',
@@ -101,11 +106,22 @@ function redact(text) {
   try { username = os.userInfo().username || ''; } catch { /* not critical */ }
   try { hostname = os.hostname() || ''; } catch { /* not critical */ }
 
+  // BOTH forms of every path rule below, because two kinds of file travel through
+  // here. A build transcript is plain text with single separators; a crash report
+  // is JSON, where every separator arrives doubled (`C:\\Users\\name`). The first
+  // version of this only matched single backslashes, so it reported "0 redaction
+  // rules applied" on a crash report and shipped the username to a public repo
+  // intact. Caught by reading the committed blob back rather than trusting the hit
+  // count — which is exactly why that check exists.
   const home = os.homedir() || '';
-  if (home) sub(new RegExp(escapeRe(home), 'gi'), '<HOME>');
+  if (home) {
+    sub(new RegExp(escapeRe(home.replace(/\\/g, '\\\\')), 'gi'), '<HOME>');   // JSON-escaped
+    sub(new RegExp(escapeRe(home), 'gi'), '<HOME>');                          // plain
+  }
 
   // Any Windows user profile path, including other machines' in pasted output.
-  sub(/([A-Za-z]:\\Users\\)[^\\\r\n"']+/g, '$1<USER>');
+  sub(/([A-Za-z]:\\\\Users\\\\)[^\\\r\n"']+/g, '$1<USER>');   // JSON:  C:\\Users\\name
+  sub(/([A-Za-z]:\\Users\\)[^\\\r\n"']+/g, '$1<USER>');       // plain: C:\Users\name
   sub(/(\/(?:home|Users)\/)[^/\r\n"']+/g, '$1<USER>');
 
   if (username && username.length > 2) sub(new RegExp(escapeRe(username), 'gi'), '<USER>');
@@ -141,6 +157,77 @@ function newestTranscript() {
   return all[0];
 }
 
+// ─── Crash reports from the installed app ─────────────────────────────────────
+/**
+ * Find the crash directory `crashGuard` writes to.
+ *
+ * WHY THIS SEARCHES RATHER THAN COMPUTES: the path is
+ * `app.getPath('userData')/crash`, and `app.getName()` resolves differently
+ * depending on whether a top-level `productName` exists in the packaged
+ * package.json — so it could be `%APPDATA%\rama-agi` or `%APPDATA%\Rama AGI`.
+ * Guessing one and reporting "no crashes found" when the folder is simply
+ * somewhere else would be a lie of omission at the worst moment. `crashGuard` also
+ * falls back to `~/.rama-agi` when the app is unavailable, so that is checked too.
+ *
+ * The repo lives on the same machine as the install — that is how the build was
+ * produced — so the checkout can read the installed app's crash folder directly.
+ */
+function crashDirs() {
+  const explicit = valueOf('--crash-dir', null);
+  if (explicit) return [explicit];
+
+  const out = [];
+  const push = (p) => { if (p && !out.includes(p)) out.push(p); };
+
+  const appData = process.env.APPDATA;
+  const home    = os.homedir();
+
+  // Every plausible spelling of the app's userData directory.
+  for (const appName of ['rama-agi', 'Rama AGI', 'Rāma AGI', 'RamaAGI']) {
+    if (appData) push(path.join(appData, appName, 'crash'));
+    if (home)    push(path.join(home, 'AppData', 'Roaming', appName, 'crash'));
+  }
+  // crashGuard's own fallback when app.getPath is unavailable.
+  if (home) push(path.join(home, '.rama-agi', 'crash'));
+
+  return out.filter(d => { try { return fs.existsSync(d); } catch { return false; } });
+}
+
+/** Crash reports, newest first, across every crash directory that exists. */
+function crashReports() {
+  const found = [];
+  for (const dir of crashDirs()) {
+    let names = [];
+    try { names = fs.readdirSync(dir); } catch { continue; }
+    for (const n of names) {
+      if (!/^crash-.*\.json$/.test(n)) continue;
+      const full = path.join(dir, n);
+      try { found.push({ name: n, full, dir, mtime: fs.statSync(full).mtimeMs }); }
+      catch { /* vanished between readdir and stat */ }
+    }
+  }
+  return found.sort((a, b) => b.mtime - a.mtime);
+}
+
+/**
+ * One-line summary of a crash report, printed before shipping so master sees the
+ * cause immediately rather than having to wait for the round trip.
+ */
+function summariseCrash(full) {
+  try {
+    const r = JSON.parse(fs.readFileSync(full, 'utf8'));
+    const what = r.missingModule
+      ? `missing module "${r.missingModule}"`
+      : (r.message ?? 'unknown error');
+    const wanted = Array.isArray(r.requireStack) && r.requireStack[0]
+      ? `, wanted by ${path.basename(r.requireStack[0])}`
+      : '';
+    return `${String(r.ts ?? '').slice(0, 19)} — ${what}${wanted}`;
+  } catch {
+    return 'unreadable report';
+  }
+}
+
 // ─── Retention ────────────────────────────────────────────────────────────────
 /**
  * Keep the most recent `keepCount`, delete the rest. Called after a successful
@@ -171,17 +258,17 @@ function prune(keep = keepCount) {
  * Commit `content` as `build-logs/<name>` on the `build-logs` branch using
  * plumbing only, so the working tree and index are untouched.
  */
-function commitViaPlumbing(name, content) {
+/**
+ * @param {Array<{destPath:string, content:string}>} entries
+ * @param {string} message commit subject
+ */
+function commitViaPlumbing(entries, message) {
+  if (!entries.length) return { ok: false, error: 'nothing to commit' };
+
   const tmpIndex = path.join(os.tmpdir(), `rama-shiplog-index-${process.pid}`);
-  const tmpFile  = path.join(os.tmpdir(), `rama-shiplog-${process.pid}-${name}`);
-  const destPath = `${DEST_DIR}/${name}`;
+  const tmpFiles = [];
 
   try {
-    fs.writeFileSync(tmpFile, content);
-
-    const blob = tryGit(['hash-object', '-w', '--', tmpFile]);
-    if (!blob.ok) return { ok: false, error: `hash-object failed: ${blob.error}` };
-
     // Carry forward whatever is already on the branch so history accumulates
     // rather than each push replacing the last log.
     const parent = tryGit(['rev-parse', '--verify', `refs/heads/${BRANCH}`]);
@@ -193,16 +280,24 @@ function commitViaPlumbing(name, content) {
       if (!read.ok) return { ok: false, error: `read-tree failed: ${read.error}` };
     }
 
-    const add = tryGit(
-      ['update-index', '--add', '--cacheinfo', `100644,${blob.out},${destPath}`],
-      { env },
-    );
-    if (!add.ok) return { ok: false, error: `update-index failed: ${add.error}` };
+    for (const [i, entry] of entries.entries()) {
+      const tmpFile = path.join(os.tmpdir(), `rama-shiplog-${process.pid}-${i}`);
+      tmpFiles.push(tmpFile);
+      fs.writeFileSync(tmpFile, entry.content);
+
+      const blob = tryGit(['hash-object', '-w', '--', tmpFile]);
+      if (!blob.ok) return { ok: false, error: `hash-object failed: ${blob.error}` };
+
+      const add = tryGit(
+        ['update-index', '--add', '--cacheinfo', `100644,${blob.out},${entry.destPath}`],
+        { env },
+      );
+      if (!add.ok) return { ok: false, error: `update-index failed: ${add.error}` };
+    }
 
     const tree = tryGit(['write-tree'], { env });
     if (!tree.ok) return { ok: false, error: `write-tree failed: ${tree.error}` };
 
-    const message = `chore(logs): ${name}`;
     const commitArgs = ['commit-tree', tree.out, '-m', message];
     if (hasParent) commitArgs.push('-p', parent.out);
 
@@ -212,9 +307,9 @@ function commitViaPlumbing(name, content) {
     const ref = tryGit(['update-ref', `refs/heads/${BRANCH}`, commit.out]);
     if (!ref.ok) return { ok: false, error: `update-ref failed: ${ref.error}` };
 
-    return { ok: true, commit: commit.out, destPath };
+    return { ok: true, commit: commit.out, count: entries.length };
   } finally {
-    for (const f of [tmpIndex, tmpFile]) {
+    for (const f of [tmpIndex, ...tmpFiles]) {
       try { if (fs.existsSync(f)) fs.rmSync(f); } catch { /* temp */ }
     }
   }
@@ -224,16 +319,25 @@ function help() {
   out(`
 ${C.bold}Rāma AGI — ship a build transcript${C.reset}
 
-  npm run ship-log                       newest transcript
-  node scripts/shipLog.cjs --file <p>    a specific transcript
-  node scripts/shipLog.cjs --dry-run     redact and report, push nothing
-  node scripts/shipLog.cjs --no-push     commit locally, do not push
-  node scripts/shipLog.cjs --prune-only  only clean old local logs
-  node scripts/shipLog.cjs --keep <n>    local transcripts to retain (default 20)
+  npm run ship-log                          crash reports + newest transcript
+  node scripts/shipLog.cjs --crashes-only    only the installed app's crashes
+  node scripts/shipLog.cjs --transcripts-only  only build transcripts
+  node scripts/shipLog.cjs --crash-dir <p>  read crashes from a specific folder
+  node scripts/shipLog.cjs --file <p>       a specific transcript
+  node scripts/shipLog.cjs --dry-run        redact and report, push nothing
+  node scripts/shipLog.cjs --no-push        commit locally, do not push
+  node scripts/shipLog.cjs --prune-only     only clean old local logs
+  node scripts/shipLog.cjs --keep <n>       local transcripts to retain (default 20)
+  node scripts/shipLog.cjs --crash-count <n>  crash reports to ship (default 10)
 
-Pushes to the ${C.bold}${BRANCH}${C.reset} branch as ${DEST_DIR}/<name>, using git plumbing so
-your working tree, index and current branch are never touched. The OS username,
-home directory and hostname are redacted first, because the repo is public.
+Pushes to the ${C.bold}${BRANCH}${C.reset} branch — transcripts under ${DEST_DIR}/, crash
+reports under crash-reports/ — using git plumbing, so your working tree, index and
+current branch are never touched.
+
+Crash reports are read from the INSTALLED app's data directory, which is on this
+same machine. Several spellings of that path are searched, because it depends on
+how the app resolves its own name. The OS username, home directory and hostname are
+redacted from everything before it is committed, because the repo is public.
 `);
 }
 
@@ -247,33 +351,71 @@ function main() {
   const inside = tryGit(['rev-parse', '--is-inside-work-tree']);
   if (!inside.ok) { fail('Not a git repository — nothing to ship to.'); return 1; }
 
-  const t = newestTranscript();
-  if (!t) return 1;
+  const entries = [];
 
-  let raw;
-  try { raw = fs.readFileSync(t.full, 'utf8'); }
-  catch (e) { fail(`Could not read ${t.name}: ${e.message}`); return 1; }
-
-  if (raw.trim().length === 0) {
-    warn(`${t.name} is empty — not shipping it`);
-    return 0;
+  // ── Crash reports from the installed app ────────────────────────────────────
+  // Shipped first and unconditionally, because a crash is the most valuable thing
+  // this script can carry: it is the difference between "it crashed" and knowing
+  // which module was missing and which part of Rāma wanted it.
+  if (!transcriptsOnly) {
+    const crashes = crashReports();
+    if (crashes.length === 0) {
+      const searched = crashDirs();
+      info(searched.length
+        ? `No crash reports in ${searched.join(', ')}`
+        : 'No crash directory found — the installed app has not crashed, or uses a path not searched');
+    } else {
+      info(`${crashes.length} crash report(s) found:`);
+      for (const c of crashes.slice(0, crashKeep)) {
+        out(`      ${C.yellow}${summariseCrash(c.full)}${C.reset}`);
+        let raw;
+        try { raw = fs.readFileSync(c.full, 'utf8'); } catch { continue; }
+        const { text } = redact(raw);
+        entries.push({ destPath: `crash-reports/${c.name}`, content: text });
+      }
+    }
   }
 
-  const { text, hits } = redact(raw);
-  info(`${t.name} — ${(raw.length / 1024).toFixed(1)} KB, ${hits} redaction rule(s) applied`);
+  // ── Build transcript ────────────────────────────────────────────────────────
+  if (!crashesOnly) {
+    const t = newestTranscript();
+    if (t) {
+      let raw = null;
+      try { raw = fs.readFileSync(t.full, 'utf8'); }
+      catch (e) { warn(`Could not read ${t.name}: ${e.message}`); }
+
+      if (raw && raw.trim().length > 0) {
+        const { text, hits } = redact(raw);
+        info(`${t.name} — ${(raw.length / 1024).toFixed(1)} KB, ${hits} redaction rule(s) applied`);
+        entries.push({ destPath: `${DEST_DIR}/${t.name}`, content: text });
+      } else if (raw !== null) {
+        warn(`${t.name} is empty — not shipping it`);
+      }
+    }
+  }
+
+  if (entries.length === 0) {
+    warn('Nothing to ship.');
+    return 0;
+  }
 
   if (dryRun) {
     out('');
     out(`  ${C.bold}Dry run — nothing committed or pushed.${C.reset}`);
-    out(`  Would commit  ${DEST_DIR}/${t.name} on branch ${BRANCH}`);
-    out(`  Redacted      ${hits} rule(s) matched (username, home path, hostname)`);
+    for (const e of entries) out(`  Would commit  ${e.destPath}`);
+    out(`  On branch     ${BRANCH}`);
+    out(`  ${C.dim}Machine paths, username and hostname are redacted first.${C.reset}`);
     out('');
     return 0;
   }
 
-  const committed = commitViaPlumbing(t.name, text);
+  const subject = entries.some(e => e.destPath.startsWith('crash-reports/'))
+    ? `chore(diagnostics): ${entries.length} report(s) from an installed build`
+    : `chore(logs): ${entries.length} build transcript(s)`;
+
+  const committed = commitViaPlumbing(entries, subject);
   if (!committed.ok) { fail(committed.error); return 1; }
-  ok(`Committed ${committed.destPath} (${committed.commit.slice(0, 8)}) on ${BRANCH}`);
+  ok(`Committed ${committed.count} file(s) (${committed.commit.slice(0, 8)}) on ${BRANCH}`);
 
   if (noPush) {
     info(`--no-push: run "git push origin ${BRANCH}" when ready`);
@@ -289,7 +431,8 @@ function main() {
     return 0;   // the log is preserved locally; this is not a build failure
   }
   ok(`Pushed to origin/${BRANCH}`);
-  out(`  ${C.dim}Readable from any machine: git fetch origin ${BRANCH} && git show origin/${BRANCH}:${committed.destPath}${C.reset}`);
+  out(`  ${C.dim}Readable from any machine:${C.reset}`);
+  out(`  ${C.dim}  git fetch origin ${BRANCH} && git ls-tree -r --name-only origin/${BRANCH}${C.reset}`);
 
   prune();
   out('');
