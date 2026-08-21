@@ -20,7 +20,7 @@
     "package:readiness": "node scripts/buildInstaller.cjs --readiness",
     "audit:package": "node scripts/auditPackage.cjs",
     "ship-log":      "node scripts/shipLog.cjs",
-    "build:win":     "vite build && electron-builder --win --x64",
+    "build:win":     "vite build && electron-builder --win --x64 && node scripts/auditPackage.cjs",
     "build:mac":     "vite build && electron-builder --mac",
     "build:linux":   "vite build && electron-builder --linux",
     "build:all":     "vite build && electron-builder --win --mac --linux",

@@ -1144,16 +1144,30 @@ app.whenReady().then(async () => {
     try { crashGuard.record(new Error(`Boot path incomplete: ${missingBootChannels.join(', ') || stubbedCritical.join(', ')}`), { origin: 'boot-check', fatalKind: 'boot-incomplete' }); }
     catch { /* best effort */ }
 
+    // A packaged app has no console, and a dialog cannot be copied out of. Write
+    // the full untruncated reasons to a file and name it — see lib/bootReport.cjs.
+    let reportPaths = [];
+    try {
+      reportPaths = require('./lib/bootReport.cjs').write({
+        phase: 'boot-check',
+        loadFailures: loadFailures(),
+        registrationFailures,
+        missingChannels: missingBootChannels,
+        stubbed: stubbedCritical,
+        registeredChannels,
+      }).written;
+    } catch (e) { console.error(`[main] could not write the boot report: ${e.message}`); }
+
     try {
       dialog.showMessageBox({
         type:    'error',
         title:   'Rāma cannot reach its own sign-in',
         message: 'Part of Rāma did not start, so the passcode screen has nothing to talk to.',
-        detail:  `${detail}\n\nA report was written to the crash folder. Reinstalling or updating to a corrected build will fix an incomplete installation.`,
-        buttons: ['Continue anyway', 'Show report folder', 'Quit'],
+        detail:  `${detail}\n\nFull report written to:\n${reportPaths.join('\n') || '(could not write a report file)'}\n\nSend that file — it names every missing module and contains no secrets.`,
+        buttons: ['Continue anyway', 'Open report', 'Quit'],
         defaultId: 1,
       }).then((res) => {
-        if (res.response === 1) shell.openPath(crashGuard.reportDir()).catch(() => {});
+        if (res.response === 1 && reportPaths[0]) shell.openPath(reportPaths[0]).catch(() => {});
         if (res.response === 2) { app.isQuiting = true; app.quit(); }
       }).catch(() => { /* dialog unavailable */ });
     } catch { /* dialog unavailable */ }
@@ -1191,17 +1205,30 @@ app.whenReady().then(async () => {
   try { crashGuard.record(err, { origin: 'whenReady', fatalKind: 'startup-incomplete' }); }
   catch { /* recording is best-effort; the console lines above still stand */ }
 
+  let paths = [];
+  try {
+    paths = require('./lib/bootReport.cjs').write({
+      phase: 'whenReady',
+      error: err,
+      loadFailures: loadFailures(),
+      registrationFailures,
+      registeredChannels,
+    }).written;
+  } catch { /* best effort */ }
+
   try {
     const { dialog: d } = require('electron');
     d.showMessageBox({
       type:    'error',
       title:   'Rāma did not finish starting',
       message: 'Some of Rāma failed to start, so parts of the app will not respond.',
-      detail:  `${err.message}\n\nWhat did not start: ${registrationFailures.map(f => f.label).join(', ') || 'startup stopped before IPC registration'}\n\nA report was written to the crash folder.`,
-      buttons: ['Continue anyway', 'Quit'],
-      defaultId: 0,
-    }).then((res) => { if (res.response === 1) { app.isQuiting = true; app.quit(); } })
-      .catch(() => { /* no dialog available */ });
+      detail:  `${err.message}\n\nWhat did not start: ${registrationFailures.map(f => f.label).join(', ') || 'startup stopped before IPC registration'}\n\nFull report written to:\n${paths.join('\n') || '(could not write a report file)'}`,
+      buttons: ['Continue anyway', 'Open report', 'Quit'],
+      defaultId: 1,
+    }).then((res) => {
+      if (res.response === 1 && paths[0]) shell.openPath(paths[0]).catch(() => {});
+      if (res.response === 2) { app.isQuiting = true; app.quit(); }
+    }).catch(() => { /* no dialog available */ });
   } catch { /* electron dialog unavailable */ }
 });
 
