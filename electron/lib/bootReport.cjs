@@ -37,7 +37,13 @@ function targets(stamp) {
   try {
     const app = require('electron').app;
     const userData = app?.getPath('userData');
-    if (userData) out.push(path.join(userData, name));
+    if (userData) {
+      out.push(path.join(userData, name));
+      // Also into the crash folder, because that is where `scripts/shipLog.cjs`
+      // looks. Writing the report somewhere the shipping mechanism does not search
+      // is how the cause stayed on master's machine for three rounds.
+      out.push(path.join(userData, 'crash', name));
+    }
     const desktop = app?.getPath('desktop');
     if (desktop) out.push(path.join(desktop, name));
   } catch { /* electron unavailable */ }

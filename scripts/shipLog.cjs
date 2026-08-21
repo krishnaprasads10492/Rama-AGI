@@ -200,7 +200,11 @@ function crashReports() {
     let names = [];
     try { names = fs.readdirSync(dir); } catch { continue; }
     for (const n of names) {
-      if (!/^crash-.*\.json$/.test(n)) continue;
+      // Boot-failure text reports travel too. They are written by
+      // `electron/lib/bootReport.cjs` alongside the JSON and carry the full
+      // untruncated module reasons — the thing that actually identifies a startup
+      // fault. Shipping only the JSON meant the cause stayed on master's machine.
+      if (!/^crash-.*\.json$/.test(n) && !/^rama-boot-failure-.*\.txt$/.test(n)) continue;
       const full = path.join(dir, n);
       try { found.push({ name: n, full, dir, mtime: fs.statSync(full).mtimeMs }); }
       catch { /* vanished between readdir and stat */ }

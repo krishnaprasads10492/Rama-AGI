@@ -364,6 +364,17 @@ function record(err, meta = {}) {
   try {
     const report = buildReport(err, meta.origin || 'recorded');
     report.fatalKind = meta.fatalKind || 'recorded-non-fatal';
+
+    // `meta.details` rides along inside the report. This exists because the boot
+    // check's most valuable output — the per-module "Cannot find module 'x'" reason
+    // strings — lived only in a console the packaged app does not have and in a
+    // local text file `shipLog` did not collect. Three diagnostic rounds were spent
+    // asking master to read them off a dialog. Anything worth diagnosing has to
+    // travel in the artefact that already ships.
+    if (meta.details && typeof meta.details === 'object') {
+      report.details = meta.details;
+    }
+
     faults.push(report);
     return writeReport(report);
   } catch { return null; }

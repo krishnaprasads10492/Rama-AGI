@@ -1145,8 +1145,27 @@ app.whenReady().then(async () => {
     ].filter(Boolean).join('\n');
 
     console.error(`[main] boot path incomplete\n${detail}`);
-    try { crashGuard.record(new Error(`Boot path incomplete: ${missingBootChannels.join(', ') || stubbedCritical.join(', ')}`), { origin: 'boot-check', fatalKind: 'boot-incomplete' }); }
-    catch { /* best effort */ }
+    try {
+      crashGuard.record(
+        new Error(`Boot path incomplete: ${missingBootChannels.join(', ') || stubbedCritical.join(', ')}`),
+        {
+          origin: 'boot-check',
+          fatalKind: 'boot-incomplete',
+          // The reasons travel with the report, so `ship-log` carries the actual
+          // cause instead of only the symptom.
+          details: {
+            stubbed: stubbedCritical,
+            missingChannels: missingBootChannels,
+            registrationFailures,
+            loadFailures: loadFailures().map(f => ({
+              name: f.name, reason: f.reason, missing: f.missing,
+              code: f.code, requireStack: f.requireStack,
+            })),
+            channelsRegistered: registeredChannels.size,
+          },
+        },
+      );
+    } catch { /* best effort */ }
 
     // A packaged app has no console, and a dialog cannot be copied out of. Write
     // the full untruncated reasons to a file and name it — see lib/bootReport.cjs.
