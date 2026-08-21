@@ -1719,6 +1719,7 @@ authenticated **Master session**, not merely an open store.
 | 77 | Using other installed applications — invocation vs absorption | answered; invocation half already built (Section 44), planning layer not built | Section 59, in reply to master's question. **Invoking another application as a tool is valid and is *not* assimilation** — biologically it is symbiosis (the mitochondrion keeps its own DNA and supplies a capability), nothing is taken in, Rāma stays Rāma and gains reach. **Reading their files to take their functionality is rejected**, on three independent grounds: licence violation in nearly every case for installed commercial software; brittleness, because internals are not an interface and break on any update where a documented CLI flag does not; and it would have to pass I6 anyway, where `evolutionEngine`'s existing licence filter (MIT/Apache/BSD/ISC in, GPL family and SSPL out) would refuse essentially all of it. A third narrower case *is* legitimate and named: **reading their files to learn an interface** — a config schema, an export format, documented flags — which is ordinary interoperability and produces knowledge rather than copied code. Already built in `electron/ipc/appAssimilation.cjs`: `apps:scan-installed`/`get-registry`/`get-capabilities` on `apps.view` (2), `apps:execute` `launch`/`query` on `apps.execute-safe` (2), `spawn-cli` on `apps.execute-all` (**tier 0**), plus whitelist, blacklist and an audit log. The module name is misleading — it is app *invocation*, and this section records that. **Missing:** nothing plans with the registry; no engine asks "which installed app could do this task" and routes to it. That is the useful next step and belongs with the Section 54 lineage — a cell spawned for a job whose tool is another program. **Risk to respect before extending, which is why `spawn-cli` is already master-only:** launching an executable discovered by scanning the filesystem *is* arbitrary code execution, so a planted binary or a lookalike name in a scanned directory turns "trigger the app" into "run the attacker's program with Rāma's privileges". Minimum requirements recorded: an allowlist of specific **resolved paths** confirmed by master once (never a name match against a scan), `execFile` with an argument array and never `exec` with an interpolated string, a verified publisher or hash for anything invoked unattended, and no unattended invocation of anything that writes outside a scratch directory. |
 | 78 | Baseline and release policy | policy recorded as **I17**; baseline **not yet declared** | Section 60. Master: *"Once all the features are working as expected, that will be taken as baseline. New upgrades/updates/fixes will be treated as release. I'll tell you when it should be considered update/new release."* Locked as I17 specifically because across several turns of this session I repeatedly suggested tagging a release so the updater would have a target — that suggestion is answered and retired: **not before baseline, and never on Rāma's initiative.** Master classifies; Rāma prepares. `releaseChannel` staying dormant is now recorded as correct rather than as row 53's defect. **Found while verifying that pre-baseline behaviour is right: two crash paths I introduced myself.** Row 70 moved the `electron-updater` require *inside* `setupAutoUpdater()` so a broken dependency chain could not kill startup — but the tray's "Check for Updates" item and the `updater:install-now` handler still referenced the now function-local name, so both threw `ReferenceError: autoUpdater is not defined`, and since `crashGuard` makes `uncaughtException` always fatal, **clicking a tray menu item would kill a working app**; the install handler was not even `isDev`-guarded so it crashed in development too. Fixing a startup crash had created two click-to-crash paths — row 70's own lesson, one layer along. Fixed by keeping the lazily-required instance in a single module-scope `updater` reference that `setupAutoUpdater()` populates, and guarding both sites; the manual check is now separate from the automatic one because the right answers differ (an automatic check finding nothing should stay quiet, master clicking deserves a reply either way), and pre-baseline that reply is "No releases published yet — this build is the current one", as information. Added `updater:notice` to the preload. `node --check` clean, `npm run audit` clean. **Section 60 carries the baseline checklist**, compiled from this ledger rather than memory, in two classes: (A) verified nowhere but this machine and needing master to install a build — the installed app launching at all, crashGuard's dialog, selfRepair in a real package, the loyalty-core migration, the `ready` path, NanaZip, agent assimilation and ledger restore in the running app; and (B) **features that do not work or report success while doing nothing**, which are the real blockers since a baseline including them enshrines a lie — `evolutionEngine` has no synthesis step so absorption can never complete, `evolution:self-assess` is a hardcoded literal, `optimizationVectors()` is consumed by nothing, `executeAction()` returns hardcoded strings and queues nothing so an agent is one model call rather than a tool-using loop, `agents:approval-needed` has no resume path, `sandbox:approve` re-runs code without re-classifying, `checkSandbox()` always reports healthy, `selfHeal()` implements three of the actions its header claims, the `DEPENDENCY` kind has no applier, and `metaCognition` does not persist `byTool` so optimization vectors are relearned every restart. Next step: master's call on which of class B to close first — my recommendation is `executeAction`, since an agent that cannot act is the largest gap between what the UI claims and what happens. |
 | 79 | "No handler registered for 'session:unlock'" | diagnosed; fixes in place; **needs master to relaunch/rebuild to confirm** | Section 61. Reported three times; my first three explanations were all wrong, and **the evidence that settled it was timestamps, not code**: `build/` was **Aug 20 23:37**, `app.asar` **Aug 21 11:14**, newest `src/` file Aug 21 23:12, newest `electron/` file Aug 22 00:50, and Vite was **not running**. Master was running code that predated the entire session — which explains both of his observations at once, as no code theory did: the stale renderer is why "the new login page itself is not showing errors" (and with Vite down, running from *source* also served that stale `build/`), and the stale main process is why "the previous error still comes up". Confirmed from the artefact: `electron/lib/` in the asar holds 16 entries and **none of `loyaltyGuard.cjs`, `loyaltyCore.cjs`, `selfRepair.cjs`** — the files this session created. **Ruled out:** packaging. `audit:package` on that asar passed (12,266 entries, 741 package dirs, only macOS-only `osx-temperature-sensor` absent and correctly degrading), and a direct boot-path check found `main.cjs`, `preload.cjs`, `sessionManager.cjs`, `cryptoCore.cjs`, `dataStore.cjs`, `nucleusSealer.cjs`, `genome.cjs`, `authEngine.cjs`, `capabilities.json` and `build/index.html` all present — 53 main-process files, 134 renderer entries. Not row 66 repeating. **Actual failure:** that build had no `.catch()` on `whenReady` and 40 bare sequential `register()` calls, so a throw anywhere abandoned every later registration while the window still opened; `sessionMgr` is third from last, making the passcode screen the most likely victim of a fault anywhere upstream. Silent by construction, because Electron's message names the channel and never the cause, and **Rāma's own diagnostics all sit behind the gate that will not open** — the identical trap as Section 49's `bootFailurePage`, whose four call sites were all downstream of the failure it existed to report. `safeRequire`'s stub made it worse: a module that fails to load gets an inert stub whose `register()` is a **no-op that does not throw**, so a per-call guard reports nothing and only that subsystem's channels quietly vanish. **Fixed:** per-registration guards in an order-preserving table; a `whenReady` rejection handler that records a crash report and shows a dialog naming what did not start (deliberately not fatal — a partly-started Rāma that can explain itself beats one that exits); a thin recorder passed in place of `ipcMain` so channel creation is observable (Electron offers no way to ask whether a channel is registered), then the boot-critical channels verified present and the critical modules checked with `isStub`, with a **native** dialog naming load failures, absent channels and registration errors plus a button to the crash folder — native because the renderer cannot be relied on there; `crashGuard.record()` for faults caught elsewhere that deserve a durable report without termination; and `build/` rebuilt so running from source no longer serves a day-old renderer. Also answered master's question: a wrong passcode **returns** `{ok:false,error:'Incorrect passcode'}`, a value not a throw, so it renders as "Incorrect passcode" and can never produce "No handler registered". **Two standing assumptions corrected:** `vite build` *does* work here (`npm run build` completes in ~7s; the steering file's claim that `node_modules` is absent is wrong — the real limit is only the *installer*, blocked by the 7-Zip policy of Section 51); and **a stale artefact must be ruled out before any code-level theory** — three theories were tested against source that was never running, when checking three timestamps would have ended it immediately. **Unresolved:** which subsystem threw in that build is now unknowable — it was never logged and the build is superseded. Next step: master relaunches (full Electron restart, or rebuild if using the installer); a clean start means the fault was in code already replaced, and otherwise the dialog names it. |
+| 80 | `Module._initPaths()` cost the packaged app every engine — root cause of row 79 | **fixed**; needs master's rebuild to confirm | Section 62. **My bug, from Section 53's self-repair work, invisible in development by construction.** `selfRepair.registerRepairPath()` set `NODE_PATH` and called `Module._initPaths()`; its own comment called that "re-reading NODE_PATH into globalPaths", and the error is the word *re-reading* — **`_initPaths()` recomputes the search paths from scratch**, discarding the entries Electron patches in so that paths inside `app.asar` resolve. `safeRequire` then called it at the worst moment: `ensureRepairPath()` ran before the **first** guarded require, inside `main.cjs`'s module-scope chain. So the first `safeRequire` destroyed asar resolution, every later `require()` failed with MODULE_NOT_FOUND, `safeRequire` returned an inert stub for each — whose `register()` is a **silent no-op** — and because `sessionManager` and `dataStore` are the **last two** loaded, their channels were the visible casualties. **Development has no asar**, so `_initPaths()` recomputed ordinary paths that still worked; every local test passed and the fault existed only in a packaged build. **Why six wrong explanations came first:** every signal pointed away — `audit:package` reported "every package on a real load path is present" and was *correct* (they were present, they had become unresolvable); the build log was clean (30 pinned packages, both native binaries, installer + portable produced); reinstalling `node_modules` correctly changed nothing; and both modules load fine in isolation with all 36 registrations succeeding against a stub `ipcMain`. What identified it was the crash report shipped over git: **all four** boot-critical channels absent including `store:get` — two independent subsystems yielding zero channels while throwing nothing means stubs, and stubs plus provably-present packages has exactly one explanation. **Lesson: "the packages are present" and "the packages are resolvable" are different claims, and the package audit proves the first while reading like it proves the second.** **Fixed in two halves.** *Mechanism:* `_initPaths()` removed; resolution extended by wrapping `Module._resolveFilename` so the repair dir is consulted **only after normal resolution has already thrown**, via the documented `options.paths` form — so repair cannot shadow a working module by construction, not convention, and nothing existing is removed or reordered. An earlier attempt appended to `Module.globalPaths`, which does nothing (Node resolves bare specifiers through an internal `modulePaths`); the behavioural test caught that before it shipped. *Timing:* `safeRequire` no longer touches module paths at all; `ensureRepairPath()` is exported and called once from `whenReady` after every engine has loaded, where `retryFailures()` picks up a repaired module anyway. Verified by **15 assertions that assert the invariant rather than the symptom** (the symptom needs an asar to appear): `globalPaths` not recomputed; `express`/`crypto`/`path` **still resolve** afterwards; require cache intact; a module planted in the repair dir becomes require-able (the first attempt failed this); relative requires unaffected; an absent package still fails with its original error; repeated registration safe; plus three guards so the mistake cannot return — neither file may call `Module._initPaths` in live code and `safeRequire()` may not call `ensureRepairPath()`. `npm run audit` clean. **Session-level observation recorded in Section 62:** Sections 49, 52, 53 and 61 all added resilience machinery and three introduced a fault of their own (crash guard killed a working app; updater guard made a tray click fatal; self-repair cost a packaged build every engine). The common shape is **testing the mechanism in the environment where it cannot fail** — `crashGuard` with `electron` stubbed, `selfRepair` in a checkout with no asar. Since this workspace cannot produce an installer (Section 51), for anything touching module loading, packaging or startup **master's build is the only real test**, and that is a limit to state rather than paper over with local passes. |
 
 ### Resume checklist for a cold session
 
@@ -5411,3 +5412,110 @@ Which subsystem threw in that build is unknown and now unknowable — it was nev
 logged, and the build is superseded. The next run reports it by name. If the rebuilt
 app starts cleanly, the fault was in code this session has already replaced; if it
 does not, the dialog names it.
+
+---
+
+## SECTION 62 — `Module._initPaths()` cost the packaged app every one of its engines
+
+The root cause of "No handler registered for 'session:unlock'". It was mine,
+introduced by Section 53's self-repair work, and it was invisible in development by
+construction.
+
+### The mechanism
+
+`selfRepair.registerRepairPath()` made the writable repair directory resolvable by
+setting `NODE_PATH` and calling `Module._initPaths()`. Its own comment described
+`_initPaths` as re-reading `NODE_PATH` into `Module.globalPaths` — the mistake is in
+the word *re-reading*. **`_initPaths()` does not extend the search paths, it
+recomputes them from scratch.** Electron patches Node's module system so that paths
+inside `app.asar` resolve; recomputing discards those patched entries.
+
+`safeRequire` then called it at the worst possible moment — `ensureRepairPath()` ran
+before the **first** guarded require, i.e. in the middle of `main.cjs`'s module-scope
+require chain. So:
+
+1. first `safeRequire(...)` → `_initPaths()` → asar resolution destroyed
+2. every subsequent `require()` fails with `MODULE_NOT_FOUND`
+3. `safeRequire` returns an inert stub for each, whose `register()` is a **silent
+   no-op**
+4. `sessionManager` and `dataStore` are the **last two** loaded, so their channels
+   were the visible casualties
+
+**Development has no asar**, so `_initPaths()` recomputed ordinary paths that still
+worked and nothing looked wrong. Every test in this workspace passed. The failure
+existed only in a packaged build.
+
+### Why it took so long, and what would have shortened it
+
+Six explanations were offered before this one. What made it hard was that every
+signal pointed away from the truth:
+
+- `audit:package` reported **"every package on a real load path is present"** — and
+  it was right. The packages were there; they had become *unresolvable*.
+- The build log was clean: 30 pinned packages, both native binaries built, installer
+  and portable produced.
+- Reinstalling `node_modules` changed nothing, correctly, because nothing was missing.
+- `sessionManager` and `dataStore` load cleanly in isolation, and all 36
+  registrations succeed against a stub `ipcMain`.
+
+What finally identified it was the crash report shipped over git: **all four**
+boot-critical channels absent, including `store:get`. Two independent subsystems
+producing zero channels while throwing nothing meant stubs, and stubs meant load
+failure — with the packages provably present. That combination has exactly one
+explanation.
+
+The lesson worth keeping: **"the packages are present" and "the packages are
+resolvable" are different claims, and only the second one matters.** The package
+audit proves the first and reads like it proves the second.
+
+### The fix
+
+Two halves, because the mistake had two halves.
+
+**Mechanism.** `Module._initPaths()` is gone. Resolution is extended by wrapping
+`Module._resolveFilename` so the repair directory is consulted **only after normal
+resolution has already thrown**, using the documented `options.paths` form —
+the same mechanism `require.resolve(x, { paths })` uses. Two consequences, both
+wanted: repair can never shadow a working module, not by convention but because the
+code does not execute unless the normal walk already failed; and nothing existing is
+removed, recomputed or reordered.
+
+An earlier attempt appended to `Module.globalPaths`, which does nothing — Node
+resolves bare specifiers through an internal `modulePaths`, and `globalPaths` is only
+the copy `_initPaths()` publishes. The behavioural test caught that before it shipped.
+
+**Timing.** `safeRequire` no longer touches module paths at all. `ensureRepairPath()`
+is exported and called once from `whenReady`, after every engine has loaded, where a
+previously-repaired module is picked up by `retryFailures()` anyway. Even with a safe
+implementation, path surgery inside the require chain is not being reinstated.
+
+### Verification
+
+15 assertions, and the important ones assert the *invariant* rather than the symptom,
+since the symptom is invisible without an asar:
+
+`Module.globalPaths` is not recomputed; `express`, `crypto` and `path` all **still
+resolve** after `registerRepairPath()` — the exact failure that stubbed every engine;
+the require cache is not cleared; a module planted in the repair directory becomes
+require-able (proving the mechanism actually works, which the first attempt did not);
+relative requires are unaffected; a genuinely absent package still fails cleanly with
+its original error; repeated registration stays safe. Three assertions guard against
+the mistake returning: neither `selfRepair.cjs` nor `safeRequire.cjs` may call
+`Module._initPaths` in live code, and `safeRequire()` may not call
+`ensureRepairPath()`.
+
+### What this says about the session
+
+Sections 49, 52, 53 and 61 all added resilience machinery, and three of them
+introduced a fault of their own: the crash guard killed a working app (52), the
+updater guard turned a tray click into a fatal error (row 78), and self-repair cost a
+packaged build every engine it had (this). Each was written to prevent a failure and
+became one.
+
+The common shape is not carelessness, it is **testing the mechanism in the
+environment where it cannot fail**. `crashGuard` was tested with `electron` stubbed;
+`selfRepair` was tested in a checkout with no asar. Both passed. The honest conclusion
+is that resilience code needs to be exercised in the environment it defends, and this
+workspace cannot produce an installer (Section 51) — so for anything touching module
+loading, packaging or startup, **master's build is the only real test**, and that must
+be stated as a limit rather than papered over with local passes.

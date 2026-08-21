@@ -10,7 +10,7 @@
 const crashGuard = require('./lib/crashGuard.cjs');
 crashGuard.install();
 
-const { safeRequire, loadFailures, isStub, retryFailures } = require('./lib/safeRequire.cjs');
+const { safeRequire, loadFailures, isStub, retryFailures, ensureRepairPath } = require('./lib/safeRequire.cjs');
 
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog, Notification } = require('electron');
 const path = require('path');
@@ -977,6 +977,10 @@ app.whenReady().then(async () => {
   // See spec Section 53.
   if (!startupHealth.ok || startupHealth.degraded.some(d => !d.expected)) {
     setTimeout(() => {
+      // Make anything repaired in a previous session resolvable. Done HERE, after
+      // every engine has loaded — never during the require chain, which is what
+      // cost a packaged build all of its engines (Section 62).
+      ensureRepairPath();
       doctor.repair(startupHealth, {
         safeRequireFailures: loadFailures(),
         crashReports:        crashGuard.recentReports(3),

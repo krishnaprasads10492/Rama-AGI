@@ -80,23 +80,96 @@ function repairDir() {
 /**
  * Make the writable repair directory resolvable by `require`.
  *
- * `NODE_PATH` + `Module._initPaths()` is the mechanism Node itself provides for
- * this: `_initPaths` re-reads NODE_PATH into `Module.globalPaths`, which is
- * consulted after the normal node_modules walk. So a module inside the asar keeps
- * resolving from the asar when it is present, and only falls through to the repair
- * directory when it is not — repair never shadows a working module.
+ * DO NOT CALL `Module._initPaths()` HERE. That is what this function used to do,
+ * and it broke every packaged build.
+ *
+ * `_initPaths()` does not *extend* the search paths, it **recomputes them from
+ * scratch**. Electron patches Node's module system so that paths inside `app.asar`
+ * resolve; recomputing discards those patched entries. The result in a packaged app
+ * was that every `require()` after the first `safeRequire()` failed with
+ * MODULE_NOT_FOUND, so `safeRequire` replaced *every* engine with a stub — and
+ * because `sessionManager` and `dataStore` are the last two loaded, the visible
+ * symptom was "No handler registered for 'session:unlock'" with the packages all
+ * verifiably present in the asar. In development there is no asar, so `_initPaths()`
+ * recomputed paths that still worked and nothing looked wrong. See Section 62.
+ *
+ * Appending to `Module.globalPaths` achieves the same thing without destroying
+ * anything: it is consulted *after* the normal `node_modules` walk, so a module
+ * inside the asar keeps resolving from the asar and only falls through to the repair
+ * directory when it is genuinely absent. Repair still never shadows a working
+ * module, which was the original point.
  */
+/**
+ * Make the repair directory reachable, as a **last resort only**.
+ *
+ * `Module._resolveFilename` is wrapped so that the repair directory is consulted
+ * *after normal resolution has already thrown*. Two consequences, both wanted:
+ *
+ *   - Repair can never shadow a working module. Not by convention or ordering, but
+ *     because this code does not execute unless the normal walk — including
+ *     everything Electron makes resolvable inside `app.asar` — has already failed.
+ *   - Nothing existing is removed, recomputed or reordered, which is exactly where
+ *     `Module._initPaths()` went wrong (Section 62).
+ *
+ * Appending to the array from `_resolveLookupPaths` was tried first and did not
+ * work — the behavioural test caught it. Failing over on the error is both simpler
+ * and a stronger guarantee.
+ *
+ * Relative, absolute and `node:` specifiers are rethrown untouched.
+ */
+const _repairDirs = new Set();
+let _resolveHooked = false;
+
+function installLookupHook(dir) {
+  _repairDirs.add(dir);
+  if (_resolveHooked) return;
+  _resolveHooked = true;
+
+  const original = Module._resolveFilename;
+  Module._resolveFilename = function resolveFilenameWithRepair(request, parent, isMain, options) {
+    try {
+      return original.call(this, request, parent, isMain, options);
+    } catch (err) {
+      if (typeof request !== 'string') throw err;
+      if (request.startsWith('.') || request.startsWith('node:') || path.isAbsolute(request)) throw err;
+
+      const dirs = [..._repairDirs];
+      // `options.paths` is the documented mechanism — the same one
+      // `require.resolve(x, { paths })` uses — so this is a supported lookup rather
+      // than a guess at Node's internals.
+      try { return original.call(this, request, parent, isMain, { ...(options || {}), paths: dirs }); }
+      catch { /* not in the repair dirs either */ }
+
+      for (const repair of dirs) {
+        // Direct path, which covers a package whose entry point is unusual.
+        try { return original.call(this, path.join(repair, request), parent, isMain, options); }
+        catch { /* fall through */ }
+      }
+      throw err;   // genuinely absent — report the original failure, not ours
+    }
+  };
+}
+
 function registerRepairPath() {
   const dir = repairDir();
   try { fs.mkdirSync(dir, { recursive: true }); }
   catch (e) { return { ok: false, error: `repair directory unavailable: ${e.message}` }; }
 
-  const current = process.env.NODE_PATH ? process.env.NODE_PATH.split(path.delimiter) : [];
-  if (!current.includes(dir)) {
-    process.env.NODE_PATH = [...current, dir].join(path.delimiter);
-    try { Module._initPaths(); }
-    catch (e) { return { ok: false, error: `could not extend module paths: ${e.message}` }; }
-  }
+  // Appending to `Module.globalPaths` looks like the obvious answer and does
+  // nothing: Node resolves bare specifiers through an internal `modulePaths`, and
+  // `globalPaths` is only the copy `_initPaths()` publishes. The behavioural test
+  // caught that. So the lookup itself is extended, once, additively.
+  try { installLookupHook(dir); }
+  catch (e) { return { ok: false, error: `could not extend module paths: ${e.message}` }; }
+
+  // Kept in step for any child process we spawn, which reads NODE_PATH at its own
+  // startup. This process's resolution comes from globalPaths above, never from
+  // re-reading this value.
+  try {
+    const current = process.env.NODE_PATH ? process.env.NODE_PATH.split(path.delimiter) : [];
+    if (!current.includes(dir)) process.env.NODE_PATH = [...current, dir].join(path.delimiter);
+  } catch { /* env is advisory here */ }
+
   return { ok: true, dir };
 }
 

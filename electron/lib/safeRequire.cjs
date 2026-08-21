@@ -29,14 +29,25 @@
 
 const failures = [];
 
-// Registered once, before the first guarded require, so a module repaired in a
-// previous session is already resolvable this time without any further work.
-let repairPathReady = false;
+/**
+ * Make previously-repaired modules resolvable.
+ *
+ * DELIBERATELY NOT CALLED FROM `safeRequire`. It used to be, on the reasoning that a
+ * module repaired in a previous session should already be resolvable — which is
+ * true, but doing module-path surgery in the middle of `main.cjs`'s require chain
+ * turned out to be how a packaged build lost every one of its engines: the old
+ * implementation called `Module._initPaths()`, which recomputes search paths from
+ * scratch and discards Electron's asar-aware entries, so every require after the
+ * first one failed. See Section 62.
+ *
+ * The implementation is now non-destructive, but the timing was the second half of
+ * the mistake and is not being reinstated. This is invoked once from `whenReady`,
+ * after every engine has already loaded, where a repaired module is picked up by
+ * `retryFailures()` anyway.
+ */
 function ensureRepairPath() {
-  if (repairPathReady) return;
-  repairPathReady = true;
-  try { require('./selfRepair.cjs').registerRepairPath(); }
-  catch { /* repair is an enhancement; its absence must not break loading */ }
+  try { return require('./selfRepair.cjs').registerRepairPath(); }
+  catch (e) { return { ok: false, error: e.message }; }
 }
 
 /**
@@ -73,7 +84,9 @@ function makeStub(name, reason) {
  */
 function safeRequire(id, label) {
   const name = label ?? String(id).replace(/^.*[\\/]/, '').replace(/\.cjs$/, '');
-  ensureRepairPath();
+  // No module-path manipulation here — see ensureRepairPath's note. This function
+  // runs dozens of times during the module-scope require chain and must do nothing
+  // but require and catch.
   try {
     return require(id);
   } catch (err) {
@@ -133,4 +146,4 @@ function isStub(mod) {
   try { return !!mod?.__ramaStub; } catch { return false; }
 }
 
-module.exports = { safeRequire, loadFailures, isStub, retryFailures };
+module.exports = { safeRequire, loadFailures, isStub, retryFailures, ensureRepairPath };
