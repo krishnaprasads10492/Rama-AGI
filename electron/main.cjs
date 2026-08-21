@@ -104,6 +104,10 @@ let updater = null;
 // What the repair pass obtained and what stayed out of reach, exposed alongside
 // the diagnosis so master sees the fix and not only the fault.
 let startupRepair = null;
+// Subsystems whose register() threw. Every channel they own is absent, so anything
+// touching one gets "No handler registered" — this is what turns that into a named
+// cause instead of a guess. Surfaced through `health:startup`.
+const registrationFailures = [];
 
 // ─── Auto Updater ────────────────────────────────────────────────────────────
 /** A short notice to master, wherever he can currently see one. */
@@ -535,6 +539,9 @@ function registerHealthIpc(ipcMain) {
         previousCrash: startupHealth.previousCrash,
         buildManifest: startupHealth.buildManifest,
         packaged:      app.isPackaged,
+        // Subsystems whose IPC never registered. Without this, a missing channel is
+        // only ever visible as "No handler registered" at the call site.
+        registrationFailures,
         repair:        startupRepair && {
           attempted: startupRepair.attempted,
           repaired:  startupRepair.repaired,
@@ -1004,49 +1011,82 @@ app.whenReady().then(async () => {
   const dataDir = dataStore.getDataDir();
   await sessionMgr.init(dataDir);
 
-  // Register all IPC handlers
-  systemIPC.register(ipcMain);
-  fsIPC.register(ipcMain);
-  gitIPC.register(ipcMain);
-  terminalIPC.register(ipcMain, mainWindow);
-  appsIPC.register(ipcMain);
-  aiIPC.register(ipcMain);
-  marketIPC.register(ipcMain);
-  browserIPC.register(ipcMain);
-  vaultIPC.register(ipcMain);
-  modelIPC.register(ipcMain);
-  agentIPC.register(ipcMain);
-  intelligenceIPC.register(ipcMain);
-  evolutionIPC.register(ipcMain);
-  resourceResearchIPC.register(ipcMain);
-  resourceOrchestrator.register(ipcMain);
-  // Upgrade layer
-  vectorMemoryIPC.register(ipcMain);
-  sandboxIPC.register(ipcMain);
-  graphIPC.register(ipcMain);
-  selfCareIPC.register(ipcMain);
-  eventBus.register(ipcMain);
-  astIPC.register(ipcMain);
-  codeRegenIPC.register(ipcMain);
-  nucleusSealer.register(ipcMain);
-  ipcEncryption.register(ipcMain);
-  proposalLedger.register(ipcMain);
-  genomeApplier.register();   // closes the gap: GENOME proposals could not be applied
-  releaseChannel.register(ipcMain);   // dormant until master cuts a release — see Section 39
-  registerLocalUpdate(ipcMain);       // local pull → install → build → apply — see Section 40
-  publishProposal.register(ipcMain);  // applied self-modify proposals → new branch, never dev/source directly
-  registerAppearance(ipcMain);
-  registerHealthIpc(ipcMain);         // startup diagnosis + past crashes, readable from the UI
-  // Genome layer — registered after the engines it describes so verify() is honest
-  genomeIPC.register(ipcMain);
-  instanceIPC.register(ipcMain);
-  metaCognitionIPC.register(ipcMain);
-  timelineIPC.register(ipcMain);
-  voiceIPC.register(ipcMain);
-  sessionMgr.register(ipcMain);
-  dataStore.register(ipcMain);
-  // Auth is registered after the store so its adapter can attach on unlock
-  authIPC.register(ipcMain);
+  // ── Register all IPC handlers, each one independently ──────────────────────
+  // WHY A LOOP AND NOT 40 BARE CALLS: these were 40 unguarded statements, so the
+  // first one to throw abandoned every later `register()` — and `whenReady` has no
+  // `.catch()`, so the window still opened with a silently incomplete IPC surface.
+  // The symptom is "No handler registered for 'x'" on whichever channel master
+  // happens to touch first, with nothing anywhere saying why. That is the same
+  // failure shape `safeRequire` was built for at the *loading* boundary (Section
+  // 49), left wide open at the *registration* boundary. `sessionMgr` is third from
+  // last here, so a throw almost anywhere took the sign-in screen down with it.
+  //
+  // Order is preserved exactly — several entries depend on it, noted inline.
+  const REGISTRATIONS = [
+    ['System sensing',        () => systemIPC.register(ipcMain)],
+    ['Filesystem',            () => fsIPC.register(ipcMain)],
+    ['Version control',       () => gitIPC.register(ipcMain)],
+    ['Terminal',              () => terminalIPC.register(ipcMain, mainWindow)],
+    ['App assimilation',      () => appsIPC.register(ipcMain)],
+    ['AI backend process',    () => aiIPC.register(ipcMain)],
+    ['Market intelligence',   () => marketIPC.register(ipcMain)],
+    ['Browser engine',        () => browserIPC.register(ipcMain)],
+    ['Credential vault',      () => vaultIPC.register(ipcMain)],
+    ['Model router',          () => modelIPC.register(ipcMain)],
+    ['Agent orchestrator',    () => agentIPC.register(ipcMain)],
+    ['Intelligence engine',   () => intelligenceIPC.register(ipcMain)],
+    ['Evolution engine',      () => evolutionIPC.register(ipcMain)],
+    ['Resource research',     () => resourceResearchIPC.register(ipcMain)],
+    ['Resource orchestrator', () => resourceOrchestrator.register(ipcMain)],
+    // Upgrade layer
+    ['Vector memory',         () => vectorMemoryIPC.register(ipcMain)],
+    ['Execution sandbox',     () => sandboxIPC.register(ipcMain)],
+    ['Graph planner',         () => graphIPC.register(ipcMain)],
+    ['Self-care monitor',     () => selfCareIPC.register(ipcMain)],
+    ['Event bus',             () => eventBus.register(ipcMain)],
+    ['Code comprehension',    () => astIPC.register(ipcMain)],
+    ['Self-modification',     () => codeRegenIPC.register(ipcMain)],
+    ['Nucleus (identity)',    () => nucleusSealer.register(ipcMain)],
+    ['IPC encryption',        () => ipcEncryption.register(ipcMain)],
+    ['Approval ledger',       () => proposalLedger.register(ipcMain)],
+    // Closes the gap where GENOME proposals could not be applied
+    ['Genome applier',        () => genomeApplier.register()],
+    // Dormant until master declares baseline and cuts a release — Sections 39, 60
+    ['Release channel',       () => releaseChannel.register(ipcMain)],
+    // local pull → install → build → apply — Section 40
+    ['Local self-update',     () => registerLocalUpdate(ipcMain)],
+    // applied self-modify proposals → a new branch, never dev/source directly
+    ['Proposal publishing',   () => publishProposal.register(ipcMain)],
+    ['Appearance',            () => registerAppearance(ipcMain)],
+    // startup diagnosis + past crashes, readable from the UI
+    ['Startup health',        () => registerHealthIpc(ipcMain)],
+    // Genome layer — after the engines it describes, so verify() is honest
+    ['Genome',                () => genomeIPC.register(ipcMain)],
+    ['Instance lifecycle',    () => instanceIPC.register(ipcMain)],
+    ['Meta-cognition',        () => metaCognitionIPC.register(ipcMain)],
+    ['Timeline',              () => timelineIPC.register(ipcMain)],
+    ['Voice',                 () => voiceIPC.register(ipcMain)],
+    ['Session manager',       () => sessionMgr.register(ipcMain)],
+    ['Encrypted store',       () => dataStore.register(ipcMain)],
+    // Auth is registered after the store so its adapter can attach on unlock
+    ['Authentication',        () => authIPC.register(ipcMain)],
+  ];
+
+  for (const [label, run] of REGISTRATIONS) {
+    try {
+      run();
+    } catch (err) {
+      registrationFailures.push({ label, error: err.message });
+      // console.error, not a throw: one broken engine must not cost every later
+      // engine its channels. Named explicitly so the cause is in the log rather
+      // than inferred from a missing channel.
+      console.error(`[main] IPC registration failed for ${label}: ${err.message}`);
+    }
+  }
+
+  if (registrationFailures.length > 0) {
+    console.error(`[main] ${registrationFailures.length} subsystem(s) did not register their IPC channels — features depending on them will report "No handler registered"`);
+  }
 
   // CSP and permission policy must be installed before the window makes requests
   applyCsp();
@@ -1062,6 +1102,34 @@ app.whenReady().then(async () => {
   // once here, independent of the main window's own show/hide lifecycle.
   badgeWindow.create({ onClick: bringToFront });
   registerBadgeIpc(ipcMain);
+}).catch((err) => {
+  // WHY THIS EXISTS: `whenReady` had no rejection handler at all, so anything
+  // throwing in the ~150 lines above abandoned the rest of startup silently. The
+  // window could still be open from an earlier line while every IPC channel after
+  // the throw was missing, and the only visible symptom was "No handler registered
+  // for 'session:unlock'" — a message that names the victim, never the cause.
+  //
+  // crashGuard is deliberately not asked to kill the app: a partly-started Rāma
+  // that can still show master what went wrong is more useful than one that exits.
+  // But it must never be silent, which is what it was.
+  console.error(`[main] startup did not complete: ${err.message}`);
+  console.error(err.stack);
+
+  try { crashGuard.record(err, { origin: 'whenReady', fatalKind: 'startup-incomplete' }); }
+  catch { /* recording is best-effort; the console lines above still stand */ }
+
+  try {
+    const { dialog: d } = require('electron');
+    d.showMessageBox({
+      type:    'error',
+      title:   'Rāma did not finish starting',
+      message: 'Some of Rāma failed to start, so parts of the app will not respond.',
+      detail:  `${err.message}\n\nWhat did not start: ${registrationFailures.map(f => f.label).join(', ') || 'startup stopped before IPC registration'}\n\nA report was written to the crash folder.`,
+      buttons: ['Continue anyway', 'Quit'],
+      defaultId: 0,
+    }).then((res) => { if (res.response === 1) { app.isQuiting = true; app.quit(); } })
+      .catch(() => { /* no dialog available */ });
+  } catch { /* electron dialog unavailable */ }
 });
 
 app.on('window-all-closed', () => {

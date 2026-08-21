@@ -348,8 +348,29 @@ function recentReports(limit = 5) {
   } catch { return []; }
 }
 
+/**
+ * Write a report for a fault that was caught elsewhere, without terminating.
+ *
+ * Added for `whenReady`'s rejection handler (Section 61): startup failing part-way
+ * leaves a running but incomplete app, which is worth a durable report even though
+ * it is explicitly not worth killing. Same shape as the reports the handlers write,
+ * so `recentReports()` and `ship-log` pick it up with no special case.
+ *
+ * @param {Error|any} err
+ * @param {{origin?:string, fatalKind?:string}} [meta]
+ * @returns {string|null} the file written, or null if it could not be
+ */
+function record(err, meta = {}) {
+  try {
+    const report = buildReport(err, meta.origin || 'recorded');
+    report.fatalKind = meta.fatalKind || 'recorded-non-fatal';
+    faults.push(report);
+    return writeReport(report);
+  } catch { return null; }
+}
+
 module.exports = {
-  install, recentReports, reportDir,
+  install, recentReports, reportDir, record,
   // exported for tests — the classification is the part worth verifying
   missingModuleFrom, buildReport, guidanceFor, headline,
 };
