@@ -177,6 +177,13 @@ const RAMA_API = {
   // ── Updater ───────────────────────────────────────────────────────────────
   updater: {
     installNow: () => ipcRenderer.send('updater:install-now'),
+    // Plain notices from the updater — including "no releases published yet", which
+    // is the expected state until master tags one (Section 60).
+    onNotice: (cb) => {
+      const handler = (_e, n) => cb(n);
+      ipcRenderer.on('updater:notice', handler);
+      return () => ipcRenderer.removeListener('updater:notice', handler);
+    },
     onAvailable: (cb) => {
       const handler = (_e, info) => cb(info);
       ipcRenderer.on('updater:update-available', handler);

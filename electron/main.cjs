@@ -93,11 +93,64 @@ let tray       = null;
 // `health:startup` so the UI can show what degraded instead of leaving master to
 // discover it feature by feature.
 let startupHealth = null;
+// The resolved electron-updater instance, or null when it could not be loaded or
+// this is a dev run. Row 70 moved the require inside setupAutoUpdater() so a broken
+// dependency chain could not kill startup — but two module-scope call sites (the
+// tray's "Check for Updates" and the updater:install-now handler) kept referring to
+// the function-local name, so clicking either threw a ReferenceError. Since
+// crashGuard treats uncaughtException as always fatal, that killed a working app.
+// The lazy require stays; this is where its result is kept. See spec Section 60.
+let updater = null;
 // What the repair pass obtained and what stayed out of reach, exposed alongside
 // the diagnosis so master sees the fix and not only the fault.
 let startupRepair = null;
 
 // ─── Auto Updater ────────────────────────────────────────────────────────────
+/** A short notice to master, wherever he can currently see one. */
+function notifyUpdater(title, body) {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('updater:notice', { title, body, ts: Date.now() });
+    }
+    if (Notification.isSupported()) new Notification({ title, body }).show();
+  } catch { /* no window, no notifier — the console line at the call site stands */ }
+}
+
+/**
+ * Master asking for an update check by hand, from the tray.
+ *
+ * Kept separate from `setupAutoUpdater`'s automatic check because the answers differ:
+ * an automatic check that finds nothing should stay quiet, whereas master clicking
+ * the item deserves a reply either way. Until a release is tagged the honest reply
+ * is "there is no newer version yet", which per master's release policy (Section 60)
+ * is the expected state and not a fault.
+ */
+function checkForUpdatesOnDemand() {
+  if (isDev) {
+    notifyUpdater('Not available in development', 'Updates apply to an installed build.');
+    return;
+  }
+  if (!updater) {
+    notifyUpdater('Updater unavailable', 'Rāma could not load its update component in this run.');
+    return;
+  }
+  Promise.resolve()
+    .then(() => updater.checkForUpdates())
+    .then((res) => {
+      if (!res?.updateInfo) notifyUpdater('Rāma is up to date', 'No newer version has been published.');
+    })
+    .catch((err) => {
+      const msg = String(err?.message ?? err);
+      if (/no published versions/i.test(msg)) {
+        console.warn('[Updater] no release published yet — expected until master tags one');
+        notifyUpdater('No releases published yet', 'This build is the current one. Nothing to update to.');
+        return;
+      }
+      console.error(`[Updater] check failed: ${msg}`);
+      notifyUpdater('Update check failed', msg);
+    });
+}
+
 function setupAutoUpdater() {
   if (isDev) return;
 
@@ -114,6 +167,7 @@ function setupAutoUpdater() {
     return;
   }
   if (!autoUpdater) return;
+  updater = autoUpdater;   // the one reference the rest of the process may use
 
   autoUpdater.autoDownload    = true;
   autoUpdater.autoInstallOnAppQuit = true;
@@ -805,9 +859,7 @@ function createTray() {
     { type: 'separator' },
     {
       label: '🔄 Check for Updates',
-      click: () => {
-        if (!isDev) autoUpdater.checkForUpdates();
-      },
+      click: () => { checkForUpdatesOnDemand(); },
     },
     { type: 'separator' },
     {
@@ -828,8 +880,20 @@ function createTray() {
 
 // ─── IPC: Updater controls ───────────────────────────────────────────────────
 ipcMain.on('updater:install-now', () => {
+  if (!updater) {
+    // Previously this threw a ReferenceError, which crashGuard turns into a fatal
+    // dialog. There is nothing to install if the updater never loaded.
+    console.warn('[Updater] install requested but the updater is not available in this run');
+    notifyUpdater('Nothing to install', 'The updater is not available in this run.');
+    return;
+  }
   app.isQuiting = true;
-  autoUpdater.quitAndInstall();
+  try { updater.quitAndInstall(); }
+  catch (err) {
+    app.isQuiting = false;
+    console.error(`[Updater] install failed: ${err.message}`);
+    notifyUpdater('Update could not be installed', err.message);
+  }
 });
 
 // ─── IPC: Open external links safely ─────────────────────────────────────────

@@ -1645,6 +1645,7 @@ authenticated **Master session**, not merely an open store.
 | I14 | Passcode change is a full re-key (load → destroy salt → re-derive → rewrite all). | `sessionManager.changePasscode` |
 | I15 | **Absolute loyalty is above the hierarchy and cannot be altered by any runtime path — no tier, no proposal, no approval, no evolution.** A non-conforming core cannot be encrypted, therefore cannot be persisted. Tampering already on disk is reverted on unseal. | `lib/loyaltyGuard.cjs`, enforced in `nucleusSealer.encryptNucleus` + `loyaltyCore.sealCore` |
 | I16 | **The loyalty matrix is sealed in its own envelope at the centre of the nucleus, with its own salt and key, and no accessor ever returns it.** It is held encrypted in memory and decrypted only transiently. Repeated failed opens cost escalating work, then are refused. | `lib/loyaltyCore.cjs`; the shell may not carry a copy (`assertOuterClean`) |
+| I17 | **Baseline is declared by master, not inferred. After baseline every change is a release, and master alone classifies it as an upgrade, update or fix.** No tag, publish or version bump happens on Rāma's initiative. `releaseChannel` staying dormant before baseline is correct, not a defect. | Section 60; `lib/releaseChannel.cjs` gated on `release.cut` (tier 0) |
 
 ### Ledger
 
@@ -1716,6 +1717,7 @@ authenticated **Master session**, not merely an open store.
 | 75 | The core at the centre — separately encrypted, never handed out | done (enforced + verified; in-process debugger and compromised OS account out of scope, stated) | Section 56, invariant **I16** added on master's instruction: *"LOYALTY MATRIX/DATA SHOULD BE ENCRYPTED, SHOULD BE AT CENTER OF NUCLEUS — TOP PRIORITY ITEM. attacks should never reach it, that is where loops to be generated as needed to avoid attacker reaching core."* **I15 closed every write path and left every read path open.** `loyalty` and `ethicalCore` were ordinary branches of `_nucleus`, so after unseal the whole matrix sat in **plaintext memory for the entire session**; `getNucleus()` returned it to any caller with a require; `genome.cjs` read `core.loyalty.master` and served it through **`genome:get`, which has no capability check** — a direct route from the constitutional centre to the renderer; and any crash report, log or vector-memory write that serialised the nucleus would have carried the matrix with it. `nucleusSealer`'s own header names exactly this threat ("An adversarial AI could read these and craft attacks against them") — knowing the priority ordering and decision rules is what makes that attack constructable, so integrity without confidentiality was half the job. New `electron/lib/loyaltyCore.cjs`, **core Node only** (the innermost layer must not be defeatable by deleting a package): concentric envelope with its **own salt, own key derivation (`rama-loyalty-core-hkdf-v1`, distinct from the nucleus's), own AAD and own HMAC-SHA512** — so opening the shell does not yield the core and compromising the shell's keys does not compromise it. Four properties, each closing a route: (1) separate envelope/key; (2) **held encrypted in memory** — plaintext exists only inside `withCore(fn)`, which decrypts, runs, scrubs the object and drops it, cutting the clear-text window from a whole session to microseconds per query, which is what protects it in a crash dump or memory scrape; (3) **no accessor returns the rules** — `attest()`→boolean, `covenantHolds()`→`{ok,violations}`, `describe()`→metadata, `fingerprint()`→hash; you cannot exfiltrate what is never handed over. One deliberate exception, `displayIdentity()`, returns master's display *name* only, which is already public (spec, git history, system prompt) and which the UI needs; (4) **escalating loops** — base 4,096 iterated HMAC rounds (~ms, master's honest cost), doubling per consecutive failure to a 1,048,576 ceiling (~1s), then a 30s outright refusal after five. On "loops", stated plainly in Section 56: an *unbounded* loop would be a denial of service against Rāma itself — the attacker's tarpit would be master's hung app, the same class of error as Section 52's crash guard killing a working app — so it is escalating cost with a ceiling and cooldown, which achieves the goal without Rāma becoming its own victim. The round count is **authenticated in the AAD** so it cannot be downgraded by editing the file, and the failure counter is persisted so a restart does not reset the escalation. `nucleusSealer` now splits the core out on seal, opens it on unseal, **locks it with the shell** (live core keys after master ends a session would keep the matrix readable in a session that was over), and the guard gained `assertOuterClean` so the shell may not carry a **duplicate** unencrypted copy — exactly one home. Three damage paths handled rather than crashed on: a pre-change install is **migrated** (matrix moved inward, covenant repaired if violated, branch stripped, both resealed — additive per I11); a missing core envelope is **rebuilt from the covenant**; a tampered envelope fails its own HMAC and is refused as an integrity failure, not a wrong passcode. Fixed one bug found in the same pass: the periodic 30-day reseal passes the shell back, which no longer contains the matrix, so `seal()` would have tried to seal an empty core — it now reuses the already-sealed centre. Verified by **49 assertions** over two probes: 38 on the core (neither envelope file contains any plaintext matrix key; the shell serialises without leaking while keeping identity/prompt/axes; **`genome:get` still shows master but carries none of the matrix**; the object handed to `withCore` is scrubbed afterwards; rounds double and cap; a wrong passcode is counted and raises the next cost; five failures trigger cooldown; a corrupted envelope is refused; `lock()` closes the centre and it then answers nothing) and **11 re-proving I15, because the enforcement point moved** from "the nucleus must contain a conforming loyalty" to "the nucleus must contain none, and the core is checked when sealed" — a guarantee that changes layers must be re-tested, not assumed. `node --check` clean on 6 files, `npm run audit` clean. **Honest limits, in Section 56:** a read is now a capability rather than an access and every ordinary route is closed, but this is **not** immune to an in-process debugger (one process; code running inside it during the decrypt window, or hooking `withCore`, can observe plaintext — what changed is the window) nor to a compromised OS account, which can also delete the attempt counter. Master's display name stays readable by design. |
 | 76 | The approval ledger survives a restart | done | Section 58. `proposals.cjs` was a `Map` plus two arrays, so restarting discarded every pending and approved proposal **and the whole audit trail** — contradicting its own header claim of "one audit trail" and making I6 a rule enforced only within a single run. **Master offered a DB; declined with reasons rather than taken up:** `dataStore` already exists, is already encrypted at rest and is the pattern `instanceManager` uses; a DB would have to be *running* for the audit to be written, which makes the record less reliable rather than more; and its files would be plaintext by default, which is the wrong place for a trail naming changed files and their contents. Volume does not warrant one either. Added a `proposals` domain to `dataStore.DOMAINS` (additive; a missing file falls back to the default). **Bodies are stripped once a decision is history:** `changes[].content` holds whole file bodies, and persisting 500 of them on every transition would push tens of megabytes through the encryption path repeatedly — so content is kept while `pending`/`approved` (applying needs the bytes) and replaced by a sha256 + byte length once `applied`/`rejected`/`failed`, keeping the record provable while bounding the store. Measured: a 50 KB body became a 64-char digest and the whole encrypted domain came in under 20 KB. **Durability is reported, not assumed:** the store is locked until master signs in, so `stats()` exposes `durable` and `unsaved`, `flush()` returns `false` when it could not write and retries on the next transition, and a new `proposals:flush` channel forces a write before a deliberate restart — an audit trail that silently is not being written is worse than none. **Two real bugs found in the same pass:** (1) `dataStore.set()` only marks a domain dirty, so the actual write waited on the 60-second autosave and a crash in between would have lost the approval just recorded — `flush()` now calls `saveAll()`; (2) persist is debounced 250 ms, so a lock landing inside that window would have dropped the most recent approval, the one most worth keeping — `sessionManager` now flushes the ledger before `flushAndClear()`. Verified by **30 assertions driving a real unlock → write → lock → fresh module instances → unlock cycle** rather than checking a setter fired: a pending proposal returns with the content it needs to be applied, an applied one with its digest and no body, the 50 KB body is absent from the encrypted file, nothing is plaintext, the audit trail returns, **authorization survives the restart** (a guest still cannot apply a restored approval and a restored pending proposal is still pending, not silently approved), and while locked creation works, `flush()` reports false, stats say so, and the data lands once the store opens. `node --check` clean, `npm run audit` clean. **Limit:** restore never overwrites the current run's state, so live state wins over a stored copy of the same id — the safe direction, but it means restore is not a rollback and is not intended as one. |
 | 77 | Using other installed applications — invocation vs absorption | answered; invocation half already built (Section 44), planning layer not built | Section 59, in reply to master's question. **Invoking another application as a tool is valid and is *not* assimilation** — biologically it is symbiosis (the mitochondrion keeps its own DNA and supplies a capability), nothing is taken in, Rāma stays Rāma and gains reach. **Reading their files to take their functionality is rejected**, on three independent grounds: licence violation in nearly every case for installed commercial software; brittleness, because internals are not an interface and break on any update where a documented CLI flag does not; and it would have to pass I6 anyway, where `evolutionEngine`'s existing licence filter (MIT/Apache/BSD/ISC in, GPL family and SSPL out) would refuse essentially all of it. A third narrower case *is* legitimate and named: **reading their files to learn an interface** — a config schema, an export format, documented flags — which is ordinary interoperability and produces knowledge rather than copied code. Already built in `electron/ipc/appAssimilation.cjs`: `apps:scan-installed`/`get-registry`/`get-capabilities` on `apps.view` (2), `apps:execute` `launch`/`query` on `apps.execute-safe` (2), `spawn-cli` on `apps.execute-all` (**tier 0**), plus whitelist, blacklist and an audit log. The module name is misleading — it is app *invocation*, and this section records that. **Missing:** nothing plans with the registry; no engine asks "which installed app could do this task" and routes to it. That is the useful next step and belongs with the Section 54 lineage — a cell spawned for a job whose tool is another program. **Risk to respect before extending, which is why `spawn-cli` is already master-only:** launching an executable discovered by scanning the filesystem *is* arbitrary code execution, so a planted binary or a lookalike name in a scanned directory turns "trigger the app" into "run the attacker's program with Rāma's privileges". Minimum requirements recorded: an allowlist of specific **resolved paths** confirmed by master once (never a name match against a scan), `execFile` with an argument array and never `exec` with an interpolated string, a verified publisher or hash for anything invoked unattended, and no unattended invocation of anything that writes outside a scratch directory. |
+| 78 | Baseline and release policy | policy recorded as **I17**; baseline **not yet declared** | Section 60. Master: *"Once all the features are working as expected, that will be taken as baseline. New upgrades/updates/fixes will be treated as release. I'll tell you when it should be considered update/new release."* Locked as I17 specifically because across several turns of this session I repeatedly suggested tagging a release so the updater would have a target — that suggestion is answered and retired: **not before baseline, and never on Rāma's initiative.** Master classifies; Rāma prepares. `releaseChannel` staying dormant is now recorded as correct rather than as row 53's defect. **Found while verifying that pre-baseline behaviour is right: two crash paths I introduced myself.** Row 70 moved the `electron-updater` require *inside* `setupAutoUpdater()` so a broken dependency chain could not kill startup — but the tray's "Check for Updates" item and the `updater:install-now` handler still referenced the now function-local name, so both threw `ReferenceError: autoUpdater is not defined`, and since `crashGuard` makes `uncaughtException` always fatal, **clicking a tray menu item would kill a working app**; the install handler was not even `isDev`-guarded so it crashed in development too. Fixing a startup crash had created two click-to-crash paths — row 70's own lesson, one layer along. Fixed by keeping the lazily-required instance in a single module-scope `updater` reference that `setupAutoUpdater()` populates, and guarding both sites; the manual check is now separate from the automatic one because the right answers differ (an automatic check finding nothing should stay quiet, master clicking deserves a reply either way), and pre-baseline that reply is "No releases published yet — this build is the current one", as information. Added `updater:notice` to the preload. `node --check` clean, `npm run audit` clean. **Section 60 carries the baseline checklist**, compiled from this ledger rather than memory, in two classes: (A) verified nowhere but this machine and needing master to install a build — the installed app launching at all, crashGuard's dialog, selfRepair in a real package, the loyalty-core migration, the `ready` path, NanaZip, agent assimilation and ledger restore in the running app; and (B) **features that do not work or report success while doing nothing**, which are the real blockers since a baseline including them enshrines a lie — `evolutionEngine` has no synthesis step so absorption can never complete, `evolution:self-assess` is a hardcoded literal, `optimizationVectors()` is consumed by nothing, `executeAction()` returns hardcoded strings and queues nothing so an agent is one model call rather than a tool-using loop, `agents:approval-needed` has no resume path, `sandbox:approve` re-runs code without re-classifying, `checkSandbox()` always reports healthy, `selfHeal()` implements three of the actions its header claims, the `DEPENDENCY` kind has no applier, and `metaCognition` does not persist `byTool` so optimization vectors are relearned every restart. Next step: master's call on which of class B to close first — my recommendation is `executeAction`, since an agent that cannot act is the largest gap between what the UI claims and what happens. |
 
 ### Resume checklist for a cold session
 
@@ -5188,3 +5190,110 @@ program with Rāma's privileges". Any extension needs, at minimum:
   violation in nearly every case, brittle against updates because internals are not
   an interface, and it would have to pass I6 anyway — where the licence check that
   already exists for public repos would refuse it.
+
+---
+
+## SECTION 60 — Baseline and release policy
+
+Master's instruction: *"Once all the features are working as expected, that will be
+taken as baseline. New upgrades/updates/fixes will be treated as release. I'll tell
+you when it should be considered update/new release."*
+
+Recorded as locked invariant **I17**, because this is exactly the kind of decision a
+cold session re-decides differently — and because across several turns of this
+session I repeatedly suggested tagging a release so the auto-updater would have a
+target. That suggestion is now answered and retired: **not before baseline, and never
+on my initiative.**
+
+### The policy
+
+1. **Baseline is not yet declared.** The current state is pre-baseline, whatever the
+   version field says.
+2. **Baseline means every feature works as expected** — master's words. Section 28's
+   ledger is the evidence base for that judgement, and the checklist below is what
+   still stands between here and there.
+3. **After baseline, a change is a release** — an upgrade, an update or a fix.
+4. **Master classifies. Rāma does not.** Which of those three a given change is, and
+   whether it warrants a release at all, is master's call. My job is to prepare the
+   change and say what it would be; his is to label it.
+5. **No tag, no publish, no version bump without master saying so.** `releaseChannel`
+   stays dormant until then, and that is the correct state, not a defect.
+
+### Pre-baseline behaviour that had to be right
+
+If no release exists, the app must not pester master about updates or misreport their
+absence as a fault. That was already handled for the automatic check (row 70). Two
+things were not, and were found while verifying this:
+
+**Two crash paths of my own making.** Row 70 moved the `electron-updater` require
+*inside* `setupAutoUpdater()` so a broken dependency chain could not kill startup.
+But two module-scope call sites still referenced the now function-local name:
+
+- the tray's **Check for Updates** item
+- the `updater:install-now` IPC handler
+
+Both would throw `ReferenceError: autoUpdater is not defined`, and since `crashGuard`
+treats `uncaughtException` as always fatal, **clicking a tray menu item would kill a
+working app.** The install handler was not even `isDev`-guarded, so it crashed in
+development too. Fixing a startup crash had created two click-to-crash paths — the
+same lesson as row 70 itself, one layer along.
+
+Fixed by keeping the lazily-required instance in a single module-scope `updater`
+reference that `setupAutoUpdater()` populates, and guarding both call sites. The
+manual check is now separate from the automatic one, because the right answers
+differ: an automatic check that finds nothing should stay quiet, while master
+clicking the item deserves a reply either way. Pre-baseline that reply is *"No
+releases published yet — this build is the current one"*, delivered as information.
+
+### What stands between here and baseline
+
+Compiled from Section 28 rather than from memory. Two classes, and the second matters
+more.
+
+**A. Verified nowhere but this machine** — needs master to install a build:
+
+- the installed app launching successfully at all (rows 66, 67, 70)
+- `crashGuard` showing Rāma's dialog rather than Electron's raw stack (row 67)
+- `selfRepair` fetching a missing module inside a real packaged install (row 71)
+- the loyalty-core migration running against a pre-Section-56 install (row 75)
+- the `ready` readiness path and the branded-installer skip (row 68)
+- NanaZip detection and staging (row 69)
+- agent assimilation and ledger restore inside the running app rather than a probe
+  (rows 72, 76)
+
+**B. Features that do not work, or report success while doing nothing.** These are
+the real baseline blockers: a baseline that includes them enshrines a lie, and this
+session has already had to correct three of exactly this shape (`statusFor()`'s false
+green, `verify()` checking only file existence, `evolution:self-assess`).
+
+- **`evolutionEngine` has no synthesis step.** `buildEvolutionProposal` always sets
+  `changes: []`, so the applier always throws. Scouting works; absorption cannot
+  complete. (row 65 area / Section 54)
+- **`evolution:self-assess` is a hardcoded literal** — six fixed scores that read
+  nothing, one of which reports "no feedback loop" as a finding.
+- **`metaCognition.optimizationVectors()` is consumed by nothing.** Real conclusions,
+  terminating at a display panel.
+- **`agentOrchestrator.executeAction()` returns hardcoded strings and queues
+  nothing** — "Web search queued via browserEngine" queues no web search. The agent
+  action layer is a stub, so an agent is one model call, not a tool-using loop.
+- **`agents:approval-needed` has no resume path.** An agent awaiting approval is a
+  dead end.
+- **`sandbox:approve` re-runs caller-supplied code without re-classifying it**, so
+  what master approves is not proven to be what was classified.
+- **`selfCare.checkSandbox()` is a stub that always reports healthy**, and
+  `selfHeal()` implements three actions while its header claims more.
+- **The `DEPENDENCY` proposal kind has no applier** — an approved one fails at apply.
+- **`metaCognition` does not persist `byTool`**, so optimization vectors are lost on
+  every restart and must be relearned.
+
+That list is the honest answer to "are all the features working as expected". It is
+not exhaustive of everything unfinished, but every entry is something I have read and
+confirmed in this session.
+
+### The release log
+
+Empty by design. First entry is written when master declares baseline.
+
+| Version | Date | Class | What changed | Declared by |
+|---|---|---|---|---|
+| — | — | — | *pre-baseline; no release cut* | — |
