@@ -10,7 +10,7 @@
 const crashGuard = require('./lib/crashGuard.cjs');
 crashGuard.install();
 
-const { safeRequire, loadFailures, isStub } = require('./lib/safeRequire.cjs');
+const { safeRequire, loadFailures, isStub, retryFailures } = require('./lib/safeRequire.cjs');
 
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog, Notification } = require('electron');
 const path = require('path');
@@ -93,6 +93,9 @@ let tray       = null;
 // `health:startup` so the UI can show what degraded instead of leaving master to
 // discover it feature by feature.
 let startupHealth = null;
+// What the repair pass obtained and what stayed out of reach, exposed alongside
+// the diagnosis so master sees the fix and not only the fault.
+let startupRepair = null;
 
 // ─── Auto Updater ────────────────────────────────────────────────────────────
 function setupAutoUpdater() {
@@ -478,8 +481,30 @@ function registerHealthIpc(ipcMain) {
         previousCrash: startupHealth.previousCrash,
         buildManifest: startupHealth.buildManifest,
         packaged:      app.isPackaged,
+        repair:        startupRepair && {
+          attempted: startupRepair.attempted,
+          repaired:  startupRepair.repaired,
+          recovered: startupRepair.recoveredSubsystems,
+          remaining: startupRepair.stillMissing,
+          notes:     startupRepair.notes,
+        },
       },
     };
+  });
+
+  // Repair on demand, for when master would rather not wait for a relaunch.
+  ipcMain.handle('health:repair', async () => {
+    if (!startupHealth) return { ok: false, error: 'Startup diagnosis has not run yet' };
+    const doctor = require('./lib/startupDoctor.cjs');
+    const outcome = await doctor.repair(startupHealth, {
+      safeRequireFailures: loadFailures(),
+      crashReports:        crashGuard.recentReports(3),
+      appRoot:             path.join(__dirname, '..'),
+      retryFailures,
+    });
+    startupRepair = outcome;
+    if (outcome.rediagnosed) startupHealth = outcome.rediagnosed;
+    return { ok: true, data: outcome };
   });
 
   // Past crashes, so a fault that killed a previous launch is visible now rather
@@ -859,6 +884,56 @@ app.whenReady().then(async () => {
 
   if (startupHealth.previousCrash) {
     console.warn(`[doctor] the previous run ended in a crash: ${startupHealth.previousCrash.message}`);
+  }
+
+  // ── Self-repair, deferred until after the window exists ────────────────────
+  // Scheduled rather than awaited: fetching a package is network-bound, and an
+  // app that shows nothing until the network answers looks broken in exactly the
+  // way this is supposed to prevent. Master gets a usable window immediately and
+  // the repair lands underneath it, then `health:startup` reports what changed.
+  // See spec Section 53.
+  if (!startupHealth.ok || startupHealth.degraded.some(d => !d.expected)) {
+    setTimeout(() => {
+      doctor.repair(startupHealth, {
+        safeRequireFailures: loadFailures(),
+        crashReports:        crashGuard.recentReports(3),
+        appRoot:             path.join(__dirname, '..'),
+        retryFailures,
+      }).then((outcome) => {
+        startupRepair = outcome;
+        if (outcome.repaired.length > 0) {
+          console.warn(`[repair] obtained ${outcome.repaired.join(', ')}`);
+        }
+        if (outcome.recoveredSubsystems.length > 0) {
+          console.warn(`[repair] back online: ${outcome.recoveredSubsystems.join(', ')}`);
+        }
+        for (const n of outcome.notes) console.warn(`[repair] ${n}`);
+        if (outcome.stillMissing.length > 0) {
+          console.error(`[repair] beyond reach: ${outcome.stillMissing.join(', ')}`);
+        }
+
+        // The re-diagnosis is the current truth; keep it so the UI stops showing
+        // faults that have since been fixed.
+        if (outcome.rediagnosed) {
+          startupHealth = outcome.rediagnosed;
+          console.warn(`[doctor] after repair: ${doctor.summarise(startupHealth)}`);
+        }
+
+        // Tell the window, if it is listening, so master sees recovery happen
+        // rather than having to reopen a panel to find out.
+        try {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('health:repaired', {
+              repaired:  outcome.repaired,
+              recovered: outcome.recoveredSubsystems,
+              remaining: outcome.stillMissing,
+            });
+          }
+        } catch { /* the window may not be ready; the IPC handler still has it */ }
+      }).catch((e) => {
+        console.error(`[repair] repair pass failed: ${e.message}`);
+      });
+    }, 2_000);
   }
 
   // Initialize session manager (check first-run, etc.)

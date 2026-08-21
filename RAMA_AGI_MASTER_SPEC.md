@@ -1707,6 +1707,7 @@ authenticated **Master session**, not merely an open store.
 | 69 | Why 7-Zip and not RAR; widen the archiver ladder | done (RAR ruled out on hard grounds; NanaZip detection unverified here) | Section 51. Master asked why the archiver is 7-Zip only. Three hard constraints, not preference: (1) electron-builder emits **7-Zip's own method switches** — `-mx=9`, `-md=64m`, `-ms=off`, `-mhc=off`, `-mf=BCJ2` (`archive.js`'s `compute7zCompressArgs`) — so a substitute must speak 7-Zip's command line, which rules out both `rar.exe` and other tools that can merely produce the format; (2) the NSIS payload is `app.7z` and **the NSIS stub has a 7z decompressor compiled in, no unrar engine** — the format is dictated by the consumer, so a `.rar` payload could not be unpacked by the installer we ship; (3) the RAR **compressor** is proprietary — WinRAR is paid and the `unrar` licence explicitly forbids building a RAR compressor from it, so bundling one is not legally available, and requiring master to buy WinRAR to build his own app would be absurd. Also would not have helped: the failures were a policy flagging 7-Zip **21.07 as a vulnerable version** and macOS symlinks inside `winCodeSign` needing a Windows privilege — neither is a property of the format. Acted on the sound instinct behind the question by widening the ladder beyond one binary: added **`NanaZipC.exe`** (current MIT 7-Zip fork, **per-user Store install so no admin rights**, and not the flagged 21.07 — the most likely route back to real installers on the work machine), `7zz`/`7zzs` (official modern standalone builds, and the usual Linux/macOS names), `WindowsApps` in the search path since MSIX packages are not under `Program Files`, and `HKCU` alongside `HKLM` for the registry `Path`. Staging generalised to copy `7z.dll` whenever one sits beside the chosen binary rather than keying on the filename. Ranking prefers self-contained builds, then NanaZip, then `7z.exe`, then `7zr`; every rung is still executed and must identify itself as 7-Zip. Remedy text now leads with NanaZip and states plainly that RAR is not an alternative. **Not verified: NanaZip detection/staging** — not installed here; recorded caveat is that a Store `NanaZipC.exe` is an execution alias and copying it may not work, though `stage7za` re-probes and reverts, so the ladder degrades safely. |
 | 70 | The crash guard became the crash | done | Section 52. Master's four crash reports (shipped over git — row 62's channel earning its keep) all read `unhandledRejection — No published versions on GitHub` / `ERR_XML_MISSED_ELEMENT` from `NsisUpdater.doCheckForUpdates`. Two of my own changes combined, and the second is the worse mistake: (1) `setupAutoUpdater()` never handled the promise — `checkForUpdatesAndNotify()` returns one and `autoUpdater.on('error')` does **not** catch its rejection, both fire independently; (2) `crashGuard` treated *every* `unhandledRejection` as fatal, on reasoning written into the file about half-initialised startups — but `setupAutoUpdater()` runs from `ready-to-show`, so **the app was fully started and working**. A guard written to stop Rāma dying silently became the reason a healthy Rāma died, and its own Relaunch button made it a loop: four identical reports from two cycles. **The failure master saw was caused by the resilience feature, not caught by it** — Section 49's claim that "Rāma will never again die silently" held only in the letter. The underlying condition was not even a fault: row 53 records that no release has ever been tagged, so the releases feed is legitimately empty and the updater was telling the truth. Fixes: the promise is caught and "no published versions" is reported as *information*, since logging an expected condition as an error trains master to ignore updater messages; `crashGuard` now splits by lifecycle — `uncaughtException` always fatal, `unhandledRejection` fatal only *before* `app.isReady()`, and after ready it is recorded, written to disk, logged, and **the app keeps running**; the dialog drops Relaunch when the same message appears in a report from the last 10 minutes, and matches buttons by label rather than index since the set now varies. Verified against the exact error with `electron` stubbed — 8 assertions: no termination, still recorded, classified `non-fatal-rejection`, report still written, repeat detectable from disk, guidance still avoids impossible npm advice. `npm run audit` clean. **Not verified: that the installed app survives it** — needs a rebuild and reinstall. Lesson recorded in Section 52: two guards written this session were disproportionate in the same direction (this, and the package audit flagging 65 third-party test-file requires), both defaulting to *stop* where the honest answer was *record and continue*. The test for a guard is not whether it catches the bad case but what it does to the good one. |
 | 61 | Fleet awareness — Rāma on several devices, staying in touch | in-progress (designed, not implemented; one decision open for master) | Section 46. Researched first: there is **no cross-device anything today** — instances are objects in one in-process `Map` with no `host`/`machineId`/`deviceId`/`lastHeartbeat` field (`instanceManager.cjs:112-133`), "sibling" discovery is a `.filter()` over that same Map (`selfCare.cjs:144-145`), a "dead" gene means a local module path failed to resolve, the API server binds `127.0.0.1` explicitly (`server/index.cjs:101`), and there is no WebSocket/mDNS/discovery/peer code at all. Usable anchors that do exist: `authCore`'s `instanceMeta.instanceId` (stable per-install UUID) + `instanceName` (`<hostname>-rama`), and `cryptoCore`'s AES-256-GCM. **Decisions recorded in Section 46:** (a) the corporate-managed machine is *not* enrolled as a peer — Rāma's IPC surface (`terminal:create`, `fs:write/delete`, `vault:*`, `apps:execute` `spawn-cli`, `system:kill-process`, `regen:*`) makes a peer channel a wider remote-access path than the RDP that was declined a turn earlier; (b) first increment uses the **existing git remote as the fleet bus** — no listener, no inbound, no NAT traversal, same outbound traffic as a `git push`, auditable as commits, at the honest cost of minute-scale eventual consistency rather than live presence; (c) fleet payloads are **encrypted** with the existing `cryptoCore` path, because `build.publish` is `"private": false` and telemetry carries hostnames, paths and OS usernames — plaintext would be a leak created by a protective feature; (d) fleet messages are a closed status vocabulary (device id/name, liveness, genomeVersion+genomeHash for drift detection, selfCare summary, task/build headline, alerts) and the reader is **never** a proxy onto `ipcMain` — a remote device may inform, never act; (e) peer identity comes from the device record, never a caller-supplied `user` and never `authClient.getFingerprint()` (`userAgent+language+screen+timezone` collides across similar laptops). Next steps, in order: **(1) gate `instance:*` — worth doing regardless of this feature.** Those handlers have no `capability.deny()` at all (`instanceManager.cjs:300-341`) and `express(id, gene, null)` skips the tier check by design for `selfCare.cjs:158`'s self-heal; caps `instances.view/spawn/express/terminate` already exist in `capabilities.json` but are unenforced at the IPC boundary. This is the same class row 59 closed for `fs`/`vault`/`terminal`/`git`/`agents`/`sandbox` and missed here; needs `preload.cjs` + every `.jsx` caller threading `currentUser`, verified with `npm run audit`. (2) Add device fields (`deviceId`, `deviceName`, `lastHeartbeat`) to instance records, anchored on `instanceMeta.instanceId`. (3) Add `fleet.view`/`fleet.publish`/`fleet.enroll` capabilities. (4) Build publish/read over the `fleet` branch with encrypted payloads and explicit master enrolment. **Blocked on master confirming the enrolment scope** before (4). |
+| 71 | An installed Rāma that repairs itself | done (mechanism verified; unverified inside a real install) | Section 53. Master rejected row 67's model and was right. Section 49 said "an install cannot npm-install into its own read-only archive" — true, but it answers *"can the asar be rewritten?"* (no) and was used to conclude something about *"can the app obtain a missing module?"* (it can: `userData` is writable, Node's resolution can be pointed at it, and `asarUnpack` already proves code outside the archive loads). Row 67's "degrade, report, offer the updater" was not the limit of the achievable, only of the built; diagnosing a fault then asking master to reinstall is delegation with a diagnostic attached. Second time in two sessions a resilience claim held in the letter and failed in the spirit (Section 52 was the first) — same pattern, a plausible technical sentence standing in for a decision. New `electron/lib/selfRepair.cjs`, bounded by **`package-lock.json`, now shipped in `build.files`**: 745 packages with exact versions, tarball URLs and sha512 hashes, making one file the allowlist, the version pin (so I12 survives repair) and the verifier at once. Repair therefore means only "restore what this build declared it was made of" — it cannot install anything new, upgrade, or be steered. Rejected resolving by name against the registry API: it works and is what a human would do, but it turns an attacker-influenced string into an arbitrary download, and the name is parsed out of an error message. Core Node only (`https`/`zlib`/`crypto`/`fs`/`path`) including a hand-written ustar reader — rejected the `tar` package because a repair mechanism needing a third-party package cannot repair a missing third-party package, the only case it exists for; same reasoning as `crashGuard`. Repaired code lands in `userData/repair/node_modules` via `NODE_PATH` + `Module._initPaths()`, and because `globalPaths` is consulted *after* the normal walk, **repair can never shadow a working module**. Deliberately **not** attempted inline in `safeRequire`: that runs in the module-scope require chain before `whenReady`, so a network fetch would stall startup for every later engine — order is come up degraded → repair → retry → report, with `retryFailures()` added so a fetched package is proved to make its consumer load rather than merely to exist. `startupDoctor` gained `repair()`, its false "WHAT IT DOES NOT DO" block corrected, and `dep-*` remedies no longer say "reinstall"; wired into `whenReady` on a 2s deferral plus `health:repair` on demand and a `health:repaired` event. Honest remaining boundary, narrow and stated: native modules needing a compiler, a corrupt asar, and a missing renderer bundle — all three the auto-updater's job, and **row 53 is still dormant because no release has ever been tagged**, which is now the highest-value remaining action. Verified by 32 assertions over two probes against the **live registry with real checksums**, then deleted: `@emnapi/runtime` (genuinely absent here) downloaded → sha512-verified → gunzipped → extracted → `require()` succeeded at the pinned version through the repair dir; a non-lockfile package refused; a tar entry with `../` refused with nothing written outside the target; weak digests refused; a crafted error message obtains nothing; a build-manifest `expected: true` degradation left alone. `node --check` clean on 5 files, `npm run audit` clean. **Not verified: repair inside a real packaged install** — needs a rebuild and reinstall on master's machine, since this workspace cannot produce an installer (Section 51). Next step: master to cut a release so the updater has a target, closing the one repair channel still unavailable. |
 
 ### Resume checklist for a cold session
 
@@ -4360,3 +4361,154 @@ disproportionate in the same direction: this one, and the audit that treated 65
 third-party test-file requires as build failures. Both defaulted to *stop* where the
 honest answer was *record and continue*. The test for a guard is not "does it catch
 the bad case" but "what does it do to the good case".
+
+---
+
+## SECTION 53 — An installed Rāma that repairs itself
+
+Master's challenge: *"Once the application is installed, it should take care of
+itself, no matter the issue. Isn't that self-repair and self-heal means."*
+
+It is, and the answer given in Section 49 was wrong. This section records the
+correction and what was built because of it.
+
+### The sentence that was true, and the conclusion that was not
+
+Section 49 said:
+
+> An install cannot npm-install into its own read-only archive, and claiming
+> otherwise would be a lie told by the component whose entire job is honesty.
+
+Every clause of that is accurate. The problem is the question it answers. It
+answers **"can the asar be rewritten in place?"** — no, it is a packed, read-only
+archive. It was then used to justify a conclusion about a different question:
+**"can the app obtain a module it is missing?"** — which it can:
+
+- `userData` is writable on every platform, in every install
+- Node's module resolution can be pointed at a writable directory
+- `asarUnpack` already proves code outside the archive loads fine
+
+So Section 49's recovery model — *degrade, report precisely, offer the update
+channel* — was not the boundary of what is achievable. It was the boundary of what
+had been built. Row 67 even labelled itself "containment + honest reporting;
+autonomous repair still needs the updater live", which reads as a measured limit
+but was an unexamined one. Diagnosing a fault and then telling master to reinstall
+is not self-healing; it is delegation with a diagnostic attached. Master was right
+to reject it.
+
+This is the second time in two sessions that a resilience claim held in the letter
+and failed in the spirit (Section 52 was the first). The pattern in both: a
+plausible technical sentence was allowed to stand in for a decision.
+
+### Why the lockfile is the authority, and not the registry
+
+Downloading code at runtime and then executing it is the most security-sensitive
+thing in this codebase. It is therefore bounded by something already trustworthy
+rather than by the error that triggered it.
+
+`package-lock.json` now ships inside the app (added to `build.files`). It names
+**745 packages with exact versions, resolved tarball URLs, and sha512 integrity
+hashes**. That makes it simultaneously the allowlist, the version pin, and the
+verifier:
+
+| Property | Consequence |
+|---|---|
+| Package must appear in the lockfile | A crafted `Cannot find module 'x'` cannot induce an arbitrary download |
+| Version comes from the lockfile | Never `latest` — invariant I12 holds through repair |
+| `integrity` sha512 must match | Mismatched bytes are discarded, never written to disk |
+| Weak digests refused | `md5-…`/`sha1-…` rejected outright |
+
+So repair means exactly one thing: **restore what this build already declared it
+was made of.** It cannot install something new, upgrade anything, or be steered.
+That is a far narrower power than `npm install`, deliberately so.
+
+**Rejected:** resolving the package by name against the npm registry API. It would
+have worked and it is what a person would do by hand, but it converts an
+attacker-influenced string into an arbitrary download, and the module name is
+parsed out of an error message. The lockfile removes that entirely.
+
+### Why it is written in core Node only
+
+`selfRepair.cjs` uses `https`, `zlib`, `crypto`, `fs`, `path` — nothing else,
+including a tar reader written out by hand.
+
+**Rejected:** using the `tar` package. A repair mechanism that needs a third-party
+package cannot repair a missing third-party package, which is the only case it
+exists for. Same reasoning as `crashGuard` being dependency-free.
+
+The tar reader implements only what an npm tarball uses: ustar regular files and
+directories, the `prefix` field, and GNU long names. Every member path is checked
+for traversal before anything is written, because a tar entry is attacker-
+controlled input in the general case and `../` in a member name is the classic way
+out of a target directory.
+
+### Where repaired code lives
+
+`userData/repair/node_modules`, registered by appending to `NODE_PATH` and calling
+`Module._initPaths()` — the mechanism Node itself provides for extending
+resolution. `Module.globalPaths` is consulted *after* the normal `node_modules`
+walk, which gives a property worth stating explicitly:
+
+**repair can never shadow a working module.** A module present in the asar keeps
+resolving from the asar. The repair directory is only reached when resolution would
+otherwise have failed.
+
+### Why repair is not attempted inline in `safeRequire`
+
+`safeRequire` runs during `main.cjs`'s module-scope require chain, before
+`app.whenReady()`. Attempting a network fetch there would stall startup for every
+subsequent engine, and an app that shows nothing until the network answers looks
+broken in precisely the way this exists to prevent.
+
+The order is therefore: **come up degraded → repair → retry → report.** Master gets
+a usable window immediately, the repair lands underneath it, and `health:startup`
+plus a `health:repaired` event say what changed. `safeRequire` gained
+`retryFailures()` so a repaired package can be proved to make its consumer load,
+not merely to exist on disk.
+
+### What remains genuinely out of reach
+
+Stated plainly, because the honest boundary is narrow and the last attempt at
+drawing it was too generous to itself:
+
+- **a native module needing compilation** — no compiler in an install. Fetching a
+  prebuilt binary for the right ABI is possible in principle and is not built.
+- **a corrupt or truncated asar** — the app cannot rewrite the archive it is
+  executing. This is the auto-updater's job, and row 53 is still dormant because
+  **no release has ever been tagged.** Cutting one is the single highest-value
+  remaining action for whole-build recovery.
+- **a missing renderer bundle** — shipped inside the asar, so the point above
+  applies.
+
+Everything else that has actually broken in this project so far — a missing
+transitive dependency, which is what took the app down in row 66 — is now repaired
+by the app itself.
+
+### Verification
+
+32 assertions across two behavioural probes, run against the real registry with
+real checksums rather than mocks, then deleted:
+
+`selfRepair` (16) — the writable path becomes resolvable and a module planted there
+is require-able (the load-bearing assumption of the design); a package absent from
+the lockfile is refused; a tar entry escaping the target directory is refused and
+nothing is written outside it; integrity mismatch rejected; weak algorithm
+rejected; correct sha512 accepted; **`@emnapi/runtime` — genuinely absent from
+`node_modules` here — downloaded, verified, gunzipped, extracted, and `require()`
+then succeeded**, at the version the lockfile pinned, resolving through the repair
+directory; a second pass is an idempotent no-op.
+
+`startupDoctor.repair` (16) — module names parsed correctly out of error text
+including scoped packages and sub-paths, with relative and absolute specifiers
+rejected as first-party; **a crafted message naming a non-lockfile package obtains
+nothing and explains the refusal**; a real missing dependency is attempted,
+obtained, the failed loads retried, the recovered subsystem named, and a
+re-diagnosis produced; a degradation already marked `expected: true` by the build
+manifest is left alone rather than treated as damage.
+
+`node --check` clean on all five touched `.cjs`; `npm run audit` clean.
+
+**Not verified here:** that repair runs in a real packaged install. It needs a
+rebuild and reinstall on master's own machine, and this workspace cannot produce an
+installer (Section 51). What is verified is the mechanism, on this machine, against
+the live registry.

@@ -417,6 +417,15 @@ const RAMA_API = {
     startup:      ()      => ipcRenderer.invoke('health:startup'),
     crashReports: (limit) => ipcRenderer.invoke('health:crash-reports', limit),
     crashDir:     ()      => ipcRenderer.invoke('health:crash-dir'),
+    // Ask for a repair pass now rather than waiting for the next launch.
+    repair:       ()      => ipcRenderer.invoke('health:repair'),
+    // Fired when the automatic pass finishes, so recovery is visible as it
+    // happens instead of only when a panel is reopened.
+    onRepaired: (cb) => {
+      const handler = (_e, payload) => cb(payload);
+      ipcRenderer.on('health:repaired', handler);
+      return () => ipcRenderer.removeListener('health:repaired', handler);
+    },
   },
 
   appearance: {

@@ -29,12 +29,20 @@
  *   - crash reports from previous runs, so a fault that killed the last launch is
  *     visible on this one instead of being forgotten.
  *
- * WHAT IT DOES NOT DO: repair. An install cannot npm-install into its own
- * read-only archive, and claiming otherwise would be a lie told by the component
- * whose entire job is honesty. Recovery for a packaged app is: degrade the
- * affected capability, tell master precisely what is missing, and offer the update
- * channel — which genuinely can replace a broken build. Repair belongs to
- * `start.cjs` in a checkout, and to the auto-updater in an install.
+ * WHAT IT DOES ABOUT IT — and a correction. This block previously said repair was
+ * impossible in an install, because "an install cannot npm-install into its own
+ * read-only archive". That sentence is true; the conclusion drawn from it was not.
+ * It answers whether the asar can be rewritten in place. It does not answer
+ * whether a missing module can be obtained, which it can — `userData` is writable
+ * and Node's module resolution can be pointed at it. Diagnosing a fault and then
+ * asking master to reinstall is not self-healing, it is delegation with extra
+ * steps. See `selfRepair.cjs` and spec Section 53.
+ *
+ * So `diagnose()` reports, and `repair()` acts: any missing package named in the
+ * lockfile is fetched, checksum-verified, and made resolvable, then the failed
+ * loads are retried and the diagnosis re-run. What genuinely remains beyond reach
+ * is narrow and stated plainly — a native module needing a compiler, and a corrupt
+ * asar, which is the auto-updater's job.
  */
 
 const path = require('path');
@@ -93,8 +101,9 @@ function diagnose(ctx = {}) {
     if (!present) {
       fatal.push({
         id: `dep-${dep.name}`,
+        module: dep.name,
         detail: `${dep.name} is missing — ${dep.gives} cannot run`,
-        remedy: 'This installation is incomplete. Reinstall or update to a corrected build.',
+        remedy: 'Rāma will fetch it from the lockfile and retry; no action needed unless that fails.',
       });
     }
   }
@@ -103,7 +112,7 @@ function diagnose(ctx = {}) {
     const present = resolves(dep.name);
     add(dep.name, present, present ? '' : 'absent — running on the fallback');
     if (!present) {
-      degraded.push({ id: `dep-${dep.name}`, detail: `${dep.name} absent — ${dep.gives}` });
+      degraded.push({ id: `dep-${dep.name}`, module: dep.name, detail: `${dep.name} absent — ${dep.gives}` });
     }
   }
 
@@ -205,4 +214,88 @@ function summarise(result) {
   return 'healthy';
 }
 
-module.exports = { diagnose, summarise, RUNTIME_CRITICAL, RUNTIME_OPTIONAL };
+/**
+ * The npm package name inside a "Cannot find module 'x'" reason.
+ *
+ * A first-party engine usually fails to load because of a missing *transitive*
+ * package, not because the engine file is gone — `sysinfo` died on `debug`. The
+ * name is therefore taken from the error text, which is untrusted input. That is
+ * safe only because selfRepair refuses anything absent from the lockfile: the
+ * worst a crafted message can do is name a package this build already contains.
+ */
+function missingModuleFrom(reason) {
+  const m = /Cannot find module ['"]([^'"]+)['"]/.exec(String(reason ?? ''));
+  if (!m) return null;
+  const id = m[1];
+  if (id.startsWith('.') || id.startsWith('/') || path.isAbsolute(id)) return null;   // first-party file
+  const parts = id.split('/');
+  return id.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+}
+
+/**
+ * Act on the diagnosis: obtain what is missing, retry what failed, re-diagnose.
+ *
+ * Runs after the window exists rather than before it. A repair is network-bound
+ * and an app that shows nothing until the network answers looks broken in exactly
+ * the way this is meant to prevent; master gets a usable window first, then a
+ * report of what was fixed underneath it.
+ *
+ * @param {object} result   the value returned by diagnose()
+ * @param {object} ctx      same shape diagnose() takes, plus retryFailures
+ * @returns {Promise<{attempted:string[], repaired:string[], stillMissing:string[],
+ *                    recoveredSubsystems:string[], rediagnosed:object|null, notes:string[]}>}
+ */
+async function repair(result, ctx = {}) {
+  const notes = [];
+  const wanted = new Set();
+
+  for (const entry of [...(result.fatal ?? []), ...(result.degraded ?? [])]) {
+    if (entry.expected) continue;            // a build-time trade-off, not damage
+    if (entry.module) { wanted.add(entry.module); continue; }
+    const fromReason = missingModuleFrom(entry.detail);
+    if (fromReason) wanted.add(fromReason);
+  }
+
+  for (const f of ctx.safeRequireFailures ?? []) {
+    const name = missingModuleFrom(f.reason);
+    if (name) wanted.add(name);
+  }
+
+  if (wanted.size === 0) {
+    return { attempted: [], repaired: [], stillMissing: [], recoveredSubsystems: [], rediagnosed: null, notes: ['nothing to repair'] };
+  }
+
+  let selfRepair;
+  try { selfRepair = require('./selfRepair.cjs'); }
+  catch (e) {
+    return { attempted: [...wanted], repaired: [], stillMissing: [...wanted], recoveredSubsystems: [], rediagnosed: null, notes: [`selfRepair unavailable: ${e.message}`] };
+  }
+
+  const repaired = [];
+  const stillMissing = [];
+
+  for (const name of wanted) {
+    let res;
+    try { res = await selfRepair.repairModule(name); }
+    catch (e) { res = { ok: false, repaired: [], failed: [{ name, error: e.message }] }; }
+
+    if (res.ok) repaired.push(...res.repaired);
+    else {
+      stillMissing.push(name);
+      for (const f of res.failed ?? []) notes.push(`${f.name}: ${f.error}`);
+    }
+  }
+
+  // A repaired package is only useful if the module that needed it now loads.
+  let recoveredSubsystems = [];
+  if (repaired.length > 0 && typeof ctx.retryFailures === 'function') {
+    try { recoveredSubsystems = ctx.retryFailures().recovered ?? []; }
+    catch (e) { notes.push(`retry failed: ${e.message}`); }
+  }
+
+  const rediagnosed = repaired.length > 0 ? diagnose(ctx) : null;
+
+  return { attempted: [...wanted], repaired, stillMissing, recoveredSubsystems, rediagnosed, notes };
+}
+
+module.exports = { diagnose, repair, summarise, missingModuleFrom, RUNTIME_CRITICAL, RUNTIME_OPTIONAL };

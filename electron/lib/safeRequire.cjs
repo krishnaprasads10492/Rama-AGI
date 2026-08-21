@@ -29,6 +29,16 @@
 
 const failures = [];
 
+// Registered once, before the first guarded require, so a module repaired in a
+// previous session is already resolvable this time without any further work.
+let repairPathReady = false;
+function ensureRepairPath() {
+  if (repairPathReady) return;
+  repairPathReady = true;
+  try { require('./selfRepair.cjs').registerRepairPath(); }
+  catch { /* repair is an enhancement; its absence must not break loading */ }
+}
+
 /**
  * A stand-in for an engine that could not load.
  *
@@ -63,6 +73,7 @@ function makeStub(name, reason) {
  */
 function safeRequire(id, label) {
   const name = label ?? String(id).replace(/^.*[\\/]/, '').replace(/\.cjs$/, '');
+  ensureRepairPath();
   try {
     return require(id);
   } catch (err) {
@@ -82,8 +93,34 @@ function safeRequire(id, label) {
     // genuine degradation master should be able to see in the terminal.
     console.warn(`[safeRequire] ${name} did not load (${reason}) — continuing without it`);
 
+    // Remembered so the startup doctor can ask selfRepair to fetch it. Repair is
+    // deliberately NOT attempted inline here: this runs during the module-scope
+    // require chain, before app.whenReady(), where a network round trip would
+    // stall startup for every subsequent engine. The app comes up degraded first,
+    // then repairs, then reports — which is faster to a usable window and honest
+    // about what happened in between.
     return makeStub(name, reason);
   }
+}
+
+/**
+ * Retry the loads that failed, after repair has had a chance to fetch what was
+ * missing. Called by the startup doctor once the app is ready.
+ *
+ * @returns {{recovered:string[], stillMissing:string[]}}
+ */
+function retryFailures() {
+  const recovered = [];
+  const stillMissing = [];
+  for (const f of failures) {
+    try {
+      require(f.id);
+      recovered.push(f.name);
+    } catch {
+      stillMissing.push(f.name);
+    }
+  }
+  return { recovered, stillMissing };
 }
 
 /** Everything that failed to load this run. Feeds the startup health report. */
@@ -96,4 +133,4 @@ function isStub(mod) {
   try { return !!mod?.__ramaStub; } catch { return false; }
 }
 
-module.exports = { safeRequire, loadFailures, isStub };
+module.exports = { safeRequire, loadFailures, isStub, retryFailures };
