@@ -131,7 +131,26 @@ function setupAutoUpdater() {
     console.error('[Updater] Error:', err.message);
   });
 
-  autoUpdater.checkForUpdatesAndNotify();
+  // `checkForUpdatesAndNotify()` returns a promise, and the 'error' event above
+  // does NOT catch its rejection — both fire. Without this .catch() the rejection
+  // was unhandled, and once crashGuard started claiming unhandledRejection it
+  // became fatal for an app that had already started successfully.
+  //
+  // "No published versions on GitHub" is the EXPECTED state here, not a fault:
+  // ledger row 53 records that no release has ever been tagged, so the releases
+  // feed is legitimately empty. Reporting that as an error would train master to
+  // ignore updater messages, so it is stated as information instead.
+  autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+    const msg = String(err?.message ?? err);
+    if (/no published versions/i.test(msg)) {
+      console.warn('[Updater] No release has been published yet — nothing to update to. This is expected until a version is tagged.');
+      return;
+    }
+    // Anything else is a real failure of the update channel. Worth saying, and
+    // never worth killing a running app over — self-update is a capability, not a
+    // prerequisite.
+    console.error(`[Updater] Update check failed: ${msg}`);
+  });
 }
 
 // ─── Content Security Policy ─────────────────────────────────────────────────

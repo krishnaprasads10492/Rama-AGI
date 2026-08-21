@@ -184,9 +184,17 @@ async function tellMaster(report, reportFile) {
   try { if (!app.isReady()) await app.whenReady(); } catch { /* proceed anyway */ }
 
   const lines = guidanceFor(report);
-  const buttons = ['Relaunch Rāma', 'Show the report', 'Quit'];
 
-  let choice = 2;
+  // Do not invite a relaunch into the same wall. If this exact fault already
+  // happened in the last few minutes, relaunching produced a loop last time — and
+  // it did: two crash-relaunch cycles left four identical reports. Offer it only
+  // when there is reason to think it might work.
+  const looping = recurredRecently(report);
+  const buttons = looping
+    ? ['Show the report', 'Quit']
+    : ['Relaunch Rāma', 'Show the report', 'Quit'];
+
+  let choice = buttons.length - 1;
   try {
     const res = await dialog.showMessageBox({
       type: 'error',
@@ -195,6 +203,7 @@ async function tellMaster(report, reportFile) {
       detail: [
         ...lines,
         '',
+        looping ? 'This same fault occurred moments ago, so relaunching is not offered — it would repeat.' : '',
         report.requireStack.length
           ? `Wanted by: ${path.basename(report.requireStack[0] ?? '')}`
           : '',
@@ -202,19 +211,20 @@ async function tellMaster(report, reportFile) {
       ].filter(Boolean).join('\n'),
       buttons,
       defaultId: 0,
-      cancelId: 2,
+      cancelId: buttons.length - 1,
       noLink: true,
     });
     choice = res.response;
   } catch { /* fall through to quit */ }
 
   try {
-    if (choice === 0) {
+    const picked = buttons[choice];
+    if (picked === 'Relaunch Rāma') {
       app.relaunch();
       app.exit(0);
       return;
     }
-    if (choice === 1 && reportFile && shell) {
+    if (picked === 'Show the report' && reportFile && shell) {
       shell.showItemInFolder(reportFile);
     }
   } catch { /* best effort */ }
@@ -258,17 +268,67 @@ function install(opts = {}) {
     });
   };
 
+  // An uncaught exception leaves the process in an unknown state. Stopping and
+  // explaining is the honest response.
   process.on('uncaughtException', (err) => handle(err, 'uncaughtException'));
 
-  // An unhandled rejection is not necessarily fatal, but during startup it
-  // usually means an await chain that never completed — silently continuing
-  // leaves a half-initialised app, which is harder to diagnose than a stop.
+  /**
+   * An unhandled rejection is NOT the same thing, and treating it as fatal was a
+   * real mistake that this file caused.
+   *
+   * The first version killed the app on any rejection, reasoning that during
+   * startup it usually means an await chain that never completed. What actually
+   * happened: `autoUpdater.checkForUpdatesAndNotify()` rejected with "No published
+   * versions on GitHub" — the expected state, since no release has been tagged —
+   * from `ready-to-show`, i.e. *after* the app was fully up and working. So a guard
+   * written to stop the app dying silently became the reason a healthy app died,
+   * and its own Relaunch button turned that into a loop. Four crash reports from
+   * two relaunch cycles.
+   *
+   * The distinction that was missing: once the app is running, a rejected promise
+   * is a bug to record and surface, not grounds for killing a working session.
+   * Before the app is ready it may genuinely mean startup broke, and stopping with
+   * an explanation is still better than a half-initialised app.
+   */
   process.on('unhandledRejection', (reason) => {
     const err = reason instanceof Error ? reason : new Error(String(reason));
+
+    let ready = false;
+    try { ready = !!require('electron').app?.isReady(); } catch { /* assume not */ }
+
+    if (ready) {
+      const report = buildReport(err, 'unhandledRejection');
+      report.fatalKind = 'non-fatal-rejection';
+      faults.push(report);
+      writeReport(report);
+      try {
+        console.error(`[crashGuard] unhandled rejection (app kept running): ${report.message}`);
+      } catch { /* stderr may be closed */ }
+      try { opts.onFault?.(report, null); } catch { /* observer must not break this */ }
+      return;   // deliberately NOT fatal
+    }
+
     handle(err, 'unhandledRejection');
   });
 
   return { ok: true, reportDir: reportDir() };
+}
+
+/**
+ * Has this same fault already happened in the last few minutes?
+ *
+ * Compares the message rather than the timestamp, because a relaunch loop
+ * produces reports that differ only in when they were written.
+ */
+function recurredRecently(report, withinMinutes = 10) {
+  try {
+    const cutoff = Date.now() - withinMinutes * 60_000;
+    return recentReports(6).some(prev =>
+      prev
+      && prev.message === report.message
+      && prev.ts !== report.ts
+      && new Date(prev.ts).getTime() >= cutoff);
+  } catch { return false; }
 }
 
 /** Reports written by previous runs — so the app can surface a past crash. */
