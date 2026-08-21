@@ -1708,6 +1708,7 @@ authenticated **Master session**, not merely an open store.
 | 70 | The crash guard became the crash | done | Section 52. Master's four crash reports (shipped over git — row 62's channel earning its keep) all read `unhandledRejection — No published versions on GitHub` / `ERR_XML_MISSED_ELEMENT` from `NsisUpdater.doCheckForUpdates`. Two of my own changes combined, and the second is the worse mistake: (1) `setupAutoUpdater()` never handled the promise — `checkForUpdatesAndNotify()` returns one and `autoUpdater.on('error')` does **not** catch its rejection, both fire independently; (2) `crashGuard` treated *every* `unhandledRejection` as fatal, on reasoning written into the file about half-initialised startups — but `setupAutoUpdater()` runs from `ready-to-show`, so **the app was fully started and working**. A guard written to stop Rāma dying silently became the reason a healthy Rāma died, and its own Relaunch button made it a loop: four identical reports from two cycles. **The failure master saw was caused by the resilience feature, not caught by it** — Section 49's claim that "Rāma will never again die silently" held only in the letter. The underlying condition was not even a fault: row 53 records that no release has ever been tagged, so the releases feed is legitimately empty and the updater was telling the truth. Fixes: the promise is caught and "no published versions" is reported as *information*, since logging an expected condition as an error trains master to ignore updater messages; `crashGuard` now splits by lifecycle — `uncaughtException` always fatal, `unhandledRejection` fatal only *before* `app.isReady()`, and after ready it is recorded, written to disk, logged, and **the app keeps running**; the dialog drops Relaunch when the same message appears in a report from the last 10 minutes, and matches buttons by label rather than index since the set now varies. Verified against the exact error with `electron` stubbed — 8 assertions: no termination, still recorded, classified `non-fatal-rejection`, report still written, repeat detectable from disk, guidance still avoids impossible npm advice. `npm run audit` clean. **Not verified: that the installed app survives it** — needs a rebuild and reinstall. Lesson recorded in Section 52: two guards written this session were disproportionate in the same direction (this, and the package audit flagging 65 third-party test-file requires), both defaulting to *stop* where the honest answer was *record and continue*. The test for a guard is not whether it catches the bad case but what it does to the good one. |
 | 61 | Fleet awareness — Rāma on several devices, staying in touch | in-progress (designed, not implemented; one decision open for master) | Section 46. Researched first: there is **no cross-device anything today** — instances are objects in one in-process `Map` with no `host`/`machineId`/`deviceId`/`lastHeartbeat` field (`instanceManager.cjs:112-133`), "sibling" discovery is a `.filter()` over that same Map (`selfCare.cjs:144-145`), a "dead" gene means a local module path failed to resolve, the API server binds `127.0.0.1` explicitly (`server/index.cjs:101`), and there is no WebSocket/mDNS/discovery/peer code at all. Usable anchors that do exist: `authCore`'s `instanceMeta.instanceId` (stable per-install UUID) + `instanceName` (`<hostname>-rama`), and `cryptoCore`'s AES-256-GCM. **Decisions recorded in Section 46:** (a) the corporate-managed machine is *not* enrolled as a peer — Rāma's IPC surface (`terminal:create`, `fs:write/delete`, `vault:*`, `apps:execute` `spawn-cli`, `system:kill-process`, `regen:*`) makes a peer channel a wider remote-access path than the RDP that was declined a turn earlier; (b) first increment uses the **existing git remote as the fleet bus** — no listener, no inbound, no NAT traversal, same outbound traffic as a `git push`, auditable as commits, at the honest cost of minute-scale eventual consistency rather than live presence; (c) fleet payloads are **encrypted** with the existing `cryptoCore` path, because `build.publish` is `"private": false` and telemetry carries hostnames, paths and OS usernames — plaintext would be a leak created by a protective feature; (d) fleet messages are a closed status vocabulary (device id/name, liveness, genomeVersion+genomeHash for drift detection, selfCare summary, task/build headline, alerts) and the reader is **never** a proxy onto `ipcMain` — a remote device may inform, never act; (e) peer identity comes from the device record, never a caller-supplied `user` and never `authClient.getFingerprint()` (`userAgent+language+screen+timezone` collides across similar laptops). Next steps, in order: **(1) gate `instance:*` — worth doing regardless of this feature.** Those handlers have no `capability.deny()` at all (`instanceManager.cjs:300-341`) and `express(id, gene, null)` skips the tier check by design for `selfCare.cjs:158`'s self-heal; caps `instances.view/spawn/express/terminate` already exist in `capabilities.json` but are unenforced at the IPC boundary. This is the same class row 59 closed for `fs`/`vault`/`terminal`/`git`/`agents`/`sandbox` and missed here; needs `preload.cjs` + every `.jsx` caller threading `currentUser`, verified with `npm run audit`. (2) Add device fields (`deviceId`, `deviceName`, `lastHeartbeat`) to instance records, anchored on `instanceMeta.instanceId`. (3) Add `fleet.view`/`fleet.publish`/`fleet.enroll` capabilities. (4) Build publish/read over the `fleet` branch with encrypted payloads and explicit master enrolment. **Blocked on master confirming the enrolment scope** before (4). |
 | 71 | An installed Rāma that repairs itself | done (mechanism verified; unverified inside a real install) | Section 53. Master rejected row 67's model and was right. Section 49 said "an install cannot npm-install into its own read-only archive" — true, but it answers *"can the asar be rewritten?"* (no) and was used to conclude something about *"can the app obtain a missing module?"* (it can: `userData` is writable, Node's resolution can be pointed at it, and `asarUnpack` already proves code outside the archive loads). Row 67's "degrade, report, offer the updater" was not the limit of the achievable, only of the built; diagnosing a fault then asking master to reinstall is delegation with a diagnostic attached. Second time in two sessions a resilience claim held in the letter and failed in the spirit (Section 52 was the first) — same pattern, a plausible technical sentence standing in for a decision. New `electron/lib/selfRepair.cjs`, bounded by **`package-lock.json`, now shipped in `build.files`**: 745 packages with exact versions, tarball URLs and sha512 hashes, making one file the allowlist, the version pin (so I12 survives repair) and the verifier at once. Repair therefore means only "restore what this build declared it was made of" — it cannot install anything new, upgrade, or be steered. Rejected resolving by name against the registry API: it works and is what a human would do, but it turns an attacker-influenced string into an arbitrary download, and the name is parsed out of an error message. Core Node only (`https`/`zlib`/`crypto`/`fs`/`path`) including a hand-written ustar reader — rejected the `tar` package because a repair mechanism needing a third-party package cannot repair a missing third-party package, the only case it exists for; same reasoning as `crashGuard`. Repaired code lands in `userData/repair/node_modules` via `NODE_PATH` + `Module._initPaths()`, and because `globalPaths` is consulted *after* the normal walk, **repair can never shadow a working module**. Deliberately **not** attempted inline in `safeRequire`: that runs in the module-scope require chain before `whenReady`, so a network fetch would stall startup for every later engine — order is come up degraded → repair → retry → report, with `retryFailures()` added so a fetched package is proved to make its consumer load rather than merely to exist. `startupDoctor` gained `repair()`, its false "WHAT IT DOES NOT DO" block corrected, and `dep-*` remedies no longer say "reinstall"; wired into `whenReady` on a 2s deferral plus `health:repair` on demand and a `health:repaired` event. Honest remaining boundary, narrow and stated: native modules needing a compiler, a corrupt asar, and a missing renderer bundle — all three the auto-updater's job, and **row 53 is still dormant because no release has ever been tagged**, which is now the highest-value remaining action. Verified by 32 assertions over two probes against the **live registry with real checksums**, then deleted: `@emnapi/runtime` (genuinely absent here) downloaded → sha512-verified → gunzipped → extracted → `require()` succeeded at the pinned version through the repair dir; a non-lockfile package refused; a tar entry with `../` refused with nothing written outside the target; weak digests refused; a crafted error message obtains nothing; a build-manifest `expected: true` degradation left alone. `node --check` clean on 5 files, `npm run audit` clean. **Not verified: repair inside a real packaged install** — needs a rebuild and reinstall on master's machine, since this workspace cannot produce an installer (Section 51). Next step: master to cut a release so the updater has a target, closing the one repair channel still unavailable. |
+| 72 | The cellular model — assimilation connected, division bounded | done (mechanism verified; issue-triggered spawning and germline growth deliberately deferred) | Section 54. Master described the lifecycle: DNA holds all capabilities → a cell is created to handle an issue → its experience is assimilated back into the original → growth. **Finding: this is already `genome.cjs`'s documented architecture** ("every instance carries the COMPLETE genome… a role is a lens, not a limit") **and three of the four steps are inert.** (1) DNA/expression is bookkeeping — `express()` moves a gene id between two arrays and loads, gates, unlocks nothing. (2) Spawning is two disconnected halves, neither triggered by an issue: `instanceManager.spawn()` is callable in-process but an instance has **no runtime at all** (no timer, no loop, no worker — it is a record), while `agentOrchestrator` actually executes but was **IPC-only, so only the renderer could create one**; grep for `parentId\|lineage\|spawnChild` across `electron/**` returned **zero**. (3) Assimilation: **the receiver was built and unplugged** — `ramaEventBus.wireAutomaticFlows` (result → vector memory) and `metaCognition.wireBus` (outcome → experiential dataset) both subscribe, but `agentOrchestrator` only ever called `broadcast()` (webContents only) and **never required the bus**: two receivers, zero publishers, plus a singular/plural name mismatch (`agent:complete` vs `agents:complete`). (4) Growth is blocked: `buildEvolutionProposal` sets `changes: []` with no synthesis step anywhere so the applier always throws, and `evolution:self-assess` is a **hardcoded literal** whose own fixed findings include *"No feedback loop — user satisfaction not measured and fed back"*; `optimizationVectors()` produces real evidence-backed conclusions that **nothing consumes**. **Biology, corrected:** master's mechanism is not general somatic biology (experience writing back to the germline is Lamarckism) but it is *exactly* **clonal selection in adaptive immunity** — antigen → proliferation → somatic hypermutation in the germinal centre → affinity maturation → surviving clones persist as memory cells. Two properties matter: hypermutation is **bounded to the germinal centre**, and **only selected clones persist** — proliferation without selection or death is a tumour. So the biology **argues for I6, not against it**: somatic memory (outcomes, latencies, results worth recalling — this install only, reversible) auto-assimilates, while germline change (the `GENES` manifest, source, capability matrix — reaches every future cell *and* every other instance) stays behind master's approval. `selfCare.checkInstanceFailover()` already reasons exactly this way. Also named: the reaper was **necrosis, not apoptosis** — it `delete`d agents intact, and a killed or timed-out agent never reached the completion path, so the experience of precisely the cells that failed was the experience most reliably destroyed. Implemented: `emit()` (bus then renderer, mirroring `instanceManager`) so the two waiting subscribers finally receive; the mismatch fixed **at the subscriber** so there is one event name rather than two aliases; `assimilate()` idempotent and called from the complete, error, kill, timeout, governor-timeout and **pre-delete reap** paths; lineage (`parent`, `depth`, `lineage[]`, `children[]`) and a queryable `lineageOf()`; spawn refactored into one `createAgent()` used by both IPC and a new exported `spawnChild()`, so a cell can create a cell in-process. Bounded because unbounded proliferation is the failure mode: `MAX_LINEAGE_DEPTH = 2`, existing agent/type caps and `resourceOrchestrator.admit()` apply to every child (I10), and — security-critical — **a child inherits its parent's `rootAuthority` and is re-checked at every level**, since allowing an in-process spawn with no `user` would have bypassed the `agents.spawn` tier gate entirely; same rule `instanceManager.express` states for instances. Verified by 24 assertions with the model and resource layers stubbed: experience reaches the bus with result/duration/lineage, assimilation idempotent, a guest cannot spawn, **a cell with no authority cannot divide and cannot promote itself by dividing**, depth 2 allowed / 3 refused, ancestry root-first, a killed cell still assimilates and is recorded as a failure with its reason. `node --check` clean, `npm run audit` clean. **Deliberately not done:** `optimizationVectors()` is not wired to file proposals automatically (that is the one step that would let Rāma change its own source without master initiating — needs master's decision); issue-triggered spawning from `selfCare` (needs a decision on what a cell may do unsupervised); and the `evolutionEngine` synthesis gap (germline, behind I6). Next step: master to decide on those three, starting with whether a detected fault should spawn a handler cell automatically. |
 
 ### Resume checklist for a cold session
 
@@ -4512,3 +4513,151 @@ manifest is left alone rather than treated as damage.
 rebuild and reinstall on master's own machine, and this workspace cannot produce an
 installer (Section 51). What is verified is the mechanism, on this machine, against
 the live registry.
+
+---
+
+## SECTION 54 — The cellular model, and which parts of it are inert
+
+Master's directive: *"DNA contains all capabilities. When there is an issue, the
+first instance/cell will create a cell which will handle it. Later that cell will
+bring the experience and it will be assimilated into the original. That's how
+growth can happen."*
+
+### Finding: this is already the documented architecture, and most of it does nothing
+
+`genome.cjs`'s own header describes the holonic model in master's terms — every
+instance carries the **complete** genome, a role only decides which genes are
+*expressed*, the rest stay dormant but present, and `ROLES` is commented as *"a
+lens, not a limit"*. So step 1 was already built. The honest finding is what
+happened to the other three:
+
+| Master's step | State | Where |
+|---|---|---|
+| DNA holds every capability | **Built, but inert.** `express()` moves a gene id between two arrays. It loads nothing, gates nothing, unlocks nothing. | `genome.cjs`, `instanceManager.express` |
+| A cell is created to handle an issue | **Two disconnected halves, neither triggered by an issue.** | see below |
+| Experience assimilated back into the original | **The receiver is built and unplugged.** | see below |
+| Growth | **Structurally blocked.** | see below |
+
+**On spawning.** There are two unrelated mechanisms. `instanceManager.spawn()` is
+role-based, persistent, genome-stamped, and callable in-process — but an instance
+has **no runtime at all**: no timer, no loop, no worker. It is a record.
+`agentOrchestrator`'s `agents:spawn` is the thing that actually executes, but it is
+IPC-only, so **only the renderer can create one** — no main-process module can, and
+no agent can. There is no parent/child relationship anywhere: a grep of
+`electron/**` for `parentId|parent_id|spawnChild` returned zero. And
+`instanceManager.recordWork(id, { agentsSpawned })` merely adds a number the caller
+supplied — the two subsystems have zero code-level coupling in either direction.
+Nothing anywhere spawns a cell *in response to an issue*.
+
+**On assimilation — the specific fault.** Two subscribers are already written and
+waiting for a completed agent's experience:
+
+- `ramaEventBus.wireAutomaticFlows()` → store the result in vector memory, tagged
+  with the agent id
+- `metaCognition.wireBus()` → `recordOutcome` with `actor: payload.agentId`
+
+`agentOrchestrator` finishes an agent with `broadcast('agents:complete', …)`, and
+`broadcast()` only calls `webContents.send()`. **It never requires the bus.** So
+there are two receivers, zero publishers, plus a singular/plural mismatch between
+them (`agent:complete` vs `agents:complete`). A child's experience reaches the UI
+and nothing else. Then the reaper deletes the agent an hour later, destroying
+`result` and `steps`, and nothing was ever persisted — `dataStore` reserves an
+`agents` domain that nothing writes.
+
+**On growth.** `evolutionEngine.buildEvolutionProposal` creates proposals with
+`changes: []` and there is no synthesis step anywhere in the file, so the applier
+always throws *"no synthesised changes to apply"*. `evolution:self-assess` is a
+**hardcoded literal** of six fixed scores that reads nothing — and one of its own
+hardcoded findings is *"No feedback loop — user satisfaction not measured and fed
+back"*, score 5. Meanwhile `metaCognition.optimizationVectors()` produces real
+evidence-backed "prefer X over Y for action Z" conclusions with sample counts and
+confidence, and **nothing consumes them.** The loop terminates at a display panel.
+
+### The biology, precisely — and one correction worth making
+
+Master's mechanism is not general somatic biology. In general biology somatic
+experience does **not** write back to the germline; that is Lamarckism and it is
+false. But there is one place where master's description is exactly right, and it
+is the most sophisticated adaptive system in the body: **clonal selection in
+adaptive immunity.**
+
+Antigen appears → naive B-cells that happen to bind it **proliferate** → somatic
+hypermutation generates variants inside the germinal centre → affinity maturation
+selects the highest-binding ones and the rest die → the winners persist as **memory
+B-cells**, so the second encounter is faster and stronger. That is precisely "the
+cell brings the experience back and it is assimilated."
+
+Two properties of that mechanism matter for this codebase:
+
+1. **Hypermutation is bounded to the germinal centre.** It is not genome-wide. The
+   organism does not rewrite its inherited DNA to answer an infection.
+2. **Only selected clones persist.** Proliferation without selection and without
+   death is not adaptation, it is a tumour.
+
+So the biology **argues for the approval gate, not against it.** There are two
+distinct write-backs and conflating them is the error:
+
+| | Somatic / immune memory | Germline |
+|---|---|---|
+| What | this run's experience: outcomes, latencies, which tool won, results worth recalling | the `GENES` manifest, source code, capability matrix |
+| Reach | this organism, this install | every future cell, and every other instance |
+| Reversible | yes | not without a release |
+| Gate | **auto-assimilate** | **proposal + master approval (I6)** |
+
+`selfCare.checkInstanceFailover()` already reasons exactly this way and states it:
+expressing a dormant gene auto-applies because it is *additive, reversible, and
+touches no source file*. That is the somatic column. Anything in the germline column
+stays behind I6, permanently, and master's model is the argument for why — an
+organism that rewrote its DNA every time a cell learned something would not be
+adaptive, it would be malignant.
+
+### Apoptosis vs necrosis — what the reaper gets wrong
+
+The codebase has real death: a 5-minute timeout, cooperative kill, a 2-second
+reaper, hard caps of 10 agents and 8 instances. What it does not have is
+*programmed* death. In biology an apoptotic cell is dismantled in an orderly way
+and its material is **recycled by the organism**; necrosis is a cell bursting and
+its contents being lost. The reaper `delete`s finished agents, and **an agent that
+was killed or timed out never reaches the completion path at all** — so the
+experience of exactly the cells that failed, which is the most informative kind, is
+the experience most reliably destroyed. That is necrosis.
+
+### What this section changes
+
+The narrow, verifiable increment — turning on the step that is built and unplugged,
+rather than designing a new subsystem:
+
+1. **Assimilation is connected.** `agentOrchestrator` gains the `emit()` helper
+   `instanceManager` already uses (bus first, then renderer) and emits on
+   completion and on error. The two waiting subscribers start receiving. The
+   singular/plural mismatch is fixed at the subscriber, so there is one event name
+   rather than two aliases.
+2. **Dying cells are assimilated before they are deleted.** Kill, timeout, and
+   reap paths record their outcome, so a failure teaches something. Apoptosis, not
+   necrosis.
+3. **Lineage exists.** `parent`, `depth`, and `rootAuthority` on the agent record,
+   so "which cell came from which" is answerable at all.
+4. **A cell can create a cell.** An exported in-process `spawnChild()`, because
+   spawning being IPC-only is what makes master's step 2 impossible today.
+5. **Bounded, because unbounded proliferation is the failure mode.** Depth is
+   capped (`MAX_LINEAGE_DEPTH`), the existing agent cap and `resourceOrchestrator`
+   admission still apply to every child, and — the security-critical part — **a
+   child inherits its parent's authority and can never exceed it.** Spawning is
+   gated on `agents.spawn`; an in-process spawn with no user would have bypassed
+   that gate entirely, so the tier that authorised the root is carried down the
+   lineage and re-checked at every level. This is the same rule
+   `instanceManager.express` states for instances: *never exceed the authority of
+   whoever asked for it.*
+
+### Deliberately not done here, and why
+
+- **No autonomous germline change.** `optimizationVectors()` is not wired to file
+  proposals automatically. That is the one step that would let Rāma alter its own
+  source without master initiating it, and it needs master's decision, not mine.
+- **No issue-triggered spawning yet.** `selfCare` detecting a fault and spawning a
+  cell to handle it is master's step 2 proper. It needs the lineage and bounding
+  from this section to exist first, and it needs a decision about what a cell is
+  permitted to do unsupervised.
+- **The `evolutionEngine` synthesis gap is not closed.** Filling `changes` means
+  generating source from a scouted repo, which lands squarely in the germline
+  column and behind I6.

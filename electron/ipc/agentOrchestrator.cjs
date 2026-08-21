@@ -33,6 +33,12 @@ const GOVERNOR = {
   get TOTAL_RAM_CAP_PCT() { return resources.THRESHOLDS.RAM.HIGH; },
 };
 
+// ─── Lineage limits (spec Section 54) ─────────────────────────────────────────
+// A cell that can create a cell needs a bound, or one task becomes a fork bomb.
+// Biology bounds proliferation the same way — the Hayflick limit exists so that
+// division is finite by default rather than by luck.
+const MAX_LINEAGE_DEPTH = 2;   // root (0) → child (1) → grandchild (2)
+
 // ─── Agent state ──────────────────────────────────────────────────────────────
 const agents     = {};   // { [agentId]: AgentState }
 const agentLog   = [];   // Full audit trail
@@ -101,66 +107,8 @@ function register(ipcMain) {
   // Spawning a sub-agent that can call models, browse, and take actions on
   // master's behalf is not a read-only capability — gated on agents.spawn
   // (tier 3) per shared/capabilities.json, unenforced before this pass.
-  ipcMain.handle('agents:spawn', async (event, { user, type, task, config = {} } = {}) => {
-    const denied = capability.deny(user, 'agents.spawn');
-    if (denied) return denied;
-    // Governor: max agent check
-    const activeCount = Object.values(agents).filter(a => a.status === 'running').length;
-    if (activeCount >= GOVERNOR.MAX_AGENTS) {
-      return { ok: false, error: `Max agents reached (${GOVERNOR.MAX_AGENTS}). Kill an agent first.` };
-    }
-
-    // Type instance limit
-    const typeInfo = AGENT_TYPES[type];
-    if (!typeInfo) return { ok: false, error: `Unknown agent type: ${type}` };
-    const typeCount = Object.values(agents).filter(a => a.type === type && a.status === 'running').length;
-    if (typeCount >= typeInfo.maxInstances) {
-      return { ok: false, error: `Max ${typeInfo.label} instances reached (${typeInfo.maxInstances})` };
-    }
-
-    // Resource admission — single authority (CPU, RAM, thermal, pressure).
-    // Reputation only reorders the queue under contention; it cannot lower the
-    // bar for admission itself.
-    const requestedPriority = config.priority ?? resources.PRIORITY.NORMAL;
-    const admission = resources.orchestrator.admit({
-      ramMB: GOVERNOR.MAX_AGENT_RAM_MB,
-      label: `${typeInfo.label} spawn`,
-      priority: reputationAdjustedPriority(type, requestedPriority),
-    });
-    if (!admission.allow) {
-      return { ok: false, error: admission.reason, snapshot: admission.snapshot };
-    }
-
-    const agentId = uuidv4();
-    const agent = {
-      id:        agentId,
-      type,
-      label:     typeInfo.label,
-      task,
-      config,
-      status:    'running',
-      startedAt: Date.now(),
-      lastPing:  Date.now(),
-      steps:     [],
-      result:    null,
-      error:     null,
-      model:     typeInfo.model ? selectModel(typeInfo.model) : null,
-    };
-
-    agents[agentId] = agent;
-    logAudit('spawn', agentId, { type, task });
-
-    // Emit to renderer
-    broadcast('agents:spawned', { id: agentId, type, label: typeInfo.label, task });
-
-    // Execute agent task async
-    executeAgent(agentId, task, config, event.sender).catch(err => {
-      agents[agentId].status = 'error';
-      agents[agentId].error  = err.message;
-      broadcast('agents:update', sanitize(agents[agentId]));
-    });
-
-    return { ok: true, agentId, label: typeInfo.label };
+  ipcMain.handle('agents:spawn', async (_event, { user, type, task, config = {} } = {}) => {
+    return createAgent({ user, type, task, config });
   });
 
   // ── Kill agent ────────────────────────────────────────────────────────────
@@ -174,6 +122,10 @@ function register(ipcMain) {
     if (agent.killFn) agent.killFn();
     logAudit('kill', agentId, {});
     broadcast('agents:update', sanitize(agent));
+    // Kill is cooperative — the in-flight call may not notice for a while, so the
+    // execution path may never reach its own assimilation. Do it here too; the
+    // guard makes it idempotent.
+    assimilate(agent, { ok: false, reason: 'killed' });
     return { ok: true };
   });
 
@@ -271,8 +223,135 @@ function register(ipcMain) {
   startGovernor();
 }
 
+// ─── Cell division (spec Section 54) ──────────────────────────────────────────
+/**
+ * The one place an agent is created, whether the request came over IPC or from
+ * another agent in-process.
+ *
+ * AUTHORITY IS INHERITED, NEVER ASSUMED. Spawning is gated on `agents.spawn`
+ * (tier 3). Before this, spawning existed only as an IPC handler, so the `user`
+ * always came from the renderer. Allowing a main-process caller — which is what
+ * lets a cell create a cell at all — introduces the obvious hole: an in-process
+ * spawn with no user would skip the gate entirely. So a child carries the tier
+ * that authorised its root and is re-checked against it at every level. A cell can
+ * never exceed the authority of the cell that made it, which is the same rule
+ * `instanceManager.express` states for instances.
+ *
+ * @param {object}  req
+ * @param {object}  req.user      the requesting user, or the inherited rootAuthority
+ * @param {string}  req.type
+ * @param {string}  req.task
+ * @param {object} [req.config]
+ * @param {string} [req.parent]   parent agent id, when this is a division
+ */
+function createAgent({ user, type, task, config = {}, parent = null }) {
+  const denied = capability.deny(user, 'agents.spawn');
+  if (denied) return denied;
+
+  // ── Lineage bounding ──────────────────────────────────────────────────────
+  let depth = 0;
+  let lineage = [];
+  if (parent) {
+    const p = agents[parent];
+    if (!p) return { ok: false, error: `Parent agent ${parent} not found` };
+    depth   = (p.depth ?? 0) + 1;
+    lineage = [...(p.lineage ?? []), parent];
+    if (depth > MAX_LINEAGE_DEPTH) {
+      return { ok: false, error: `Lineage depth limit reached (${MAX_LINEAGE_DEPTH}) — this cell may not divide further` };
+    }
+  }
+
+  // Governor: max agent check
+  const activeCount = Object.values(agents).filter(a => a.status === 'running').length;
+  if (activeCount >= GOVERNOR.MAX_AGENTS) {
+    return { ok: false, error: `Max agents reached (${GOVERNOR.MAX_AGENTS}). Kill an agent first.` };
+  }
+
+  // Type instance limit
+  const typeInfo = AGENT_TYPES[type];
+  if (!typeInfo) return { ok: false, error: `Unknown agent type: ${type}` };
+  const typeCount = Object.values(agents).filter(a => a.type === type && a.status === 'running').length;
+  if (typeCount >= typeInfo.maxInstances) {
+    return { ok: false, error: `Max ${typeInfo.label} instances reached (${typeInfo.maxInstances})` };
+  }
+
+  // Resource admission — single authority (CPU, RAM, thermal, pressure), and it
+  // applies to a child exactly as it does to a root (I10).
+  const requestedPriority = config.priority ?? resources.PRIORITY.NORMAL;
+  const admission = resources.orchestrator.admit({
+    ramMB: GOVERNOR.MAX_AGENT_RAM_MB,
+    label: `${typeInfo.label} spawn`,
+    priority: reputationAdjustedPriority(type, requestedPriority),
+  });
+  if (!admission.allow) {
+    return { ok: false, error: admission.reason, snapshot: admission.snapshot };
+  }
+
+  const agentId = uuidv4();
+  const agent = {
+    id:        agentId,
+    type,
+    label:     typeInfo.label,
+    task,
+    config,
+    status:    'running',
+    startedAt: Date.now(),
+    lastPing:  Date.now(),
+    steps:     [],
+    result:    null,
+    error:     null,
+    model:     typeInfo.model ? selectModel(typeInfo.model) : null,
+
+    // ── Lineage ──────────────────────────────────────────────────────────────
+    parent,
+    depth,
+    lineage,                    // root-first ancestry
+    children:      [],
+    // Carried so a descendant's spawn can be checked against the tier that
+    // authorised the root, rather than against nothing.
+    rootAuthority: user ? { tier: user.tier, id: user.id ?? null } : null,
+    assimilated:   false,
+  };
+
+  agents[agentId] = agent;
+  if (parent && agents[parent]) agents[parent].children.push(agentId);
+
+  logAudit('spawn', agentId, { type, task, parent, depth });
+  broadcast('agents:spawned', { id: agentId, type, label: typeInfo.label, task, parent, depth });
+
+  // Execute async — fire and forget, failures assimilate through the catch.
+  executeAgent(agentId, task, config).catch(err => {
+    const a = agents[agentId];
+    if (!a) return;
+    a.status = 'error';
+    a.error  = err.message;
+    broadcast('agents:update', sanitize(a));
+    assimilate(a, { ok: false });
+  });
+
+  return { ok: true, agentId, label: typeInfo.label, depth, parent };
+}
+
+/**
+ * Division: an agent creating an agent to handle part of its work.
+ *
+ * Exported so a main-process caller can do what only the renderer could before.
+ * The parent's `rootAuthority` is the authority used — a cell cannot promote
+ * itself by spawning.
+ */
+function spawnChild(parentId, { type, task, config = {} } = {}) {
+  const parent = agents[parentId];
+  if (!parent) return { ok: false, error: `Parent agent ${parentId} not found` };
+  return createAgent({
+    user:   parent.rootAuthority,
+    type, task,
+    config: { ...config, priority: config.priority ?? parent.config?.priority },
+    parent: parentId,
+  });
+}
+
 // ─── Agent execution engine ───────────────────────────────────────────────────
-async function executeAgent(agentId, task, config, sender) {
+async function executeAgent(agentId, task, config) {
   const agent = agents[agentId];
   if (!agent) return;
 
@@ -286,6 +365,7 @@ async function executeAgent(agentId, task, config, sender) {
       agents[agentId].error  = `Agent timed out after ${GOVERNOR.AGENT_TIMEOUT_MS / 1000}s`;
       broadcast('agents:update', sanitize(agents[agentId]));
       logAudit('timeout', agentId, {});
+      assimilate(agents[agentId], { ok: false, reason: 'timeout' });
     }
   }, GOVERNOR.AGENT_TIMEOUT_MS);
 
@@ -359,7 +439,9 @@ async function executeAgent(agentId, task, config, sender) {
     agent.status = agent.type === 'monitor' || agent.type === 'sync' ? 'running' : 'complete';
     recordReputation(agent.type, true);
     broadcast('agents:update', sanitize(agent));
-    broadcast('agents:complete', { agentId, result: finalContent });
+    // Bus, not just the window — this is where the experience returns to the
+    // organism. See spec Section 54.
+    assimilate(agent, { ok: true });
 
   } catch (err) {
     if (err.message !== 'Agent killed') {
@@ -367,6 +449,11 @@ async function executeAgent(agentId, task, config, sender) {
       agent.error  = err.message;
       recordReputation(agent.type, false);
       broadcast('agents:update', sanitize(agent));
+      assimilate(agent, { ok: false });
+    } else {
+      // A killed cell still learned something, and losing that was the point of
+      // the necrosis/apoptosis distinction in Section 54.
+      assimilate(agent, { ok: false, reason: 'killed' });
     }
   } finally {
     clearTimeout(timeoutId);
@@ -550,12 +637,16 @@ function startGovernor() {
         if (agent.killFn) agent.killFn();
         broadcast('agents:update', sanitize(agent));
         logAudit('governor-timeout', id, {});
+        assimilate(agent, { ok: false, reason: 'governor-timeout' });
       }
     }
-    // Clean up completed/failed agents older than 1 hour
+    // Clean up completed/failed agents older than 1 hour. Assimilate first —
+    // deleting an unassimilated agent destroys the only record of what it learned,
+    // which is necrosis rather than programmed death (spec Section 54).
     const cutoff = now - 3600000;
     for (const [id, agent] of Object.entries(agents)) {
       if (['complete', 'error', 'killed', 'timeout'].includes(agent.status) && agent.startedAt < cutoff) {
+        assimilate(agent, { ok: agent.status === 'complete', reason: `reaped-${agent.status}` });
         delete agents[id];
       }
     }
@@ -572,6 +663,56 @@ function broadcast(channel, data) {
   } catch { /* ignore if no windows */ }
 }
 
+/**
+ * Bus first, then the renderer — the pattern `instanceManager.emit` already uses.
+ *
+ * THIS IS THE FIX FOR THE MISSING ASSIMILATION STEP. This file previously only
+ * ever called `broadcast()`, which reaches `webContents` and nothing else, while
+ * two subscribers sat waiting on the bus for a finished agent's experience:
+ * `ramaEventBus.wireAutomaticFlows` (result → vector memory) and
+ * `metaCognition.wireBus` (outcome → experiential dataset). Two receivers, zero
+ * publishers. A child's experience reached the UI and was then deleted by the
+ * reaper an hour later. See spec Section 54.
+ *
+ * Reserved for lifecycle transitions that something actually learns from —
+ * `agents:step` stays on `broadcast` because step spam on the bus would drown the
+ * signal it exists to carry.
+ */
+function emit(channel, data) {
+  try { require('../ramaEventBus.cjs').bus.emit(channel, data); }
+  catch { /* bus optional — the renderer still gets it below */ }
+  broadcast(channel, data);
+}
+
+/**
+ * Assimilate a cell's experience before it is destroyed.
+ *
+ * WHY THIS IS SEPARATE FROM THE COMPLETION PATH: an agent that was killed or timed
+ * out never reaches completion, so the experience of precisely the cells that
+ * failed — the most informative kind — was the experience most reliably lost. The
+ * reaper `delete`d them intact. That is necrosis; apoptosis returns the material to
+ * the organism. Idempotent, because the reaper and the kill path can both reach a
+ * given agent.
+ */
+function assimilate(agent, { ok, reason = null }) {
+  if (!agent || agent.assimilated) return false;
+  agent.assimilated   = true;
+  agent.assimilatedAt = Date.now();
+
+  emit(ok ? 'agents:complete' : 'agents:error', {
+    agentId:    agent.id,
+    type:       agent.type,
+    result:     agent.result,
+    error:      agent.error ?? reason,
+    durationMs: Date.now() - agent.startedAt,
+    model:      agent.model,
+    parent:     agent.parent,
+    depth:      agent.depth,
+    steps:      agent.steps.length,
+  });
+  return true;
+}
+
 function sanitize(agent) {
   const { killFn, ...safe } = agent;
   return safe;
@@ -582,4 +723,23 @@ function logAudit(action, agentId, meta) {
   if (agentLog.length > 1000) agentLog.pop();
 }
 
-module.exports = { register, agents, GOVERNOR, AGENT_TYPES, getReputations, REFINE_METRICS };
+/** Ancestry and descendants of a cell — lineage is queryable, not just recorded. */
+function lineageOf(agentId) {
+  const a = agents[agentId];
+  if (!a) return null;
+  return {
+    id:        a.id,
+    parent:    a.parent,
+    depth:     a.depth,
+    lineage:   a.lineage,
+    children:  a.children,
+    maxDepth:  MAX_LINEAGE_DEPTH,
+    canDivide: (a.depth ?? 0) < MAX_LINEAGE_DEPTH,
+  };
+}
+
+module.exports = {
+  register, agents, GOVERNOR, AGENT_TYPES, getReputations, REFINE_METRICS,
+  // Cell division + assimilation (spec Section 54)
+  createAgent, spawnChild, lineageOf, assimilate, MAX_LINEAGE_DEPTH,
+};

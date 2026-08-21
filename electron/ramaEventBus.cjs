@@ -112,8 +112,14 @@ class RamaEventBus extends EventEmitter {
       } catch { /* non-fatal */ }
     });
 
-    // agent:complete → store result in vector memory for future recall
-    this.onAsync('agent:complete', async ({ agentId, type, result }) => {
+    // agents:complete → store result in vector memory for future recall.
+    //
+    // The channel was `agent:complete` (singular) here while metaCognition
+    // subscribed to `agents:complete` (plural) and agentOrchestrator emitted
+    // neither — it only reached the renderer. Two receivers, two names, zero
+    // publishers. Corrected to the plural name the orchestrator now emits, rather
+    // than publishing both aliases: one event, two subscribers. Spec Section 54.
+    this.onAsync('agents:complete', async ({ agentId, type, result }) => {
       try {
         const vectorMem = require('./ipc/vectorMemory.cjs');
         if (result && typeof result === 'string' && result.length > 20) {
