@@ -27,7 +27,42 @@
  * degrade into, and pretending otherwise would hide a genuinely fatal condition.
  */
 
+const path = require('path');
+const { createRequire } = require('module');
+
 const failures = [];
+
+/**
+ * WHERE RELATIVE PATHS RESOLVE FROM — the bug that broke every launch.
+ *
+ * `main.cjs` calls `safeRequire('./ipc/system.cjs')`. That path is relative to
+ * `electron/`, because that is where the caller lives. But this file is in
+ * `electron/lib/`, and a bare `require(id)` inside it resolves relative to **this**
+ * file — so it looked for `electron/lib/ipc/system.cjs` and found nothing.
+ *
+ * Every one of the 39 guarded requires therefore failed, and because a failed load
+ * returns an inert stub whose `register()` is a silent no-op, the app started with 13
+ * IPC channels instead of ~257 and no `session:*` at all. The visible symptom was
+ * "No handler registered for 'session:unlock'".
+ *
+ * It had been broken since the refactor that introduced this file, and stayed hidden
+ * because nothing verified that the app actually launched afterwards — every ledger
+ * row since carries the note "not verified: that the installed app launches". A
+ * guard that silently swallows its own misuse is worse than no guard: the stubs made
+ * a total failure look like a partial one.
+ *
+ * Resolution is now anchored to `electron/`, and `main.cjs` additionally hands over
+ * its own `require` so the anchor is the caller's rather than an assumption.
+ */
+let _require = createRequire(path.join(__dirname, '..', 'main.cjs'));
+
+/**
+ * Adopt the caller's `require`, so relative ids resolve from the caller's directory.
+ * @param {NodeRequire} callerRequire
+ */
+function useRequire(callerRequire) {
+  if (typeof callerRequire === 'function') _require = callerRequire;
+}
 
 /**
  * Make previously-repaired modules resolvable.
@@ -88,7 +123,7 @@ function safeRequire(id, label) {
   // runs dozens of times during the module-scope require chain and must do nothing
   // but require and catch.
   try {
-    return require(id);
+    return _require(id);
   } catch (err) {
     const missing = err?.code === 'MODULE_NOT_FOUND'
       ? (String(err.message).match(/cannot find module ['"]([^'"]+)['"]/i)?.[1] ?? null)
@@ -127,7 +162,7 @@ function retryFailures() {
   const stillMissing = [];
   for (const f of failures) {
     try {
-      require(f.id);
+      _require(f.id);
       recovered.push(f.name);
     } catch {
       stillMissing.push(f.name);
@@ -146,4 +181,4 @@ function isStub(mod) {
   try { return !!mod?.__ramaStub; } catch { return false; }
 }
 
-module.exports = { safeRequire, loadFailures, isStub, retryFailures, ensureRepairPath };
+module.exports = { safeRequire, loadFailures, isStub, retryFailures, ensureRepairPath, useRequire };

@@ -5519,3 +5519,104 @@ is that resilience code needs to be exercised in the environment it defends, and
 workspace cannot produce an installer (Section 51) — so for anything touching module
 loading, packaging or startup, **master's build is the only real test**, and that must
 be stated as a limit rather than papered over with local passes.
+
+---
+
+## SECTION 63 — `safeRequire` resolved every path one directory too deep
+
+The actual root cause. Eight explanations were offered before this one; the boot
+report identified it in a single read.
+
+### The evidence
+
+```
+MODULE LOAD FAILURES (39)
+  System sensing      reason: missing module "./ipc/system.cjs"
+  Filesystem          reason: missing module "./ipc/filesystem.cjs"
+  … 39 of 39 …
+  Session manager     reason: missing module "./sessionManager.cjs"
+  Encrypted store     reason: missing module "./dataStore.cjs"
+
+BOOT PATH RESOLUTION CHECK
+  ../sessionManager.cjs   resolves
+  ../dataStore.cjs        resolves
+
+registered total: 13      session:* present: NONE
+```
+
+**Every guarded require failed, while the same files resolved fine from the report
+writer.** That contradiction is the whole diagnosis.
+
+### The mechanism
+
+`main.cjs` calls `safeRequire('./ipc/system.cjs')`. That path is relative to
+`electron/`, because that is where the caller lives. But `safeRequire.cjs` is in
+`electron/lib/`, and a bare `require(id)` inside it resolves relative to **its own**
+file — so it looked for `electron/lib/ipc/system.cjs`, which does not exist.
+
+Consequences, in order:
+
+1. all 39 guarded requires fail with `MODULE_NOT_FOUND`
+2. each returns an inert stub whose `register()` is a **silent no-op**
+3. the app registers **13** IPC channels instead of ~257, and **no `session:*` at
+   all** — the 13 are the handlers defined inside `main.cjs` itself, which never go
+   through `safeRequire`
+4. the first thing master touches is the passcode screen, so the symptom is
+   "No handler registered for 'session:unlock'"
+
+It has been broken since the refactor that introduced `safeRequire` (Section 49) and
+was never noticed, because nothing verified that the app launched afterwards — every
+ledger row since carries the note *"not verified: that the installed app launches"*.
+That note was doing real work and was never acted on.
+
+### Why the stub design turned a total failure into a puzzle
+
+`safeRequire` returns a stub rather than throwing, so that one broken engine cannot
+kill the app. Applied to *its own misuse*, that reasoning inverts: a mistake in the
+loader itself is indistinguishable from 39 unrelated missing packages. A guard that
+silently swallows evidence of its own failure is worse than no guard — it made a
+total failure look like a partial one, which is why every explanation that followed
+was about *packaging* rather than *resolution*.
+
+Two claims that were both true and both misleading:
+- `audit:package` — "every package on a real load path is present". Correct. The
+  packages were never the problem.
+- reinstalling `node_modules` changed nothing. Correct, and for the same reason.
+
+### The fix
+
+Resolution is anchored to `electron/` by default via
+`createRequire(path.join(__dirname, '..', 'main.cjs'))`, so the correct behaviour
+does not depend on anyone remembering to configure it. `main.cjs` additionally calls
+`useRequire(require)`, making the anchor the caller's own rather than an assumption
+this file makes about who calls it.
+
+`retryFailures()` uses the same requirer, or it would have re-tried against the wrong
+root and reported permanent failure.
+
+### Verification
+
+23 assertions, and they test the property that was actually violated rather than that
+the function returns something:
+
+Every id **exactly as `main.cjs` passes it** loads without configuration — `./ipc/*`,
+`./sessionManager.cjs`, `./dataStore.cjs`, `./lib/*` — with zero load failures. The
+results are checked to be the real modules and not stubs wearing their names
+(`sessionManager.register` is a function, `dataStore.DOMAINS` contains `proposals`).
+A genuinely absent module still stubs cleanly, refuses politely, and is recorded.
+`useRequire` demonstrably changes resolution, so the mechanism is proven to be live
+rather than incidentally correct.
+
+### The lesson, stated plainly
+
+Three separate faults in this session came from the same habit: **verifying a
+mechanism in the environment where it cannot fail.** `crashGuard` was tested with
+`electron` stubbed (Section 52). `selfRepair` was tested in a checkout with no asar
+(Section 62). `safeRequire` was tested by calling it from a probe that sat in a
+directory where its paths happened to work — never from `main.cjs`, which is its only
+real caller.
+
+The correct discipline for a loader is to assert the *identity of what came back*,
+not merely that something did. Section 49's 27 assertions checked that a stub refuses
+politely and that guidance avoids impossible npm advice. Not one checked that a
+non-stub was returned for a module that exists.

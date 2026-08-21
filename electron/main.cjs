@@ -10,7 +10,12 @@
 const crashGuard = require('./lib/crashGuard.cjs');
 crashGuard.install();
 
-const { safeRequire, loadFailures, isStub, retryFailures, ensureRepairPath } = require('./lib/safeRequire.cjs');
+const { safeRequire, loadFailures, isStub, retryFailures, ensureRepairPath, useRequire } = require('./lib/safeRequire.cjs');
+// Hand safeRequire this file's `require`, so './ipc/x.cjs' resolves from `electron/`
+// where the caller lives, not from `electron/lib/` where safeRequire lives. Without
+// this every guarded require failed and every engine became a silent stub — see
+// spec Section 63.
+useRequire(require);
 
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog, Notification } = require('electron');
 const path = require('path');
