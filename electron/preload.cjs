@@ -220,8 +220,8 @@ const RAMA_API = {
     readRepo:          (opts)      => ipcRenderer.invoke('evolution:read-repo',           opts),
     analyzeAndPropose: (opts)      => ipcRenderer.invoke('evolution:analyze-and-propose', opts),
     apply:             (opts)      => ipcRenderer.invoke('evolution:apply',               opts),
-    approve:           (id)        => ipcRenderer.invoke('evolution:approve',             id),
-    reject:            (id)        => ipcRenderer.invoke('evolution:reject',              id),
+    approve:           (id, user)  => ipcRenderer.invoke('evolution:approve',             id, user),
+    reject:            (id, user)  => ipcRenderer.invoke('evolution:reject',              id, user),
     selfAssess:        ()          => ipcRenderer.invoke('evolution:self-assess'),
     getLog:            ()          => ipcRenderer.invoke('evolution:get-log'),
     getScout:          (id)        => ipcRenderer.invoke('evolution:get-scout',           id),
@@ -319,14 +319,17 @@ const RAMA_API = {
   },
 
   // ── Nucleus (Immutable Encryption Foundry) ────────────────────────────────
+  // `user` is threaded through the channels that write or reveal (Section 57).
+  // `unseal` and `status` stay userless on purpose: unseal IS the authentication
+  // gate, and status returns only booleans needed before anyone is signed in.
   nucleus: {
-    seal:        (passcode)    => ipcRenderer.invoke('nucleus:seal',            passcode),
+    seal:        (passcode, user) => ipcRenderer.invoke('nucleus:seal',        passcode, user),
     unseal:      (passcode)    => ipcRenderer.invoke('nucleus:unseal',          passcode),
     status:      ()            => ipcRenderer.invoke('nucleus:status'),
-    getPrompt:   (extra)       => ipcRenderer.invoke('nucleus:get-prompt',      extra),
-    patch:       (patches)     => ipcRenderer.invoke('nucleus:patch',           patches),
+    getPrompt:   (extra, user) => ipcRenderer.invoke('nucleus:get-prompt',      extra, user),
+    patch:       (patches, user) => ipcRenderer.invoke('nucleus:patch',         patches, user),
     lock:        ()            => ipcRenderer.invoke('nucleus:lock'),
-    getIdentity: ()            => ipcRenderer.invoke('nucleus:get-identity'),
+    getIdentity: (user)        => ipcRenderer.invoke('nucleus:get-identity',    user),
   },
 
   // ── IPC Encryption (Pervasive Flow Encryption) ────────────────────────────
@@ -371,8 +374,8 @@ const RAMA_API = {
     listProposals: ()           => ipcRenderer.invoke('regen:list-proposals'),
     setFix:      (opts)         => ipcRenderer.invoke('regen:set-fix',      opts),
     apply:       (opts)         => ipcRenderer.invoke('regen:apply',        opts),
-    approve:     (id)           => ipcRenderer.invoke('regen:approve',      id),
-    reject:      (id)           => ipcRenderer.invoke('regen:reject',       id),
+    approve:     (id, user)     => ipcRenderer.invoke('regen:approve',      id, user),
+    reject:      (id, user)     => ipcRenderer.invoke('regen:reject',       id, user),
     research:    (opts)         => ipcRenderer.invoke('regen:research',     opts),
     getPrompt:   (opts)         => ipcRenderer.invoke('regen:get-prompt',   opts),
     onProposalReady: (cb) => {
@@ -447,12 +450,12 @@ const RAMA_API = {
 
   // ── Genome (complete capability blueprint carried by every instance) ───────
   genome: {
-    get:       ()        => ipcRenderer.invoke('genome:get'),
-    verify:    ()        => ipcRenderer.invoke('genome:verify'),
-    roles:     ()        => ipcRenderer.invoke('genome:roles'),
-    genes:     (domain)  => ipcRenderer.invoke('genome:genes', domain),
-    expressed: (role)    => ipcRenderer.invoke('genome:expressed', role),
-    proposeChange: (c)   => ipcRenderer.invoke('genome:propose-change', c),
+    get:       (user)          => ipcRenderer.invoke('genome:get', user),
+    verify:    (user)          => ipcRenderer.invoke('genome:verify', user),
+    roles:     (user)          => ipcRenderer.invoke('genome:roles', user),
+    genes:     (domain, user)  => ipcRenderer.invoke('genome:genes', domain, user),
+    expressed: (role, user)    => ipcRenderer.invoke('genome:expressed', role, user),
+    proposeChange: (c, user)   => ipcRenderer.invoke('genome:propose-change', c, user),
   },
 
   // ── Instances (holonic — each carries the full genome, expresses a subset) ──
@@ -515,14 +518,16 @@ const RAMA_API = {
 
   // ── Proposal Ledger (single approve→apply gate for every self-change) ──────
   proposals: {
-    list:    (filter)         => ipcRenderer.invoke('proposals:list',    filter),
-    get:     (id)             => ipcRenderer.invoke('proposals:get',     id),
-    create:  (def)            => ipcRenderer.invoke('proposals:create',  def),
-    approve: (id, by)         => ipcRenderer.invoke('proposals:approve', id, by),
-    reject:  (id, by, reason) => ipcRenderer.invoke('proposals:reject',  id, by, reason),
-    apply:   (id, opts)       => ipcRenderer.invoke('proposals:apply',   id, opts),
-    stats:   ()               => ipcRenderer.invoke('proposals:stats'),
-    audit:   (limit)          => ipcRenderer.invoke('proposals:audit',   limit),
+    // `approve`/`reject` take the signed-in user, not a name. The ledger refuses a
+    // string outright — a label is not an identity (Section 57).
+    list:    (filter)           => ipcRenderer.invoke('proposals:list',    filter),
+    get:     (id, user)         => ipcRenderer.invoke('proposals:get',     id, user),
+    create:  (def)              => ipcRenderer.invoke('proposals:create',  def),
+    approve: (id, user)         => ipcRenderer.invoke('proposals:approve', id, user),
+    reject:  (id, user, reason) => ipcRenderer.invoke('proposals:reject',  id, user, reason),
+    apply:   (id, opts)         => ipcRenderer.invoke('proposals:apply',   id, opts),
+    stats:   (user)             => ipcRenderer.invoke('proposals:stats',   user),
+    audit:   (limit, user)      => ipcRenderer.invoke('proposals:audit',   limit, user),
     on: (event, cb) => {
       const channel = `proposals:${event}`;
       const h = (_e, d) => cb(d);

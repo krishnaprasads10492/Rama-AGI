@@ -76,10 +76,15 @@ export function getSystemPrompt(extraContext = '') {
  * Async version — fetches from nucleus (encrypted, in-memory only).
  * Use this wherever possible — it's the live identity, not the source template.
  */
-export async function getSystemPromptAsync(extraContext = '') {
+export async function getSystemPromptAsync(extraContext = '', user = null) {
   if (typeof window !== 'undefined' && window.ipcRenderer) {
     try {
-      const res = await window.ipcRenderer.invoke('nucleus:get-prompt', extraContext);
+      // The user decides which identity comes back. The live prompt declares
+      // master and absolute loyalty, so a session without `identity.reveal` gets
+      // the masked persona instead — which is what this file's own header has
+      // always promised ("Masked identity by default") and what the main process
+      // now actually enforces. See spec Section 57.
+      const res = await window.ipcRenderer.invoke('nucleus:get-prompt', extraContext, user);
       if (res?.ok && res.prompt) return res.prompt;
     } catch { /* fall through to source template */ }
   }

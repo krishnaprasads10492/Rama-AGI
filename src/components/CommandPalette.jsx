@@ -586,7 +586,7 @@ export default function CommandPalette({ extraPages = [] }) {
   const handleApproveModification = useCallback(async () => {
     if (!pendingModification) return;
     const { applyModification } = await import('@services/selfModify.js');
-    const result = await applyModification(pendingModification);
+    const result = await applyModification(pendingModification, currentUser);
     if (result.ok) {
       clearPendingMod();
       // Vite HMR handles reload for UI changes

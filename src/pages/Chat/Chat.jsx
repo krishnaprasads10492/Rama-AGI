@@ -208,7 +208,7 @@ export default function Chat() {
     }
 
     // Build messages with nucleus system prompt (encrypted identity — never from source)
-    const systemPrompt = await getSystemPromptAsync();
+    const systemPrompt = await getSystemPromptAsync('', currentUser);
     const allMessages  = [
       { role: 'system', content: systemPrompt },
       ...messages.filter(m => m.role !== 'system'),

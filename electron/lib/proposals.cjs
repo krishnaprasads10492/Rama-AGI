@@ -19,7 +19,36 @@
  * the applier only knows how to write its own kind of change.
  */
 
-const crypto = require('crypto');
+const crypto     = require('crypto');
+const capability = require('./capability.cjs');
+
+/**
+ * Who is allowed to decide — enforced here, not at each channel (Section 57).
+ *
+ * `approve(id, by = 'master')` used to take the approver as a **free-text string**,
+ * and three separate IPC handlers hardcoded `'master'`. So I6's approval gate was a
+ * real state machine with no authorization behind it: anything that could reach
+ * `evolution:approve`, `regen:approve` or `proposals:approve` was master as far as
+ * the ledger was concerned.
+ *
+ * Six channels funnel into these three functions, so the check lives in the
+ * functions. Same reasoning as the loyalty covenant at the encryption boundary:
+ * gating six callers leaves the seventh, gating the chokepoint cannot be routed
+ * around. A string is refused outright — a name is not an identity.
+ *
+ * @returns {{denied?:object, by?:string}}
+ */
+function authorise(user, cap, action) {
+  if (typeof user === 'string') {
+    return { denied: { ok: false, error: `${action} requires an authenticated user — "${user}" is a label, not an identity (I6)` } };
+  }
+  if (!user || typeof user.tier !== 'number') {
+    return { denied: { ok: false, error: `${action} requires an authenticated user (I6)` } };
+  }
+  const denied = capability.deny(user, cap);
+  if (denied) return { denied };
+  return { by: `${user.name || user.id || 'user'} (tier ${user.tier})` };
+}
 
 // ─── Proposal kinds ───────────────────────────────────────────────────────────
 const KINDS = {
@@ -137,7 +166,11 @@ function stats() {
 }
 
 // ─── Decide ───────────────────────────────────────────────────────────────────
-function approve(id, by = 'master') {
+function approve(id, user) {
+  const auth = authorise(user, 'self-modify.apply', 'Approving a change');
+  if (auth.denied) return auth.denied;
+  const by = auth.by;
+
   const p = get(id);
   if (!p) return { ok: false, error: 'Proposal not found' };
   if (p.status === STATUS.APPLIED) return { ok: false, error: 'Already applied' };
@@ -150,7 +183,11 @@ function approve(id, by = 'master') {
   return { ok: true, data: summarise(p) };
 }
 
-function reject(id, by = 'master', reason = '') {
+function reject(id, user, reason = '') {
+  const auth = authorise(user, 'self-modify.apply', 'Rejecting a change');
+  if (auth.denied) return auth.denied;
+  const by = auth.by;
+
   const p = get(id);
   if (!p) return { ok: false, error: 'Proposal not found' };
   if (p.status === STATUS.APPLIED) return { ok: false, error: 'Already applied' };
@@ -170,6 +207,11 @@ function reject(id, by = 'master', reason = '') {
  * been explicitly approved — this is the invariant the whole module exists for.
  */
 async function apply(id, opts = {}) {
+  // Applying is the moment Rāma's own source changes, so it carries the same
+  // authorization as approving — an approved proposal is not a bearer token.
+  const auth = authorise(opts.user, 'self-modify.apply', 'Applying a change');
+  if (auth.denied) return auth.denied;
+
   const p = get(id);
   if (!p) return { ok: false, error: 'Proposal not found' };
 
@@ -201,17 +243,39 @@ async function apply(id, opts = {}) {
 
 // ─── IPC surface ──────────────────────────────────────────────────────────────
 function register(ipcMain) {
-  ipcMain.handle('proposals:list',    async (_e, filter)      => ({ ok: true, data: list(filter || {}) }));
-  ipcMain.handle('proposals:get',     async (_e, id)          => {
+  // Reading the ledger is `self-modify.view` (tier 1); deciding is
+  // `self-modify.apply` (tier 0) and is enforced inside approve/reject/apply so it
+  // holds for the evolution: and regen: channels too. See Section 57.
+  const canView = (user) => capability.deny(user, 'self-modify.view');
+
+  ipcMain.handle('proposals:list',    async (_e, filter) => {
+    const denied = canView(filter?.user); if (denied) return denied;
+    return { ok: true, data: list(filter || {}) };
+  });
+  ipcMain.handle('proposals:get',     async (_e, id, user) => {
+    const denied = canView(user); if (denied) return denied;
     const p = get(id);
     return p ? { ok: true, data: p } : { ok: false, error: 'Proposal not found' };
   });
-  ipcMain.handle('proposals:approve', async (_e, id, by)      => approve(id, by));
-  ipcMain.handle('proposals:reject',  async (_e, id, by, why) => reject(id, by, why));
-  ipcMain.handle('proposals:apply',   async (_e, id, opts)    => apply(id, opts || {}));
-  ipcMain.handle('proposals:stats',   async ()                => ({ ok: true, data: stats() }));
-  ipcMain.handle('proposals:audit',   async (_e, limit)       => ({ ok: true, data: audit.slice(0, limit || 100) }));
-  ipcMain.handle('proposals:create',  async (_e, def)         => ({ ok: true, data: summarise(create(def || {})) }));
+  ipcMain.handle('proposals:approve', async (_e, id, user)      => approve(id, user));
+  ipcMain.handle('proposals:reject',  async (_e, id, user, why) => reject(id, user, why));
+  ipcMain.handle('proposals:apply',   async (_e, id, opts)      => apply(id, opts || {}));
+  ipcMain.handle('proposals:stats',   async (_e, user) => {
+    const denied = canView(user); if (denied) return denied;
+    return { ok: true, data: stats() };
+  });
+  ipcMain.handle('proposals:audit',   async (_e, limit, user) => {
+    const denied = canView(user); if (denied) return denied;
+    return { ok: true, data: audit.slice(0, limit || 100) };
+  });
+  // Creating a proposal is intent, not authority — Rāma's own engines call
+  // `create()` directly with no user, and apply() is what is gated. A
+  // renderer-initiated create still needs the view capability so it cannot be
+  // used to flood the queue anonymously.
+  ipcMain.handle('proposals:create',  async (_e, def) => {
+    const denied = canView(def?.user); if (denied) return denied;
+    return { ok: true, data: summarise(create(def || {})) };
+  });
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

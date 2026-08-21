@@ -331,19 +331,19 @@ export default function Evolution() {
 
   const approve = async (id) => {
     if (!isElectron) { setProposals(s => s.map(p => p.id === id ? { ...p, status: 'approved' } : p)); return; }
-    await window.ipcRenderer?.invoke('evolution:approve', id);
+    await window.ipcRenderer?.invoke('evolution:approve', id, currentUser);
     setProposals(s => s.map(p => p.id === id ? { ...p, status: 'approved' } : p));
   };
 
   const reject = async (id) => {
     if (!isElectron) { setProposals(s => s.map(p => p.id === id ? { ...p, status: 'rejected' } : p)); return; }
-    await window.ipcRenderer?.invoke('evolution:reject', id);
+    await window.ipcRenderer?.invoke('evolution:reject', id, currentUser);
     setProposals(s => s.map(p => p.id === id ? { ...p, status: 'rejected' } : p));
   };
 
   const apply = async (id) => {
     if (!isElectron || !repoPath) { alert('Set repo path first'); return; }
-    const res = await window.ipcRenderer?.invoke('evolution:apply', { proposalId: id, repoPath });
+    const res = await window.ipcRenderer?.invoke('evolution:apply', { proposalId: id, repoPath, user: currentUser });
     if (res?.ok) {
       setProposals(s => s.map(p => p.id === id ? { ...p, status: 'applied' } : p));
       emitActivity('complete', `Evolution applied: proposal ${id}`);

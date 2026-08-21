@@ -133,14 +133,15 @@ function register(ipcMain) {
   // These delegate to the shared proposal ledger (electron/lib/proposals.cjs).
   // The ledger owns the approval invariant; this engine only knows how to write
   // absorbed files (see the registered applier below).
-  ipcMain.handle('evolution:apply', async (event, { proposalId, repoPath }) => {
-    const res = await proposals.apply(proposalId, { repoPath });
+  ipcMain.handle('evolution:apply', async (event, { proposalId, repoPath, user }) => {
+    const res = await proposals.apply(proposalId, { repoPath, user });
     if (res.ok) event.sender.send('evolution:applied', { proposalId, results: res.data });
     return res;
   });
 
-  ipcMain.handle('evolution:approve', async (_e, proposalId) => proposals.approve(proposalId, 'master'));
-  ipcMain.handle('evolution:reject',  async (_e, proposalId) => proposals.reject(proposalId, 'master'));
+  // Was `'master'` as a literal string, which the ledger accepted as an identity.
+  ipcMain.handle('evolution:approve', async (_e, proposalId, user) => proposals.approve(proposalId, user));
+  ipcMain.handle('evolution:reject',  async (_e, proposalId, user) => proposals.reject(proposalId, user));
 
   // ── Self-assessment: what should Rāma evolve next? ────────────────────────
   ipcMain.handle('evolution:self-assess', async () => {

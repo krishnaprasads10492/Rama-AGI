@@ -290,9 +290,12 @@ function register(ipcMain) {
   });
 
   // ── Approve / reject / apply — all owned by the shared ledger ─────────────
-  ipcMain.handle('regen:apply',   async (_e, { proposalId }) => ledger.apply(proposalId));
-  ipcMain.handle('regen:approve', async (_e, proposalId)     => ledger.approve(proposalId, 'master'));
-  ipcMain.handle('regen:reject',  async (_e, proposalId)     => ledger.reject(proposalId, 'master'));
+  // The real user is threaded through rather than the literal 'master' these three
+  // handlers used to pass — that string was accepted as an identity by the ledger.
+  // The capability check itself lives in the ledger (Section 57).
+  ipcMain.handle('regen:apply',   async (_e, { proposalId, user }) => ledger.apply(proposalId, { user }));
+  ipcMain.handle('regen:approve', async (_e, proposalId, user)     => ledger.approve(proposalId, user));
+  ipcMain.handle('regen:reject',  async (_e, proposalId, user)     => ledger.reject(proposalId, user));
 
   // ── Research a topic (for IDE use) ────────────────────────────────────────
   ipcMain.handle('regen:research', async (_e, { errorMessage, language }) => {

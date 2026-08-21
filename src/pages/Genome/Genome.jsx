@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useUserStore } from '@store/userStore.js';
 
 /**
  * Genome — Rāma's capability genome and instance lattice.
@@ -127,6 +128,9 @@ function InstanceCard({ inst, genes, onSuspend, onResume, onTerminate, onExpress
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function Genome() {
   const ipc = typeof window !== 'undefined' ? window.rama : null;
+  // genome.view is tier 0 and is now enforced in the main process, so the page has
+  // to identify the session rather than assume it (Section 57).
+  const { currentUser } = useUserStore();
 
   const [genome,   setGenome]   = useState(null);
   const [verify,   setVerify]   = useState(null);
@@ -141,8 +145,9 @@ export default function Genome() {
     if (!ipc?.genome) { setError('Genome layer needs the desktop app (Electron IPC unavailable).'); return; }
     try {
       const [g, v, l, s] = await Promise.all([
-        ipc.genome.get(),
-        ipc.genome.verify(),
+        // genome.view is master-only and is now actually enforced (Section 57).
+        ipc.genome.get(currentUser),
+        ipc.genome.verify(currentUser),
         ipc.instance.list(),
         ipc.instance.stats(),
       ]);
@@ -154,7 +159,7 @@ export default function Genome() {
     } catch (err) {
       setError(err.message);
     }
-  }, [ipc]);
+  }, [ipc, currentUser]);
 
   useEffect(() => { load(); }, [load]);
 

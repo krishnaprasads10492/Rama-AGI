@@ -119,10 +119,11 @@ export function generateRegistryUpdate(registrySource, page) {
  * approval recorded there.
  * @returns {Promise<{ok:boolean, id?:string, error?:string}>}
  */
-export async function proposeModification(mod) {
+export async function proposeModification(mod, user = null) {
   if (!isElectron) return { ok: false, error: 'Not in Electron' };
 
   const res = await window.rama.proposals.create({
+    user,
     kind:    'self-modify',
     title:   mod.description,
     summary: mod.description,
@@ -145,13 +146,16 @@ export async function proposeModification(mod) {
  * `mod.proposalId` and the ledger performs the write + audit. The direct-write
  * path remains for master-initiated edits that were approved inline in the UI.
  */
-export async function applyModification(mod) {
+export async function applyModification(mod, user = null) {
   if (!isElectron) return { ok: false, error: 'Not in Electron' };
 
-  // Ledger-backed path — preferred, keeps one audit trail
+  // Ledger-backed path — preferred, keeps one audit trail.
+  // The signed-in user is passed, not the literal 'master' this used to send: the
+  // ledger took that string as an identity and now refuses it (Section 57).
   if (mod.proposalId) {
-    await window.rama.proposals.approve(mod.proposalId, 'master');
-    return window.rama.proposals.apply(mod.proposalId);
+    const approved = await window.rama.proposals.approve(mod.proposalId, user);
+    if (approved && approved.ok === false) return approved;
+    return window.rama.proposals.apply(mod.proposalId, { user });
   }
 
   const results = [];

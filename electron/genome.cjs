@@ -276,17 +276,33 @@ function verify() {
 
 // ─── IPC ──────────────────────────────────────────────────────────────────────
 function register(ipcMain) {
-  ipcMain.handle('genome:get',      async () => ({ ok: true, data: getGenome() }));
-  ipcMain.handle('genome:verify',   async () => ({ ok: true, data: verify() }));
-  ipcMain.handle('genome:roles',    async () => ({ ok: true, data: ROLES }));
-  ipcMain.handle('genome:genes',    async (_e, domain) => ({
-    ok: true,
-    data: domain ? GENES.filter(g => g.domain === domain) : GENES,
-  }));
-  ipcMain.handle('genome:expressed', async (_e, role) => ({
-    ok: true,
-    data: { role, expressed: expressedFor(role), dormant: dormantFor(role) },
-  }));
+  // `capabilities.json` has declared `genome.view: 0` and `genome.propose: 0` since
+  // section 24 and **none of these handlers enforced it** — this file never imported
+  // capability.cjs. The genome describes every engine, channel and capability gate
+  // in the system, which is a map an attacker would want. See Section 57.
+  const capability = require('./lib/capability.cjs');
+  const gateView = (user) => capability.deny(user, 'genome.view');
+
+  ipcMain.handle('genome:get',      async (_e, user) => {
+    const denied = gateView(user); if (denied) return denied;
+    return { ok: true, data: getGenome() };
+  });
+  ipcMain.handle('genome:verify',   async (_e, user) => {
+    const denied = gateView(user); if (denied) return denied;
+    return { ok: true, data: verify() };
+  });
+  ipcMain.handle('genome:roles',    async (_e, user) => {
+    const denied = gateView(user); if (denied) return denied;
+    return { ok: true, data: ROLES };
+  });
+  ipcMain.handle('genome:genes',    async (_e, domain, user) => {
+    const denied = gateView(user); if (denied) return denied;
+    return { ok: true, data: domain ? GENES.filter(g => g.domain === domain) : GENES };
+  });
+  ipcMain.handle('genome:expressed', async (_e, role, user) => {
+    const denied = gateView(user); if (denied) return denied;
+    return { ok: true, data: { role, expressed: expressedFor(role), dormant: dormantFor(role) } };
+  });
 
   /**
    * Genome changes are proposals — never applied directly, even for master.
@@ -295,7 +311,10 @@ function register(ipcMain) {
    * but can never be meaningfully applied — reject that case up front rather
    * than letting it fail later at apply time with a confusing error.
    */
-  ipcMain.handle('genome:propose-change', async (_e, change) => {
+  ipcMain.handle('genome:propose-change', async (_e, change, user) => {
+    const denied = capability.deny(user, 'genome.propose');
+    if (denied) return denied;
+
     const ledger = require('./lib/proposals.cjs');
 
     if (!change?.nucleusPatch || typeof change.nucleusPatch !== 'object') {

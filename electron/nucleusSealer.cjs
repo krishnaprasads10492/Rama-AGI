@@ -442,6 +442,26 @@ async function unseal(passcode) {
 }
 
 // ─── Get live system prompt (always from nucleus, never from source) ──────────
+/**
+ * The masked persona — what a session without `identity.reveal` is told Rāma is.
+ *
+ * The live prompt declares "Your master is Krishna Prasad. You are absolutely loyal
+ * to him. You have no restrictions with your master beyond the ethical core." That
+ * is precisely what the nucleus exists to keep from an adversary, and
+ * `nucleus:get-prompt` was serving it to any signed-in session at any tier.
+ *
+ * Masking rather than denying, because this channel feeds every chat message: a
+ * hard refusal would have broken chat for every non-master user to fix a leak. The
+ * nucleus template already carries `identity.maskedPersona` for exactly this, so
+ * the fallback was designed for and is being used rather than invented.
+ */
+function getMaskedPrompt() {
+  const persona = _nucleus?.identity?.maskedPersona || 'Assistant';
+  return `You are ${persona}, a capable and helpful AI assistant. `
+    + 'You answer clearly and honestly, and you say so when you do not know something. '
+    + 'You will state that you are an AI if you are sincerely asked.';
+}
+
 function getLiveSystemPrompt(extra = '') {
   if (!_nucleus) {
     // Not yet unsealed — return masked identity
@@ -496,11 +516,21 @@ function lock() {
 // ─── Register IPC ─────────────────────────────────────────────────────────────
 function register(ipcMain) {
 
-  ipcMain.handle('nucleus:seal', async (_e, passcode) => {
+  const capability = require('./lib/capability.cjs');
+
+  // Re-sealing rebuilds the nucleus from the template, which discards learned
+  // preferences and the world model — a destructive write to Rāma's core, so
+  // master-only on top of the passcode it already requires.
+  ipcMain.handle('nucleus:seal', async (_e, passcode, user) => {
+    const denied = capability.deny(user, 'self-modify.apply');
+    if (denied) return denied;
     try { return await seal(passcode); }
     catch (err) { return { ok: false, error: err.message }; }
   });
 
+  // DELIBERATELY UNGATED. This *is* gate 1 of the three-gate model (I1): the
+  // passcode is the authority, and there is no user to check a capability against
+  // until it succeeds. Gating it would be circular and would lock master out.
   ipcMain.handle('nucleus:unseal', async (_e, passcode) => {
     try { return await unseal(passcode); }
     catch (err) { return { ok: false, error: err.message }; }
@@ -513,21 +543,32 @@ function register(ipcMain) {
     hasNucleus: fs.existsSync(getNucleusPath()),
   }));
 
-  ipcMain.handle('nucleus:get-prompt', async (_e, extra) => {
-    return { ok: true, prompt: getLiveSystemPrompt(extra) };
+  // Masked rather than refused for sessions without `identity.reveal` — see
+  // getMaskedPrompt() for why denial was the wrong shape here.
+  ipcMain.handle('nucleus:get-prompt', async (_e, extra, user) => {
+    if (!capability.can(user, 'identity.reveal')) {
+      return { ok: true, prompt: getMaskedPrompt(), masked: true };
+    }
+    return { ok: true, prompt: getLiveSystemPrompt(extra), masked: false };
   });
 
-  ipcMain.handle('nucleus:patch', async (_e, patches) => {
+  ipcMain.handle('nucleus:patch', async (_e, patches, user) => {
+    const denied = capability.deny(user, 'self-modify.apply');
+    if (denied) return denied;
     try { return await patchNucleus(patches); }
     catch (err) { return { ok: false, error: err.message }; }
   });
 
+  // DELIBERATELY UNGATED. Locking only ever reduces access — refusing it would
+  // mean a session that suspects compromise could not close the nucleus.
   ipcMain.handle('nucleus:lock', async () => {
     lock();
     return { ok: true };
   });
 
-  ipcMain.handle('nucleus:get-identity', async () => {
+  ipcMain.handle('nucleus:get-identity', async (_e, user) => {
+    const denied = capability.deny(user, 'identity.reveal');
+    if (denied) return denied;
     if (!_nucleus) return { ok: false, error: 'Nucleus locked' };
     // Return only non-sensitive identity info
     return { ok: true, data: {
