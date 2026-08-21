@@ -1,0 +1,19 @@
+{
+  "ts": "2026-08-21T20:29:59.852Z",
+  "origin": "boot-check",
+  "packaged": false,
+  "fatalKind": "boot-incomplete",
+  "missingModule": null,
+  "message": "Boot path incomplete: session:is-first-run, session:unlock, session:status, store:get",
+  "code": null,
+  "requireStack": [],
+  "stack": [
+    "Error: Boot path incomplete: session:is-first-run, session:unlock, session:status, store:get",
+    "    at C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs:1148:29"
+  ],
+  "versions": {
+    "node": "20.18.0",
+    "electron": "31.7.7"
+  },
+  "platform": "win32-x64"
+}
