@@ -1,0 +1,148 @@
+RAMA AGI — STARTUP FAILURE REPORT
+========================================================================
+when        : 2026-08-21T20:47:36.967Z
+phase       : boot-check
+
+ENVIRONMENT
+------------------------------------------------------------------------
+packaged    : false
+appPath     : C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI
+version     : 1.0.0
+execPath    : C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\electron\dist\electron.exe
+__dirname   : C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\electron\lib
+node        : 20.18.0
+electron    : 31.7.7
+platform    : win32 x64
+
+MODULE LOAD FAILURES (39)
+------------------------------------------------------------------------
+  System sensing
+      reason: missing module "./ipc/system.cjs"
+  Filesystem
+      reason: missing module "./ipc/filesystem.cjs"
+  Version control
+      reason: missing module "./ipc/git.cjs"
+  Terminal
+      reason: missing module "./ipc/terminal.cjs"
+  App assimilation
+      reason: missing module "./ipc/appAssimilation.cjs"
+  AI backend process
+      reason: missing module "./ipc/aiProcess.cjs"
+  Market intelligence
+      reason: missing module "./ipc/marketIntel.cjs"
+  Browser engine
+      reason: missing module "./ipc/browserEngine.cjs"
+  Credential vault
+      reason: missing module "./ipc/credentialVault.cjs"
+  Model router
+      reason: missing module "./ipc/modelRouter.cjs"
+  Agent orchestrator
+      reason: missing module "./ipc/agentOrchestrator.cjs"
+  Intelligence engine
+      reason: missing module "./ipc/intelligenceEngine.cjs"
+  Evolution engine
+      reason: missing module "./ipc/evolutionEngine.cjs"
+  Resource research
+      reason: missing module "./ipc/resourceResearchEngine.cjs"
+  Resource orchestrator
+      reason: missing module "./resourceOrchestrator.cjs"
+  Vector memory
+      reason: missing module "./ipc/vectorMemory.cjs"
+  Execution sandbox
+      reason: missing module "./ipc/sandboxEngine.cjs"
+  Graph planner
+      reason: missing module "./ipc/graphReasoner.cjs"
+  Self-care monitor
+      reason: missing module "./ipc/selfCare.cjs"
+  Event bus
+      reason: missing module "./ramaEventBus.cjs"
+  Code comprehension
+      reason: missing module "./ipc/astEngine.cjs"
+  Self-modification
+      reason: missing module "./ipc/codeRegenEngine.cjs"
+  Nucleus (identity)
+      reason: missing module "./nucleusSealer.cjs"
+  IPC encryption
+      reason: missing module "./ipcEncryption.cjs"
+  Approval ledger
+      reason: missing module "./lib/proposals.cjs"
+  Genome
+      reason: missing module "./genome.cjs"
+  Genome applier
+      reason: missing module "./lib/genomeApplier.cjs"
+  Release channel
+      reason: missing module "./lib/releaseChannel.cjs"
+  Local self-update
+      reason: missing module "./lib/localUpdateEngine.cjs"
+  Proposal publishing
+      reason: missing module "./lib/publishProposal.cjs"
+  Authentication
+      reason: missing module "./ipc/authEngine.cjs"
+  Instance lifecycle
+      reason: missing module "./ipc/instanceManager.cjs"
+  Meta-cognition
+      reason: missing module "./ipc/metaCognition.cjs"
+  Timeline
+      reason: missing module "./ipc/timeline.cjs"
+  Voice
+      reason: missing module "./ipc/voiceEngine.cjs"
+  Session manager
+      reason: missing module "./sessionManager.cjs"
+  Encrypted store
+      reason: missing module "./dataStore.cjs"
+  Status badge
+      reason: missing module "./badgeWindow.cjs"
+  Badge state
+      reason: missing module "./lib/badgeState.cjs"
+
+IPC REGISTRATION FAILURES (0)
+------------------------------------------------------------------------
+  none
+
+BOOT-CRITICAL CHANNELS
+------------------------------------------------------------------------
+  missing: session:is-first-run, session:unlock, session:status, store:get
+  registered total: 13
+  session:* present: NONE
+
+SUBSYSTEMS REPLACED BY A STUB
+------------------------------------------------------------------------
+  Session manager, Encrypted store, Authentication
+
+BOOT PATH RESOLUTION CHECK
+------------------------------------------------------------------------
+  ../sessionManager.cjs              resolves
+  ../cryptoCore.cjs                  resolves
+  ../dataStore.cjs                   resolves
+  ../nucleusSealer.cjs               resolves
+  ../genome.cjs                      resolves
+  ./safeRequire.cjs                  resolves
+  ./capability.cjs                   resolves
+  ./loyaltyGuard.cjs                 resolves
+  ./loyaltyCore.cjs                  resolves
+  ./selfRepair.cjs                   resolves
+  ./crashGuard.cjs                   resolves
+  ./startupDoctor.cjs                resolves
+  ../../shared/capabilities.json     resolves
+  ../../package-lock.json            resolves
+
+RUNTIME PACKAGE CHECK
+------------------------------------------------------------------------
+  express                resolves
+  cors                   resolves
+  helmet                 resolves
+  express-rate-limit     resolves
+  debug                  resolves
+  simple-git             resolves
+  axios                  resolves
+  systeminformation      resolves
+  uuid                   resolves
+  electron-updater       resolves
+  follow-redirects       resolves
+  node-gyp-build         resolves
+  argon2                 resolves
+
+========================================================================
+Send this whole file. It contains no passcode, no key and no file contents —
+only module names, channel names and resolution results.
+report id: 2026-08-21T20-47-36-967Z

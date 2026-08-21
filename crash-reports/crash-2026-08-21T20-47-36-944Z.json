@@ -1,0 +1,426 @@
+{
+  "ts": "2026-08-21T20:47:36.944Z",
+  "origin": "boot-check",
+  "packaged": false,
+  "fatalKind": "boot-incomplete",
+  "missingModule": null,
+  "message": "Boot path incomplete: session:is-first-run, session:unlock, session:status, store:get",
+  "code": null,
+  "requireStack": [],
+  "stack": [
+    "Error: Boot path incomplete: session:is-first-run, session:unlock, session:status, store:get",
+    "    at C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs:1150:9"
+  ],
+  "versions": {
+    "node": "20.18.0",
+    "electron": "31.7.7"
+  },
+  "platform": "win32-x64",
+  "details": {
+    "stubbed": [
+      "Session manager",
+      "Encrypted store",
+      "Authentication"
+    ],
+    "missingChannels": [
+      "session:is-first-run",
+      "session:unlock",
+      "session:status",
+      "store:get"
+    ],
+    "registrationFailures": [],
+    "loadFailures": [
+      {
+        "name": "System sensing",
+        "reason": "missing module \"./ipc/system.cjs\"",
+        "missing": "./ipc/system.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Filesystem",
+        "reason": "missing module \"./ipc/filesystem.cjs\"",
+        "missing": "./ipc/filesystem.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Version control",
+        "reason": "missing module \"./ipc/git.cjs\"",
+        "missing": "./ipc/git.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Terminal",
+        "reason": "missing module \"./ipc/terminal.cjs\"",
+        "missing": "./ipc/terminal.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "App assimilation",
+        "reason": "missing module \"./ipc/appAssimilation.cjs\"",
+        "missing": "./ipc/appAssimilation.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "AI backend process",
+        "reason": "missing module \"./ipc/aiProcess.cjs\"",
+        "missing": "./ipc/aiProcess.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Market intelligence",
+        "reason": "missing module \"./ipc/marketIntel.cjs\"",
+        "missing": "./ipc/marketIntel.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Browser engine",
+        "reason": "missing module \"./ipc/browserEngine.cjs\"",
+        "missing": "./ipc/browserEngine.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Credential vault",
+        "reason": "missing module \"./ipc/credentialVault.cjs\"",
+        "missing": "./ipc/credentialVault.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Model router",
+        "reason": "missing module \"./ipc/modelRouter.cjs\"",
+        "missing": "./ipc/modelRouter.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Agent orchestrator",
+        "reason": "missing module \"./ipc/agentOrchestrator.cjs\"",
+        "missing": "./ipc/agentOrchestrator.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Intelligence engine",
+        "reason": "missing module \"./ipc/intelligenceEngine.cjs\"",
+        "missing": "./ipc/intelligenceEngine.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Evolution engine",
+        "reason": "missing module \"./ipc/evolutionEngine.cjs\"",
+        "missing": "./ipc/evolutionEngine.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Resource research",
+        "reason": "missing module \"./ipc/resourceResearchEngine.cjs\"",
+        "missing": "./ipc/resourceResearchEngine.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Resource orchestrator",
+        "reason": "missing module \"./resourceOrchestrator.cjs\"",
+        "missing": "./resourceOrchestrator.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Vector memory",
+        "reason": "missing module \"./ipc/vectorMemory.cjs\"",
+        "missing": "./ipc/vectorMemory.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Execution sandbox",
+        "reason": "missing module \"./ipc/sandboxEngine.cjs\"",
+        "missing": "./ipc/sandboxEngine.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Graph planner",
+        "reason": "missing module \"./ipc/graphReasoner.cjs\"",
+        "missing": "./ipc/graphReasoner.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Self-care monitor",
+        "reason": "missing module \"./ipc/selfCare.cjs\"",
+        "missing": "./ipc/selfCare.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Event bus",
+        "reason": "missing module \"./ramaEventBus.cjs\"",
+        "missing": "./ramaEventBus.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Code comprehension",
+        "reason": "missing module \"./ipc/astEngine.cjs\"",
+        "missing": "./ipc/astEngine.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Self-modification",
+        "reason": "missing module \"./ipc/codeRegenEngine.cjs\"",
+        "missing": "./ipc/codeRegenEngine.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Nucleus (identity)",
+        "reason": "missing module \"./nucleusSealer.cjs\"",
+        "missing": "./nucleusSealer.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "IPC encryption",
+        "reason": "missing module \"./ipcEncryption.cjs\"",
+        "missing": "./ipcEncryption.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Approval ledger",
+        "reason": "missing module \"./lib/proposals.cjs\"",
+        "missing": "./lib/proposals.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Genome",
+        "reason": "missing module \"./genome.cjs\"",
+        "missing": "./genome.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Genome applier",
+        "reason": "missing module \"./lib/genomeApplier.cjs\"",
+        "missing": "./lib/genomeApplier.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Release channel",
+        "reason": "missing module \"./lib/releaseChannel.cjs\"",
+        "missing": "./lib/releaseChannel.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Local self-update",
+        "reason": "missing module \"./lib/localUpdateEngine.cjs\"",
+        "missing": "./lib/localUpdateEngine.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Proposal publishing",
+        "reason": "missing module \"./lib/publishProposal.cjs\"",
+        "missing": "./lib/publishProposal.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Authentication",
+        "reason": "missing module \"./ipc/authEngine.cjs\"",
+        "missing": "./ipc/authEngine.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Instance lifecycle",
+        "reason": "missing module \"./ipc/instanceManager.cjs\"",
+        "missing": "./ipc/instanceManager.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Meta-cognition",
+        "reason": "missing module \"./ipc/metaCognition.cjs\"",
+        "missing": "./ipc/metaCognition.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Timeline",
+        "reason": "missing module \"./ipc/timeline.cjs\"",
+        "missing": "./ipc/timeline.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Voice",
+        "reason": "missing module \"./ipc/voiceEngine.cjs\"",
+        "missing": "./ipc/voiceEngine.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Session manager",
+        "reason": "missing module \"./sessionManager.cjs\"",
+        "missing": "./sessionManager.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Encrypted store",
+        "reason": "missing module \"./dataStore.cjs\"",
+        "missing": "./dataStore.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Status badge",
+        "reason": "missing module \"./badgeWindow.cjs\"",
+        "missing": "./badgeWindow.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      },
+      {
+        "name": "Badge state",
+        "reason": "missing module \"./lib/badgeState.cjs\"",
+        "missing": "./lib/badgeState.cjs",
+        "code": "MODULE_NOT_FOUND",
+        "requireStack": [
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\lib\\safeRequire.cjs",
+          "C:\\Games\\Portifolo_Apps\\RAMA_AGI\\Rama-AGI\\electron\\main.cjs"
+        ]
+      }
+    ],
+    "channelsRegistered": 13
+  }
+}
