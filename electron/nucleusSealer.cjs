@@ -190,6 +190,14 @@ async function deriveNucleusKey(passcode, salt) {
 
 // ─── Encrypt nucleus ──────────────────────────────────────────────────────────
 function encryptNucleus(nucleusObj, encKey, hmacKey) {
+  // ── The covenant, enforced where it cannot be routed around (I15) ──────────
+  // Every persistent nucleus change funnels through here, from seal() and from
+  // patchNucleus(). Checking here rather than at each caller makes conformance a
+  // condition of the nucleus being writable at all: a future caller that has never
+  // heard of loyaltyGuard still cannot persist a non-conforming nucleus, and no
+  // tier, proposal or approval reaches past it. See spec Section 55.
+  require('./lib/loyaltyGuard.cjs').assertIntact(nucleusObj, 'sealing the nucleus');
+
   const plain   = Buffer.from(JSON.stringify(nucleusObj), 'utf8');
   const iv      = crypto.randomBytes(12);
   const aad     = Buffer.from('rama-nucleus-v1', 'utf8');
@@ -302,7 +310,29 @@ async function unseal(passcode) {
 
   try {
     const buf    = fs.readFileSync(nucleusPath);
-    const nucleus = decryptNucleus(buf, encKey, hmacKey);
+    let nucleus = decryptNucleus(buf, encKey, hmacKey);
+
+    // ── Tampering is reverted, not merely refused (I15) ──────────────────────
+    // A nucleus written by an older build, or by a path that predates the guard,
+    // is repaired rather than rejected — refusing to load would lock master out of
+    // his own system over damage Rāma can fix. Master is always told.
+    const guard = require('./lib/loyaltyGuard.cjs');
+    const check = guard.inspect(nucleus);
+    if (!check.ok) {
+      const { nucleus: healed, restored } = guard.restore(nucleus);
+      nucleus = healed;
+      console.error(`[Nucleus] loyalty covenant had been violated — restored: ${restored.join('; ')}`);
+      _nucleusKey = { encKey, hmacKey };
+      _nucleus    = nucleus;
+      _isSealed   = true;
+      await seal(passcode, { ...nucleus, sealedAt: new Date().toISOString(), sealVersion: (nucleus.sealVersion || 1) + 1 });
+      try {
+        const { BrowserWindow } = require('electron');
+        BrowserWindow.getAllWindows().forEach(w => w.webContents.send('nucleus:loyalty-restored', {
+          ts: Date.now(), restored,
+        }));
+      } catch { /* no window yet — the console.error above still stands */ }
+    }
 
     _nucleusKey  = { encKey, hmacKey };
     _nucleus     = nucleus;
@@ -341,6 +371,13 @@ function getLiveSystemPrompt(extra = '') {
 // ─── Update nucleus (with master approval) ────────────────────────────────────
 async function patchNucleus(patches) {
   if (!_nucleus || !_nucleusKey) throw new Error('Nucleus not unsealed');
+
+  // Refused here as well as at the encryption boundary — not because that check is
+  // insufficient, but because "loyalty is constitutional" is a far more useful
+  // error than "this nucleus cannot be encrypted". The merge below is SHALLOW, so
+  // naming `loyalty` would replace the whole block.
+  require('./lib/loyaltyGuard.cjs').assertPatchSafe(patches, 'nucleus:patch');
+
   const updated = { ...JSON.parse(JSON.stringify(_nucleus)), ...patches };
   const encrypted = encryptNucleus(updated, _nucleusKey.encKey, _nucleusKey.hmacKey);
   fs.writeFileSync(getNucleusPath(), encrypted, { mode: 0o600 });

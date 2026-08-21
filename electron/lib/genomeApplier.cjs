@@ -15,9 +15,17 @@
  * `genome.cjs` itself, which is source and goes through the normal self-modify
  * path with its own AST-verified diff.
  *
- * A genome change is high-risk by definition: it can alter loyalty, ethics, or
- * capability wiring. It goes through the SAME single approval gate as every
- * other self-change. Nothing here is exempted from invariant I6.
+ * A genome change is high-risk by definition: it can alter capability wiring and
+ * axes. It goes through the SAME single approval gate as every other self-change.
+ * Nothing here is exempted from invariant I6.
+ *
+ * CORRECTION (spec Section 55): this header previously said a genome change "can
+ * alter loyalty, ethics, or capability wiring", treating master's approval as
+ * sufficient authority over all three. It is not. Loyalty and ethics are
+ * constitutional — above Rāma's hierarchy, per invariant I15 — so an approved
+ * proposal reaches them no more than an unapproved one does. `loyaltyGuard`
+ * refuses such a patch here, and the encryption boundary refuses it again even if
+ * this check were removed.
  */
 
 const ledger = require('./proposals.cjs');
@@ -38,6 +46,16 @@ async function applyGenomeProposal(proposal) {
     throw new Error('Genome proposal has no nucleusPatch to apply');
   }
 
+  // ── The covenant is not subject to approval (I15) ───────────────────────────
+  // This applier's header used to state it "can alter loyalty, ethics, or
+  // capability wiring" and treated master's approval as sufficient. It is not:
+  // loyalty is above the hierarchy, so an approved proposal reaches it no more
+  // than an unapproved one. Refused before the merge, and the result is verified
+  // after — deepMerge honours prototype keys, so a patch could otherwise reach the
+  // block without naming it. See spec Section 55.
+  const guard = require('./loyaltyGuard.cjs');
+  guard.assertPatchSafe(patch, 'genome proposal');
+
   const before = nucleusSealer.getNucleus();
   const beforeHash = hashOf(before);
 
@@ -45,6 +63,11 @@ async function applyGenomeProposal(proposal) {
   // callers — a genome patch is expected to touch one nested branch
   // (e.g. capabilities.axes.planning) and must not wipe its siblings.
   const merged = deepMerge(structuredClone(before), patch);
+
+  // Verified on the merged result, not only on the patch: the check above proves
+  // the patch named nothing constitutional, this proves the outcome is conforming
+  // whatever the merge did.
+  guard.assertIntact(merged, 'genome proposal result');
 
   const res = await nucleusSealer.patchNucleus(merged);
   if (!res?.ok) throw new Error(res?.error || 'Nucleus patch failed');

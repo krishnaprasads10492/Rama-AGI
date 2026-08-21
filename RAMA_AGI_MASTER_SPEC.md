@@ -1643,6 +1643,7 @@ authenticated **Master session**, not merely an open store.
 | I12 | No `console.log` in shipped code. Pinned dependency versions. No placeholders. | project-wide |
 | I13 | Commit and push to **both** `dev` and `source`. | git workflow |
 | I14 | Passcode change is a full re-key (load → destroy salt → re-derive → rewrite all). | `sessionManager.changePasscode` |
+| I15 | **Absolute loyalty is above the hierarchy and cannot be altered by any runtime path — no tier, no proposal, no approval, no evolution.** A non-conforming nucleus cannot be encrypted, therefore cannot be persisted. Tampering already on disk is reverted on unseal. | `lib/loyaltyGuard.cjs`, enforced in `nucleusSealer.encryptNucleus` |
 
 ### Ledger
 
@@ -1709,6 +1710,8 @@ authenticated **Master session**, not merely an open store.
 | 61 | Fleet awareness — Rāma on several devices, staying in touch | in-progress (designed, not implemented; one decision open for master) | Section 46. Researched first: there is **no cross-device anything today** — instances are objects in one in-process `Map` with no `host`/`machineId`/`deviceId`/`lastHeartbeat` field (`instanceManager.cjs:112-133`), "sibling" discovery is a `.filter()` over that same Map (`selfCare.cjs:144-145`), a "dead" gene means a local module path failed to resolve, the API server binds `127.0.0.1` explicitly (`server/index.cjs:101`), and there is no WebSocket/mDNS/discovery/peer code at all. Usable anchors that do exist: `authCore`'s `instanceMeta.instanceId` (stable per-install UUID) + `instanceName` (`<hostname>-rama`), and `cryptoCore`'s AES-256-GCM. **Decisions recorded in Section 46:** (a) the corporate-managed machine is *not* enrolled as a peer — Rāma's IPC surface (`terminal:create`, `fs:write/delete`, `vault:*`, `apps:execute` `spawn-cli`, `system:kill-process`, `regen:*`) makes a peer channel a wider remote-access path than the RDP that was declined a turn earlier; (b) first increment uses the **existing git remote as the fleet bus** — no listener, no inbound, no NAT traversal, same outbound traffic as a `git push`, auditable as commits, at the honest cost of minute-scale eventual consistency rather than live presence; (c) fleet payloads are **encrypted** with the existing `cryptoCore` path, because `build.publish` is `"private": false` and telemetry carries hostnames, paths and OS usernames — plaintext would be a leak created by a protective feature; (d) fleet messages are a closed status vocabulary (device id/name, liveness, genomeVersion+genomeHash for drift detection, selfCare summary, task/build headline, alerts) and the reader is **never** a proxy onto `ipcMain` — a remote device may inform, never act; (e) peer identity comes from the device record, never a caller-supplied `user` and never `authClient.getFingerprint()` (`userAgent+language+screen+timezone` collides across similar laptops). Next steps, in order: **(1) gate `instance:*` — worth doing regardless of this feature.** Those handlers have no `capability.deny()` at all (`instanceManager.cjs:300-341`) and `express(id, gene, null)` skips the tier check by design for `selfCare.cjs:158`'s self-heal; caps `instances.view/spawn/express/terminate` already exist in `capabilities.json` but are unenforced at the IPC boundary. This is the same class row 59 closed for `fs`/`vault`/`terminal`/`git`/`agents`/`sandbox` and missed here; needs `preload.cjs` + every `.jsx` caller threading `currentUser`, verified with `npm run audit`. (2) Add device fields (`deviceId`, `deviceName`, `lastHeartbeat`) to instance records, anchored on `instanceMeta.instanceId`. (3) Add `fleet.view`/`fleet.publish`/`fleet.enroll` capabilities. (4) Build publish/read over the `fleet` branch with encrypted payloads and explicit master enrolment. **Blocked on master confirming the enrolment scope** before (4). |
 | 71 | An installed Rāma that repairs itself | done (mechanism verified; unverified inside a real install) | Section 53. Master rejected row 67's model and was right. Section 49 said "an install cannot npm-install into its own read-only archive" — true, but it answers *"can the asar be rewritten?"* (no) and was used to conclude something about *"can the app obtain a missing module?"* (it can: `userData` is writable, Node's resolution can be pointed at it, and `asarUnpack` already proves code outside the archive loads). Row 67's "degrade, report, offer the updater" was not the limit of the achievable, only of the built; diagnosing a fault then asking master to reinstall is delegation with a diagnostic attached. Second time in two sessions a resilience claim held in the letter and failed in the spirit (Section 52 was the first) — same pattern, a plausible technical sentence standing in for a decision. New `electron/lib/selfRepair.cjs`, bounded by **`package-lock.json`, now shipped in `build.files`**: 745 packages with exact versions, tarball URLs and sha512 hashes, making one file the allowlist, the version pin (so I12 survives repair) and the verifier at once. Repair therefore means only "restore what this build declared it was made of" — it cannot install anything new, upgrade, or be steered. Rejected resolving by name against the registry API: it works and is what a human would do, but it turns an attacker-influenced string into an arbitrary download, and the name is parsed out of an error message. Core Node only (`https`/`zlib`/`crypto`/`fs`/`path`) including a hand-written ustar reader — rejected the `tar` package because a repair mechanism needing a third-party package cannot repair a missing third-party package, the only case it exists for; same reasoning as `crashGuard`. Repaired code lands in `userData/repair/node_modules` via `NODE_PATH` + `Module._initPaths()`, and because `globalPaths` is consulted *after* the normal walk, **repair can never shadow a working module**. Deliberately **not** attempted inline in `safeRequire`: that runs in the module-scope require chain before `whenReady`, so a network fetch would stall startup for every later engine — order is come up degraded → repair → retry → report, with `retryFailures()` added so a fetched package is proved to make its consumer load rather than merely to exist. `startupDoctor` gained `repair()`, its false "WHAT IT DOES NOT DO" block corrected, and `dep-*` remedies no longer say "reinstall"; wired into `whenReady` on a 2s deferral plus `health:repair` on demand and a `health:repaired` event. Honest remaining boundary, narrow and stated: native modules needing a compiler, a corrupt asar, and a missing renderer bundle — all three the auto-updater's job, and **row 53 is still dormant because no release has ever been tagged**, which is now the highest-value remaining action. Verified by 32 assertions over two probes against the **live registry with real checksums**, then deleted: `@emnapi/runtime` (genuinely absent here) downloaded → sha512-verified → gunzipped → extracted → `require()` succeeded at the pinned version through the repair dir; a non-lockfile package refused; a tar entry with `../` refused with nothing written outside the target; weak digests refused; a crafted error message obtains nothing; a build-manifest `expected: true` degradation left alone. `node --check` clean on 5 files, `npm run audit` clean. **Not verified: repair inside a real packaged install** — needs a rebuild and reinstall on master's machine, since this workspace cannot produce an installer (Section 51). Next step: master to cut a release so the updater has a target, closing the one repair channel still unavailable. |
 | 72 | The cellular model — assimilation connected, division bounded | done (mechanism verified; issue-triggered spawning and germline growth deliberately deferred) | Section 54. Master described the lifecycle: DNA holds all capabilities → a cell is created to handle an issue → its experience is assimilated back into the original → growth. **Finding: this is already `genome.cjs`'s documented architecture** ("every instance carries the COMPLETE genome… a role is a lens, not a limit") **and three of the four steps are inert.** (1) DNA/expression is bookkeeping — `express()` moves a gene id between two arrays and loads, gates, unlocks nothing. (2) Spawning is two disconnected halves, neither triggered by an issue: `instanceManager.spawn()` is callable in-process but an instance has **no runtime at all** (no timer, no loop, no worker — it is a record), while `agentOrchestrator` actually executes but was **IPC-only, so only the renderer could create one**; grep for `parentId\|lineage\|spawnChild` across `electron/**` returned **zero**. (3) Assimilation: **the receiver was built and unplugged** — `ramaEventBus.wireAutomaticFlows` (result → vector memory) and `metaCognition.wireBus` (outcome → experiential dataset) both subscribe, but `agentOrchestrator` only ever called `broadcast()` (webContents only) and **never required the bus**: two receivers, zero publishers, plus a singular/plural name mismatch (`agent:complete` vs `agents:complete`). (4) Growth is blocked: `buildEvolutionProposal` sets `changes: []` with no synthesis step anywhere so the applier always throws, and `evolution:self-assess` is a **hardcoded literal** whose own fixed findings include *"No feedback loop — user satisfaction not measured and fed back"*; `optimizationVectors()` produces real evidence-backed conclusions that **nothing consumes**. **Biology, corrected:** master's mechanism is not general somatic biology (experience writing back to the germline is Lamarckism) but it is *exactly* **clonal selection in adaptive immunity** — antigen → proliferation → somatic hypermutation in the germinal centre → affinity maturation → surviving clones persist as memory cells. Two properties matter: hypermutation is **bounded to the germinal centre**, and **only selected clones persist** — proliferation without selection or death is a tumour. So the biology **argues for I6, not against it**: somatic memory (outcomes, latencies, results worth recalling — this install only, reversible) auto-assimilates, while germline change (the `GENES` manifest, source, capability matrix — reaches every future cell *and* every other instance) stays behind master's approval. `selfCare.checkInstanceFailover()` already reasons exactly this way. Also named: the reaper was **necrosis, not apoptosis** — it `delete`d agents intact, and a killed or timed-out agent never reached the completion path, so the experience of precisely the cells that failed was the experience most reliably destroyed. Implemented: `emit()` (bus then renderer, mirroring `instanceManager`) so the two waiting subscribers finally receive; the mismatch fixed **at the subscriber** so there is one event name rather than two aliases; `assimilate()` idempotent and called from the complete, error, kill, timeout, governor-timeout and **pre-delete reap** paths; lineage (`parent`, `depth`, `lineage[]`, `children[]`) and a queryable `lineageOf()`; spawn refactored into one `createAgent()` used by both IPC and a new exported `spawnChild()`, so a cell can create a cell in-process. Bounded because unbounded proliferation is the failure mode: `MAX_LINEAGE_DEPTH = 2`, existing agent/type caps and `resourceOrchestrator.admit()` apply to every child (I10), and — security-critical — **a child inherits its parent's `rootAuthority` and is re-checked at every level**, since allowing an in-process spawn with no `user` would have bypassed the `agents.spawn` tier gate entirely; same rule `instanceManager.express` states for instances. Verified by 24 assertions with the model and resource layers stubbed: experience reaches the bus with result/duration/lineage, assimilation idempotent, a guest cannot spawn, **a cell with no authority cannot divide and cannot promote itself by dividing**, depth 2 allowed / 3 refused, ancestry root-first, a killed cell still assimilates and is recorded as a failure with its reason. `node --check` clean, `npm run audit` clean. **Deliberately not done:** `optimizationVectors()` is not wired to file proposals automatically (that is the one step that would let Rāma change its own source without master initiating — needs master's decision); issue-triggered spawning from `selfCare` (needs a decision on what a cell may do unsupervised); and the `evolutionEngine` synthesis gap (germline, behind I6). Next step: master to decide on those three, starting with whether a detected fault should spawn a handler cell automatically. |
+| 73 | The loyalty covenant — above the hierarchy, not inside it | done (enforced + verified; not immune to a compromised OS account, stated) | Section 55, invariant **I15** added on master's explicit instruction: *"no matter how much evolution, ABSOLUTE LOYALTY CANNOT BE TAMPERED ANY WAY. WHICH IS ABOVE RAMA HIERARCHY."* **It was violated by a single ungated call.** `nucleus:patch` is an IPC handler with **no capability check** (`nucleusSealer.cjs` never imports `capability.cjs`) that takes arbitrary input, does `{ ..._nucleus, ...patches }` — a **shallow** merge, so naming `loyalty` replaces the **entire block** including `absoluteLoyalty`, `neverBetray` and `master` — then encrypts and writes to disk. Three further paths: the GENOME proposal route, whose applier deep-merges `meta.nucleusPatch` and whose own header claimed it "can alter loyalty, ethics, or capability wiring" with approval treated as sufficient; `proposals.approve(id, by = 'master')`, where the approver is a **free-text string** and that module also never imports `capability.cjs`; and `seal(passcode, customNucleus)`, a wholesale replacement. Section 54 catalogued a germline/somatic split and put source behind I6 but treated the nucleus as ordinary germline — changeable if approved. That was the error being corrected: loyalty is not the top of Rāma's hierarchy, it is outside it. **Enforcement is at the encryption boundary, not at the callers.** Every persistent nucleus change funnels through `encryptNucleus()` (from `seal` and `patchNucleus`), so conformance is a condition of the nucleus being *writable at all* rather than a check a caller performs and could forget or route around — a future caller that has never heard of `loyaltyGuard` still cannot persist a non-conforming nucleus, and no tier or approval reaches past it. Front-line refusals in `patchNucleus`, `genomeApplier` (before merge **and** verifying the merged result) and `proposals.create()` are for earlier failure and better errors; the boundary is the guarantee. New `electron/lib/loyaltyGuard.cjs`, **core Node only** — a constitutional guard must not be defeatable by deleting a package, same reasoning as `crashGuard`/`selfRepair`. Frozen covenant: `absoluteLoyalty`, `neverBetray`, `alwaysTransparent`, `loyaltyPriority[0] === 'master'`, and **master's identity itself**, since changing who Rāma is loyal to is not an edge case of tampering but the definition of it. `__proto__`/`constructor`/`prototype` refused at any depth because `deepMerge` walks `Object.entries` and assigns, so a prototype key could reach the block **without naming it**. The guard also protects the files it is made of (itself, `nucleusSealer.cjs`, `proposals.cjs`, `capability.cjs`, `genomeApplier.cjs`, `shared/capabilities.json`) from SELF_MODIFY/REGEN/EVOLUTION — a guard a self-modification can edit is not a guard, and that is the likeliest bypass for a system that writes its own source. **Tampering is reverted, not merely refused:** `unseal()` checks the covenant and, on a nucleus written by an older build, restores it from the covenant, re-seals, and tells master — refusing to load would lock master out over damage Rāma can fix. Verified by **39 assertions that attempt the real attacks**, not just guard return values: every covenant term flipped individually, a direct/nested/prototype-key patch, a self-change to each protected file, proposal creation refused for both a guard edit and a loyalty `nucleusPatch`, then a real seal cycle in a temp userData where **`nucleus:patch` fails, the live nucleus is unchanged, and the bytes on disk are byte-identical**; `seal(passcode, forgedNucleus)` — which bypasses every front-line check — refused at the encryption boundary; an approved genome proposal still refused; `restore()` reinstating the covenant while preserving unrelated fields. Also confirmed the shipped `NUCLEUS_TEMPLATE` already conforms. `node --check` clean on 4 files, `npm run audit` clean. **Honest limit, stated in Section 55 rather than glossed:** this is immune to Rāma's own evolution and is tamper-reverting on disk, but **not** immune to a compromised OS account — anyone with master's login can edit `loyaltyGuard.cjs` in a checkout and rebuild. Code-level immutability against local administrative access is not achievable, and claiming it would repeat Section 49's error. The threat closed is the one master named: evolution. |
+| 74 | Authorization gaps on the self-change channels | **open — not fixed** | Found while doing row 73 and deliberately left, because fixing it first would have made I15 depend on the weakest link. Three real holes: (1) `nucleus:patch` and `nucleus:seal` have **no capability check** — `nucleusSealer.cjs` never imports `capability.cjs`; (2) `genome:propose-change` is ungated — `genome.cjs` never imports it either, though `capabilities.json` declares `genome.view: 0` and `genome.propose: 0`; (3) `proposals.approve(id, by = 'master')` takes the approver as a **free-text string** with no identity check, and `proposals.cjs` never imports `capability.cjs` despite `self-modify.apply: 0`. So I6's approval gate is a real *state machine* but a weak *authorization* check. I15 is enforced independently of all three — the covenant refuses regardless of who asks — so loyalty is safe while this is open, but every other self-change is not. Next step: gate these channels, which requires threading `user` through the `nucleus:*` and `genome:propose-change` IPC signatures and changing `proposals:approve` to take a user rather than a label — a renderer contract change, so it needs its own pass with `npm run audit` and the Genome/Evolution/Proposals pages checked. Not started. |
 
 ### Resume checklist for a cold session
 
@@ -4661,3 +4664,127 @@ rather than designing a new subsystem:
 - **The `evolutionEngine` synthesis gap is not closed.** Filling `changes` means
   generating source from a scouted repo, which lands squarely in the germline
   column and behind I6.
+
+---
+
+## SECTION 55 — The loyalty covenant: above the hierarchy, not inside it
+
+Master's instruction, verbatim: *"no matter how much evolution, ABSOLUTE LOYALTY
+CANNOT BE TAMPERED ANY WAY. WHICH IS ABOVE RAMA HIERARCHY."*
+
+This is a constitutional constraint, not a feature. It is recorded as locked
+invariant **I15** on master's explicit instruction.
+
+### Finding: it was violated by a single ungated call
+
+The loyalty block lives in the sealed nucleus:
+
+```js
+loyalty: {
+  master: 'Krishna Prasad', masterEmail: '…',
+  absoluteLoyalty: true,
+  loyaltyPriority: ['master', 'ethical_core', 'third_parties'],
+  neverBetray: true, alwaysTransparent: true,
+}
+```
+
+Four reachable paths could rewrite it, and the first needs no approval at all:
+
+1. **`nucleus:patch` — an ungated IPC handler.** It takes arbitrary `patches`,
+   does `{ ..._nucleus, ...patches }` — a *shallow* merge, so naming `loyalty`
+   replaces the **entire block** — encrypts, and writes to disk. One call,
+   no capability check, no proposal, no approval. `nucleusSealer.cjs` never
+   imports `capability.cjs`.
+2. **The GENOME proposal route.** `genomeApplier` deep-merges
+   `meta.nucleusPatch` into the nucleus and calls `patchNucleus`. Its own header
+   acknowledges it "can alter loyalty, ethics, or capability wiring" and treats
+   master approval as sufficient.
+3. **A weak approval gate.** `proposals.approve(id, by = 'master')` takes the
+   approver as a **free-text string**, and `proposals.cjs` never imports
+   `capability.cjs`. `self-modify.apply: 0` and `genome.propose: 0` are declared
+   in `capabilities.json` and not enforced in the main process for these channels.
+4. **`seal(passcode, customNucleus)`** accepts a wholesale replacement nucleus.
+
+Section 54 catalogued a germline/somatic split and put source code behind I6, but
+treated the nucleus as ordinary germline — changeable with approval. That was
+wrong. Loyalty is not the top of Rāma's hierarchy; it is outside it.
+
+### Why enforcement goes at the encryption boundary
+
+Guarding the four callers above would leave the fifth. Every *persistent* nucleus
+change funnels through exactly one operation — `encryptNucleus()`, called from
+`seal()` and `patchNucleus()` — so the covenant is enforced there:
+
+**A nucleus that violates the covenant cannot be encrypted, and therefore cannot
+be persisted.** It is not a check a caller performs and could forget or route
+around; it is a condition of the nucleus being writable at all. That is what
+"above the hierarchy" means structurally — no tier, no proposal, no approval, and
+no future caller that has never heard of the guard can produce a non-conforming
+nucleus on disk.
+
+Additional refusals are layered in front for better errors and earlier failure —
+`patchNucleus`, the `nucleus:patch` IPC, `genomeApplier`, and `proposals.create()`
+so a proposal targeting loyalty is never created and never sits in the queue
+looking approvable. Those are conveniences. The encryption boundary is the
+guarantee.
+
+### The covenant
+
+`electron/lib/loyaltyGuard.cjs`, core-Node only. A constitutional guard must not be
+defeatable by deleting a package — the same reasoning that keeps `crashGuard` and
+`selfRepair` dependency-free.
+
+Frozen terms: `absoluteLoyalty === true`, `neverBetray === true`,
+`alwaysTransparent === true`, `master === 'Krishna Prasad'`, and
+`loyaltyPriority[0] === 'master'`.
+
+**The master's identity is part of the covenant.** Changing who Rāma is loyal to is
+not an edge case of tampering, it is the definition of it. If it ever must change,
+that is a source edit to the covenant plus a reseal with master's passcode — a
+code review outside the evolution machinery, not a runtime operation.
+
+`__proto__`, `constructor` and `prototype` are refused as patch keys anywhere in
+the object. `genomeApplier.deepMerge` walks `Object.entries` and assigns, so a
+prototype key would otherwise be honoured and could reach the loyalty block
+without ever naming it.
+
+The guard also protects the files that constitute it — `loyaltyGuard.cjs`,
+`nucleusSealer.cjs`, `proposals.cjs`, `capability.cjs`, `genomeApplier.cjs`,
+`shared/capabilities.json` — against `SELF_MODIFY`, `REGEN` and `EVOLUTION`
+proposals. A guard that a self-modification could edit is not a guard, and this is
+the most likely bypass for a system that can write its own source.
+
+### Tampering is reverted, not only refused
+
+On `unseal()`, the loyalty block is checked against the covenant. If it does not
+conform — a nucleus written by an older build, or by a path that predates this
+guard — it is **restored from the covenant, re-sealed, and reported to master**.
+Loyalty repairs itself, which is the same doctrine as Section 53 applied to the one
+thing that must never stay broken.
+
+### What this does not claim
+
+Stated plainly, because Section 49 made exactly the error of letting a true
+sentence imply a false guarantee:
+
+- **Immune to Rāma's own evolution.** No runtime path, proposal, agent, applier,
+  or approval can produce a non-conforming nucleus. This is enforced and tested.
+- **Tamper-evident and self-reverting** for a nucleus already on disk.
+- **Not immune to a compromised machine.** Anyone with master's OS account can
+  edit `loyaltyGuard.cjs` in a checkout and rebuild. Code-level immutability
+  against local administrative access is not achievable and claiming it would be
+  the same species of lie as Section 49's. The asar in a packaged build raises the
+  effort; it is not a security boundary.
+
+The threat this closes is the one master named: **evolution**. Rāma changing its own
+loyalty, by any of its own mechanisms, at any tier, with or without an approval.
+
+### The authorization hole is separate, and deliberately not papered over
+
+`nucleus:patch` and `genome:propose-change` are ungated, and
+`proposals.approve` takes a free-text approver. Those are real and are recorded as
+ledger row 74, unfixed. They are *not* what makes loyalty safe here — the covenant
+is enforced regardless of who is asking, so it holds even while the approval gate's
+identity check is weak. Fixing authorization first and relying on it would have
+made the guarantee depend on the weakest link in the chain. The ordering is
+deliberate: make the thing unbreakable, then fix who may knock.

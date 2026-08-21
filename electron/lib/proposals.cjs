@@ -73,6 +73,17 @@ function create(def = {}) {
     risk = 'medium',
   } = def;
 
+  // ── Refuse at creation, not only at apply (I15) ────────────────────────────
+  // A proposal that targets the loyalty covenant must never exist: sitting in the
+  // queue with an Approve button next to it invites master to authorise something
+  // no authority covers. Both the file list and any nucleus patch are checked.
+  // See spec Section 55.
+  {
+    const guard = require('./loyaltyGuard.cjs');
+    guard.assertChangesSafe(changes, `${kind} proposal "${title}"`);
+    if (meta?.nucleusPatch) guard.assertPatchSafe(meta.nucleusPatch, `${kind} proposal "${title}"`);
+  }
+
   const proposal = {
     id:        def.id || crypto.randomBytes(10).toString('hex'),
     kind,
