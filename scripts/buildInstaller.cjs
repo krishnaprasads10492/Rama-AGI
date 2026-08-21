@@ -843,7 +843,37 @@ function executeProbe(exe) {
   return { ok: true, version: m ? m[1] : 'unknown' };
 }
 
-/** Self-contained binaries first; 7z.exe needs its DLL carried along. */
+/**
+ * Find something that can stand in for the bundled archiver.
+ *
+ * WHY NOT RAR — asked, and worth answering here because it will be asked again.
+ * A substitute has to satisfy three constraints, and RAR fails all three:
+ *
+ *   1. CLI COMPATIBILITY, not just format support. electron-builder builds
+ *      7-Zip's own method switches — `-mx=9`, `-md=64m`, `-ms=off`, `-mhc=off`,
+ *      `-mtc=off`, `-mf=BCJ2` (see app-builder-lib/out/targets/archive.js's
+ *      compute7zCompressArgs). `rar.exe` uses an entirely different syntax. So a
+ *      candidate must speak 7-Zip's command line, which means being 7-Zip or a
+ *      fork of it — not merely a program that can compress.
+ *   2. THE INSTALLER MUST BE ABLE TO UNPACK IT. The NSIS payload is `app.7z`,
+ *      and the NSIS stub has a 7z decompressor built in. It has no unrar engine,
+ *      so a .rar payload could not be extracted by the installer we ship.
+ *   3. LICENCE. The RAR *compressor* is proprietary — WinRAR is paid software, and
+ *      the unrar source licence explicitly forbids using it to build a RAR
+ *      compressor. Bundling one is not legally available to us, and requiring
+ *      master to buy WinRAR to build his own app would be absurd. 7-Zip is free
+ *      and redistributable, which is precisely why electron-builder bundles it.
+ *
+ * And it would not have helped: the failures here were a policy flagging 7-Zip
+ * *21.07 as a vulnerable version*, and a winCodeSign archive containing macOS
+ * symlinks that need a Windows privilege. Neither is a property of the format.
+ *
+ * What DOES help is looking beyond the one binary `7zip-bin` ships. NanaZip is a
+ * current, MIT-licensed 7-Zip fork that installs per-user from the Store — so it
+ * needs no administrator rights, and being current it is not the flagged 21.07.
+ * On a machine where the bundled archiver is blocked by version, it is the most
+ * likely way to get real installers back.
+ */
 function systemCandidates() {
   const found = [];
   const push = (p) => { if (p && fs.existsSync(p) && !found.includes(p)) found.push(p); };
@@ -857,22 +887,33 @@ function systemCandidates() {
     ].filter(Boolean);
 
     const dirs = [];
-    for (const r of roots) dirs.push(path.join(r, '7-Zip'), path.join(r, 'NanaZip'));
+    for (const r of roots) {
+      dirs.push(path.join(r, '7-Zip'), path.join(r, 'NanaZip'), path.join(r, '7-Zip-Zstandard'));
+    }
+    // NanaZip ships as an MSIX package, so its real install root is under
+    // WindowsApps rather than Program Files.
+    if (process.env.LOCALAPPDATA) {
+      dirs.push(path.join(process.env.LOCALAPPDATA, 'Microsoft', 'WindowsApps'));
+    }
 
-    const reg = tryRun('reg query "HKLM\\SOFTWARE\\7-Zip" /v Path');
-    if (reg.ok) {
+    for (const hive of ['HKLM\\SOFTWARE\\7-Zip', 'HKCU\\SOFTWARE\\7-Zip']) {
+      const reg = tryRun(`reg query "${hive}" /v Path`);
+      if (!reg.ok) continue;
       const m = reg.out.match(/Path\s+REG_[A-Z_]+\s+(.+)/);
       if (m) dirs.push(m[1].trim());
     }
 
-    for (const d of dirs) for (const n of ['7za.exe', '7z.exe', '7zr.exe']) push(path.join(d, n));
+    // Every name here is 7-Zip or a fork speaking 7-Zip's command line.
+    const names = ['7za.exe', '7z.exe', '7zr.exe', '7zz.exe', 'NanaZipC.exe'];
+    for (const d of dirs) for (const n of names) push(path.join(d, n));
 
-    for (const n of ['7za', '7z', '7zr']) {
+    for (const n of ['7za', '7z', '7zr', '7zz', 'NanaZipC']) {
       const w = tryRun(`where ${n}`);
       if (w.ok) for (const l of w.out.split('\n')) push(l.trim());
     }
   } else {
-    for (const n of ['7za', '7z', '7zr']) {
+    // 7zz/7zzs are the official 7-Zip builds for Linux/macOS; 7z is p7zip's.
+    for (const n of ['7zz', '7zzs', '7za', '7z', '7zr']) {
       const w = tryRun(`command -v ${n}`);
       if (w.ok && w.out.trim()) push(w.out.trim());
     }
@@ -880,9 +921,11 @@ function systemCandidates() {
 
   const rank = (p) => {
     const b = path.basename(p).toLowerCase();
-    if (b.startsWith('7za')) return 0;   // standalone console, self-contained
-    if (b.startsWith('7z.')) return 1;   // full featured, needs 7z.dll beside it
-    return 2;                            // 7zr — .7z only, which is all NSIS needs
+    if (b.startsWith('7za'))     return 0;   // standalone console, self-contained
+    if (b.startsWith('7zz'))     return 1;   // official modern standalone build
+    if (b.startsWith('nanazip')) return 2;   // current MIT fork, per-user install
+    if (b.startsWith('7z.'))     return 3;   // full featured, needs 7z.dll beside it
+    return 4;                                // 7zr — .7z only, which is all NSIS needs
   };
   return found.sort((a, b) => rank(a) - rank(b));
 }
@@ -906,10 +949,16 @@ function stage7za(src) {
     fs.mkdirSync(dir, { recursive: true });
     if (fs.existsSync(target) && !fs.existsSync(keep)) fs.copyFileSync(target, keep);
 
-    if (path.basename(src).toLowerCase() === '7z.exe') {
-      const dll = path.join(path.dirname(src), '7z.dll');
-      if (!fs.existsSync(dll)) return { ok: false, reason: '7z.exe found without its 7z.dll' };
+    // 7z.exe is a thin front end over 7z.dll and cannot run without it. Other
+    // builds (7za, 7zz) are self-contained. Copy the DLL whenever one sits beside
+    // the source rather than keying on the filename, so a fork that also needs it
+    // is handled without another special case.
+    const base = path.basename(src).toLowerCase();
+    const dll  = path.join(path.dirname(src), '7z.dll');
+    if (fs.existsSync(dll)) {
       fs.copyFileSync(dll, path.join(dir, '7z.dll'));
+    } else if (base === '7z.exe') {
+      return { ok: false, reason: '7z.exe found without its 7z.dll' };
     }
 
     fs.copyFileSync(src, target);
@@ -1402,11 +1451,14 @@ function report({ archiver, dirOnly, degraded, archive, salvaged, failureTail, n
     warn(`  ${archiver.reason ?? 'no usable 7-Zip'}`);
     warn('  electron-builder needs 7-Zip for the NSIS payload, the portable .exe,');
     warn('  and even for unpacking its own code-signing tools.');
-    warn('  To get installers on this machine, one of:');
-    warn('    · install 7-Zip machine-wide (a current version — 21.07 is what gets flagged);');
-    warn('      this script finds it automatically on the next run');
-    warn('    · have the security policy allow node_modules/7zip-bin/win/x64/7za.exe');
-    warn('    · build on a machine without that restriction');
+    warn('  To get installers on this machine, in order of least friction:');
+    warn('    · install NanaZip from the Microsoft Store — a current, MIT-licensed');
+    warn('      7-Zip fork, per-user so it needs no admin rights, and not the 21.07');
+    warn('      version that policies flag. Found automatically on the next run.');
+    warn('    · or install 7-Zip machine-wide (any current version)');
+    warn('    · or have the policy allow node_modules/7zip-bin/win/x64/7za.exe');
+    warn('  RAR is not an alternative: electron-builder emits 7-Zip method switches,');
+    warn('  the NSIS stub can only unpack 7z, and the RAR compressor is proprietary.');
     warn('  This build also has Electron\'s default .exe icon and metadata, because');
     warn('  branding the executable is part of the step that had to be skipped.');
     if (archive) {
