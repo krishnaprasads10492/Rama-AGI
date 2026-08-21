@@ -108,6 +108,18 @@ let startupRepair = null;
 // touching one gets "No handler registered" — this is what turns that into a named
 // cause instead of a guess. Surfaced through `health:startup`.
 const registrationFailures = [];
+// Every channel actually created, recorded as it is created. Electron offers no way
+// to ask "is this channel registered", and without that a missing handler can only
+// be discovered by a renderer calling it and failing.
+const registeredChannels = new Set();
+// What the passcode screen needs before it can do anything. If any of these are
+// absent, master is looking at a dead gate and no in-app panel can tell him why.
+const BOOT_CRITICAL_CHANNELS = [
+  'session:is-first-run',
+  'session:unlock',
+  'session:status',
+  'store:get',
+];
 
 // ─── Auto Updater ────────────────────────────────────────────────────────────
 /** A short notice to master, wherever he can currently see one. */
@@ -1021,55 +1033,71 @@ app.whenReady().then(async () => {
   // 49), left wide open at the *registration* boundary. `sessionMgr` is third from
   // last here, so a throw almost anywhere took the sign-in screen down with it.
   //
+  // Every module receives this instead of `ipcMain`, so channel creation is
+  // observable. It forwards to the real ipcMain and only records names — it is not
+  // a policy layer and must not become one.
+  const ipcRec = {
+    handle: (ch, fn) => { registeredChannels.add(ch); return ipcMain.handle(ch, fn); },
+    handleOnce: (ch, fn) => { registeredChannels.add(ch); return ipcMain.handleOnce(ch, fn); },
+    removeHandler: (ch) => { registeredChannels.delete(ch); return ipcMain.removeHandler(ch); },
+    on: (...a) => ipcMain.on(...a),
+    once: (...a) => ipcMain.once(...a),
+    off: (...a) => ipcMain.off(...a),
+    removeListener: (...a) => ipcMain.removeListener(...a),
+    removeAllListeners: (...a) => ipcMain.removeAllListeners(...a),
+    emit: (...a) => ipcMain.emit(...a),
+    listenerCount: (...a) => ipcMain.listenerCount(...a),
+  };
+
   // Order is preserved exactly — several entries depend on it, noted inline.
   const REGISTRATIONS = [
-    ['System sensing',        () => systemIPC.register(ipcMain)],
-    ['Filesystem',            () => fsIPC.register(ipcMain)],
-    ['Version control',       () => gitIPC.register(ipcMain)],
-    ['Terminal',              () => terminalIPC.register(ipcMain, mainWindow)],
-    ['App assimilation',      () => appsIPC.register(ipcMain)],
-    ['AI backend process',    () => aiIPC.register(ipcMain)],
-    ['Market intelligence',   () => marketIPC.register(ipcMain)],
-    ['Browser engine',        () => browserIPC.register(ipcMain)],
-    ['Credential vault',      () => vaultIPC.register(ipcMain)],
-    ['Model router',          () => modelIPC.register(ipcMain)],
-    ['Agent orchestrator',    () => agentIPC.register(ipcMain)],
-    ['Intelligence engine',   () => intelligenceIPC.register(ipcMain)],
-    ['Evolution engine',      () => evolutionIPC.register(ipcMain)],
-    ['Resource research',     () => resourceResearchIPC.register(ipcMain)],
-    ['Resource orchestrator', () => resourceOrchestrator.register(ipcMain)],
+    ['System sensing',        () => systemIPC.register(ipcRec)],
+    ['Filesystem',            () => fsIPC.register(ipcRec)],
+    ['Version control',       () => gitIPC.register(ipcRec)],
+    ['Terminal',              () => terminalIPC.register(ipcRec, mainWindow)],
+    ['App assimilation',      () => appsIPC.register(ipcRec)],
+    ['AI backend process',    () => aiIPC.register(ipcRec)],
+    ['Market intelligence',   () => marketIPC.register(ipcRec)],
+    ['Browser engine',        () => browserIPC.register(ipcRec)],
+    ['Credential vault',      () => vaultIPC.register(ipcRec)],
+    ['Model router',          () => modelIPC.register(ipcRec)],
+    ['Agent orchestrator',    () => agentIPC.register(ipcRec)],
+    ['Intelligence engine',   () => intelligenceIPC.register(ipcRec)],
+    ['Evolution engine',      () => evolutionIPC.register(ipcRec)],
+    ['Resource research',     () => resourceResearchIPC.register(ipcRec)],
+    ['Resource orchestrator', () => resourceOrchestrator.register(ipcRec)],
     // Upgrade layer
-    ['Vector memory',         () => vectorMemoryIPC.register(ipcMain)],
-    ['Execution sandbox',     () => sandboxIPC.register(ipcMain)],
-    ['Graph planner',         () => graphIPC.register(ipcMain)],
-    ['Self-care monitor',     () => selfCareIPC.register(ipcMain)],
-    ['Event bus',             () => eventBus.register(ipcMain)],
-    ['Code comprehension',    () => astIPC.register(ipcMain)],
-    ['Self-modification',     () => codeRegenIPC.register(ipcMain)],
-    ['Nucleus (identity)',    () => nucleusSealer.register(ipcMain)],
-    ['IPC encryption',        () => ipcEncryption.register(ipcMain)],
-    ['Approval ledger',       () => proposalLedger.register(ipcMain)],
+    ['Vector memory',         () => vectorMemoryIPC.register(ipcRec)],
+    ['Execution sandbox',     () => sandboxIPC.register(ipcRec)],
+    ['Graph planner',         () => graphIPC.register(ipcRec)],
+    ['Self-care monitor',     () => selfCareIPC.register(ipcRec)],
+    ['Event bus',             () => eventBus.register(ipcRec)],
+    ['Code comprehension',    () => astIPC.register(ipcRec)],
+    ['Self-modification',     () => codeRegenIPC.register(ipcRec)],
+    ['Nucleus (identity)',    () => nucleusSealer.register(ipcRec)],
+    ['IPC encryption',        () => ipcEncryption.register(ipcRec)],
+    ['Approval ledger',       () => proposalLedger.register(ipcRec)],
     // Closes the gap where GENOME proposals could not be applied
     ['Genome applier',        () => genomeApplier.register()],
     // Dormant until master declares baseline and cuts a release — Sections 39, 60
-    ['Release channel',       () => releaseChannel.register(ipcMain)],
+    ['Release channel',       () => releaseChannel.register(ipcRec)],
     // local pull → install → build → apply — Section 40
-    ['Local self-update',     () => registerLocalUpdate(ipcMain)],
+    ['Local self-update',     () => registerLocalUpdate(ipcRec)],
     // applied self-modify proposals → a new branch, never dev/source directly
-    ['Proposal publishing',   () => publishProposal.register(ipcMain)],
-    ['Appearance',            () => registerAppearance(ipcMain)],
+    ['Proposal publishing',   () => publishProposal.register(ipcRec)],
+    ['Appearance',            () => registerAppearance(ipcRec)],
     // startup diagnosis + past crashes, readable from the UI
-    ['Startup health',        () => registerHealthIpc(ipcMain)],
+    ['Startup health',        () => registerHealthIpc(ipcRec)],
     // Genome layer — after the engines it describes, so verify() is honest
-    ['Genome',                () => genomeIPC.register(ipcMain)],
-    ['Instance lifecycle',    () => instanceIPC.register(ipcMain)],
-    ['Meta-cognition',        () => metaCognitionIPC.register(ipcMain)],
-    ['Timeline',              () => timelineIPC.register(ipcMain)],
-    ['Voice',                 () => voiceIPC.register(ipcMain)],
-    ['Session manager',       () => sessionMgr.register(ipcMain)],
-    ['Encrypted store',       () => dataStore.register(ipcMain)],
+    ['Genome',                () => genomeIPC.register(ipcRec)],
+    ['Instance lifecycle',    () => instanceIPC.register(ipcRec)],
+    ['Meta-cognition',        () => metaCognitionIPC.register(ipcRec)],
+    ['Timeline',              () => timelineIPC.register(ipcRec)],
+    ['Voice',                 () => voiceIPC.register(ipcRec)],
+    ['Session manager',       () => sessionMgr.register(ipcRec)],
+    ['Encrypted store',       () => dataStore.register(ipcRec)],
     // Auth is registered after the store so its adapter can attach on unlock
-    ['Authentication',        () => authIPC.register(ipcMain)],
+    ['Authentication',        () => authIPC.register(ipcRec)],
   ];
 
   for (const [label, run] of REGISTRATIONS) {
@@ -1086,6 +1114,51 @@ app.whenReady().then(async () => {
 
   if (registrationFailures.length > 0) {
     console.error(`[main] ${registrationFailures.length} subsystem(s) did not register their IPC channels — features depending on them will report "No handler registered"`);
+  }
+
+  // ── Did the channels the first screen needs actually appear? ────────────────
+  // A subsystem that failed to *load* is replaced by an inert stub whose
+  // `register()` is a silent no-op (safeRequire, Section 49). Nothing throws, so
+  // the loop above reports nothing, and the only symptom is "No handler registered
+  // for 'session:unlock'" on the passcode screen — with Rāma's own diagnostics
+  // sitting behind the very gate that will not open. That is the same trap as
+  // `bootFailurePage` being unreachable because every call site was downstream of
+  // the failure (Section 49). So the boot path is checked here, and reported with a
+  // native dialog, because at this point the renderer cannot be relied on.
+  const missingBootChannels = BOOT_CRITICAL_CHANNELS.filter(c => !registeredChannels.has(c));
+  const stubbedCritical = [
+    ['Session manager',  sessionMgr],
+    ['Encrypted store',  dataStore],
+    ['Authentication',   authIPC],
+  ].filter(([, mod]) => isStub(mod)).map(([name]) => name);
+
+  if (missingBootChannels.length > 0 || stubbedCritical.length > 0) {
+    const detail = [
+      stubbedCritical.length ? `Did not load: ${stubbedCritical.join(', ')}` : null,
+      missingBootChannels.length ? `Missing channels: ${missingBootChannels.join(', ')}` : null,
+      registrationFailures.length ? `Registration errors: ${registrationFailures.map(f => `${f.label} (${f.error})`).join('; ')}` : null,
+      ...loadFailures().map(f => `Load failure: ${f.name} — ${f.reason}`),
+    ].filter(Boolean).join('\n');
+
+    console.error(`[main] boot path incomplete\n${detail}`);
+    try { crashGuard.record(new Error(`Boot path incomplete: ${missingBootChannels.join(', ') || stubbedCritical.join(', ')}`), { origin: 'boot-check', fatalKind: 'boot-incomplete' }); }
+    catch { /* best effort */ }
+
+    try {
+      dialog.showMessageBox({
+        type:    'error',
+        title:   'Rāma cannot reach its own sign-in',
+        message: 'Part of Rāma did not start, so the passcode screen has nothing to talk to.',
+        detail:  `${detail}\n\nA report was written to the crash folder. Reinstalling or updating to a corrected build will fix an incomplete installation.`,
+        buttons: ['Continue anyway', 'Show report folder', 'Quit'],
+        defaultId: 1,
+      }).then((res) => {
+        if (res.response === 1) shell.openPath(crashGuard.reportDir()).catch(() => {});
+        if (res.response === 2) { app.isQuiting = true; app.quit(); }
+      }).catch(() => { /* dialog unavailable */ });
+    } catch { /* dialog unavailable */ }
+  } else {
+    console.warn(`[main] boot path ready — ${registeredChannels.size} IPC channels registered`);
   }
 
   // CSP and permission policy must be installed before the window makes requests
