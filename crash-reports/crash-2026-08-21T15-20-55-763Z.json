@@ -1,0 +1,24 @@
+{
+  "ts": "2026-08-21T15:20:55.763Z",
+  "origin": "unhandledRejection",
+  "packaged": true,
+  "fatalKind": "unhandled-error",
+  "missingModule": null,
+  "message": "No published versions on GitHub",
+  "code": "ERR_XML_MISSED_ELEMENT",
+  "requireStack": [],
+  "stack": [
+    "Error: No published versions on GitHub",
+    "    at newError (<HOME>\\AppData\\Local\\Programs\\Rama AGI\\resources\\app.asar\\node_modules\\electron-updater\\node_modules\\builder-util-runtime\\out\\error.js:5:19)",
+    "    at XElement.element (<HOME>\\AppData\\Local\\Programs\\Rama AGI\\resources\\app.asar\\node_modules\\electron-updater\\node_modules\\builder-util-runtime\\out\\xml.js:36:40)",
+    "    at GitHubProvider.getLatestVersion (<HOME>\\AppData\\Local\\Programs\\Rama AGI\\resources\\app.asar\\node_modules\\electron-updater\\out\\providers\\GitHubProvider.js:48:34)",
+    "    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)",
+    "    at async NsisUpdater.getUpdateInfoAndProvider (<HOME>\\AppData\\Local\\Programs\\Rama AGI\\resources\\app.asar\\node_modules\\electron-updater\\out\\AppUpdater.js:343:19)",
+    "    at async NsisUpdater.doCheckForUpdates (<HOME>\\AppData\\Local\\Programs\\Rama AGI\\resources\\app.asar\\node_modules\\electron-updater\\out\\AppUpdater.js:356:24)"
+  ],
+  "versions": {
+    "node": "20.18.0",
+    "electron": "31.7.7"
+  },
+  "platform": "win32-x64"
+}
