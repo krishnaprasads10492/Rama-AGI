@@ -986,6 +986,27 @@ async function packageApp(dirOnly, { noSignEdit = false } = {}) {
   return { ok: false, tail: r.tail, recentText: r.recentText };
 }
 
+/**
+ * Read the artefact back and confirm it can resolve what it will load.
+ *
+ * WHY THIS IS A BUILD STAGE AND NOT A MANUAL STEP: an installed build once died on
+ * launch with `Cannot find module 'debug'`, and every part of the build had
+ * reported success — electron-builder packaged exactly what `build.files` told it
+ * to, the installer was produced, the report was green. The only place the fault
+ * existed was in the artefact, so that is where it has to be checked. See
+ * `scripts/auditPackage.cjs` and spec Section 48.
+ *
+ * @returns {Promise<{ok:boolean, ran:boolean, tail:string}>}
+ */
+async function auditPackagedApp() {
+  const script = path.join(__dirname, 'auditPackage.cjs');
+  if (!fs.existsSync(script)) return { ok: true, ran: false, tail: '' };
+
+  info('verifying the packaged app can resolve its dependencies');
+  const r = await runTee(`node ${JSON.stringify(script)}`, 10 * 60_000);
+  return { ok: r.ok, ran: true, tail: r.tail ?? '' };
+}
+
 const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
 
 /**
@@ -1322,6 +1343,17 @@ async function main() {
     }
     return 1;
   }
+
+  // Before anything is zipped or handed over, prove the artefact is loadable.
+  // A missing dependency is not a warning: the app cannot start, so shipping it
+  // is worse than failing here.
+  const audit = await auditPackagedApp();
+  if (audit.ran && !audit.ok) {
+    fail('The packaged app is missing dependencies it needs to start.');
+    fail('  Not shipping a build that cannot launch — see the list above.');
+    return 1;
+  }
+  if (audit.ran) ok('Packaged app resolves every dependency on its load path');
 
   const archive = dirOnly ? await zipUnpacked() : null;
 

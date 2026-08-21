@@ -1701,6 +1701,7 @@ authenticated **Master session**, not merely an open store.
 | 63 | Blank DISK panel, and CPU/RAM reporting 0% with no reading | done | Master's screenshot. Three defects, none a capability gate. (a) The disk tab was rendered behind `tab === 'disk' && m &&` where `m` is the *metrics* snapshot — an unrelated call — so a metrics failure deleted the whole card including its own loading text; each panel now stands on its own call. (b) `DiskPanel` did `if (res.ok) setDrives(...)` with no `else` and no `.catch()`: a failure pinned it on "Loading…" forever with the error discarded, and a *success* returning `[]` passed the `!drives` guard and rendered an empty list — both blank on screen. It now has real loading, error and empty states with retry, and `[]` is expected because `si.fsSize()` has no Node fallback. (c) The titlebar seeded `{cpu:0, ram:0}` with no `else` and an empty `catch`, so "0%" was the initial state rendered indefinitely; RAM can never legitimately be 0 on a running machine, so that display was always false. Both now start `null`, render `--`, and carry the reason in a tooltip. Underneath (c) was a genuine measurement bug in `sysinfo.cjs`: the first call had no baseline and returned 0 behind a `firstSample` flag **no caller ever read**, and one module-level `_prevTicks` was shared by three concurrent pollers (titlebar, System page, `resourceOrchestrator`) so the second caller saw no tick delta and got 0% — "CPU 0%" was the design working as written. `cpuLoadFallback()` now samples a 120 ms window inside the call: no shared state, no race, no meaningless first reading, and returns `currentLoad: null` rather than 0 when load is genuinely unmeasurable, which `system.cjs` passes through instead of `Math.round()`-ing to a confident 0. Verified by forcing the fallback through a `Module._load` hook: first call 27.3% `measured=true`, three concurrent callers 29.1/29.1/29.1 with zero collisions where the old code produced 0 for two of three. |
 | 64 | Fit the interface to the display; remember master's zoom | done | Section 47. `electron/lib/appearanceState.cjs` persists `{zoom, source, fittedFor}` beside `badge-state.json`. Two causes behind master's tiny-text screenshot: zoom was never written down, so every launch reverted to 1.0 and the setting looked broken; and nothing adapted to the display. The fit keys on **DIP** work-area size because Chromium has already applied the OS scale factor by then — a display reporting a large DIP area is one the OS is *not* scaling, which is exactly the case needing help, and a 4K panel at 200% correctly reports 1920×1080 DIP and gets the same treatment as native 1080p. Scaling uses the smaller of width/height ratios against a 1600×900 reference so an ultrawide is not flattered by its width. Auto range 1.0–1.4, deliberately narrower than the 0.6–2.0 the IPC allows: a guess should never shrink the UI and should stay clear of the bound where the fixed-height titlebar clips. Ownership is explicit — `source` flips to `'master'` the moment a zoom is set by hand and the fit never overrides it again, on any display; `appearance:reset-zoom` hands control back and `appearance:display-info` reports what the fit would choose without applying it. Applied on `did-finish-load`, not at window creation, because `setZoomFactor` is per-`webContents` and `loadRenderer`'s navigation would silently undo it. Verified by two probes: fit maths across eight geometries (1366×768→1.0 never shrunk, 1920×1080→1.15, 2560×1440→1.4, 3440×1440→1.4 height-limited, 4K@200%→1.15 identical to native 1080p, garbage→1.0) and a 14-assertion state machine (first run fits, same display reused not re-fitted, changed display re-fits while auto, master's value returned exactly and surviving a display change, out-of-range clamped not rejected, reset returns to auto, corrupt state file falls back cleanly). **Not verified: how it looks on master's screen** — the maths is checked, the judgement is master's. |
 | 65 | Free design resources, adopted only on master's decision | in-progress (catalog seeded; no design change proposed yet) | Section 47. Added a `design` axis to `shared/resourceCatalog.json` — 7 entries, all free *and* redistributable in a shipped app, each carrying a new `license` field because licence, not price, is what decides a design asset. Anything merely "free to view" is excluded: bundling it would be a licence breach dressed as a saving. `resourceResearchEngine.cjs` iterates axes generically, so no engine change was needed. Entries, ordered by how directly they address what master reported: `modern-css-reset` (density scale — the dead vertical space; lowest-risk starting point), `fluid-type-scale` (CSS `clamp()`, Utopia method — the tiny type, complementary to row 64's zoom since zoom scales uniformly while a fluid scale changes ratios; **blocked on tokenising hundreds of inline `px` font sizes**, which is precisely why it must be a reviewed proposal), `lucide` (ISC — replaces unicode glyphs `⬢ ◈ ▣ ↕ ↺` that render differently per machine; a real cross-platform inconsistency, not taste), `radix-colors` (MIT, contrast-verified dark scales) vs `open-color` (MIT, simpler, listed so the report compares rather than presents one option), `inter-font` (OFL 1.1, tabular figures stop metric readouts jittering), `hud-display-fonts` (OFL 1.1, headings only — poor for body text, and a proposal should argue that scope or drop it). Fixed a live bug the axis would have amplified: `statusFor()` returned `'no-key-needed'` for entries needing no credential *and not wired*, which `Resources.jsx` renders as a green **"READY"** — so Qdrant claimed to be ready while nothing referenced it, and all seven design entries would have claimed the same. Absence of a key requirement is not adoption; those now report `'researched-only'` ("NOT ENABLED"), and the dead style key was removed since unknown statuses already fall back to it. Next step: run `resource:research` on `modern-css-reset` and `lucide`, then file the first `KINDS.RESOURCE` proposal for master to approve or reject — nothing here touches the UI without that (I6). |
+| 66 | Installed app died on launch — `Cannot find module 'debug'` | done | Section 48. `build.files` used `!node_modules/**/*` plus a hand-written allowlist of 18 packages. npm hoists transitive dependencies to top-level `node_modules`, so the exclusion stripped everything the list did not name: **211 of a 229-package production closure were absent from the asar** — `express` without `body-parser`, `axios` without `follow-redirects`, `argon2` without `node-gyp-build`. `debug` was just the first one the loader reached. The allowlist could never have been correct, because it enumerates direct dependencies while npm's layout is decided by hoisting; any upgrade could move a package from nested to hoisted and break it again. Fixed by letting electron-builder resolve the production tree itself: `files` now includes `node_modules/**/*` and excludes only renderer-only libraries (verified by grep that nothing in `electron/`/`server/` requires them), the build toolchain, and test/doc directories. The remaining risk direction is deliberate — a wrong exclusion makes the package bigger, a missing allowlist entry makes the app not start. Two incidental findings: specifying any `files` pattern replaces electron-builder's default `**/*`, so omitting `node_modules/**/*` produced an asar with **zero** packages; and a stale `win-unpacked` causes `ENOENT: rename electron.exe`. New `scripts/auditPackage.cjs` + `npm run audit:package`, wired into `buildInstaller.cjs` as a stage that fails the build: it opens the built asar and walks outward from the real entry points, so it reads the artefact rather than the config — which is the actual lesson, since every stage had reported success while the artefact was unloadable. Three refinements each came from a wrong first attempt: reachability instead of a full scan (a full scan reported 65 misses, nearly all third-party `test.js` noise; reachability walks 831 files instead of 7,790), splitting misses on local presence so `chromium-bidi` — absent from `node_modules` entirely, so failing in dev too — is not blamed on packaging, and treating `try/catch`-guarded requires as degrading rather than fatal since that is this project's deliberate optional-dependency pattern. It also fails when it cannot read most of the archive: the first version normalised the asar's Windows backslash paths before `extractFile`, read **13 of 7,790 files and reported success**. Verified against the bug by rebuilding with the old allowlist — exit 1, 51 packages flagged with load paths including `debug`; fixed config exits 0 with `fsevents`/`osx-temperature-sensor` correctly degrading. **Not verified: that the installed app now launches** — that needs master to install it. |
 | 61 | Fleet awareness — Rāma on several devices, staying in touch | in-progress (designed, not implemented; one decision open for master) | Section 46. Researched first: there is **no cross-device anything today** — instances are objects in one in-process `Map` with no `host`/`machineId`/`deviceId`/`lastHeartbeat` field (`instanceManager.cjs:112-133`), "sibling" discovery is a `.filter()` over that same Map (`selfCare.cjs:144-145`), a "dead" gene means a local module path failed to resolve, the API server binds `127.0.0.1` explicitly (`server/index.cjs:101`), and there is no WebSocket/mDNS/discovery/peer code at all. Usable anchors that do exist: `authCore`'s `instanceMeta.instanceId` (stable per-install UUID) + `instanceName` (`<hostname>-rama`), and `cryptoCore`'s AES-256-GCM. **Decisions recorded in Section 46:** (a) the corporate-managed machine is *not* enrolled as a peer — Rāma's IPC surface (`terminal:create`, `fs:write/delete`, `vault:*`, `apps:execute` `spawn-cli`, `system:kill-process`, `regen:*`) makes a peer channel a wider remote-access path than the RDP that was declined a turn earlier; (b) first increment uses the **existing git remote as the fleet bus** — no listener, no inbound, no NAT traversal, same outbound traffic as a `git push`, auditable as commits, at the honest cost of minute-scale eventual consistency rather than live presence; (c) fleet payloads are **encrypted** with the existing `cryptoCore` path, because `build.publish` is `"private": false` and telemetry carries hostnames, paths and OS usernames — plaintext would be a leak created by a protective feature; (d) fleet messages are a closed status vocabulary (device id/name, liveness, genomeVersion+genomeHash for drift detection, selfCare summary, task/build headline, alerts) and the reader is **never** a proxy onto `ipcMain` — a remote device may inform, never act; (e) peer identity comes from the device record, never a caller-supplied `user` and never `authClient.getFingerprint()` (`userAgent+language+screen+timezone` collides across similar laptops). Next steps, in order: **(1) gate `instance:*` — worth doing regardless of this feature.** Those handlers have no `capability.deny()` at all (`instanceManager.cjs:300-341`) and `express(id, gene, null)` skips the tier check by design for `selfCare.cjs:158`'s self-heal; caps `instances.view/spawn/express/terminate` already exist in `capabilities.json` but are unenforced at the IPC boundary. This is the same class row 59 closed for `fs`/`vault`/`terminal`/`git`/`agents`/`sandbox` and missed here; needs `preload.cjs` + every `.jsx` caller threading `currentUser`, verified with `npm run audit`. (2) Add device fields (`deviceId`, `deviceName`, `lastHeartbeat`) to instance records, anchored on `instanceMeta.instanceId`. (3) Add `fleet.view`/`fleet.publish`/`fleet.enroll` capabilities. (4) Build publish/read over the `fleet` branch with encrypted payloads and explicit master enrolment. **Blocked on master confirming the enrolment scope** before (4). |
 
 ### Resume checklist for a cold session
@@ -3834,3 +3835,127 @@ Absence of a key requirement is not adoption. Those entries now report
 `'researched-only'` ("NOT ENABLED"), and the now-unreachable style key was removed
 since unknown statuses already fall back to it. A catalogue whose status column
 overstates reality is worse than no status column, because it is trusted.
+---
+
+## SECTION 48 — The installed app could not find its own dependencies
+
+> Master installed the build and got a dialog on launch:
+> `A JavaScript error occurred in the main process — Error: Cannot find module 'debug'`,
+> with a require stack ending in `app.asar/node_modules/electron-updater/…/httpExecutor.js`.
+
+### What was wrong
+
+`build.files` used an exclusion followed by a hand-written allowlist:
+
+```json
+"!node_modules/**/*",
+"node_modules/argon2/**/*",
+"node_modules/electron-updater/**/*",
+…18 packages in total
+```
+
+npm **hoists** transitive dependencies to top-level `node_modules`. So
+`electron-updater` was packaged, its nested `builder-util-runtime` came with it,
+and the `debug` that `builder-util-runtime` requires — hoisted to
+`node_modules/debug` — was stripped by the exclusion.
+
+Measured rather than guessed: of a 229-package production closure, **211 were
+absent from the asar.** `debug` was simply the first one the module loader reached.
+`express` had no `body-parser`, `axios` had no `follow-redirects`, `argon2` had no
+`node-gyp-build`. The app could not have worked.
+
+**The allowlist could never have been correct**, because it enumerates direct
+dependencies while npm's layout is determined by hoisting. Every dependency
+upgrade could silently move a package from nested to hoisted and break the build
+again. This is not a missing entry; it is the wrong mechanism.
+
+### Why nothing caught it
+
+Every stage reported success. electron-builder packaged precisely what it was
+told to, the NSIS installer was produced, `npm run audit` passed (it checks the
+renderer's store keys and IPC bridge, not the package), and the build report was
+green. The fault existed only in the artefact, and nothing read the artefact.
+
+That is the real lesson here, and it is the same shape as the earlier
+`signAndEditExecutable` and dead-retry-rung mistakes: **a build that reports on its
+intentions rather than its output can be confidently wrong.**
+
+### The fix
+
+Stop fighting electron-builder. It resolves the production dependency tree itself
+and already omits devDependencies. `files` now includes `node_modules/**/*` and
+excludes only what genuinely must not ship:
+
+- renderer-only libraries (`react`, `react-dom`, `react-router-dom`, `recharts`,
+  `zustand`) — Vite bundles those into `build/`, and nothing in `electron/` or
+  `server/` requires them (verified by grep before excluding)
+- the build toolchain itself (`electron`, `electron-builder`, `vite`, `sharp`,
+  `7zip-bin`, `@electron/*`, rollup/esbuild)
+- test, example and doc directories, and `.md`/`.map` files
+
+Note the direction of the remaining risk, which is deliberate: if one of those
+exclusions is wrong, the package is **larger** than necessary. If an allowlist
+entry is missing, the app **does not start**. Given a choice between wasting
+megabytes and shipping something that crashes, waste the megabytes.
+
+Two incidental findings worth recording. Specifying any `files` patterns replaces
+electron-builder's default `**/*`, so `node_modules` must be named explicitly —
+omitting it produced an asar with **zero** packages, which is worse than the
+original bug. And a stale `dist-electron/win-unpacked` causes
+`ENOENT: rename electron.exe`, because the previous build already renamed it; the
+output directory needs clearing between configuration experiments.
+
+### `scripts/auditPackage.cjs` — reading the artefact, not the config
+
+A new build stage opens the built asar, walks outward from the real entry points
+(`electron/main.cjs`, `electron/preload.cjs`, `server/index.cjs`) following
+requires the way Node does — nested `node_modules` first, then upward — and fails
+the build if a package on a live load path was not packaged.
+
+Three design decisions, each from a wrong first attempt:
+
+1. **Reachability, not a full scan.** Scanning every JavaScript file in the asar
+   reported 65 missing packages, of which nearly all were noise: `tape` and
+   `benchmark` required by third-party `test.js` files, `browserify` inside a
+   package's own build script, `osx-temperature-sensor` which is macOS-only. An
+   audit that cries wolf 65 times gets ignored, and the one real failure hides in
+   the list. Walking from the entry points reaches 831 files instead of 7,790 and
+   only reports what can actually be loaded.
+2. **"Did packaging drop something we have?"** — not "does every third-party
+   package have all its optional peers?". `chromium-bidi` is required by
+   playwright-core's BiDi transport and is not in `node_modules` at all, so the
+   same require fails in development; packaging cannot be blamed for losing a
+   package that was never installed. Missing packages are therefore split on local
+   presence, which removes that entire class of false positive without weakening
+   the real check — a dropped dependency is by definition installed here.
+3. **Guarded requires degrade, they do not fail.** This project loads every
+   optional dependency inside `try/catch` on purpose (`sysinfo.cjs` wraps
+   `systeminformation`). Reporting those as hard errors would flag the fallback
+   design as a bug, so they are listed separately as degrading.
+
+It also refuses to pass when it could not read most of the archive. The first
+version normalised the asar's Windows backslash paths before calling
+`extractFile`, which wants that exact form — so it read **13 of 7,790 files and
+reported success.** An audit that quietly inspects nothing is worse than no audit,
+because it is believed.
+
+### Verified
+
+The guard was tested against the bug it exists to catch, by rebuilding with the
+old allowlist restored:
+
+- **old config** → exit 1, **51 packages** flagged with load paths, including
+  `debug required by node_modules/simple-git/dist/cjs/index.js` and
+  `sax required by …/electron-updater/node_modules/builder-util-runtime/out/xml.js`
+- **fixed config** → exit 0, "every package on a real load path is present";
+  `fsevents` and `osx-temperature-sensor` correctly reported as degrading,
+  `chromium-bidi` correctly reported as never installed
+
+Directly confirmed present in the fixed asar: all 26 packages the main process
+needs, including `debug`, `builder-util-runtime`, `body-parser`, `follow-redirects`
+and `node-gyp-build`. Confirmed absent: `electron`, `electron-builder`, `vite`,
+`sharp`, `react`, `recharts`, `7zip-bin`.
+
+**Not verified:** that the installed app now launches. That needs master to
+install it. What is verified is that the specific failure — an unresolvable
+`require` on a load path — can no longer leave this machine undetected.
