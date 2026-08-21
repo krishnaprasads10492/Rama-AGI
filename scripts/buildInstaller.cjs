@@ -49,6 +49,12 @@ const forceDir     = has('--dir');
 // raises a policy dialog at the master, and re-asking a settled question is not
 // worth interrupting them for.
 const recheck      = has('--recheck-archiver');
+// Check whether this machine can produce a good setup, write the verdict to
+// data/system/readiness.json, and build nothing. The build then reads that
+// verdict and adapts rather than rediscovering the same facts.
+const readinessOnly = has('--readiness');
+// Package even when readiness says the result would be unusable.
+const force         = has('--force');
 // On any failure the transcript is shipped to the build-logs branch so it can be
 // read from another machine. Opt out for a run you do not want published.
 const noShipLog    = has('--no-ship-log');
@@ -337,13 +343,17 @@ function isSymlinkPrivilegeFailure(text) {
  *
  * @returns {string[]} notes, empty when the file looks sane
  */
-function checkInstallerScript() {
+/**
+ * @param {{ok:boolean, code?:string}|null} link result of canCreateSymlink(), passed
+ *   in rather than probed here so the readiness verdict can carry the same value
+ *   instead of measuring it twice and risking two different answers.
+ */
+function checkInstallerScript(link = null) {
   if (!wantWin) return [];
 
   const notesOut = [];
 
-  if (isWin) {
-    const link = canCreateSymlink();
+  if (isWin && link) {
     if (link.ok) {
       ok('Symlink privilege present — winCodeSign will extract cleanly');
     } else {
@@ -544,6 +554,51 @@ async function installLadder() {
     lastTail = r.tail || lastTail;
   }
   return { ok: false, tail: lastTail };
+}
+
+/**
+ * The dependency picture as it stands, installing nothing.
+ *
+ * Readiness has to measure without changing: if checking whether the machine is
+ * ready also installed the things that make it ready, the answer would always be
+ * yes and the check would be worthless.
+ *
+ * @returns {{ok:boolean, degraded:string[]}}
+ */
+function auditForReadiness() {
+  stage(1, 'DEPENDENCIES — measuring only, installing nothing');
+
+  const audit = auditDeps();
+  const total = expectedDeps().length;
+  const notes = [];
+
+  if (audit.required.length === 0) {
+    ok(`All ${total} pinned packages present at the pinned versions`);
+  } else {
+    warn(`${audit.required.length} of ${total} package(s) missing or mismatched:`);
+    for (const d of audit.required.slice(0, 10)) plain(`      ${describe(d)}`);
+    if (audit.required.length > 10) plain(`      … and ${audit.required.length - 10} more`);
+    info('A build would install these automatically; readiness reports them as-is.');
+  }
+
+  for (const d of audit.degraded) {
+    warn(`${describe(d)} — optional, Rāma has a fallback`);
+    notes.push(`${d.name} unavailable (fallback active)`);
+  }
+
+  for (const name of TOLERATED) {
+    if (audit.degraded.some(d => d.name === name)) continue;
+    const binary = nativeBinaryPresent(name);
+    if (!binary) {
+      warn(`${name} has no compiled binary for ${process.platform}-${process.arch}`);
+      notes.push(`${name} not compiled (the packaged app will use its fallback)`);
+    } else {
+      ok(`${name} native binary present — ${binary}`);
+    }
+  }
+
+  // Missing-but-installable is not a blocker for readiness: the build installs it.
+  return { ok: true, degraded: notes, pendingInstall: audit.required.length };
 }
 
 /** @returns {Promise<{ok:boolean, degraded:string[]}>} */
@@ -924,6 +979,166 @@ function resolveArchiver() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// READINESS — can this machine produce a setup worth installing, and what kind
+// ══════════════════════════════════════════════════════════════════════════════
+
+const READINESS_FILE = path.join(ROOT, 'data', 'system', 'readiness.json');
+const MANIFEST_FILE  = path.join(ROOT, 'shared', 'buildManifest.json');
+
+/**
+ * Turn the individual checks into one verdict plus a prediction.
+ *
+ * WHY A PREDICTION AND NOT JUST A PASS/FAIL: the interesting outcomes here are not
+ * "works" and "broken" but three shades of working — a fully branded installer, an
+ * installer whose .exe carries Electron's icon, and a portable archive with no
+ * installer at all. Master deciding whether to spend ten minutes on a build wants
+ * to know *which* of those they are about to get, before it happens rather than
+ * after.
+ *
+ * @returns {object} the verdict, also written to data/system/readiness.json
+ */
+function computeReadiness({ toolchainOk, deps, archiver, link, nsisNotes, rendererPresent }) {
+  const blocking = [];
+  const limits   = [];
+
+  if (!toolchainOk) {
+    blocking.push('The toolchain cannot package at all — see the stage 0 report above.');
+  }
+  if (deps && !deps.ok) {
+    blocking.push('Required dependencies are missing and could not be installed.');
+  }
+
+  // Archiver decides whether an installer is even reachable.
+  const archiverUsable = archiver && archiver.level !== 2;
+  if (!archiverUsable) {
+    limits.push('No usable 7-Zip: NSIS and portable-exe targets are unreachable, so only a portable zip can be produced.');
+  }
+
+  // Symlink privilege decides whether the .exe can be branded.
+  const canBrand = !isWin || (link && link.ok);
+  if (!canBrand) {
+    limits.push('No symlink privilege: winCodeSign cannot be unpacked, so the .exe will carry Electron\'s default icon.');
+  }
+
+  for (const n of nsisNotes ?? []) limits.push(`Installer script: ${n}`);
+  for (const d of deps?.degraded ?? []) limits.push(`Capability degraded in the build: ${d}`);
+
+  if (!rendererPresent && skipRenderer) {
+    blocking.push('--skip-renderer was requested but build/index.html does not exist.');
+  }
+
+  // What master will actually end up holding.
+  let predicted;
+  if (blocking.length > 0)         predicted = 'nothing — the build cannot complete';
+  else if (!archiverUsable)        predicted = 'portable zip only (no installer)';
+  else if (!canBrand)              predicted = 'NSIS installer + portable exe, unbranded .exe';
+  else                             predicted = 'NSIS installer + portable exe, fully branded';
+
+  const verdict = blocking.length > 0
+    ? 'not-ready'
+    : limits.length > 0 ? 'ready-with-limits' : 'ready';
+
+  const readiness = {
+    verdict,
+    predicted,
+    at: new Date().toISOString(),
+    version: appVersion(),
+    platform: `${process.platform}-${process.arch}`,
+    node: process.versions.node,
+    checks: {
+      toolchain:        !!toolchainOk,
+      dependencies:     !!deps?.ok,
+      archiverLevel:    archiver?.level ?? null,
+      archiverVersion:  archiver?.version ?? null,
+      symlinkPrivilege: canBrand,
+      installerScript:  (nsisNotes ?? []).length === 0,
+      rendererPresent:  !!rendererPresent,
+    },
+    blocking,
+    limits,
+    degraded: deps?.degraded ?? [],
+  };
+
+  try {
+    fs.mkdirSync(path.dirname(READINESS_FILE), { recursive: true });
+    fs.writeFileSync(READINESS_FILE, JSON.stringify(readiness, null, 2));
+  } catch { /* the verdict is still usable in memory this run */ }
+
+  return readiness;
+}
+
+/** The last written verdict, if it is recent enough to still describe this machine. */
+function loadReadiness(maxAgeMinutes = 120) {
+  try {
+    const r = JSON.parse(fs.readFileSync(READINESS_FILE, 'utf8'));
+    const ageMin = (Date.now() - new Date(r.at).getTime()) / 60000;
+    return { ...r, ageMinutes: Math.round(ageMin), fresh: ageMin <= maxAgeMinutes };
+  } catch { return null; }
+}
+
+function printReadiness(r) {
+  const colour = r.verdict === 'ready' ? C.green : r.verdict === 'ready-with-limits' ? C.yellow : C.red;
+  plain('');
+  plain(`  ${C.bold}READINESS${C.reset}  ${colour}${r.verdict.toUpperCase()}${C.reset}`);
+  plain(`  Would produce   ${r.predicted}`);
+  plain('');
+
+  for (const [k, v] of Object.entries(r.checks)) {
+    const label = k.replace(/([A-Z])/g, ' $1').toLowerCase();
+    const mark = v === true ? `${C.green}✓${C.reset}` : v === false ? `${C.red}✕${C.reset}` : `${C.dim}·${C.reset}`;
+    plain(`    ${mark} ${label.padEnd(20)} ${C.dim}${v === true ? '' : v === false ? 'no' : v}${C.reset}`);
+  }
+
+  if (r.blocking.length) {
+    plain('');
+    plain(`  ${C.bold}${C.red}Blocking — a build cannot succeed until these are fixed:${C.reset}`);
+    for (const b of r.blocking) plain(`    ${C.red}✕${C.reset} ${b}`);
+  }
+  if (r.limits.length) {
+    plain('');
+    plain(`  ${C.bold}${C.yellow}Limits — the build will succeed, with these consequences:${C.reset}`);
+    for (const l of r.limits) plain(`    ${C.yellow}!${C.reset} ${l}`);
+  }
+  plain('');
+  plain(`  ${C.dim}Verdict saved to ${path.relative(ROOT, READINESS_FILE)} — the build reads it and adapts.${C.reset}`);
+  plain('');
+}
+
+/**
+ * Record, inside the packaged app, what was true when it was built.
+ *
+ * WHY THIS SHIPS: `startupDoctor` reports at runtime that (say) node-pty is
+ * unavailable, but it cannot tell whether that is a broken installation or a known
+ * property of how this build was made. Without that distinction every degradation
+ * looks like damage, and master cannot tell a real fault from an accepted
+ * trade-off. `shared/` is packaged, so the manifest travels with the app.
+ */
+function writeBuildManifest(readiness, extra = {}) {
+  const manifest = {
+    version:   appVersion(),
+    builtAt:   new Date().toISOString(),
+    builtOn:   `${process.platform}-${process.arch}`,
+    nodeAtBuild: process.versions.node,
+    readiness: {
+      verdict:   readiness.verdict,
+      predicted: readiness.predicted,
+      limits:    readiness.limits,
+      degraded:  readiness.degraded,
+      checks:    readiness.checks,
+    },
+    ...extra,
+  };
+  try {
+    fs.mkdirSync(path.dirname(MANIFEST_FILE), { recursive: true });
+    fs.writeFileSync(MANIFEST_FILE, JSON.stringify(manifest, null, 2));
+    return manifest;
+  } catch (e) {
+    warn(`Build manifest could not be written (${e.message}) — the app will not know its own build limits`);
+    return null;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // STAGE 4 — PACKAGE
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -944,24 +1159,25 @@ async function packageApp(dirOnly, { noSignEdit = false } = {}) {
   const flags = platformFlags();
 
   // Disabling sign/edit-executable is what keeps electron-builder from fetching
-  // and extracting winCodeSign, which is the step that needs a symlink privilege
-  // this account may not have. Verified on the work machine: with this flag the
-  // winCodeSign download does not happen at all.
-  if (noSignEdit && wantWin) flags.push('-c.win.signAndEditExecutable=false');
+  // and extracting winCodeSign, which is the step needing a symlink privilege this
+  // account may not have. Verified: with this flag the download does not happen.
+  //
+  // Computed once and pushed once. It was previously pushed by both the noSignEdit
+  // branch and the dirOnly branch, and a repeated `-c.x=y` makes electron-builder
+  // parse the value as an array — "configuration.win.signAndEditExecutable should
+  // be a boolean". Two independent reasons to set the same flag is not a reason to
+  // set it twice.
+  const skipSignEdit = wantWin && (noSignEdit || dirOnly);
+  if (skipSignEdit) flags.push('-c.win.signAndEditExecutable=false');
 
-  if (dirOnly) {
-    flags.push('--dir');
-    // MEASURED, not assumed: `--dir` alone is still not enough on a machine where
-    // 7za is blocked. After the app tree is packed, electron-builder downloads
-    // winCodeSign-2.6.0.7z and extracts it *with 7za* for the sign/edit-executable
-    // step — even with no certificate configured — and fails there four times over.
-    // Turning that step off is what makes this rung reachable at all.
-    //
-    // The cost, stated rather than hidden: the launcher .exe keeps Electron's
-    // default icon and version metadata, because rcedit is part of the step being
-    // skipped. The application itself is complete and runs normally.
-    if (wantWin) flags.push('-c.win.signAndEditExecutable=false');
-  }
+  // MEASURED, not assumed: `--dir` alone is not enough on a machine where 7za is
+  // blocked. After the app tree is packed, electron-builder downloads
+  // winCodeSign-2.6.0.7z and extracts it *with 7za* for the sign/edit-executable
+  // step — even with no certificate configured — and fails four times over. That
+  // is why `skipSignEdit` above includes dirOnly, and why the flag is not optional
+  // on that path. The cost is stated rather than hidden: the launcher .exe keeps
+  // Electron's default icon, because rcedit is part of the skipped step.
+  if (dirOnly) flags.push('--dir');
 
   // electron-builder directly, not `npm run build:win` — that would run
   // `vite build` a second time.
@@ -1230,6 +1446,9 @@ ${C.bold}Rāma AGI — build from source, anywhere${C.reset}
   node scripts/buildInstaller.cjs --win       Windows targets (default here)
   node scripts/buildInstaller.cjs --mac       macOS targets
   node scripts/buildInstaller.cjs --linux     Linux targets
+  node scripts/buildInstaller.cjs --readiness Verify readiness to build a setup,
+                                             write the verdict, build nothing
+  node scripts/buildInstaller.cjs --force     Package even if readiness says no
   node scripts/buildInstaller.cjs --dir       Unpacked + portable zip only
   node scripts/buildInstaller.cjs --dry-run   Check the machine, build nothing
   node scripts/buildInstaller.cjs --skip-install    Fail instead of installing
@@ -1267,12 +1486,30 @@ async function main() {
     try { return appVersion(); } catch { return '?'; }
   })()}${C.reset}\n`);
 
-  if (!checkToolchain()) return 1;
+  const toolchainOk = checkToolchain();
+  // Probed once, here, so stage 0's warning and the readiness verdict can never
+  // disagree about the same machine.
+  const link = isWin ? canCreateSymlink() : { ok: true };
+  const nsisNotes = checkInstallerScript(link);
 
-  const nsisNotes = checkInstallerScript();
+  if (!toolchainOk && !readinessOnly) return 1;
 
-  const deps = await ensureDependencies();
-  if (!deps.ok) return 1;
+  // In readiness mode nothing is installed — the question is what this machine can
+  // do as it stands, and installing would change the answer while measuring it.
+  const deps = readinessOnly
+    ? auditForReadiness()
+    : await ensureDependencies();
+  if (!deps.ok && !readinessOnly) return 1;
+
+  if (readinessOnly) {
+    const archiverProbe = resolveArchiver();
+    const readiness = computeReadiness({
+      toolchainOk, deps, archiver: archiverProbe, link, nsisNotes,
+      rendererPresent: fs.existsSync(path.join(ROOT, 'build', 'index.html')),
+    });
+    printReadiness(readiness);
+    return readiness.verdict === 'not-ready' ? 1 : 0;
+  }
 
   if (dryRun) {
     const probe = resolveArchiver();
@@ -1295,8 +1532,39 @@ async function main() {
 
   const dirOnly = archiver.level === 2;
 
-  let packaged = await packageApp(dirOnly);
-  let unbranded = false;
+  // ── Readiness feeds the build, rather than the build rediscovering it ───────
+  const readiness = computeReadiness({
+    toolchainOk, deps, archiver, link, nsisNotes,
+    rendererPresent: fs.existsSync(path.join(ROOT, 'build', 'index.html')),
+  });
+
+  if (readiness.verdict === 'not-ready' && !force) {
+    stage(4, 'PACKAGE — refused');
+    fail('Readiness says this build cannot produce anything usable:');
+    for (const b of readiness.blocking) fail(`  ${b}`);
+    fail('Nothing was packaged. Fix the above, or pass --force to try anyway.');
+    return 1;
+  }
+
+  // The actual handling master asked for: when readiness already knows the .exe
+  // cannot be branded, do not spend four minutes on an installer attempt whose
+  // failure is a foregone conclusion. Go straight to the rung that works.
+  const brandingImpossible = isWin && !readiness.checks.symlinkPrivilege;
+  if (brandingImpossible && !dirOnly) {
+    info('Readiness: no symlink privilege, so the branded attempt would fail at winCodeSign.');
+    info('  Skipping it and building the installer with branding disabled directly.');
+  }
+
+  // Record what was true at build time, inside the app, before it is packaged.
+  writeBuildManifest(readiness, {
+    archiver: { level: archiver.level, version: archiver.version ?? null },
+    branded: !brandingImpossible && !dirOnly,
+    outputs: dirOnly ? ['portable-zip'] : ['nsis-installer', 'portable-exe'],
+  });
+  ok(`Build manifest written — the app will know its own limits at runtime`);
+
+  let packaged = await packageApp(dirOnly, { noSignEdit: brandingImpossible });
+  let unbranded = brandingImpossible && !dirOnly;
 
   // Rung between "installer" and "give up on installers": the winCodeSign
   // symlink-privilege failure is entirely avoidable, because the only reason

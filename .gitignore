@@ -29,6 +29,14 @@ ai_backend/*.egg-info/
 *.enc
 secrets/
 
+# Generated at build time by scripts/buildInstaller.cjs and packaged into the app
+# so it can report its own build-time limits at runtime. Machine-specific: it
+# records the readiness verdict of whichever machine produced the build, so
+# committing it would ship one machine's verdict as if it described every build.
+# electron-builder packages from the working tree, not from git, so ignoring it
+# here does not stop it shipping.
+shared/buildManifest.json
+
 # Runtime data — encrypted stores, salt, verifier, scenario memory, logs.
 # Never committed: rama.salt and rama.verify are per-machine, and the .enc
 # domains are the user's data. Committing them would also let an attacker

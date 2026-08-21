@@ -11,16 +11,40 @@ echo     RAMA AGI
 echo   ============================================
 echo.
 echo     1. Start Rama  (normal use)
-echo     2. Build installer from source  (installs what is missing)
-echo     3. Diagnose only  (check, fix nothing)
-echo     4. Exit
+echo     2. Check readiness to build a setup  (verify, build nothing)
+echo     3. Build installer from source  (installs what is missing)
+echo     4. Diagnose the running environment  (check, fix nothing)
+echo     5. Exit
 echo.
-set /p CHOICE="  Choose 1-4 and press Enter: "
+set /p CHOICE="  Choose 1-5 and press Enter: "
 
 if "%CHOICE%"=="1" goto START
-if "%CHOICE%"=="2" goto BUILD
-if "%CHOICE%"=="3" goto DIAGNOSE
-if "%CHOICE%"=="4" goto END
+if "%CHOICE%"=="2" goto READINESS
+if "%CHOICE%"=="3" goto BUILD
+if "%CHOICE%"=="4" goto DIAGNOSE
+if "%CHOICE%"=="5" goto END
+goto MENU
+
+:READINESS
+echo.
+echo   Verifying whether this machine can produce a setup worth installing.
+echo   Nothing is installed, built or changed - this only measures.
+echo.
+call node scripts\buildInstaller.cjs --readiness
+if errorlevel 1 (
+    echo.
+    echo   NOT READY - the blocking items above must be fixed first.
+    echo   Option 3 would refuse to build until they are resolved.
+    echo.
+    pause
+    goto MENU
+)
+echo.
+echo   The verdict has been saved. Option 3 reads it and adapts the build
+echo   accordingly - for example skipping a step that is known to fail here.
+echo.
+set /p GOBUILD="  Build the setup now using this verdict? (y/n): "
+if /i "%GOBUILD%"=="y" goto BUILD
 goto MENU
 
 :START

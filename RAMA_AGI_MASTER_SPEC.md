@@ -1703,6 +1703,7 @@ authenticated **Master session**, not merely an open store.
 | 65 | Free design resources, adopted only on master's decision | in-progress (catalog seeded; no design change proposed yet) | Section 47. Added a `design` axis to `shared/resourceCatalog.json` — 7 entries, all free *and* redistributable in a shipped app, each carrying a new `license` field because licence, not price, is what decides a design asset. Anything merely "free to view" is excluded: bundling it would be a licence breach dressed as a saving. `resourceResearchEngine.cjs` iterates axes generically, so no engine change was needed. Entries, ordered by how directly they address what master reported: `modern-css-reset` (density scale — the dead vertical space; lowest-risk starting point), `fluid-type-scale` (CSS `clamp()`, Utopia method — the tiny type, complementary to row 64's zoom since zoom scales uniformly while a fluid scale changes ratios; **blocked on tokenising hundreds of inline `px` font sizes**, which is precisely why it must be a reviewed proposal), `lucide` (ISC — replaces unicode glyphs `⬢ ◈ ▣ ↕ ↺` that render differently per machine; a real cross-platform inconsistency, not taste), `radix-colors` (MIT, contrast-verified dark scales) vs `open-color` (MIT, simpler, listed so the report compares rather than presents one option), `inter-font` (OFL 1.1, tabular figures stop metric readouts jittering), `hud-display-fonts` (OFL 1.1, headings only — poor for body text, and a proposal should argue that scope or drop it). Fixed a live bug the axis would have amplified: `statusFor()` returned `'no-key-needed'` for entries needing no credential *and not wired*, which `Resources.jsx` renders as a green **"READY"** — so Qdrant claimed to be ready while nothing referenced it, and all seven design entries would have claimed the same. Absence of a key requirement is not adoption; those now report `'researched-only'` ("NOT ENABLED"), and the dead style key was removed since unknown statuses already fall back to it. Next step: run `resource:research` on `modern-css-reset` and `lucide`, then file the first `KINDS.RESOURCE` proposal for master to approve or reject — nothing here touches the UI without that (I6). |
 | 66 | Installed app died on launch — `Cannot find module 'debug'` | done | Section 48. `build.files` used `!node_modules/**/*` plus a hand-written allowlist of 18 packages. npm hoists transitive dependencies to top-level `node_modules`, so the exclusion stripped everything the list did not name: **211 of a 229-package production closure were absent from the asar** — `express` without `body-parser`, `axios` without `follow-redirects`, `argon2` without `node-gyp-build`. `debug` was just the first one the loader reached. The allowlist could never have been correct, because it enumerates direct dependencies while npm's layout is decided by hoisting; any upgrade could move a package from nested to hoisted and break it again. Fixed by letting electron-builder resolve the production tree itself: `files` now includes `node_modules/**/*` and excludes only renderer-only libraries (verified by grep that nothing in `electron/`/`server/` requires them), the build toolchain, and test/doc directories. The remaining risk direction is deliberate — a wrong exclusion makes the package bigger, a missing allowlist entry makes the app not start. Two incidental findings: specifying any `files` pattern replaces electron-builder's default `**/*`, so omitting `node_modules/**/*` produced an asar with **zero** packages; and a stale `win-unpacked` causes `ENOENT: rename electron.exe`. New `scripts/auditPackage.cjs` + `npm run audit:package`, wired into `buildInstaller.cjs` as a stage that fails the build: it opens the built asar and walks outward from the real entry points, so it reads the artefact rather than the config — which is the actual lesson, since every stage had reported success while the artefact was unloadable. Three refinements each came from a wrong first attempt: reachability instead of a full scan (a full scan reported 65 misses, nearly all third-party `test.js` noise; reachability walks 831 files instead of 7,790), splitting misses on local presence so `chromium-bidi` — absent from `node_modules` entirely, so failing in dev too — is not blamed on packaging, and treating `try/catch`-guarded requires as degrading rather than fatal since that is this project's deliberate optional-dependency pattern. It also fails when it cannot read most of the archive: the first version normalised the asar's Windows backslash paths before `extractFile`, read **13 of 7,790 files and reported success**. Verified against the bug by rebuilding with the old allowlist — exit 1, 51 packages flagged with load paths including `debug`; fixed config exits 0 with `fsevents`/`osx-temperature-sensor` correctly degrading. **Not verified: that the installed app now launches** — that needs master to install it. |
 | 67 | Self-heal that survives being packaged | done (containment + honest reporting; autonomous repair still needs the updater live) | Section 49. Master's challenge was correct and the evidence was that an external assistant diagnosed four consecutive failures Rāma should have reported itself. Measured boundary: `main` is `electron/main.cjs`, so the installer loads it directly — and **every repair capability lives in `start.cjs`, which is not matched by any `build.files` glob**. It could not work there anyway: every repair shells out to npm against a writable tree, and an install has no npm, no `vite`, and a read-only asar. So the packaged app inherited monitoring and lost repair, with **no `uncaughtException` handler anywhere in `electron/**`** and ~45 unguarded module-scope requires. `bootFailurePage()` — the right tool, dependency-free — was unreachable because all four call sites sit downstream of `createMainWindow()`. The `isDev` check inside `setupAutoUpdater()` shows the shape of the error exactly: it guards the *invocation* ~550 lines after the *require* that throws. Three new dependency-free modules: `lib/crashGuard.cjs` installed as the first statement of `main.cjs` (a guard after the failing require protects nothing) — claims both handlers, turns `MODULE_NOT_FOUND` into "Rāma is missing a component: debug" rather than a stack, writes a report to writable `userData/crash/` keeping 20, and offers Relaunch/Show report/Quit via native `dialog` rather than a BrowserWindow *because* the fault may be a missing module and a window needs the renderer and preload that could be equally absent; `lib/safeRequire.cjs` wrapping every engine require, returning an **inert stub rather than null** since callers do `engine.register()` unconditionally and null would just be a worse crash — stub `register()` is a no-op so startup completes, other methods return `{ok:false,degraded:true}`; `lib/startupDoctor.cjs`, the diagnose stage inside the app, checking that runtime dependencies actually resolve (`genome.verify()` only resolves *first-party* engine paths, which is why a missing npm package never showed as a dead gene), the renderer bundle, and the capability matrix — whose absence does not throw, since `capability.can()` fails closed, so the app would start and deny every action, reading as a permissions bug. Guidance is build-aware: `bootFailurePage` told installed users to run `npm install && npm run build && node start.cjs --prod`, impossible from an install — advice that cannot be followed is worse than none. Exposed as `health:startup`/`health:crash-reports`/`health:crash-dir`, ungated (same class as the Home dashboard's metrics; withholding "your installation is incomplete" from someone staring at a broken feature would be perverse). Verified by 27 assertions with `electron` stubbed: the original error classified as missing module `debug` while an unrelated error is not, require stack preserved, packaged advice free of `npm install` while dev advice has it, stub refuses politely, missing renderer fatal when packaged but degraded in dev, previous crash surfaced on next start, every fatal finding carrying a remedy. `npm run audit` + `audit:package` clean. **Honest limit: this buys survival and honesty, not autonomy.** Rāma still cannot repair a broken install — only degrade cleanly, say exactly what is wrong, and offer the update channel. Real autonomous recovery needs the auto-updater live (row 53, dormant: needs a release cut + GitHub Actions). **Not verified: that the installed app shows this dialog rather than Electron's** — needs master to install a build. Next step: surface `health:startup` on the System page so degradation is visible in the UI, not just the terminal. |
+| 68 | Readiness as an input to the build, not just a report | done (constrained path verified; `ready` path unverifiable here) | Section 50. `Rama.bat` option 2 "Check readiness to build a setup" (`--readiness`, `npm run package:readiness`), build moves to option 3. The verdict is **data the build consumes**, which is the half that matters: a report is something master reads and acts on manually. Three shades of working with an explicit `predicted` string — fully branded installer / unbranded `.exe` / portable zip only / nothing — because knowing *which* a ten-minute build yields beats knowing it "should work". Measuring must not change what it measures: readiness audits dependencies but installs nothing (a check that installed the things making it ready would always say ready), and the archiver verdict comes from the remembered probe rather than a fresh execution, since re-testing a blocked binary raises a policy dialog at master. The symlink probe now runs **once** in `main()` and is passed into both the stage 0 warning and the verdict — two measurements of one fact can disagree, one cannot. Three concrete handlings: (1) refuses to build on `not-ready` (`--force` overrides, since an unbypassable refusal is its own burden); (2) **skips the branded attempt when readiness already knows it will fail at winCodeSign** — settled fact on that machine, so four minutes are no longer spent proving it again, with Section 48's retry ladder kept as the net for unpredicted failures; (3) writes `shared/buildManifest.json` into the asar recording version, build time, verdict and every accepted limit. That manifest closes the loop with row 67: `startupDoctor` could report `node-pty` unavailable but not *why*, so every degradation read as damage — it now re-labels anything the build already knew as `expected: true` with "known at build time, not a fault in this installation", which is the difference between a note and a reinstall. Manifest is gitignored (it records one machine's verdict; electron-builder packages from the working tree, not git, so ignoring it does not stop it shipping). Bug introduced and caught in the same pass: routing branding through readiness pushed `-c.win.signAndEditExecutable=false` twice, and a repeated `-c.x=y` makes electron-builder parse it as an array — `should be a boolean`; now computed once as `skipSignEdit = wantWin && (noSignEdit \|\| dirOnly)`. Verified on the constrained machine: `--readiness` → `ready-with-limits`, predicts "portable zip only", names all three real limits; a build consumed it, wrote the manifest, packaged, passed `audit:package`, exit 0; manifest confirmed **inside** `app.asar` with `branded:false` and the `node-pty` degradation; 10 runtime assertions confirm the doctor loads it and marks that degradation expected. **Not verified: the `ready` path and the branded-installer skip** — this machine can reach neither. |
 | 61 | Fleet awareness — Rāma on several devices, staying in touch | in-progress (designed, not implemented; one decision open for master) | Section 46. Researched first: there is **no cross-device anything today** — instances are objects in one in-process `Map` with no `host`/`machineId`/`deviceId`/`lastHeartbeat` field (`instanceManager.cjs:112-133`), "sibling" discovery is a `.filter()` over that same Map (`selfCare.cjs:144-145`), a "dead" gene means a local module path failed to resolve, the API server binds `127.0.0.1` explicitly (`server/index.cjs:101`), and there is no WebSocket/mDNS/discovery/peer code at all. Usable anchors that do exist: `authCore`'s `instanceMeta.instanceId` (stable per-install UUID) + `instanceName` (`<hostname>-rama`), and `cryptoCore`'s AES-256-GCM. **Decisions recorded in Section 46:** (a) the corporate-managed machine is *not* enrolled as a peer — Rāma's IPC surface (`terminal:create`, `fs:write/delete`, `vault:*`, `apps:execute` `spawn-cli`, `system:kill-process`, `regen:*`) makes a peer channel a wider remote-access path than the RDP that was declined a turn earlier; (b) first increment uses the **existing git remote as the fleet bus** — no listener, no inbound, no NAT traversal, same outbound traffic as a `git push`, auditable as commits, at the honest cost of minute-scale eventual consistency rather than live presence; (c) fleet payloads are **encrypted** with the existing `cryptoCore` path, because `build.publish` is `"private": false` and telemetry carries hostnames, paths and OS usernames — plaintext would be a leak created by a protective feature; (d) fleet messages are a closed status vocabulary (device id/name, liveness, genomeVersion+genomeHash for drift detection, selfCare summary, task/build headline, alerts) and the reader is **never** a proxy onto `ipcMain` — a remote device may inform, never act; (e) peer identity comes from the device record, never a caller-supplied `user` and never `authClient.getFingerprint()` (`userAgent+language+screen+timezone` collides across similar laptops). Next steps, in order: **(1) gate `instance:*` — worth doing regardless of this feature.** Those handlers have no `capability.deny()` at all (`instanceManager.cjs:300-341`) and `express(id, gene, null)` skips the tier check by design for `selfCare.cjs:158`'s self-heal; caps `instances.view/spawn/express/terminate` already exist in `capabilities.json` but are unenforced at the IPC boundary. This is the same class row 59 closed for `fs`/`vault`/`terminal`/`git`/`agents`/`sandbox` and missed here; needs `preload.cjs` + every `.jsx` caller threading `currentUser`, verified with `npm run audit`. (2) Add device fields (`deviceId`, `deviceName`, `lastHeartbeat`) to instance records, anchored on `instanceMeta.instanceId`. (3) Add `fleet.view`/`fleet.publish`/`fleet.enroll` capabilities. (4) Build publish/read over the `fleet` branch with encrypted payloads and explicit master enrolment. **Blocked on master confirming the enrolment scope** before (4). |
 
 ### Resume checklist for a cold session
@@ -4094,3 +4095,114 @@ wrong, and offer the update channel. Genuine autonomous recovery for an install
 means the auto-updater path being live, which needs a release cut and GitHub
 Actions enabled (ledger row 53, still dormant). Until then the honest claim is
 "Rāma will never again die silently", not "Rāma fixes itself".
+---
+
+## SECTION 50 — Readiness as an input to the build, not just a report
+
+> Master's ask: an option in the batch file to verify health and readiness to
+> generate the setup file, and once verified, "that info is taken as input for
+> setup generation and necessary handling is done at the time of creating setup."
+
+The second half is the part that matters. A readiness *report* is a document
+master reads and then acts on manually. A readiness *verdict* is data the build
+consumes, so the machine acts on it instead.
+
+### Three shades of working, known before the build starts
+
+The interesting outcomes here are not "works" and "broken". They are:
+
+| Verdict | What master actually receives |
+|---|---|
+| `ready` | NSIS installer + portable exe, fully branded |
+| `ready-with-limits` | installer with an unbranded `.exe`, **or** portable zip only |
+| `not-ready` | nothing usable |
+
+Knowing which of those a ten-minute build will produce is worth more than knowing
+it "should work", so the verdict carries an explicit `predicted` string rather than
+a boolean.
+
+`Rama.bat` gains option 2, **Check readiness to build a setup**, which measures and
+changes nothing, then offers to proceed. Build moves to option 3.
+
+### Measuring must not change what it measures
+
+Readiness mode audits dependencies but **does not install them**. A check that
+installed the things which make the machine ready would always return ready, and
+would be worthless. `auditForReadiness()` therefore reports the dependency picture
+as it stands and notes that a build would install it — missing-but-installable is a
+limit, not a blocker.
+
+For the same reason the archiver verdict comes from the remembered probe
+(Section 45) rather than a fresh execution: re-testing a blocked binary raises an
+endpoint-security dialog at master, and asking a settled question again is not
+worth interrupting them for.
+
+The symlink probe is now run **once** in `main()` and passed into both the stage 0
+warning and the readiness verdict, rather than each measuring independently. Two
+measurements of the same fact can disagree; one cannot.
+
+### What the build does with the verdict
+
+This is the "necessary handling" master asked for, and it is three concrete things:
+
+1. **Refuses to start when the verdict is `not-ready`.** Ten minutes spent
+   producing nothing is worse than a refusal in two seconds. `--force` overrides,
+   because a blanket refusal master cannot bypass is its own kind of burden.
+2. **Skips a step whose failure is already known.** When readiness says there is no
+   symlink privilege, the branded installer attempt *will* fail at winCodeSign —
+   this is settled fact on that machine, not a possibility. The build now goes
+   straight to the rung that works instead of spending four minutes proving it
+   again. The retry ladder from Section 48 stays as the safety net for a failure
+   readiness did not predict.
+3. **Writes a build manifest into the app.** `shared/buildManifest.json` is
+   generated before packaging and ships inside the asar, recording the version,
+   build time, readiness verdict, and every accepted limitation.
+
+### Why the manifest closes the loop with Section 49
+
+`startupDoctor` can report at runtime that `node-pty` is unavailable. What it could
+not know is *why*. Without the manifest, every degradation reads as damage, and
+master cannot tell "this build was made on a machine with no C++ toolchain" — an
+accepted trade-off, recorded at the moment it was accepted — from "this
+installation is broken". Those demand opposite responses: one is a note, the other
+is a reinstall.
+
+The doctor now loads the manifest and re-labels anything the build already knew
+about as `expected: true`, appending "known at build time, not a fault in this
+installation". Build-time knowledge and runtime knowledge finally refer to the same
+facts.
+
+The manifest is gitignored: it records the verdict of whichever machine produced
+the build, so committing it would ship one machine's verdict as though it described
+every build. electron-builder packages from the working tree rather than from git,
+so ignoring it does not stop it shipping.
+
+### A bug introduced and caught in the same pass
+
+Routing the branding decision through readiness meant `-c.win.signAndEditExecutable=false`
+was pushed by both the `noSignEdit` branch and the `dirOnly` branch. A repeated
+`-c.x=y` makes electron-builder parse the value as an array, and the build died on
+`configuration.win.signAndEditExecutable should be a boolean`. Two independent
+reasons to set a flag is not a reason to set it twice; the condition is now computed
+once as `skipSignEdit = wantWin && (noSignEdit || dirOnly)` and pushed once.
+
+### Verified
+
+On this machine, which is the constrained case:
+
+- `--readiness` returns `ready-with-limits`, predicts "portable zip only (no
+  installer)", and names all three real limits — blocked archiver, no symlink
+  privilege, `node-pty` not compiled. Verdict written to
+  `data/system/readiness.json`.
+- A build then consumed it, wrote the manifest, packaged, passed the dependency
+  audit, and produced the portable archive. Exit 0.
+- The manifest was confirmed **inside** `app.asar` at `shared/buildManifest.json`,
+  carrying `verdict: ready-with-limits`, `branded: false`,
+  `outputs: [portable-zip]`, and the `node-pty` degradation.
+- 10 assertions on the runtime side: the doctor loads the manifest, reports it as a
+  passing check, and marks the `node-pty` degradation `expected: true` with wording
+  that says it was known at build time rather than implying damage.
+
+**Not verified:** the `ready` path and the branded-installer skip, because this
+machine can reach neither. Both are exercised only where a working 7-Zip and the
+symlink privilege exist.

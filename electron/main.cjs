@@ -457,6 +457,7 @@ function registerHealthIpc(ipcMain) {
         degraded:      startupHealth.degraded,
         checks:        startupHealth.report,
         previousCrash: startupHealth.previousCrash,
+        buildManifest: startupHealth.buildManifest,
         packaged:      app.isPackaged,
       },
     };

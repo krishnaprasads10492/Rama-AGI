@@ -11,10 +11,11 @@
 Double-click **`Rama.bat`** in the project root. It opens a simple menu:
 
 ```
-  1. Start Rama                      (normal use)
-  2. Build installer from source     (installs what is missing)
-  3. Diagnose only                   (check, fix nothing)
-  4. Exit
+  1. Start Rama                          (normal use)
+  2. Check readiness to build a setup    (verify, build nothing)
+  3. Build installer from source         (installs what is missing)
+  4. Diagnose the running environment    (check, fix nothing)
+  5. Exit
 ```
 
 - **First time?** Pick option 1. `node start.cjs` underneath it installs
@@ -22,15 +23,24 @@ Double-click **`Rama.bat`** in the project root. It opens a simple menu:
   you don't need to run `npm install` yourself first.
 - **On first launch**: set your master passcode (min 10 chars). This
   passcode encrypts ALL data — store it securely.
-- **Want an installable app?** Pick option 2. Source code and Node.js are
-  all you need — it checks what's installed, installs whatever is missing,
-  builds the renderer, then packages the app. Nothing outside the project
-  folder is touched.
-- Option 2 *builds* into `dist-electron\`; it does not install anything by
+- **Want an installable app?** Pick option 2 first — it verifies whether this
+  machine can produce a setup worth installing and tells you *which kind* you'd
+  get (fully branded installer, installer with an unbranded `.exe`, or a
+  portable zip) before you spend ten minutes on it. It changes nothing.
+  Then pick option 3 to build. Option 3 reads option 2's verdict and adapts:
+  if a step is known to fail on this machine, it skips it rather than failing
+  through it.
+- **Option 3** needs only source code and Node.js — it checks what's installed,
+  installs whatever is missing, builds the renderer, then packages the app.
+  Nothing outside the project folder is touched.
+- Option 3 *builds* into `dist-electron\`; it does not install anything by
   itself. Building and installing are two separate steps: when it finishes,
   double-click the generated `Rama AGI Setup <version>.exe` from that folder
   the same way you'd run any downloaded installer, and *that* is what puts
   Rāma into Program Files with a desktop shortcut.
+- The build also writes a manifest into the app recording what was true when it
+  was made, so the installed Rāma can tell an accepted trade-off ("this build
+  shipped without a compiled pty") apart from a damaged installation.
 - If your machine's security policy blocks the bundled 7-Zip (electron-builder
   needs it for installers), the build says so and produces a **portable zip**
   instead — unzip it anywhere and run `Rama AGI.exe`. Installing a current
@@ -84,12 +94,18 @@ This generates:
 Self-preparing (installs missing dependencies first — use these on a fresh
 clone). Same thing `Rama.bat` option 2 runs:
 ```bash
-npm run package          # this platform
-npm run package:win      # Windows installer (.exe) + portable
-npm run package:mac      # macOS DMG
-npm run package:linux    # Linux AppImage + .deb
-npm run package:check    # report what this machine can produce, build nothing
+npm run package:readiness # verify readiness to build a setup, build nothing
+npm run package           # this platform
+npm run package:win       # Windows installer (.exe) + portable
+npm run package:mac       # macOS DMG
+npm run package:linux     # Linux AppImage + .deb
+npm run package:check     # quick machine check, build nothing
+npm run audit:package     # verify a built app.asar can resolve its dependencies
 ```
+
+`package:readiness` writes its verdict to `data/system/readiness.json`. The
+build reads it, refuses to run if the verdict is `not-ready` (override with
+`--force`), and skips steps already known to fail on this machine.
 
 Raw (assumes dependencies are already installed):
 ```bash

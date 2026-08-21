@@ -151,6 +151,36 @@ function diagnose(ctx = {}) {
     degraded.push({ id: `load-${f.name}`, detail: `${f.name} did not load — ${f.reason}` });
   }
 
+  // ── What was true when this build was made ─────────────────────────────────
+  // Without this, every runtime degradation looks like damage. The manifest lets
+  // Rāma say "node-pty was not compiled into this build" — an accepted trade-off
+  // recorded at build time — rather than "node-pty is missing", which reads as a
+  // broken installation and sends master looking for a fault that is not there.
+  let buildManifest = null;
+  try { buildManifest = require('../../shared/buildManifest.json'); }
+  catch { /* built before manifests existed, or built by the raw build:win path */ }
+
+  if (buildManifest) {
+    add('build manifest', true,
+      `${buildManifest.version} built ${String(buildManifest.builtAt).slice(0, 10)}, readiness ${buildManifest.readiness?.verdict ?? 'unknown'}`);
+  } else {
+    add('build manifest', false, 'absent — build-time limits unknown');
+  }
+
+  const known = new Set(
+    (buildManifest?.readiness?.degraded ?? []).map(d => String(d).split(' ')[0]),
+  );
+
+  // Re-label anything the build already knew about, so it reads as expected rather
+  // than as a new fault.
+  for (const d of degraded) {
+    const subject = String(d.detail).split(' ')[0];
+    if (known.has(subject)) {
+      d.expected = true;
+      d.detail = `${d.detail} — known at build time, not a fault in this installation`;
+    }
+  }
+
   // ── A crash on a previous run ──────────────────────────────────────────────
   const previousCrash = (ctx.crashReports ?? [])[0] ?? null;
 
@@ -160,6 +190,7 @@ function diagnose(ctx = {}) {
     degraded,
     report,
     previousCrash,
+    buildManifest,
   };
 }
 
