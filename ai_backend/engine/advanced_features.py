@@ -250,15 +250,32 @@ def market_profile_features(df: pd.DataFrame) -> dict:
     va_low_b  = poc_bucket
     va_high_b = poc_bucket
 
+    # Expand outward from the POC, always taking the heavier neighbour, until 70% of
+    # volume is enclosed.
+    #
+    # THE SIDE THAT CANNOT MOVE MUST NEVER WIN THE COMPARISON. This loop used to read
+    # the exhausted side's contribution as 0 and then `add_high >= add_low` picked
+    # `high` on a 0-vs-0 tie. `min(va_high_b + 1, n_buckets - 1)` clamped to the same
+    # index and `va_vol += 0` changed nothing, while the `or` in the condition stayed
+    # true because the low side still had room — an infinite loop, reachable whenever
+    # the POC lands in the top bucket and the bucket below it is empty. Twenty bars
+    # binned into twenty buckets leaves empty buckets routinely, so this hung live
+    # `/predict` calls as well as backtests, on data alone. See spec Section 66.
+    #
+    # A sentinel of -1 keeps an exhausted side out of the comparison (volumes are >= 0),
+    # and exactly one index moves per iteration, so the loop is bounded by n_buckets - 1
+    # by construction rather than by a counter.
     while va_vol < total_vol * 0.70 and (va_low_b > 0 or va_high_b < n_buckets - 1):
-        add_low  = vol_profile[va_low_b - 1]  if va_low_b > 0              else 0
-        add_high = vol_profile[va_high_b + 1] if va_high_b < n_buckets - 1 else 0
-        if add_high >= add_low:
-            va_high_b = min(va_high_b + 1, n_buckets - 1)
-            va_vol += add_high
+        can_low  = va_low_b > 0
+        can_high = va_high_b < n_buckets - 1
+        add_low  = vol_profile[va_low_b - 1]  if can_low  else -1.0
+        add_high = vol_profile[va_high_b + 1] if can_high else -1.0
+        if can_high and (not can_low or add_high >= add_low):
+            va_high_b += 1
+            va_vol += vol_profile[va_high_b]
         else:
-            va_low_b = max(va_low_b - 1, 0)
-            va_vol += add_low
+            va_low_b -= 1
+            va_vol += vol_profile[va_low_b]
 
     vah = price_min + (va_high_b + 1) * bucket_size
     val = price_min + va_low_b * bucket_size

@@ -1721,6 +1721,9 @@ authenticated **Master session**, not merely an open store.
 | 79 | "No handler registered for 'session:unlock'" | diagnosed; fixes in place; **needs master to relaunch/rebuild to confirm** | Section 61. Reported three times; my first three explanations were all wrong, and **the evidence that settled it was timestamps, not code**: `build/` was **Aug 20 23:37**, `app.asar` **Aug 21 11:14**, newest `src/` file Aug 21 23:12, newest `electron/` file Aug 22 00:50, and Vite was **not running**. Master was running code that predated the entire session — which explains both of his observations at once, as no code theory did: the stale renderer is why "the new login page itself is not showing errors" (and with Vite down, running from *source* also served that stale `build/`), and the stale main process is why "the previous error still comes up". Confirmed from the artefact: `electron/lib/` in the asar holds 16 entries and **none of `loyaltyGuard.cjs`, `loyaltyCore.cjs`, `selfRepair.cjs`** — the files this session created. **Ruled out:** packaging. `audit:package` on that asar passed (12,266 entries, 741 package dirs, only macOS-only `osx-temperature-sensor` absent and correctly degrading), and a direct boot-path check found `main.cjs`, `preload.cjs`, `sessionManager.cjs`, `cryptoCore.cjs`, `dataStore.cjs`, `nucleusSealer.cjs`, `genome.cjs`, `authEngine.cjs`, `capabilities.json` and `build/index.html` all present — 53 main-process files, 134 renderer entries. Not row 66 repeating. **Actual failure:** that build had no `.catch()` on `whenReady` and 40 bare sequential `register()` calls, so a throw anywhere abandoned every later registration while the window still opened; `sessionMgr` is third from last, making the passcode screen the most likely victim of a fault anywhere upstream. Silent by construction, because Electron's message names the channel and never the cause, and **Rāma's own diagnostics all sit behind the gate that will not open** — the identical trap as Section 49's `bootFailurePage`, whose four call sites were all downstream of the failure it existed to report. `safeRequire`'s stub made it worse: a module that fails to load gets an inert stub whose `register()` is a **no-op that does not throw**, so a per-call guard reports nothing and only that subsystem's channels quietly vanish. **Fixed:** per-registration guards in an order-preserving table; a `whenReady` rejection handler that records a crash report and shows a dialog naming what did not start (deliberately not fatal — a partly-started Rāma that can explain itself beats one that exits); a thin recorder passed in place of `ipcMain` so channel creation is observable (Electron offers no way to ask whether a channel is registered), then the boot-critical channels verified present and the critical modules checked with `isStub`, with a **native** dialog naming load failures, absent channels and registration errors plus a button to the crash folder — native because the renderer cannot be relied on there; `crashGuard.record()` for faults caught elsewhere that deserve a durable report without termination; and `build/` rebuilt so running from source no longer serves a day-old renderer. Also answered master's question: a wrong passcode **returns** `{ok:false,error:'Incorrect passcode'}`, a value not a throw, so it renders as "Incorrect passcode" and can never produce "No handler registered". **Two standing assumptions corrected:** `vite build` *does* work here (`npm run build` completes in ~7s; the steering file's claim that `node_modules` is absent is wrong — the real limit is only the *installer*, blocked by the 7-Zip policy of Section 51); and **a stale artefact must be ruled out before any code-level theory** — three theories were tested against source that was never running, when checking three timestamps would have ended it immediately. **Unresolved:** which subsystem threw in that build is now unknowable — it was never logged and the build is superseded. Next step: master relaunches (full Electron restart, or rebuild if using the installer); a clean start means the fault was in code already replaced, and otherwise the dialog names it. |
 | 80 | `Module._initPaths()` cost the packaged app every engine — root cause of row 79 | **fixed**; needs master's rebuild to confirm | Section 62. **My bug, from Section 53's self-repair work, invisible in development by construction.** `selfRepair.registerRepairPath()` set `NODE_PATH` and called `Module._initPaths()`; its own comment called that "re-reading NODE_PATH into globalPaths", and the error is the word *re-reading* — **`_initPaths()` recomputes the search paths from scratch**, discarding the entries Electron patches in so that paths inside `app.asar` resolve. `safeRequire` then called it at the worst moment: `ensureRepairPath()` ran before the **first** guarded require, inside `main.cjs`'s module-scope chain. So the first `safeRequire` destroyed asar resolution, every later `require()` failed with MODULE_NOT_FOUND, `safeRequire` returned an inert stub for each — whose `register()` is a **silent no-op** — and because `sessionManager` and `dataStore` are the **last two** loaded, their channels were the visible casualties. **Development has no asar**, so `_initPaths()` recomputed ordinary paths that still worked; every local test passed and the fault existed only in a packaged build. **Why six wrong explanations came first:** every signal pointed away — `audit:package` reported "every package on a real load path is present" and was *correct* (they were present, they had become unresolvable); the build log was clean (30 pinned packages, both native binaries, installer + portable produced); reinstalling `node_modules` correctly changed nothing; and both modules load fine in isolation with all 36 registrations succeeding against a stub `ipcMain`. What identified it was the crash report shipped over git: **all four** boot-critical channels absent including `store:get` — two independent subsystems yielding zero channels while throwing nothing means stubs, and stubs plus provably-present packages has exactly one explanation. **Lesson: "the packages are present" and "the packages are resolvable" are different claims, and the package audit proves the first while reading like it proves the second.** **Fixed in two halves.** *Mechanism:* `_initPaths()` removed; resolution extended by wrapping `Module._resolveFilename` so the repair dir is consulted **only after normal resolution has already thrown**, via the documented `options.paths` form — so repair cannot shadow a working module by construction, not convention, and nothing existing is removed or reordered. An earlier attempt appended to `Module.globalPaths`, which does nothing (Node resolves bare specifiers through an internal `modulePaths`); the behavioural test caught that before it shipped. *Timing:* `safeRequire` no longer touches module paths at all; `ensureRepairPath()` is exported and called once from `whenReady` after every engine has loaded, where `retryFailures()` picks up a repaired module anyway. Verified by **15 assertions that assert the invariant rather than the symptom** (the symptom needs an asar to appear): `globalPaths` not recomputed; `express`/`crypto`/`path` **still resolve** afterwards; require cache intact; a module planted in the repair dir becomes require-able (the first attempt failed this); relative requires unaffected; an absent package still fails with its original error; repeated registration safe; plus three guards so the mistake cannot return — neither file may call `Module._initPaths` in live code and `safeRequire()` may not call `ensureRepairPath()`. `npm run audit` clean. **Session-level observation recorded in Section 62:** Sections 49, 52, 53 and 61 all added resilience machinery and three introduced a fault of their own (crash guard killed a working app; updater guard made a tray click fatal; self-repair cost a packaged build every engine). The common shape is **testing the mechanism in the environment where it cannot fail** — `crashGuard` with `electron` stubbed, `selfRepair` in a checkout with no asar. Since this workspace cannot produce an installer (Section 51), for anything touching module loading, packaging or startup **master's build is the only real test**, and that is a limit to state rather than paper over with local passes. |
 | 81 | **ROOT CAUSE** — `safeRequire` resolved every path one directory too deep | **fixed**; needs master's launch to confirm | Section 63. The boot report identified it in one read, after eight wrong explanations. **All 39 guarded requires failed**, every reason of the form `missing module "./ipc/system.cjs"`, while the same report's resolution check showed `../sessionManager.cjs` **resolves** — that contradiction is the whole diagnosis. `main.cjs` calls `safeRequire('./ipc/system.cjs')`, a path relative to `electron/` where the caller lives; `safeRequire.cjs` is in `electron/lib/`, and a bare `require(id)` inside it resolves relative to **its own** file, so it looked for `electron/lib/ipc/system.cjs`. Consequences in order: 39 failures → each returns an inert stub whose `register()` is a **silent no-op** → **13 IPC channels registered instead of ~257, and no `session:*` at all** (the 13 being handlers defined inside `main.cjs`, which never go through `safeRequire`) → the passcode screen is the first thing touched, hence "No handler registered for 'session:unlock'". **Broken since Section 49 introduced `safeRequire`, and never noticed because nothing verified the app launched afterwards** — every ledger row since carries the note "not verified: that the installed app launches", which was doing real work and was never acted on. **Why it became a puzzle:** the stub exists so one broken engine cannot kill the app, but applied to the loader's *own* misuse that reasoning inverts — 39 loader failures are indistinguishable from 39 unrelated missing packages, so a total failure looked like a partial one and every explanation went after *packaging* instead of *resolution*. Two true-but-misleading facts followed from that: `audit:package` correctly reported "every package on a real load path is present", and reinstalling `node_modules` correctly changed nothing. **Fix:** resolution anchored to `electron/` by default via `createRequire(path.join(__dirname,'..','main.cjs'))` so correctness does not depend on remembering to configure it, plus `main.cjs` calling the new `useRequire(require)` so the anchor is the caller's rather than an assumption; `retryFailures()` uses the same requirer, or it would have retried against the wrong root and reported permanent failure. Verified by **23 assertions on the property actually violated**: every id exactly as `main.cjs` passes it loads with zero failures, and the results are checked to be the **real modules rather than stubs wearing their names** (`sessionManager.register` is a function, `dataStore.DOMAINS` includes `proposals`); an absent module still stubs cleanly and is recorded; `useRequire` demonstrably changes resolution, proving the mechanism is live rather than incidentally correct. `npm run audit` clean. **Lesson recorded in Section 63:** three faults this session came from the same habit — **verifying a mechanism in the environment where it cannot fail**: `crashGuard` with `electron` stubbed (52), `selfRepair` in a checkout with no asar (62), and `safeRequire` called from a probe whose directory made its paths work, never from `main.cjs`, its only real caller. Section 49's 27 assertions checked that a stub refuses politely; **not one checked that a non-stub came back for a module that exists.** |
+| 82 | StockMind — the defects that made its prediction output meaningless | done | Section 64. Commit `48af9c1`. Retroactive row: Section 64 was written but never given a ledger row, so a cold session reading the ledger alone would not have known this work existed. Twelve fixes, the load-bearing ones being: `platt_scale` computed `1/(1+exp(p))` and was documented as "identity" while being monotonically **decreasing** — a more confident input produced a *lower* calibrated probability, so the whole grade ladder was inverted and A+ was unreachable; `/health` reported a hardcoded 7-of-4 models loaded; 37 feature names were zipped against a 59-value vector, so every named lookup past the drift point read a different feature than it claimed; `detect_regime` indexed the wrong vector positions; the ensemble's output was computed and discarded; and signal multiplicity was faked by re-calling the model with jittered noise. Decisions that must not be re-litigated: **Platt is applied to the log-odds** (`sigmoid(A*logit(p)+B)`), which is a genuine identity at `A=1,B=0` — merely flipping the sign still scales the wrong quantity and breaks the moment real `A,B` are fitted; **`ece`/`brierScore` report `null` with `calibrationMeasured:false`**, never `0`, because 0 reads as perfect calibration; **`is_available()` (can answer) is split from `is_trained()` (loaded artifact)**, found because `RegimeAwareModel` set `loaded=True` in its constructor and counted itself as trained; **feature names are derived from `compute_features_dict`**, which kills the name/vector drift class permanently rather than repairing the hand-maintained list; and **N signals are N risk-geometry variants of ONE prediction** (`RISK_VARIANTS`) with `barrier_probability = pb/(pb+(1-p)a)`, which reduces to `b/(a+b)` driftless and to `p` at symmetric barriers. 74 assertions in `ai_backend/tests/test_defects.py`. |
+| 83 | StockMind — real market data, decades deep, free first | done | Section 65. Commit `637ba2c`. Retroactive row, same gap as 82. `ai_backend/engine/providers.py` (free-first chain with premium slots, each independently enable/disable-able by env) + `ai_backend/engine/store.py` (local append-only CSV store) + `get_ohlcv` rewired through both. **Live verified: 4,649 daily NIFTY50 bars, 2007-09-17 → 2026-08-28.** Decisions: **the local store is primary and providers exist to fill it**, not to answer requests — every free provider rate-limits, and a backtest whose data depends on whoever answered an HTTP call is not reproducible; **Alpha Vantage is registered `premium` despite a free key existing**, because 25 calls/day × 100 points means a decade of history costs a month of quota, and classifying it free would strand the chain; **Yahoo is queried with explicit `period1`/`period2` epochs, never `range=max`** — `range=max&interval=1d` **silently downsamples to monthly** (228 bars for 18.9 years), which is the kind of failure that passes every "did we get data?" check, so the test now asserts **bars-per-year ≥ 150 and median gap ≤ 5 days** instead of a bare count; **CSV not parquet**, since `pyarrow` is large, the pins are deliberate (I12), and 30 years of daily bars is ~7,500 rows. The store **refuses to shrink**, writes via atomic `os.replace`, and computes staleness business-day-aware. 57 assertions in `ai_backend/tests/test_store.py`. `ai_backend/data/` is gitignored. |
+| 84 | StockMind — a backtest that measures the predictor, and the infinite loop it uncovered | done | Section 66. Task 1 of 6. `ai_backend/engine/backtest.py` rewritten (499 → 494 lines, ~200 of them previously dead). The old file **did not test the predictor at all**: four functions were defined twice so the first ~210 lines were unreachable including a `run_backtest` whose signature did not match `main.py`'s call; `MODEL_REGISTRY` was never touched and `train_size` was computed and never used, so it measured a fixed ATR bracket. Six defects fixed, each of which moved a reported number: `grade` was `0.5 + rr*0.1 + (0.05 if outcome != "SL_HIT" else -0.1)` — **read off the answer key**, straight lookahead; `TIMEOUT` was booked as a **full stop-loss**, turning "nothing happened" into "maximum loss"; T2/T3 wins were credited at **T1 size**, understating wins while overstating losses and so biasing P&L, Sharpe and Calmar in opposite directions at once; windows advanced by `test_size // 10`, so **each bar was re-tested about ten times** and `signalsTested` was inflated an order of magnitude. Decisions: **windows are non-overlapping** — a trade resolves before the next candidate begins, so `signalsTested` means what it says; **the stop is assumed hit first** on intrabar ambiguity, because OHLC cannot resolve the order and the alternative manufactures profit; **TIMEOUT is marked to market**; **Sharpe/Sortino are annualised** via `INTERVAL_PERIODS_PER_YEAR` scaled by realised trade frequency, since `mean/std` unscaled is not a Sharpe ratio and reporting it as one invites a comparison that cannot be made; **grade comes from pre-trade edge and geometry only**; **`stable = None`, `action = "measured"`** — the old 75% accuracy floor on a mechanical bracket produced a permanent `retrain_required`, which is a verdict nobody can act on; **`FEATURE_WINDOW = 400`** trailing slice, since no feature looks back past 252 bars, so values are identical to passing full history at O(400) rather than O(idx). **The find of this pass is not in this file.** `run_backtest` completed at 100 trades and hung indefinitely at 400 on real NIFTY data. `faulthandler.dump_traceback_later` put three consecutive stack dumps inside a four-line span of `advanced_features.market_profile_features`: the value-area expansion loop read an exhausted side's contribution as `0`, so on a 0-vs-0 tie `add_high >= add_low` chose the high side, `min(va_high_b + 1, n - 1)` clamped to the same index and `va_vol += 0` changed nothing — while the `or` in the loop condition stayed true because the low side still had room. **A genuine infinite loop, reachable on data alone** whenever the POC lands in the top bucket with an empty bucket beneath it, which 20 bars binned into 20 buckets produces routinely, and which Yahoo's zero-volume early NIFTY history makes common. **This hung live `/predict` calls, not only backtests** — it was found through the backtest because the backtest is the first thing to call the feature stack thousands of times. Fixed structurally, not with a counter: a `-1` sentinel keeps an exhausted side out of the comparison and exactly one index moves per iteration, so the loop is bounded by `n_buckets - 1` by construction. Proven both directions before shipping: a crafted frame (POC at bucket 19 holding 200 of 390, bucket 18 holding 0.0) ran the **old** loop 50,000 iterations with *no state change at all*, and returns under the new one. Also **removed** an iteration guard I had added to `run_backtest` while chasing the wrong cause — it was unreachable (`idx` advances on every path) and its comment blamed the wrong thing, and a guard that cannot fire only misdirects the next reader. Verified: **202 assertions green** — `tests/test_defects.py` 83 (74 + 9 new, run on threads with join timeouts because an assertion cannot catch a loop that never returns, including a 180-window sweep with scattered zero volume), `tests/test_store.py` 57, `tests/test_backtest.py` 62 (new file). Full 18.9-year NIFTY run now completes in **4.3s for 715 independent trades**: 48.8% won, Sharpe 0.78, max drawdown 31.8%, ECE 0.017. Note for the next session: the first 100 trades alone showed 58% and Sharpe 2.12 — the 2009-11 recovery — which is exactly why the cap must not be left low. **Next step: task 2 of 6** — free NSE derivatives and flows (Bhavcopy archives, option chain OI/PCR/max pain, FII/DII, delivery %) into `providers.py` + `store.py`. Then task 3 (outcome recording → `update_from_outcome`, which is currently **never called**), task 4 (training, blocked on master's horizon answer — asked 3×, defaulting to 5 bars/swing), task 5 (news → impact via free RSS), task 6 (the chart: `recharts@2.15.3` is installed and **never imported**; needs OHLCV over IPC on `stockmind:` channels, prefix already allowlisted in `preload.cjs`, and note `!node_modules/recharts/**` is excluded from asar). |
 
 ### Resume checklist for a cold session
 
@@ -5753,3 +5756,297 @@ acceptable for verifying them, but it is a gap: **the pinned combination is not
 exercised here.** Given that three faults this session came from testing in an
 environment where the fault could not appear (Sections 52, 62, 63), that limit is
 recorded rather than glossed.
+
+---
+
+## SECTION 65 — StockMind: real market data, decades deep, free first
+
+*Recorded retroactively. The code shipped in `637ba2c`; the decisions were not written
+down, which is the gap this section closes. A cold session reading only the ledger would
+have re-decided all of them.*
+
+### The requirement
+
+Master's words: read data "since the introduction of online market data or next best
+immediate thing", "utilise free resources but can accommodate/integrate premium
+resources and enable/disable them according to our needs."
+
+Two things follow that are easy to miss. **Free-first is not free-only** — the premium
+slots have to exist and be dormant, not be added later. And **enable/disable has to be
+per-provider**, because the reason to disable one is usually that it started charging or
+started lying, not that the whole chain is unwanted.
+
+### The chain
+
+`ai_backend/engine/providers.py` holds an ordered list. Each entry declares its tier
+(`free` / `premium`), the env var that enables it, and the env var carrying its key.
+`get_ohlcv` walks the chain until one answers with a usable frame.
+
+**Alpha Vantage is registered `premium` even though a free key exists.** 25 calls a day
+at 100 points a call means a decade of daily history costs roughly a month of quota. A
+provider that cannot deliver the depth being asked for is not a free provider for this
+purpose, and classifying it free would strand the chain on it.
+
+### The store is primary, providers only fill it
+
+`ai_backend/engine/store.py` keeps an append-only local series per
+`(exchange, symbol, interval)`.
+
+This is the decision most likely to be undone by someone optimising for simplicity, so
+the reasoning is worth stating plainly: **a backtest whose data depends on whoever
+answered an HTTP call is not reproducible.** Every free provider rate-limits, several
+silently change what they return, and none guarantee the same history twice. Fetching at
+request time makes the *measurement* a function of the network. So bars are fetched once,
+merged, and read locally thereafter.
+
+Consequences, all deliberate:
+
+- The store **refuses to shrink.** A merge that would reduce the bar count is rejected.
+  A provider having a bad day must not be able to delete history.
+- Writes go through a temp file and `os.replace`, so an interrupted write cannot leave a
+  truncated series.
+- Staleness is **business-day aware.** "Last bar is 2 days old" on a Monday morning is
+  current, not stale.
+
+### CSV, not parquet
+
+`pyarrow` is large, the dependency pins are deliberate (I12), and thirty years of daily
+bars is about 7,500 rows. Parquet would buy nothing measurable and cost a heavy pinned
+dependency on every platform the installer has to work on.
+
+### The Yahoo defect worth remembering
+
+`range=max&interval=1d` **silently downsamples to monthly.** It returned 228 bars for
+18.9 years and no error, no warning, and a perfectly well-formed response.
+
+Explicit `period1`/`period2` epochs return 4,649.
+
+This is the failure mode that passes every check anyone writes by reflex — the request
+succeeded, the frame parsed, the columns were right, the dates were real. So the test
+does not assert a bar count. It asserts **bars-per-year ≥ 150 and median gap between
+bars ≤ 5 days**, which is a claim about the *shape* of the series and cannot be satisfied
+by monthly data pretending to be daily.
+
+### Verified
+
+57 assertions in `ai_backend/tests/test_store.py`, including a live fetch. Live result:
+**4,649 daily NIFTY50 bars, 2007-09-17 → 2026-08-28, 18.95 years, no duplicate dates.**
+`ai_backend/data/` is gitignored, so a fresh clone syncs on first use.
+
+Known data quality note carried forward: **1,334 of those bars have zero volume** —
+Yahoo does not report index volume for the early years. That is not a bug to fix, it is a
+property to handle, and Section 66 records what it broke.
+
+---
+
+## SECTION 66 — StockMind: a backtest that measures the predictor, and the infinite loop it uncovered
+
+Task 1 of the six-part StockMind build. `ai_backend/engine/backtest.py`, rewritten.
+
+### What was there
+
+The old file did not test the predictor. Not badly — **not at all.**
+
+`MODEL_REGISTRY` was never referenced. `train_size` was computed and never used to fit
+anything. What it measured was a fixed ATR bracket walked over price, which means it
+could never answer the only question that matters: *does the prediction work?*
+
+Four functions were also defined twice. Python keeps the second, so the first ~210 lines
+were unreachable — including a `run_backtest` whose signature did not match the call in
+`main.py`. Nobody could have noticed, because the dead one was the one that looked right.
+
+### The six defects, each of which moved a reported number
+
+1. **Grade was read off the answer key.**
+   `grade = 0.5 + rr*0.1 + (0.05 if outcome != "SL_HIT" else -0.1)`.
+   The grade was **derived from the realized outcome**. The reported grade distribution
+   was therefore a restatement of the results, and "A+ signals win more often" was true
+   by construction. Straight lookahead.
+
+2. **`TIMEOUT` was booked as a full stop-loss.** A signal that expired flat was recorded
+   as a maximum loss, so every loss statistic was overstated.
+
+3. **T2 and T3 wins were credited at T1 size.** Wins understated, losses overstated —
+   which biases P&L, Sharpe and Calmar in *opposite directions at once*, so no single
+   sanity check on the summary would catch it.
+
+4. **Windows overlapped ~10×.** `step = test_size // 10`, so with a 60-bar window a new
+   one began every 6 bars and each bar was re-tested about ten times. `signalsTested` was
+   inflated an order of magnitude and the "independent" windows were near-duplicates.
+
+5. **`mean/std` was reported as a Sharpe ratio** with no annualisation. That is not a
+   Sharpe ratio, and labelling it one invites a comparison that cannot be made.
+
+6. **A 75% accuracy floor produced a permanent `retrain_required`.** A mechanical ATR
+   bracket does not win 75% of the time and never will. The verdict was always the same,
+   so it carried no information, and a verdict nobody can act on is worse than none.
+
+### Decisions
+
+- **Non-overlapping windows.** A trade opens at a bar, resolves against the next
+  `horizon_bars`, and the next candidate starts *after* the resolution
+  (`idx += bars_held + 1`). No bar is evaluated twice, so `signalsTested` means what it
+  says.
+- **The stop is assumed hit first** when a bar's range spans both stop and target. OHLC
+  cannot resolve the order. Assuming the target came first manufactures profit that may
+  not exist, and a backtest that flatters is worse than no backtest.
+- **TIMEOUT is marked to market** at the final close.
+- **T1/T2/T3 are credited at their own level.**
+- **Sharpe and Sortino are annualised** via `INTERVAL_PERIODS_PER_YEAR`, scaled by
+  *realised* trade frequency rather than bar count, because trades are not one per bar.
+- **Grade comes from pre-trade edge and geometry only**, through the same
+  `barrier_probability` the live engine uses, so backtest grades and live grades are
+  comparable quantities.
+- **`stable = None`, `action = "measured"`.** The backtest reports; it does not issue a
+  pass/fail it has no basis for.
+- **ECE and Brier are measured against realised outcomes** of these trades. These are the
+  first honestly-measured calibration numbers in the system — Section 64 made `/health`
+  report `null` rather than a fake `0`, and this is what will eventually fill it in.
+- **`FEATURE_WINDOW = 400`.** The deepest feature lookback is 252 bars (52-week
+  high/low, EMA(200)), so a 400-bar trailing slice gives values *identical* to passing
+  the whole history, at O(400) per call instead of O(idx). Passing `df.iloc[:idx+1]`
+  would be quadratic overall, since several feature routines walk their input in a Python
+  loop.
+
+### The actual find: an infinite loop in the live feature path
+
+`run_backtest` finished 100 trades in 0.7s and **did not finish 400** — not slowly,
+never. Linear up to a point and then unbounded is not a performance profile, so the cause
+was not the thing being tuned.
+
+`faulthandler.dump_traceback_later(15, repeat=True)` settled it in one run. Three
+consecutive dumps all landed inside a four-line span of
+`advanced_features.market_profile_features`.
+
+The value area expands outward from the Point of Control, taking the heavier neighbour
+each step, until 70% of volume is enclosed. The loop read an **exhausted** side's
+contribution as `0`:
+
+```python
+add_low  = vol_profile[va_low_b - 1]  if va_low_b > 0              else 0
+add_high = vol_profile[va_high_b + 1] if va_high_b < n_buckets - 1 else 0
+if add_high >= add_low:
+    va_high_b = min(va_high_b + 1, n_buckets - 1)   # clamps to the SAME index
+    va_vol += add_high                              # adds 0
+```
+
+When the POC sits in the top bucket and the bucket below it is empty, `add_high` is 0
+because the high side is exhausted and `add_low` is 0 because that bucket holds no
+volume. `0 >= 0` chooses the high side. `min` clamps to the index it is already at.
+`va_vol` gains nothing. And the loop condition stays true, because the `or` sees that the
+*low* side still has room.
+
+**Nothing changes, forever.**
+
+Three things make this worse than a corner case:
+
+- It is reachable **on data alone**, with no unusual input. Twenty bars binned into
+  twenty buckets leaves empty buckets routinely, and a POC in the top bucket is just a
+  breakout.
+- Section 65 recorded that **1,334 early NIFTY bars have zero volume.** Empty buckets are
+  not rare in this data, they are guaranteed.
+- **It hung live `/predict` calls too**, not only backtests. The backtest found it
+  because the backtest is the first thing that calls the feature stack thousands of
+  times. A user would have experienced it as a request that never returned.
+
+### The fix is structural, not a counter
+
+```python
+can_low  = va_low_b > 0
+can_high = va_high_b < n_buckets - 1
+add_low  = vol_profile[va_low_b - 1]  if can_low  else -1.0
+add_high = vol_profile[va_high_b + 1] if can_high else -1.0
+if can_high and (not can_low or add_high >= add_low):
+    va_high_b += 1
+    va_vol += vol_profile[va_high_b]
+else:
+    va_low_b -= 1
+    va_vol += vol_profile[va_low_b]
+```
+
+A `-1` sentinel keeps an exhausted side out of the comparison (volumes are ≥ 0), and
+**exactly one index moves per iteration**, so the loop is bounded by `n_buckets - 1` *by
+construction*.
+
+An iteration counter was the obvious alternative and is the wrong answer: it would leave
+the no-progress branch in place, silently truncate the value area, and turn a logic error
+into a quietly wrong feature value. Termination should be a property of the loop, not
+something bolted to the outside of it.
+
+### Proven in both directions before shipping
+
+A regression test that passes on the broken code is worthless, so the reproduction was
+verified against the original loop, run verbatim in a throwaway script:
+
+```
+poc_bucket=19 total=390.0 va=200.0 need=273.0 below_poc=0.0
+OLD LOOP: 50,000 iterations with NO state change -> infinite
+fixed loop: in_value_area=1.0
+```
+
+The frame is 19 bars parked in the bottom bucket and one heavy bar alone in the top:
+POC at bucket 19 holding 200 of 390 total — under the 70% threshold, so the area *must*
+expand — with bucket 18 holding exactly 0.0.
+
+Because the failure mode is a **hang**, the nine new assertions in `test_defects.py` run
+the function on a daemon thread with a join timeout. An assertion cannot catch a loop
+that never returns. They cover the crafted frame, its mirror (POC in the bottom bucket —
+not reachable in the original code, but the fix must not introduce it), an all-zero-volume
+window, the full `compute_advanced_features` bucket, and a sweep of **180 consecutive
+windows with scattered zero volume**.
+
+### Removed: a guard added while chasing the wrong cause
+
+While the hang was still unexplained I added an `iterations > len(df) * 3` guard to
+`run_backtest`'s walk-forward loop. It is **unreachable** — every path through that body
+advances `idx` by at least one, so the walk is bounded by `len(df)` already — and its
+comment blamed the wrong subsystem.
+
+It is gone. A guard that cannot fire does nothing but misdirect whoever reads it next,
+and a comment asserting a false root cause is worse than no comment. The numpy hoisting
+added in the same pass is kept, because it is a real constant-factor saving, but its
+comment now says so instead of claiming to fix something.
+
+### Verified
+
+**202 assertions green** in the throwaway venv:
+
+| Suite | Assertions |
+|---|---|
+| `ai_backend/tests/test_defects.py` | 83 (74 existing + 9 new) |
+| `ai_backend/tests/test_store.py` | 57 |
+| `ai_backend/tests/test_backtest.py` | 62 (new) |
+
+Full 18.9-year NIFTY50 run, all caps completing:
+
+| Cap | Time | Trades | Won | Sharpe | Max DD |
+|---|---|---|---|---|---|
+| 100 | 0.6s | 100 | 58.0% | 2.12 | 15.0% |
+| 400 | 2.4s | 400 | 49.0% | 0.87 | 30.5% |
+| 2000 | 4.3s | 715 | 48.8% | 0.78 | 31.8% |
+
+**Read that table before trusting a short backtest.** The first 100 trades show 58% and
+a Sharpe of 2.12; the full sample shows 48.8% and 0.78. The difference is that the first
+100 trades land in the 2009-11 recovery. Same code, same geometry, same data source — the
+only variable is how much history was allowed in. ECE over the full run is 0.017, which
+is well calibrated, and the win rate near 50% is the honest reading of a heuristic
+ensemble with **no trained model in the loop**. That is the point of task 4.
+
+### Verification limits, stated
+
+- Tests ran on **numpy 2.5.2 / pandas 3.0.5 / scikit-learn 1.9.0**, newer than
+  `requirements.txt`'s pins, because this workspace has Python 3.14 and `numpy==1.26.4`
+  cannot build there. **The pinned combination is not exercised here.** Carried forward
+  from Section 64.
+- `lightgbm` and `xgboost` are absent, so those ensemble members were not in the loop.
+  The measured numbers are for the members that were.
+- Nothing here is a claim about future returns, and the disclaimer stays.
+
+### Next
+
+Task 2 of 6 — free NSE derivatives and flows (Bhavcopy archives, option chain with OI /
+PCR / max pain, FII-DII flows, delivery percentage) into `providers.py` and `store.py`.
+
+Still blocked and asked three times: **the trading horizon** — intraday, swing-days, or
+positional-weeks. Task 4 cannot define a training label without it, and the current
+default of 5 bars is a placeholder for a decision only master can make.

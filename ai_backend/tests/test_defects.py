@@ -277,5 +277,98 @@ check("high ATR is volatile", rm.detect_regime(None, feature_map=vol) == "volati
 check("high ADX is trending", rm.detect_regime(None, feature_map=trend) == "trending")
 check("narrow bands are ranging", rm.detect_regime(None, feature_map=calm) == "ranging")
 
+
+# ── Defect 11: the market-profile value area could loop forever ───────────────
+#
+# `market_profile_features` expanded the value area outward from the POC, taking the
+# heavier neighbour each step. It read an exhausted side's contribution as 0, so on a
+# 0-vs-0 tie `add_high >= add_low` chose the high side, `min(va_high_b + 1, n - 1)`
+# clamped to the same index, and `va_vol += 0` changed nothing — while the `or` in the
+# loop condition stayed true because the low side still had room. Infinite loop, on data
+# alone: POC in the top bucket with an empty bucket beneath it. That hung backtests AND
+# live /predict calls.
+#
+# The frame below reproduces it deterministically. Because the failure is a HANG, these
+# run on a thread with a join timeout — an assertion cannot catch a loop that never
+# returns.
+print("\n--- market profile value area terminates ---")
+import threading                                    # noqa: E402
+from engine.advanced_features import (              # noqa: E402
+    market_profile_features, compute_advanced_features,
+)
+
+
+def terminates(fn, arg, budget=10.0):
+    """Run `fn(arg)` on a daemon thread. @returns (finished, value)."""
+    box = {}
+    th = threading.Thread(target=lambda: box.__setitem__("v", fn(arg)), daemon=True)
+    th.start()
+    th.join(timeout=budget)
+    return (not th.is_alive()), box.get("v")
+
+
+# 19 bars parked in the bottom bucket, one heavy bar alone in the top bucket. POC lands
+# at bucket 19 holding 200 of 390 total — under the 70% threshold, so the value area must
+# expand — and every bucket between 1 and 18 is empty.
+_n = 20
+poc_top = pd.DataFrame({
+    "open":   [100.5] * (_n - 1) + [199.5],
+    "high":   [101.0] * (_n - 1) + [200.0],
+    "low":    [100.0] * (_n - 1) + [199.0],
+    "close":  [100.5] * (_n - 1) + [199.5],
+    "volume": [10.0]  * (_n - 1) + [200.0],
+})
+
+ok, feats = terminates(market_profile_features, poc_top)
+check("value area terminates when the POC is the top bucket and the one below is empty",
+      ok, "still running after 10s — the value-area loop is spinning")
+if ok and feats:
+    check("value area still spans both volume nodes", feats["mp_in_value_area"] == 1.0,
+          str(feats))
+    check("value area width is the full range, not a degenerate zero",
+          feats["mp_va_width"] > 0.4, str(feats.get("mp_va_width")))
+    check("every market-profile feature is finite",
+          all(np.isfinite(v) for v in feats.values()), str(feats))
+    check("all six market-profile features are produced", len(feats) == 6, str(len(feats)))
+
+# The mirror case: POC in the bottom bucket with an empty bucket above it. The same
+# tie-break bug in the opposite direction is not reachable in the original code, but the
+# fix must not introduce it.
+poc_bottom = pd.DataFrame({
+    "open":   [199.5] * (_n - 1) + [100.5],
+    "high":   [200.0] * (_n - 1) + [101.0],
+    "low":    [199.0] * (_n - 1) + [100.0],
+    "close":  [199.5] * (_n - 1) + [100.5],
+    "volume": [10.0]  * (_n - 1) + [200.0],
+})
+ok_b, feats_b = terminates(market_profile_features, poc_bottom)
+check("value area terminates when the POC is the bottom bucket", ok_b,
+      "still running after 10s")
+
+# Zero-volume bars are not hypothetical: Yahoo returns volume 0 for a long stretch of
+# early NIFTY history, which is exactly how this defect surfaced.
+zero_vol = frame(n=120, seed=11)
+zero_vol.loc[zero_vol.index[:80], "volume"] = 0.0
+ok_z, _ = terminates(market_profile_features, zero_vol.iloc[-20:].reset_index(drop=True))
+check("value area terminates on a window whose bars all have zero volume", ok_z,
+      "still running after 10s")
+
+ok_all, adv = terminates(compute_advanced_features, poc_top)
+check("the full advanced-feature bucket terminates on the same frame", ok_all,
+      "still running after 10s")
+
+# Every window of a real-shaped series must terminate, not just the crafted ones.
+_swept = frame(n=200, seed=5)
+_swept.loc[_swept.index[::3], "volume"] = 0.0
+ok_sweep = True
+for _i in range(20, 200):
+    fin, _ = terminates(market_profile_features,
+                        _swept.iloc[_i - 20:_i].reset_index(drop=True), budget=2.0)
+    if not fin:
+        ok_sweep = False
+        break
+check("180 consecutive windows with scattered zero volume all terminate", ok_sweep,
+      f"window ending at {_i} hung")
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)
