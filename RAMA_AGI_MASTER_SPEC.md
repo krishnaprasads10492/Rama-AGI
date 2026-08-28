@@ -5621,3 +5621,135 @@ The correct discipline for a loader is to assert the *identity of what came back
 not merely that something did. Section 49's 27 assertions checked that a stub refuses
 politely and that guidance avoids impossible npm advice. Not one checked that a
 non-stub was returned for a module that exists.
+
+---
+
+## SECTION 64 — StockMind: fixing the defects that made its output meaningless
+
+Master's intent, stated directly: **StockMind exists to generate wealth for a real
+trader**, and Rāma must be able to upgrade the capability itself. This section fixes
+the correctness defects first, because until they are fixed no improvement can be
+measured — a stronger model behind an inverted calibration still reports weaker
+numbers.
+
+### The decisions, before the code
+
+**1. Calibration — the highest-impact defect.**
+`platt_scale(p, A=1.0, B=0.0)` returned `1/(1+exp(A*p + B))`, documented as
+"identity". It is monotonically *decreasing*: p=0.95→0.279, p=0.05→0.488. So reported
+confidence was **anti-correlated with the ensemble's own signal**, and after the
+regime multiplier the range collapsed to ≈0.29–0.51, making `A+`/`A` grades
+arithmetically unreachable.
+
+Two errors compounded: Platt scaling applies to a **decision-function score**, not to
+a probability, and the sign was flipped. Fixed by converting the probability to
+log-odds first and applying `sigmoid(A*z + B)`, which **is** genuine identity at
+A=1, B=0. Rejected simply flipping the sign, because that would still be scaling the
+wrong quantity and would silently break the moment real `A`/`B` are fitted.
+
+**2. Health must not claim readiness it cannot have.**
+`get_health()` read `ensemble_size`, which is `len(self._base_models)` — a constant 7
+regardless of what loaded — against a hardcoded `total = 4`, and reported *"7/4 models
+loaded with real artifacts"* with `ece` and `brierScore` hardcoded to `0`, which reads
+as perfect calibration. Now it counts models that genuinely report `is_available()`,
+totals the real ensemble, and reports `ece`/`brierScore` as **`null` with an explicit
+`calibrationMeasured: false`** rather than 0. A metric nobody has computed must not be
+reported as a perfect score.
+
+**3. Feature names derived, never hand-maintained.**
+`get_feature_names()` returned 37 hand-written names for a 59-value vector and
+diverged after index 30, so `dict(zip(names, features))` in `_generate_reasons`
+attributed the wrong number to every reason above that index, and `hurst_exp` was
+absent entirely so its branch could never fire. The fix removes the class of bug
+rather than the instance: `compute_features_dict()` becomes the single builder, the
+vector is `np.array(list(d.values()))`, and the names are `list(d.keys())`. They
+cannot drift apart because they come from the same dict.
+
+**4. Regime detection by name, not by guessed index.**
+`detect_regime` read indices 8/15/10/12 believing them to be ATR/ADX/BB-width/RSI.
+Only index 8 was correct — 15 is `ema10_slope`, 10 is `parkinson_vol`, 12 is
+`bb_position`. It now takes the named feature mapping.
+
+**5. Stop discarding what the ensemble computed.**
+The registry computes `p_t1/p_t2/p_t3`, `suppressed`, `suppress_reason` and
+`regime_detected`, and `_build_signal` threw all of it away — hardcoding
+`suppressed: False` (so `suppressedCount` was structurally always 0), `regime:
+"trending"`, and recomputing T2/T3 probabilities with fixed −0.18/−0.38 decrements.
+The signal now carries the values the ensemble actually produced.
+
+**6. Signal multiplicity was fabricated — replaced with honest variants.**
+`_spot_signals` computed one feature vector and called
+`ensemble_predict(features + np.random.normal(0, 0.01, ...))` N times, then sorted by
+the resulting noise. Sixteen "signals" were one bar of information plus jitter, and
+the ranking was ranking noise.
+
+One bar yields **one directional view**. So the engine now makes a single prediction
+and derives N **risk variants** from it — different stop/target geometry over the same
+view — each with a barrier-probability derived from that geometry rather than from
+noise. For a driftless walk, P(hit +a before −b) = b/(a+b); the directional edge is
+blended in and the result stated as an approximation. Fewer, honest, genuinely
+different setups beat sixteen copies of one guess. Reasons now say so explicitly.
+
+**7. Real ATR, not a 0.9% guess.**
+Levels were built from `atr = base * 0.009` while `features.py` computed a real
+`atr14_pct` that was never used. Now the measured value drives the geometry, with the
+hardcoded proxy kept only as a fallback when the feature is unavailable.
+
+**8. `minGrade` was accepted, validated, and ignored.** It now filters.
+
+**9. Validity windows were non-monotonic.** `_validity_ts` used `(16 - rank) * 15`
+minutes, so with `signalCount > 16` validity ran *backwards into the past*. Now
+derived from the requested count.
+
+**10. Backtest — five defects, one of them lookahead.**
+`grade` was computed as `0.5 + rr*0.1 + (0.05 if outcome != "SL_HIT" else -0.1)` —
+**derived from the realized outcome**, so the reported grade distribution was read off
+the answer key. `TIMEOUT` was booked as a **full stop-loss** rather than marked to
+market, and T2/T3 wins were credited at T1 size, biasing P&L, Sharpe and Calmar in
+opposite directions. Windows advanced by `test_size // 10`, re-testing each bar ~10×
+and inflating `signalsTested`. Sharpe was `mean/std` with no annualisation. And four
+functions were **defined twice**, the second silently winning, leaving ~200 lines of
+dead code that did not match the live signature.
+
+All five fixed; the dead copies deleted; Sharpe annualised from the interval's
+bars-per-year. The `stable` verdict now reports measured accuracy without asserting a
+75% floor a naive ATR bracket cannot reach.
+
+**11. The live data path was unreachable.** `fetch_ohlcv_yahoo` is `async` and
+`get_ohlcv` is synchronous, so nothing ever awaited it — every prediction ran on
+`mock_ohlcv`, a random walk seeded by the typed base price. A synchronous fetch path
+is added and actually called, with mock as the last resort. `mock_ohlcv` also
+**reseeded the global numpy RNG**, silently making unrelated downstream randomness
+deterministic; it now uses a local `Generator`.
+
+**12. Wall-clock leaked into the features.** The six cyclical time features used
+`datetime.now()` rather than the bar's timestamp. Harmless while nothing is trained,
+**fatal the moment anyone fits on history** — the model would learn "what time is it
+now" instead of "what time was that bar". Now taken from the bar when a `date` column
+exists.
+
+**13. Missing Python was an uncaught exception.** `aiProcess.cjs` spawns without a
+`child.on('error')` handler, so an absent interpreter emits an unhandled `error`
+event rather than a reported failure — and `spawn` does not throw synchronously, so
+the surrounding `try/catch` never covered it.
+
+### What this section deliberately does not do
+
+- **No trained models.** Fixing arithmetic is not training. All 8 models still fall
+  back to heuristics; `/health` now says so honestly instead of claiming 7 loaded.
+  Training needs a defined label and horizon — master's answer on trading horizon is
+  still outstanding, and the label follows from it.
+- **No chart yet.** The renderer work waits on a real OHLCV series crossing IPC.
+- **No live-money automation.** The disclaimer stays and strengthens as capability
+  grows.
+
+### Verification limit, stated plainly
+
+This workspace has Python 3.14 with none of the pinned packages, and
+`numpy==1.26.4` cannot build there. Tests ran in a throwaway venv on **numpy 2.5.2 /
+pandas 3.0.5 / scikit-learn 1.9.0** — newer than `requirements.txt` pins. The defects
+fixed here are logic defects rather than version-sensitive behaviour, so that gap is
+acceptable for verifying them, but it is a gap: **the pinned combination is not
+exercised here.** Given that three faults this session came from testing in an
+environment where the fault could not appear (Sections 52, 62, 63), that limit is
+recorded rather than glossed.

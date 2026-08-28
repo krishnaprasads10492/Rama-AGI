@@ -85,6 +85,7 @@ class ModelRegistry:
         features: np.ndarray,
         regime: str = "trending",
         news_text: str = "",
+        feature_map: dict = None,
     ) -> dict:
         """
         AGI-grade ensemble prediction:
@@ -159,7 +160,8 @@ class ModelRegistry:
         p_t2 = float(np.clip(calibrated * (1.0 - epistemic * 0.5), 0.05, 0.99))
         p_t3 = float(np.clip(calibrated * (1.0 - epistemic * 1.0), 0.05, 0.99))
 
-        reasons = self._generate_reasons(features, calibrated, regime, probs, epistemic)
+        reasons = self._generate_reasons(features, calibrated, regime, probs, epistemic,
+                                         feature_map=feature_map)
 
         return {
             "probability":    calibrated,
@@ -177,19 +179,33 @@ class ModelRegistry:
             "uncertainty":    round(total_uncertainty, 3),
             "epistemic":      round(epistemic, 3),
             "aleatoric":      round(aleatoric, 3),
-            "regime_detected": self.regime.detect_regime(features),
+            "regime_detected": self.regime.detect_regime(features, feature_map=feature_map),
             "reasons":        reasons,
         }
 
-    def update_from_outcome(self, probs: list[float], was_correct: bool):
-        """Call after each resolved prediction to improve ensemble weights."""
+    def update_from_outcome(self, probs: list[float], was_correct: bool,
+                            features: np.ndarray = None):
+        """
+        Call after each resolved prediction to improve ensemble weights.
+
+        NOTE ON THE SGD BRANCH (spec Section 64). This used to call
+        `self.sgd.partial_fit(np.zeros(10), label)` with a literal
+        `# placeholder features` comment. That would have trained the online model on
+        a zero vector of the wrong dimensionality — actively corrupting it, not
+        improving it. It only ever appeared harmless because nothing calls this method,
+        so the meta-learner's weights have stayed uniform for the life of every
+        process. The SGD update now requires the real feature vector that produced the
+        prediction and is skipped when it is not supplied.
+        """
         self._meta.update(probs, was_correct)
-        # Also update Online SGD
+
+        if features is None:
+            return
         try:
             label = 1 if was_correct else 0
-            self.sgd.partial_fit(np.zeros(10), label)  # placeholder features
-        except Exception:
-            pass
+            self.sgd.partial_fit(np.asarray(features, dtype=float), label)
+        except Exception as e:
+            logger.debug(f"[Registry] SGD online update skipped: {e}")
 
     def _generate_reasons(
         self,
@@ -198,11 +214,25 @@ class ModelRegistry:
         regime: str,
         model_probs: dict,
         epistemic: float,
+        feature_map: dict = None,
     ) -> list[str]:
-        from .features import get_feature_names
-        names = get_feature_names()
+        """
+        Human-readable reasons.
+
+        `feature_map` is the named mapping from `compute_features_dict`. It is passed in
+        rather than reconstructed because `dict(zip(get_feature_names(), features))` was
+        the exact line that produced wrong numbers: the name list was hand-maintained,
+        37 long against a 59-value vector, and diverged after index 30 (Section 64).
+        The names are now derived from the same builder, so the fallback below is also
+        correct — but taking the caller's map avoids recomputing it at all.
+        """
         reasons = []
-        feat_dict = dict(zip(names, features))
+        if feature_map is not None:
+            feat_dict = feature_map
+        else:
+            from .features import get_feature_names
+            names = get_feature_names()
+            feat_dict = {n: float(features[i]) for i, n in enumerate(names) if i < len(features)}
 
         # RSI
         rsi = feat_dict.get("rsi14", 0.5) * 100
@@ -252,11 +282,22 @@ class ModelRegistry:
 
     def status(self) -> dict:
         return {
+            # `loaded` = can answer at all. `trained` = a fitted artifact was loaded.
+            # These were one flag, which let RegimeAwareModel — a pure heuristic that
+            # sets loaded=True in its constructor — count as a trained model in
+            # /health. See spec Section 64.
             "models": {
-                m.name: {"loaded": m.is_available(), "type": "real" if m.is_available() else "mock"}
+                m.name: {
+                    "loaded":  m.is_available(),
+                    "trained": m.is_trained(),
+                    "type":    "trained" if m.is_trained() else "heuristic",
+                }
                 for m in [self.lgbm, self.xgb, self.lstm, self.rf, self.mlp, self.sgd, self.regime, self.sentiment]
             },
             "ensemble_size":   len(self._base_models),
+            "models_trained":  sum(1 for m in [self.lgbm, self.xgb, self.lstm, self.rf,
+                                               self.mlp, self.sgd, self.regime, self.sentiment]
+                                   if m.is_trained()),
             "meta_weights":    dict(zip(
                 [m.name for m in self._base_models] + ["sentiment"],
                 np.round(self._meta.weights, 3).tolist()

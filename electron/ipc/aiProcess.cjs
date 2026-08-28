@@ -66,6 +66,30 @@ async function startPythonBackend() {
     env:   { ...process.env },
   });
 
+  // WHY THIS EXISTS: `spawn` does not throw synchronously when the interpreter is
+  // missing — it emits an 'error' event asynchronously. With no listener that becomes
+  // an unhandled exception in the main process, and since crashGuard treats
+  // uncaughtException as always fatal, a machine without Python on PATH would kill
+  // Rāma rather than report that StockMind is unavailable. The surrounding try/catch in
+  // the IPC handler never covered it. See spec Section 64.
+  child.on('error', (err) => {
+    processes['python'] = null;
+    const hint = /ENOENT/.test(err.message)
+      ? `Python was not found on PATH (tried "${python}"). Install Python 3.11+ and reopen Rāma.`
+      : err.message;
+    console.error(`[ai_backend] could not start: ${hint}`);
+    try {
+      const { BrowserWindow } = require('electron');
+      BrowserWindow.getAllWindows().forEach(win => {
+        win.webContents.send('ai:log', {
+          stream: 'system',
+          line: `[ai_backend] failed to start — ${hint}`,
+          ts: Date.now(),
+        });
+      });
+    } catch { /* no windows yet */ }
+  });
+
   child.stdout.on('data', (data) => {
     const line = data.toString().trim();
     if (ipcMainRef) {

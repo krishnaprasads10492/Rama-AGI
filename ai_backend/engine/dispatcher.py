@@ -17,9 +17,33 @@ import logging
 from typing import Any
 
 from .registry import MODEL_REGISTRY
-from .features import compute_features
+from .features import compute_features, compute_full_features_dict
 from .calibration import clamp_probability, regime_adjust
 from .data_fetcher import get_ohlcv
+
+# ── Risk variants ─────────────────────────────────────────────────────────────
+# One bar of data yields ONE directional view. It used to yield N "signals" by calling
+# the ensemble N times on the same feature vector plus Gaussian jitter, then ranking by
+# the resulting noise — sixteen copies of one guess, ranked by randomness.
+#
+# What genuinely differs per setup is the GEOMETRY: how much room the stop is given and
+# how far the targets sit. Each of these is a real, distinct trade with a real, distinct
+# risk/reward and a real, distinct probability of getting there. Multiples are in ATR
+# units. See spec Section 64.
+RISK_VARIANTS = [
+    {"name": "scalp",      "sl": 0.8, "t1": 1.0, "t2": 1.6, "t3": 2.2,
+     "note": "tight stop, near target — highest hit rate, smallest reward"},
+    {"name": "tight",      "sl": 1.0, "t1": 1.5, "t2": 2.4, "t3": 3.4,
+     "note": "close stop, modest target"},
+    {"name": "balanced",   "sl": 1.3, "t1": 1.8, "t2": 3.0, "t3": 4.5,
+     "note": "the default geometry — room to breathe, 1.4:1 on T1"},
+    {"name": "swing",      "sl": 1.6, "t1": 2.6, "t2": 4.2, "t3": 6.0,
+     "note": "wider stop survives noise, larger reward"},
+    {"name": "positional", "sl": 2.0, "t1": 3.5, "t2": 5.5, "t3": 8.0,
+     "note": "widest stop, largest target — lowest hit rate, best payoff"},
+    {"name": "runner",     "sl": 1.3, "t1": 2.2, "t2": 4.5, "t3": 7.5,
+     "note": "balanced stop with stretched targets — lets a trend run"},
+]
 
 logger = logging.getLogger("stockmind-ai.dispatcher")
 
@@ -92,18 +116,70 @@ def _apply_mode(prob: float, mode: str, adaptive_weight: float = 1.0) -> float:
 
 # ── Signal builder ────────────────────────────────────────────────────────────
 
-def _build_signal(rank, prob, direction, entry, sl, t1, t2, t3, capital, risk_pct, reasons, extra=None):
+def barrier_probability(directional_prob: float, reward: float, risk: float) -> float:
+    """
+    Probability of reaching the target before the stop, given the directional edge and
+    the geometry of the two barriers.
+
+    P = (p * b) / (p * b + (1 - p) * a),  where a = reward distance, b = risk distance
+
+    Chosen because it behaves correctly at every limit:
+      - p = 0.5      → b / (a + b), the classic driftless first-passage result
+      - a = b        → p, so symmetric barriers just return the directional edge
+      - p → 1 or 0   → 1 or 0
+      - a ↑ with b fixed → probability falls, as a farther target must
+
+    This replaces hardcoded decrements of −0.18 for T2 and −0.38 for T3, which took no
+    account of where those targets actually were. A far target and a near one reported
+    the same penalty. See spec Section 64.
+
+    It is an approximation — it assumes the directional edge is constant over the
+    horizon and ignores volatility clustering — and is labelled as such wherever it
+    reaches master.
+    """
+    p = float(np.clip(directional_prob, 1e-6, 1 - 1e-6))
+    a = max(float(reward), 1e-9)
+    b = max(float(risk), 1e-9)
+    return float(np.clip((p * b) / (p * b + (1.0 - p) * a), 0.01, 0.99))
+
+
+def _grade_for(prob: float) -> str:
+    return ("A+" if prob >= 0.80 else "A" if prob >= 0.70 else
+            "B"  if prob >= 0.60 else "C" if prob >= 0.50 else "D")
+
+
+GRADE_ORDER = {"A+": 4, "A": 3, "B": 2, "C": 1, "D": 0}
+
+
+def _build_signal(rank, prob, direction, entry, sl, t1, t2, t3, capital, risk_pct,
+                  reasons, extra=None, ensemble=None, total=16, variant=None):
+    """
+    Assemble the signal contract.
+
+    Now carries what the ensemble actually computed instead of discarding it
+    (spec Section 64): `suppressed` was hardcoded `False` — which is why
+    `suppressedCount` in the response was structurally always 0 — `regime` was
+    hardcoded `"trending"` regardless of what `detect_regime` returned, and the T2/T3
+    probabilities were fixed decrements rather than a function of the target distance.
+    """
+    ens      = ensemble or {}
     max_risk = capital * (risk_pct / 100)
-    rr = abs(t1 - entry) / (abs(entry - sl) + 1e-9)
-    grade = "A+" if prob >= 0.80 else "A" if prob >= 0.70 else "B" if prob >= 0.60 else "C" if prob >= 0.50 else "D"
-    prob_pct = int(round(clamp_probability(prob) * 100))
+    risk_d   = abs(entry - sl)
+    rr       = abs(t1 - entry) / (risk_d + 1e-9)
+
+    p1 = barrier_probability(prob, abs(t1 - entry), risk_d)
+    p2 = barrier_probability(prob, abs(t2 - entry), risk_d)
+    p3 = barrier_probability(prob, abs(t3 - entry), risk_d)
+
+    grade = _grade_for(p1)
+
     return {
         "rank":               rank,
         "id":                 uuid.uuid4().hex,
         "type":               direction,
         "entryPrice":         round(entry, 2),
-        "entryZoneLow":       round(entry - abs(entry - sl) * 0.1, 2),
-        "entryZoneHigh":      round(entry + abs(entry - sl) * 0.1, 2),
+        "entryZoneLow":       round(entry - risk_d * 0.1, 2),
+        "entryZoneHigh":      round(entry + risk_d * 0.1, 2),
         "t1Price":            round(t1, 2),
         "t2Price":            round(t2, 2),
         "t3Price":            round(t3, 2),
@@ -111,26 +187,42 @@ def _build_signal(rank, prob, direction, entry, sl, t1, t2, t3, capital, risk_pc
         "immediateOptimalSL": round(sl + (entry - sl) * 0.35, 2),
         "maxRisk":            round(max_risk),
         "riskRewardRatio":    round(rr, 2),
-        "validity":           _validity_ts(rank),
-        "validityBars":       max(4, 16 - rank),
-        "probability":        prob_pct,
+        "validity":           _validity_ts(rank, total),
+        "validityBars":       max(4, total - rank + 1),
+        # The directional view, and the geometry-aware probability of this variant.
+        "directionalProbability": int(round(clamp_probability(prob) * 100)),
+        "probability":        int(round(p1 * 100)),
         "grade":              grade,
-        "t1Probability":      prob_pct,
-        "t2Probability":      int(clamp_probability(prob - 0.18) * 100),
-        "t3Probability":      int(clamp_probability(prob - 0.38) * 100),
-        "slProbability":      int(clamp_probability(1 - prob) * 100),
-        "regime":             "trending",
+        "t1Probability":      int(round(p1 * 100)),
+        "t2Probability":      int(round(p2 * 100)),
+        "t3Probability":      int(round(p3 * 100)),
+        "slProbability":      int(round((1.0 - p1) * 100)),
+        "probabilityBasis":   "barrier approximation from directional edge and target distance",
+        # Straight from the ensemble rather than invented here.
+        "regime":             ens.get("regime_detected", "unknown"),
+        "suppressed":         bool(ens.get("suppressed", False)),
+        "suppressReason":     ens.get("suppress_reason"),
+        "modelAgreement":     ens.get("agreement"),
+        "uncertainty":        ens.get("uncertainty"),
+        "epistemic":          ens.get("epistemic"),
+        "variant":            variant,
         "reasons":            reasons,
-        "suppressed":         False,
-        "suppressReason":     None,
         "hmacSignature":      "",
         **(extra or {}),
     }
 
-def _validity_ts(rank):
+
+def _validity_ts(rank, total=16):
+    """
+    Validity window for a signal.
+
+    Was `(16 - rank) * 15` minutes, so any request with `signalCount > 16` produced a
+    **negative** offset and stamped validity in the past. Now derived from the actual
+    count, so the highest-ranked signal always has the longest window.
+    """
     import datetime
-    dt = datetime.datetime.now() + datetime.timedelta(minutes=(16 - rank) * 15)
-    return dt.isoformat()
+    minutes = max(15, (max(1, int(total)) - int(rank) + 1) * 15)
+    return (datetime.datetime.now() + datetime.timedelta(minutes=minutes)).isoformat()
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
@@ -168,41 +260,94 @@ def _spot_signals(params: dict) -> list[dict]:
     adaptive_weight = float(params.get("adaptiveWeight", 1.0))
 
     df, is_real = get_ohlcv(params)
-    features = compute_features(df)
+
+    # Full feature set (base + Ichimoku/Fibonacci/Supertrend/profile/order-flow/ICT).
+    # `compute_full_features` existed but had no callers, so /predict ran on 59 of the
+    # 100 available features while the advanced buckets reached only /strategy/score.
+    fmap     = compute_full_features_dict(df)
+    features = np.array(list(fmap.values()), dtype=np.float32)
 
     if not is_real:
         logger.info(f"[Dispatcher] {symbol}: using mock OHLCV for features")
 
-    count = _signal_count(params)
-    signals = []
-    for i in range(count):
-        result = MODEL_REGISTRY.ensemble_predict(
-            features + np.random.normal(0, 0.01, len(features))
+    # ONE prediction for one bar of information.
+    result   = MODEL_REGISTRY.ensemble_predict(features, feature_map=fmap)
+    raw_prob = result["probability"]
+    prob     = _apply_mode(raw_prob, mode, adaptive_weight)
+
+    # Real measured ATR rather than the hardcoded 0.9% proxy the levels used to be
+    # built from — `atr14_pct` was computed on every request and never read.
+    atr_pct = float(fmap.get("atr14_pct") or 0.0)
+    if not (0.0005 < atr_pct < 0.25):
+        atr_pct = 0.009
+        atr_source = "fallback 0.9% proxy — measured ATR unavailable"
+    else:
+        atr_source = f"measured ATR(14) = {atr_pct * 100:.2f}% of price"
+    atr = base * atr_pct
+
+    requested = _signal_count(params)
+    variants  = RISK_VARIANTS[:max(1, min(requested, len(RISK_VARIANTS)))]
+
+    base_reasons = list(result["reasons"])
+    base_reasons.append(atr_source)
+    if not is_real:
+        base_reasons.append("⚠ Using estimated data — live data unavailable")
+    if requested > len(RISK_VARIANTS):
+        base_reasons.append(
+            f"{requested} signals requested; {len(RISK_VARIANTS)} distinct setups exist for "
+            f"one bar of data — padding with noise would not add information"
         )
-        raw_prob = result["probability"]
-        prob = _apply_mode(raw_prob, mode, adaptive_weight)
 
-        is_long = direction == "long" or (direction == "both" and i % 3 != 2)
-        atr = base * 0.009
-        entry = base + np.random.uniform(-atr * 0.3, atr * 0.3)
-        sl = entry - atr * 1.3 if is_long else entry + atr * 1.3
-        t1 = entry + atr * 1.8 if is_long else entry - atr * 1.8
-        t2 = entry + atr * 3.0 if is_long else entry - atr * 3.0
-        t3 = entry + atr * 4.5 if is_long else entry - atr * 4.5
-
-        reasons = result["reasons"]
-        if not is_real:
-            reasons = reasons + ["⚠ Using estimated data — live data unavailable"]
+    long_bias = direction != "short"
+    signals = []
+    for i, v in enumerate(variants):
+        is_long = long_bias if direction in ("long", "short") else (prob >= 0.5)
+        sign    = 1 if is_long else -1
+        entry   = base
+        sl      = entry - sign * atr * v["sl"]
+        t1      = entry + sign * atr * v["t1"]
+        t2      = entry + sign * atr * v["t2"]
+        t3      = entry + sign * atr * v["t3"]
 
         signals.append(_build_signal(
             i + 1, prob, "LONG" if is_long else "SHORT",
-            entry, sl, t1, t2, t3, capital, risk_pct, reasons,
-            {"instrType": "spot", "spotPrice": round(base, 2), "dataSource": "real" if is_real else "mock"},
+            entry, sl, t1, t2, t3, capital, risk_pct,
+            base_reasons + [f"{v['name']} geometry — {v['note']}"],
+            {"instrType": "spot", "spotPrice": round(base, 2),
+             "dataSource": "real" if is_real else "mock"},
+            ensemble=result, total=len(variants), variant=v["name"],
         ))
 
     signals.sort(key=lambda s: s["probability"], reverse=True)
-    for i, s in enumerate(signals): s["rank"] = i + 1
-    return signals
+    for i, s in enumerate(signals):
+        s["rank"] = i + 1
+    return _apply_min_grade(signals, params)
+
+
+def _apply_min_grade(signals: list[dict], params: dict) -> list[dict]:
+    """
+    Honour `minGrade`, which the request schema has always accepted and validated and
+    the engine has never read (spec Section 64).
+
+    Never returns an empty list from a non-empty one — a filter that silently hides
+    every result looks identical to a backend failure, so the best available signal is
+    kept and flagged as below the requested grade.
+    """
+    want = params.get("minGrade")
+    if not want or want not in GRADE_ORDER or not signals:
+        return signals
+
+    floor = GRADE_ORDER[want]
+    kept  = [s for s in signals if GRADE_ORDER.get(s.get("grade"), -1) >= floor]
+    if kept:
+        return kept
+
+    best = signals[0]
+    best["belowRequestedGrade"] = want
+    best["reasons"] = list(best.get("reasons", [])) + [
+        f"No setup reached grade {want}; showing the best available ({best.get('grade')})"
+    ]
+    return [best]
 
 
 # ── Futures signals ───────────────────────────────────────────────────────────
@@ -225,29 +370,38 @@ def _futures_signals(params: dict) -> list[dict]:
     series       = futures_meta.get("series", "Near")
 
     df, is_real = get_ohlcv(params)
-    features = compute_features(df)
+    fmap     = compute_full_features_dict(df)
+    features = np.array(list(fmap.values()), dtype=np.float32)
 
-    count = _signal_count(params)
+    # One bar, one ensemble call — hoisted out of the loop. It used to run inside, on
+    # the same vector plus fresh noise each time (Section 64).
+    result   = MODEL_REGISTRY.ensemble_predict(features, feature_map=fmap)
+    raw_prob = result["probability"]
+
+    atr_pct = float(fmap.get("atr14_pct") or 0.0)
+    if not (0.0005 < atr_pct < 0.25):
+        atr_pct = 0.009
+
+    count = min(_signal_count(params), len(RISK_VARIANTS))
     signals = []
     for i in range(count):
-        result = MODEL_REGISTRY.ensemble_predict(
-            features + np.random.normal(0, 0.01, len(features))
-        )
-        raw_prob = result["probability"]
         prob = _apply_mode(raw_prob, mode, adaptive_weight)
 
-        is_long = direction == "long" or (direction == "both" and i % 3 != 2)
-        atr = fut_base * 0.009
-        entry = fut_base + np.random.uniform(-atr * 0.2, atr * 0.2)
-        sl = entry - atr * 1.3 if is_long else entry + atr * 1.3
-        t1 = entry + atr * 1.8 if is_long else entry - atr * 1.8
-        t2 = entry + atr * 3.2 if is_long else entry - atr * 3.2
-        t3 = entry + atr * 5.0 if is_long else entry - atr * 5.0
+        is_long = direction != "short"
+        v       = RISK_VARIANTS[i]
+        sign    = 1 if is_long else -1
+        atr     = fut_base * atr_pct
+        entry   = fut_base
+        sl = entry - sign * atr * v["sl"]
+        t1 = entry + sign * atr * v["t1"]
+        t2 = entry + sign * atr * v["t2"]
+        t3 = entry + sign * atr * v["t3"]
 
         lots = max(1, int((capital * risk_pct / 100) / (abs(entry - sl) * lot_size + 1e-9)))
         max_risk_lots = abs(entry - sl) * lot_size * lots
 
         reasons = result["reasons"][:3] + [
+            f"{v['name']} geometry — {v['note']}",
             f"Futures basis {'+' if basis >= 0 else ''}{basis:.1f} ({basis/base*100:.2f}%) — {series} series",
             f"{lots} lot{'s' if lots > 1 else ''} × {lot_size} = ₹{max_risk_lots:,.0f} max risk",
             f"{days_left}d to expiry",
@@ -263,11 +417,12 @@ def _futures_signals(params: dict) -> list[dict]:
                 "daysLeft": days_left, "series": series,
                 "dataSource": "real" if is_real else "mock",
             },
+            ensemble=result, total=count, variant=v["name"],
         ))
 
     signals.sort(key=lambda s: s["probability"], reverse=True)
     for i, s in enumerate(signals): s["rank"] = i + 1
-    return signals
+    return _apply_min_grade(signals, params)
 
 
 # ── Options signals ───────────────────────────────────────────────────────────

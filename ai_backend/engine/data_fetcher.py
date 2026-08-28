@@ -13,8 +13,12 @@ so the AI backend doesn't need to make its own HTTP calls in most cases.
 import numpy as np
 import pandas as pd
 import logging
-import httpx
 from typing import Optional
+
+# httpx is imported lazily inside the fetch functions. At module scope it made the
+# entire engine unimportable without httpx — `engine/__init__` imports dispatcher,
+# which imports this module — even for callers that only wanted the feature maths.
+# Same defect class as scikit-learn in calibration.py. See spec Section 64.
 
 logger = logging.getLogger("stockmind-ai.data")
 
@@ -74,6 +78,7 @@ async def fetch_ohlcv_yahoo(symbol: str, exchange: str = "NSE", bars: int = 250)
     }
 
     try:
+        import httpx
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(url, headers=headers)
             resp.raise_for_status()
@@ -119,15 +124,30 @@ def mock_ohlcv(base_price: float, n: int = 250) -> pd.DataFrame:
     Clearly labelled in logs.
     """
     logger.info(f"[DataFetcher] Using mock OHLCV for base_price={base_price:.2f} (n={n})")
-    np.random.seed(int(base_price) % 10000)
-    returns = np.random.normal(0.0002, 0.012, n)
-    closes  = base_price * np.cumprod(1 + returns)
-    opens   = np.roll(closes, 1)
+
+    # A LOCAL generator, not `np.random.seed`. The global reseed made every unrelated
+    # numpy draw in the process deterministic as a side effect of asking for mock bars —
+    # so any randomness elsewhere silently became a function of the price master typed.
+    # Deterministic mock data is the intent; deterministic *everything else* was not.
+    # See spec Section 64.
+    rng = np.random.default_rng(int(base_price) % 10000)
+
+    returns  = rng.normal(0.0002, 0.012, n)
+    closes   = base_price * np.cumprod(1 + returns)
+    opens    = np.roll(closes, 1)
     opens[0] = base_price
-    highs   = closes * (1 + np.abs(np.random.normal(0, 0.005, n)))
-    lows    = closes * (1 - np.abs(np.random.normal(0, 0.005, n)))
-    volumes = np.abs(np.random.normal(1e6, 3e5, n))
+    highs    = closes * (1 + np.abs(rng.normal(0, 0.005, n)))
+    lows     = closes * (1 - np.abs(rng.normal(0, 0.005, n)))
+    volumes  = np.abs(rng.normal(1e6, 3e5, n))
+
+    # A `date` column, which mock data never had. Without it `filter_by_date_range`
+    # returns the frame untouched, so `preset`, `fromDate`, `toDate` and `interval` were
+    # all silently ignored by /backtest on mock data — and the bar-time features had
+    # nothing to read.
+    dates = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=n)
+
     return pd.DataFrame({
+        "date": dates,
         "open": opens, "high": highs, "low": lows,
         "close": closes, "volume": volumes,
     })

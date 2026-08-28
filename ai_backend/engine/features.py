@@ -25,14 +25,25 @@ except ImportError:
 
 def compute_features(df: pd.DataFrame) -> np.ndarray:
     """
-    Compute all features for a single instrument.
+    Feature vector for the LAST row of `df`, as a 1D float32 array.
+
+    Thin wrapper over `compute_features_dict` — the dict is the single source of truth
+    for both the values and their order, so the vector and `get_feature_names()` cannot
+    drift apart. See `get_feature_names` for what that used to cost.
+    """
+    return np.array(list(compute_features_dict(df).values()), dtype=np.float32)
+
+
+def compute_features_dict(df: pd.DataFrame) -> dict:
+    """
+    Compute all features for a single instrument, keyed by name.
 
     Args:
-        df: DataFrame with columns [open, high, low, close, volume]
-            sorted oldest → newest, at least 200 rows recommended.
+        df: DataFrame with columns [open, high, low, close, volume] and optionally
+            `date`, sorted oldest → newest, at least 200 rows recommended.
 
     Returns:
-        1D numpy array of features for the LAST row (current bar).
+        Ordered dict of feature name → float, for the LAST row (current bar).
     """
     if len(df) < 20:
         raise ValueError(f"Need at least 20 bars, got {len(df)}")
@@ -178,14 +189,19 @@ def compute_features(df: pd.DataFrame) -> np.ndarray:
     else:
         feats["pct_from_52w_high"] = 0.0
         feats["pct_from_52w_low"]  = 0.0
-    import datetime
-    now = datetime.datetime.now()
-    feats["hour_sin"]    = np.sin(2 * np.pi * now.hour / 24)
-    feats["hour_cos"]    = np.cos(2 * np.pi * now.hour / 24)
-    feats["dow_sin"]     = np.sin(2 * np.pi * now.weekday() / 5)
-    feats["dow_cos"]     = np.cos(2 * np.pi * now.weekday() / 5)
-    feats["month_sin"]   = np.sin(2 * np.pi * now.month / 12)
-    feats["month_cos"]   = np.cos(2 * np.pi * now.month / 12)
+    # ── Bucket 6: Time of the BAR, not of the wall clock ──────────────────────
+    # These used `datetime.datetime.now()`, which describes when the request was made
+    # rather than when the bar occurred. Harmless while nothing is trained, and fatal
+    # the moment anyone fits on history: every historical row would carry today's
+    # timestamp, so the model would learn "what time is it now" — a feature that is
+    # constant within a training run and unavailable at inference. See Section 64.
+    ts = _bar_timestamp(df)
+    feats["hour_sin"]    = np.sin(2 * np.pi * ts.hour / 24)
+    feats["hour_cos"]    = np.cos(2 * np.pi * ts.hour / 24)
+    feats["dow_sin"]     = np.sin(2 * np.pi * ts.weekday() / 5)
+    feats["dow_cos"]     = np.cos(2 * np.pi * ts.weekday() / 5)
+    feats["month_sin"]   = np.sin(2 * np.pi * ts.month / 12)
+    feats["month_cos"]   = np.cos(2 * np.pi * ts.month / 12)
 
     # ── Bucket 6 Extension: Entropy & Fractality ──────────────────────────────
     # Hurst exponent proxy — >0.5 = trending, <0.5 = mean-reverting
@@ -224,55 +240,103 @@ def compute_features(df: pd.DataFrame) -> np.ndarray:
     # Close position in bar (0=low, 1=high) — buying pressure
     feats["close_in_bar"]  = (c[-1] - l[-1]) / (h[-1] - l[-1] + 1e-9)
 
-    return np.array(list(feats.values()), dtype=np.float32)
+    # Coerce to plain floats so callers get a uniform mapping regardless of numpy
+    # scalar types leaking through from the indicator helpers.
+    return {k: float(v) for k, v in feats.items()}
+
+
+def compute_full_features_dict(df: pd.DataFrame) -> dict:
+    """
+    Base features plus the advanced set (Ichimoku, Fibonacci, Supertrend, market
+    profile, order-flow proxies, ICT levels, GARCH proxy), keyed by name.
+
+    The advanced buckets were computed by `/strategy/score` but never reached
+    `/predict`, because `compute_full_features` — the only thing that joined them —
+    had no callers. Now the joined mapping is what the ensemble sees.
+    """
+    base = compute_features_dict(df)
+    try:
+        from .advanced_features import compute_advanced_features, get_advanced_feature_names
+        adv_vals  = compute_advanced_features(df)
+        adv_names = get_advanced_feature_names()
+        if len(adv_names) == len(adv_vals):
+            base.update({n: float(v) for n, v in zip(adv_names, adv_vals)})
+        else:
+            # Names and values disagree — attach positionally rather than mislabel.
+            base.update({f"adv_{i}": float(v) for i, v in enumerate(adv_vals)})
+    except Exception:
+        pass
+    return base
 
 
 def compute_full_features(df: pd.DataFrame) -> np.ndarray:
+    """Base + advanced features as a single float32 vector."""
+    return np.array(list(compute_full_features_dict(df).values()), dtype=np.float32)
+
+
+def _bar_timestamp(df: pd.DataFrame):
     """
-    Compute ALL features: base (Bucket 1-8 extension) + advanced (Ichimoku, Fib, etc.).
-    Returns a unified ~150-feature vector for the full AGI ensemble.
+    Timestamp of the last bar, falling back to now when the frame carries no dates.
+
+    The fallback is honest rather than silent: without a `date` column there is no bar
+    time to use, and `mock_ohlcv` produces none. Real OHLCV from any provider does.
     """
-    base = compute_features(df)
-    try:
-        from .advanced_features import compute_advanced_features
-        adv = compute_advanced_features(df)
-        return np.concatenate([base, adv]).astype(np.float32)
-    except Exception:
-        return base
+    import datetime
+    if "date" in df.columns:
+        try:
+            ts = pd.to_datetime(df["date"].iloc[-1])
+            if not pd.isna(ts):
+                return ts
+        except Exception:
+            pass
+    return datetime.datetime.now()
+
+
+def _canonical_frame(n: int = 260) -> pd.DataFrame:
+    """A deterministic synthetic frame, used only to enumerate feature names."""
+    rng    = np.random.default_rng(7)
+    closes = 100 + np.cumsum(rng.normal(0, 0.5, n))
+    opens  = np.concatenate([[100.0], closes[:-1]])
+    highs  = np.maximum(opens, closes) + np.abs(rng.normal(0, 0.4, n))
+    lows   = np.minimum(opens, closes) - np.abs(rng.normal(0, 0.4, n))
+    return pd.DataFrame({
+        "date":   pd.date_range("2020-01-01", periods=n, freq="D"),
+        "open":   opens,  "high": highs, "low": lows,
+        "close":  closes, "volume": np.abs(rng.normal(1e6, 2e5, n)),
+    })
+
+
+_FEATURE_NAMES = None
+_FULL_FEATURE_NAMES = None
 
 
 def get_feature_names() -> list[str]:
-    """Return ordered list of feature names (matches compute_features output)."""
-    dummy = pd.DataFrame({
-        "open":   np.random.randn(210) + 100,
-        "high":   np.random.randn(210) + 101,
-        "low":    np.random.randn(210) + 99,
-        "close":  np.random.randn(210) + 100,
-        "volume": np.abs(np.random.randn(210)) * 1e6,
-    })
-    dummy["high"]  = dummy[["open", "close"]].max(axis=1) + np.abs(np.random.randn(210)) * 0.5
-    dummy["low"]   = dummy[["open", "close"]].min(axis=1) - np.abs(np.random.randn(210)) * 0.5
-    dummy["close"] = np.cumsum(np.random.randn(210) * 0.5) + 100
-    dummy["open"]  = dummy["close"].shift(1).fillna(100)
-    # We need to capture the keys — run once and return
-    feats = {}
-    c = dummy["close"].values
-    o = dummy["open"].values
-    h = dummy["high"].values
-    l = dummy["low"].values
-    v = dummy["volume"].values
-    feats["log_return_1"] = feats["log_return_5"] = feats["log_return_20"] = 0
-    feats["candle_body"] = feats["upper_wick"] = feats["lower_wick"] = feats["gap"] = 0
-    feats["direction_streak"] = 0
-    feats["atr14_pct"] = feats["atr5_pct"] = feats["parkinson_vol"] = 0
-    feats["bb_width"] = feats["bb_position"] = 0
-    for p in [5, 10, 20, 50, 200]:
-        feats[f"ema{p}_slope"] = feats[f"price_vs_ema{p}"] = 0
-    feats["rsi14"] = feats["macd_hist"] = feats["macd_hist_vel"] = feats["adx14"] = 0
-    feats["volume_ratio"] = feats["volume_climax"] = feats["obv_slope5"] = feats["vwap_dev"] = 0
-    feats["hour_sin"] = feats["hour_cos"] = feats["dow_sin"] = feats["dow_cos"] = 0
-    feats["month_sin"] = feats["month_cos"] = 0
-    return list(feats.keys())
+    """
+    Ordered feature names, **derived from the same builder that produces the vector**.
+
+    WHAT WAS WRONG (spec Section 64). This was a hand-maintained literal returning **37
+    names for a 59-value vector**, and it diverged from the real order after index 30 —
+    jumping from `vwap_dev` straight to `hour_sin` and skipping `trend_strength`
+    onward. `registry._generate_reasons` does `dict(zip(names, features))`, so every
+    reason keyed above index 30 was reading an unrelated feature's value, and
+    `hurst_exp` was missing from the list entirely, so its branch could never fire.
+
+    Deriving the names from `compute_features_dict` removes the whole class of defect:
+    the names and the values come from one dict, so they cannot disagree. Computed once
+    and cached — the synthetic frame is deterministic, so the order is stable.
+    """
+    global _FEATURE_NAMES
+    if _FEATURE_NAMES is None:
+        _FEATURE_NAMES = list(compute_features_dict(_canonical_frame()).keys())
+    return list(_FEATURE_NAMES)
+
+
+def get_full_feature_names() -> list[str]:
+    """Ordered names for the base + advanced vector."""
+    global _FULL_FEATURE_NAMES
+    if _FULL_FEATURE_NAMES is None:
+        _FULL_FEATURE_NAMES = list(compute_full_features_dict(_canonical_frame()).keys())
+    return list(_FULL_FEATURE_NAMES)
 
 
 # ── Math helpers ──────────────────────────────────────────────────────────────

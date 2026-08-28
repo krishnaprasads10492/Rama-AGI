@@ -29,14 +29,30 @@ logger = logging.getLogger("stockmind-ai.models")
 # ── Base class ────────────────────────────────────────────────────────────────
 
 class BaseModel:
+    """
+    TWO DIFFERENT QUESTIONS, previously answered by one flag (spec Section 64).
+
+      `is_available()` — can this model produce a number at all?
+      `is_trained()`   — did it load a fitted artifact from disk?
+
+    `loaded` conflated them, and `RegimeAwareModel` sets `loaded = True` in its
+    constructor with the comment "Always available (uses other models)". So a purely
+    heuristic model counted as a trained one, and `/health` reported an artifact that
+    does not exist. Every consumer that wants to know "should master trust this" wants
+    `is_trained()`; only the ensemble loop wants `is_available()`.
+    """
     name: str = "base"
-    loaded: bool = False
+    loaded: bool = False        # can answer
+    trained: bool = False       # loaded a fitted artifact
 
     def predict_proba(self, features: np.ndarray) -> float:
         raise NotImplementedError
 
     def is_available(self) -> bool:
         return self.loaded
+
+    def is_trained(self) -> bool:
+        return bool(self.trained)
 
 
 # ── 1. LightGBM ───────────────────────────────────────────────────────────────
@@ -55,6 +71,7 @@ class LightGBMModel(BaseModel):
             if os.path.exists(model_path):
                 self.model = lgb.Booster(model_file=model_path)
                 self.loaded = True
+                self.trained = True
                 logger.info("[LightGBM] Model loaded from disk")
             else:
                 logger.info("[LightGBM] No saved model — will use mock until trained")
@@ -87,6 +104,7 @@ class XGBoostModel(BaseModel):
                 self.model = xgb.Booster()
                 self.model.load_model(model_path)
                 self.loaded = True
+                self.trained = True
                 logger.info("[XGBoost] Model loaded from disk")
             else:
                 logger.info("[XGBoost] No saved model — will use mock until trained")
@@ -120,6 +138,7 @@ class LSTMModel(BaseModel):
                 self.model = torch.load(model_path, map_location="cpu")
                 self.model.eval()
                 self.loaded = True
+                self.trained = True
                 logger.info("[LSTM] Model loaded from disk")
             else:
                 logger.info("[LSTM] No saved model — will use mock until trained")
@@ -157,6 +176,7 @@ class SentimentModel(BaseModel):
                 device=-1,  # CPU
             )
             self.loaded = True
+            self.trained = True
             logger.info("[Sentiment] FinBERT loaded")
         except ImportError:
             logger.info("[Sentiment] transformers not installed — pip install transformers torch")
@@ -197,6 +217,7 @@ class RandomForestModel(BaseModel):
             if os.path.exists(model_path):
                 self.model = joblib.load(model_path)
                 self.loaded = True
+                self.trained = True
                 logger.info("[RandomForest] Model loaded from disk")
             else:
                 # Bootstrap an untrained model — will use mock until trained
@@ -237,6 +258,7 @@ class MLPModel(BaseModel):
             if os.path.exists(model_path):
                 self.model = joblib.load(model_path)
                 self.loaded = True
+                self.trained = True
                 logger.info("[MLP] Model loaded from disk")
             else:
                 # Bootstrap architecture — 3 hidden layers
@@ -283,6 +305,7 @@ class OnlineSGDModel(BaseModel):
             if os.path.exists(model_path):
                 self.model = joblib.load(model_path)
                 self.loaded = True
+                self.trained = True
                 logger.info("[OnlineSGD] Model loaded from disk")
             else:
                 self.model = SGDClassifier(
@@ -300,6 +323,7 @@ class OnlineSGDModel(BaseModel):
             try:
                 self.model.partial_fit(features.reshape(1, -1), [label], classes=[0, 1])
                 self.loaded = True
+                self.trained = True
             except Exception as e:
                 logger.warning(f"[OnlineSGD] partial_fit error: {e}")
 
@@ -333,14 +357,32 @@ class RegimeAwareModel(BaseModel):
             "low_liquidity": {"weight_trend": 0.5, "weight_reversion": 0.3, "weight_vol": 0.2},
         }
 
-    def detect_regime(self, features: np.ndarray) -> str:
-        """Detect market regime from features."""
-        # Use feature indices: atr14_pct=8, adx14=15, bb_width=10, rsi14=12
+    def detect_regime(self, features: np.ndarray, feature_map: dict = None) -> str:
+        """
+        Detect market regime from named features.
+
+        WHAT WAS WRONG (spec Section 64). This read positional indices with the comment
+        "atr14_pct=8, adx14=15, bb_width=10, rsi14=12". **Only index 8 was correct.**
+        Index 15 is `ema10_slope`, 10 is `parkinson_vol`, and 12 is `bb_position` — so
+        an EMA slope was being tested against an ADX threshold of 0.30 and a Parkinson
+        volatility against a Bollinger-width threshold. Every regime decision, and the
+        regime-conditioned calibration weight that follows from it, was reading
+        unrelated quantities.
+
+        Now resolved by name. `feature_map` is passed by the registry; the positional
+        fallback exists only so a bare array still produces a defensible answer, and it
+        resolves the indices from `get_feature_names()` rather than guessing them.
+        """
         try:
-            atr_pct  = float(features[8])   if len(features) > 8  else 0.01
-            adx      = float(features[15])  if len(features) > 15 else 0.25
-            bb_width = float(features[10])  if len(features) > 10 else 0.02
-            rsi      = float(features[12])  if len(features) > 12 else 0.5
+            fm = feature_map
+            if fm is None:
+                from .features import get_feature_names
+                names = get_feature_names()
+                fm = {n: float(features[i]) for i, n in enumerate(names) if i < len(features)}
+
+            atr_pct  = float(fm.get("atr14_pct", 0.01))
+            adx      = float(fm.get("adx14", 0.25))
+            bb_width = float(fm.get("bb_width", 0.02))
         except Exception:
             return "trending"
 
