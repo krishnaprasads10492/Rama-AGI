@@ -157,17 +157,42 @@ def mock_ohlcv(base_price: float, n: int = 250) -> pd.DataFrame:
 
 def get_ohlcv(params: dict) -> tuple[pd.DataFrame, bool]:
     """
-    Get OHLCV data for a prediction request.
+    Get OHLCV for a request, in order of preference.
+
+        1. bars supplied in the request
+        2. the local historical store, topped up from the provider chain
+        3. mock — explicitly last, and always labelled
+
+    WHAT THIS REPLACES (spec Section 65). There used to be only steps 1 and 3: the
+    Yahoo fetcher beside this function was `async` while this function is synchronous,
+    so nothing ever awaited it. The renderer never sends `ohlcv` either, so **every
+    prediction and every backtest ran on a random walk seeded by the typed price.**
 
     Returns:
-        (df, is_real) — DataFrame and whether it's real data
+        (df, is_real)
     """
-    # 1. Use OHLCV passed in request (from Node.js backend)
+    # 1. Bars supplied by the caller.
     if params.get("ohlcv"):
         df = ohlcv_to_df(params["ohlcv"])
         if df is not None and len(df) >= 20:
             return df, True
 
-    # 2. Fall back to mock
+    # 2. The local store, extended by the provider chain when it has fallen behind.
+    symbol   = params.get("symbol")
+    exchange = params.get("exchange", "NSE")
+    if symbol and not params.get("noNetwork"):
+        try:
+            from . import store
+            df, info = store.sync(symbol, exchange, "1d",
+                                  years=params.get("historyYears"))
+            if df is not None and len(df) >= 20:
+                logger.info(f"[DataFetcher] {symbol}: {len(df)} bars "
+                            f"({info.get('firstBar')} → {info.get('lastBar')}) via {info.get('source')}")
+                return df, True
+            logger.warning(f"[DataFetcher] {symbol}: store/providers gave nothing usable — {info.get('reason')}")
+        except Exception as e:
+            logger.warning(f"[DataFetcher] {symbol}: history lookup failed ({e})")
+
+    # 3. Mock, last resort, always labelled as such by the caller.
     base_price = params.get("basePrice", 100.0)
     return mock_ohlcv(base_price, 250), False
