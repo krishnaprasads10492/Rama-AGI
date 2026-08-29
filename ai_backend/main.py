@@ -918,6 +918,51 @@ def ledger_note(req: LedgerNoteRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Alerts (spec Section 75) ─────────────────────────────────────────────────
+
+@app.get("/alerts")
+def alerts_for_book(symbol: Optional[str] = None, includePrediction: bool = False,
+                    interval: str = "1d"):
+    """
+    When to leave, reduce, or add — with the evidence that entitles each answer.
+
+    Every alert carries an `evidence` class and an `actionable` flag. `DECLARED` (master's own
+    stop or target) and `MEASURED` (arithmetic over his fills and stored bars) can be acted on.
+    `MODEL` can only be acted on if that horizon cleared Section 69's gate — none currently do,
+    so those come back with `actionable: false` and the recorded refusal reason rather than
+    being either hidden or promoted into advice.
+
+    A stale price disqualifies every alert that compares a price, because an exit fired on last
+    week's close carries the authority of a system that looks current.
+    """
+    try:
+        from engine import alerts
+        return alerts.evaluate(symbol=symbol, include_prediction=includePrediction,
+                               interval=interval)
+    except Exception as e:
+        logger.error(f"Alert evaluation error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/alerts/entitlement")
+def alerts_entitlement():
+    """Which horizons have a model entitled to influence an alert, read from provenance."""
+    try:
+        from engine import alerts
+        from engine import horizons as _h
+        ent = {n: alerts.model_entitlement(n) for n in _h.DEFAULT_ORDER}
+        entitled = [n for n, e in ent.items() if e["entitled"]]
+        return {"entitlements": ent, "entitled": entitled,
+                "anyEntitled": bool(entitled),
+                "note": ("A horizon with no gate-passing model cannot make an alert "
+                         "actionable. This is read from the per-horizon training record, "
+                         "not assumed." if not entitled else
+                         f"actionable model readings available for: {', '.join(entitled)}")}
+    except Exception as e:
+        logger.error(f"Entitlement error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("STOCKMIND_PYTHON_PORT", "8001"))

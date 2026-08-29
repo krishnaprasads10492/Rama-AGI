@@ -223,6 +223,22 @@ async function ledgerRemoveFill(body)  { return postPath('/ledger/fill/remove', 
 async function ledgerSetThesis(body)   { return postPath('/ledger/thesis', body, { timeout: 30000 }); }
 async function ledgerNote(body)        { return postPath('/ledger/note', body, { timeout: 30000 }); }
 
+// ─── Alerts (Section 75) ─────────────────────────────────────────────────────
+//
+// `stockmind.view`, deliberately the LOWEST StockMind gate. Reading a warning about one's own
+// position is not a privileged action, and putting capital protection behind a higher tier
+// than the ability to request a signal would be exactly the wrong way round.
+
+async function alertsFor({ symbol = null, includePrediction = false, interval = '1d' } = {}) {
+  const q = [`interval=${encodeURIComponent(interval)}`];
+  if (symbol) q.push(`symbol=${encodeURIComponent(symbol)}`);
+  if (includePrediction) q.push('includePrediction=true');
+  // With predictions it runs the models for every held symbol, so it needs a real budget.
+  return getPath(`/alerts?${q.join('&')}`, { timeout: includePrediction ? 120000 : 30000 });
+}
+
+async function alertEntitlement() { return getPath('/alerts/entitlement'); }
+
 // ─── Register IPC ───────────────────────────────────────────────────────────
 function register(ipcMain) {
   ipcMain.handle('market:predict', async (_e, { user, ...body } = {}) => {
@@ -285,6 +301,8 @@ function register(ipcMain) {
     'market:ledger-positions': ledgerPositions,
     'market:ledger-portfolio': ledgerPortfolio,
     'market:ledger-position':  ledgerPosition,
+    'market:alerts':           alertsFor,
+    'market:alert-entitlement': alertEntitlement,
   };
   for (const [channel, fn] of Object.entries(readOnly)) {
     ipcMain.handle(channel, async (_e, { user, ...args } = {}) => {

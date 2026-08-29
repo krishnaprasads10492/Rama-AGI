@@ -205,6 +205,11 @@ const RAMA_API = {
     ledgerRemoveFill: (opts) => ipcRenderer.invoke('market:ledger-remove-fill', opts),
     ledgerThesis:     (opts) => ipcRenderer.invoke('market:ledger-thesis', opts),
     ledgerNote:       (opts) => ipcRenderer.invoke('market:ledger-note', opts),
+
+    // Alerts (Section 75) on `stockmind.view` — the lowest StockMind gate, because a warning
+    // about your own capital should not need a higher tier than asking for a signal.
+    alerts:           (opts) => ipcRenderer.invoke('market:alerts', opts),
+    alertEntitlement: (opts) => ipcRenderer.invoke('market:alert-entitlement', opts),
   },
 
   // ── Updater ───────────────────────────────────────────────────────────────
