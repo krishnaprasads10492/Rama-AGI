@@ -239,6 +239,29 @@ async function alertsFor({ symbol = null, includePrediction = false, interval = 
 
 async function alertEntitlement() { return getPath('/alerts/entitlement'); }
 
+// ─── Justification and warnings (Section 76) ─────────────────────────────────
+//
+// Also `stockmind.view`: understanding WHY must not cost a higher tier than being told WHAT.
+
+async function explain({ symbol, exchange = 'NSE', includePrediction = true,
+  includeLive = false, interval = '1d', includePositions = true } = {}) {
+  const q = [`exchange=${encodeURIComponent(exchange)}`,
+    `interval=${encodeURIComponent(interval)}`,
+    `includePrediction=${includePrediction ? 'true' : 'false'}`,
+    `includePositions=${includePositions ? 'true' : 'false'}`];
+  if (includeLive) q.push('includeLive=true');
+  // The live path fetches the delivery report and headlines, so it needs a real budget.
+  return getPath(`/explain/${sym(symbol)}?${q.join('&')}`,
+    { timeout: includeLive ? 120000 : 45000 });
+}
+
+async function explainCorrelations({ symbol, exchange = 'NSE', against = null,
+  lookback = 120 } = {}) {
+  const q = [`exchange=${encodeURIComponent(exchange)}`, `lookback=${Number(lookback) || 120}`];
+  if (against) q.push(`against=${encodeURIComponent(against)}`);
+  return getPath(`/explain/${sym(symbol)}/correlations?${q.join('&')}`);
+}
+
 // ─── Register IPC ───────────────────────────────────────────────────────────
 function register(ipcMain) {
   ipcMain.handle('market:predict', async (_e, { user, ...body } = {}) => {
@@ -303,6 +326,8 @@ function register(ipcMain) {
     'market:ledger-position':  ledgerPosition,
     'market:alerts':           alertsFor,
     'market:alert-entitlement': alertEntitlement,
+    'market:explain':          explain,
+    'market:explain-correlations': explainCorrelations,
   };
   for (const [channel, fn] of Object.entries(readOnly)) {
     ipcMain.handle(channel, async (_e, { user, ...args } = {}) => {

@@ -963,6 +963,57 @@ def alerts_entitlement():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Justification and warnings (spec Section 76) ──────────────────────────────
+
+@app.get("/explain/{symbol}")
+def explain_symbol(symbol: str, exchange: str = "NSE", includePrediction: bool = True,
+                   includeLive: bool = False, interval: str = "1d",
+                   includePositions: bool = True):
+    """
+    Bullets justifying a reading, and the pitfalls that could cost master capital.
+
+    Each bullet carries a `basis`: `observation` (a measured fact), `convention` (how the
+    market conventionally reads it — not validated here), `forecast` (a model's output) or
+    `gate` (whether that forecast may be believed). They are never merged: "RSI is 72.4" is a
+    fact, "RSI is 72.4 therefore it will fall" is a claim StockMind has not earned.
+
+    **The gate bullet is emitted before the probability it qualifies**, and `caveat` travels in
+    the payload rather than being left for a UI to add, so bullets cannot be rendered without it.
+
+    A check that could not run appears as a warning with `checked: false`. An empty warning list
+    means "checked and clear", never "could not look". `includeLive` adds delivery percentage
+    and event risk, both of which need the network and are therefore off by default.
+    """
+    try:
+        from engine import explain
+        return explain.brief(symbol, exchange, include_prediction=includePrediction,
+                             include_live=includeLive, interval=interval,
+                             include_positions=includePositions)
+    except Exception as e:
+        logger.error(f"Explain error for {symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/explain/{symbol}/correlations")
+def explain_correlations(symbol: str, exchange: str = "NSE", against: Optional[str] = None,
+                         lookback: int = 120):
+    """
+    Return correlation against held positions, measured from stored bars.
+
+    No sector table: a hardcoded symbol→sector map would be a guess that rots, and it would
+    miss an index against its own heavyweight constituent, which is correlated by construction.
+    """
+    try:
+        from engine import explain, ledger
+        peers = [p.strip().upper() for p in (against or "").split(",") if p.strip()]
+        if not peers:
+            peers = [p["symbol"] for p in ledger.positions(status=ledger.STATUS_OPEN)]
+        return explain.correlations(list({symbol.upper(), *peers}), exchange, lookback)
+    except Exception as e:
+        logger.error(f"Correlation error for {symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("STOCKMIND_PYTHON_PORT", "8001"))

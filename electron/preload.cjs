@@ -210,6 +210,11 @@ const RAMA_API = {
     // about your own capital should not need a higher tier than asking for a signal.
     alerts:           (opts) => ipcRenderer.invoke('market:alerts', opts),
     alertEntitlement: (opts) => ipcRenderer.invoke('market:alert-entitlement', opts),
+
+    // Justification and warnings (Section 76), also on `stockmind.view`: understanding why
+    // must not cost a higher tier than being told what.
+    explain:             (opts) => ipcRenderer.invoke('market:explain', opts),
+    explainCorrelations: (opts) => ipcRenderer.invoke('market:explain-correlations', opts),
   },
 
   // ── Updater ───────────────────────────────────────────────────────────────
