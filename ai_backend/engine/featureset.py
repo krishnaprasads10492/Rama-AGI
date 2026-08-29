@@ -30,6 +30,25 @@ logger = logging.getLogger("stockmind-ai.featureset")
 # list, which the manifest already catches; a *redefinition* does not, so it needs a version.
 FEATURESET_VERSION = 2
 
+# News columns, joined from the Section 70 series. Same design as the derivative block:
+# constant width, neutral fill, and an explicit availability flag.
+#
+# OFF BY DEFAULT AND EXPECTED TO STAY OFF FOR MONTHS. No free feed reaches back more than
+# about sixteen days, so this series can only be accumulated forward. Section 69's gate needs
+# a 150-row holdout with forward-chaining folds; until `news.coverage()` reports enough days,
+# enabling these columns adds width with no information. The plumbing exists so that when
+# coverage arrives, the decision is a flag rather than a rewrite.
+NEWS_FEATURES = [
+    "news_sentiment", "news_sentiment_abs", "news_items_norm",
+    "news_pos_ratio", "news_neg_ratio", "news_relevance", "news_available",
+]
+
+NEWS_NEUTRAL = {
+    "news_sentiment": 0.0, "news_sentiment_abs": 0.0, "news_items_norm": 0.0,
+    "news_pos_ratio": 0.0, "news_neg_ratio": 0.0, "news_relevance": 0.0,
+    "news_available": 0.0,
+}
+
 # Derivative columns joined from the Section 67 store, in a fixed order.
 #
 # `deriv_available` is part of the vector on purpose. The columns are always present so the
@@ -74,10 +93,12 @@ def manifest_path() -> str:
     return os.path.join(models_dir(), "featureset.json")
 
 
-def save_manifest(names: list, include_derivatives: bool, extra: dict = None) -> bool:
+def save_manifest(names: list, include_derivatives: bool, extra: dict = None,
+                  include_news: bool = False) -> bool:
     payload = {
         "featuresetVersion": FEATURESET_VERSION,
         "includeDerivatives": bool(include_derivatives),
+        "includeNews": bool(include_news),
         "featureCount": len(names),
         "featureNames": list(names),
         "savedAt": _dt.datetime.now().isoformat(timespec="seconds"),
@@ -121,14 +142,20 @@ def include_derivatives_default() -> bool:
     return bool(m.get("includeDerivatives")) if m else False
 
 
-def validate_against_live(names_from_artifact: list, include_derivatives: bool) -> tuple[bool, str]:
+def include_news_default() -> bool:
+    m = load_manifest()
+    return bool(m.get("includeNews")) if m else False
+
+
+def validate_against_live(names_from_artifact: list, include_derivatives: bool,
+                          include_news: bool = None) -> tuple[bool, str]:
     """
     Does an artifact's feature contract still match what this build produces?
 
     @returns (ok, reason). Compares names AND order — a set comparison would pass a
              permutation, which is the exact failure this exists to prevent.
     """
-    live = feature_names(include_derivatives)
+    live = feature_names(include_derivatives, include_news)
     if len(names_from_artifact) != len(live):
         return False, (f"feature count changed: artifact has {len(names_from_artifact)}, "
                        f"this build produces {len(live)}")
@@ -230,8 +257,57 @@ def derivative_features(symbol: str, exchange: str, bar_date) -> dict:
 
 # ── The builder ───────────────────────────────────────────────────────────────
 
+def news_features(symbol: str, exchange: str, bar_date) -> dict:
+    """
+    The fixed-width news block for one bar, as-of that date.
+
+    Same rules as `derivative_features`: constant keys, neutral fill, `news_available` flag so
+    the model can tell a quiet news day from an absent series. As-of and never after — a
+    feature built from tomorrow's headlines is lookahead of the plainest kind.
+    """
+    out = {k: NEWS_NEUTRAL[k] for k in NEWS_FEATURES}
+    if not symbol:
+        return out
+    try:
+        from . import news as _news
+        df = _news.load_series(symbol, exchange)
+        if df is None or len(df) == 0:
+            return out
+        d = df.copy()
+        d["date"] = pd.to_datetime(d["date"], errors="coerce")
+        d = d.dropna(subset=["date"]).sort_values("date")
+        upto = d[d["date"] <= pd.Timestamp(bar_date).normalize()]
+        if len(upto) == 0:
+            return out
+        row = upto.iloc[-1].to_dict()
+    except Exception as e:
+        logger.debug(f"[featureset] news lookup failed for {symbol}: {e}")
+        return out
+
+    def num(key, default=0.0):
+        try:
+            v = float(row.get(key))
+            return v if np.isfinite(v) else default
+        except (TypeError, ValueError):
+            return default
+
+    items = max(0.0, num("items"))
+    out["news_sentiment"]     = float(np.clip(num("sentiment"), -1.0, 1.0))
+    out["news_sentiment_abs"] = float(np.clip(num("sentiment_abs"), 0.0, 1.0))
+    # Scaled by a typical busy day rather than left raw, so the model sees "how much news"
+    # instead of a count whose meaning drifts with how many sources are enabled.
+    out["news_items_norm"]    = float(np.clip(items / 40.0, 0.0, 5.0))
+    if items > 0:
+        out["news_pos_ratio"] = float(np.clip(num("positive") / items, 0.0, 1.0))
+        out["news_neg_ratio"] = float(np.clip(num("negative") / items, 0.0, 1.0))
+    out["news_relevance"]     = float(np.clip(num("relevance_mean"), 0.0, 1.0))
+    out["news_available"]     = 1.0
+    return out
+
+
 def build_feature_map(df: pd.DataFrame, symbol: str = None, exchange: str = "NSE",
-                      include_derivatives: bool = None) -> dict:
+                      include_derivatives: bool = None,
+                      include_news: bool = None) -> dict:
     """
     THE feature vector, as an ordered mapping. Used by the trainer and by the dispatcher.
 
@@ -247,42 +323,59 @@ def build_feature_map(df: pd.DataFrame, symbol: str = None, exchange: str = "NSE
 
     if include_derivatives is None:
         include_derivatives = include_derivatives_default()
+    if include_news is None:
+        include_news = include_news_default()
 
     fmap = dict(compute_full_features_dict(df))
 
-    if include_derivatives:
+    bar_date = None
+    try:
+        if df is not None and len(df) and "date" in df.columns:
+            bar_date = pd.Timestamp(df["date"].iloc[-1]).normalize()
+    except Exception:
         bar_date = None
-        try:
-            if df is not None and len(df) and "date" in df.columns:
-                bar_date = pd.Timestamp(df["date"].iloc[-1]).normalize()
-        except Exception:
-            bar_date = None
+
+    if include_derivatives:
         if bar_date is not None and symbol:
             fmap.update(derivative_features(symbol, exchange, bar_date))
         else:
             fmap.update({k: DERIV_NEUTRAL[k] for k in DERIV_FEATURES})
+    if include_news:
+        if bar_date is not None and symbol:
+            fmap.update(news_features(symbol, exchange, bar_date))
+        else:
+            fmap.update({k: NEWS_NEUTRAL[k] for k in NEWS_FEATURES})
     return fmap
 
 
 def build_vector(df: pd.DataFrame, symbol: str = None, exchange: str = "NSE",
-                 include_derivatives: bool = None) -> tuple[np.ndarray, dict]:
-    fmap = build_feature_map(df, symbol, exchange, include_derivatives)
+                 include_derivatives: bool = None,
+                 include_news: bool = None) -> tuple[np.ndarray, dict]:
+    fmap = build_feature_map(df, symbol, exchange, include_derivatives, include_news)
     return np.array(list(fmap.values()), dtype=np.float32), fmap
 
 
-def feature_names(include_derivatives: bool = None) -> list:
+def feature_names(include_derivatives: bool = None, include_news: bool = None) -> list:
     """
     The names this build produces, without computing anything.
 
     Derived from `get_full_feature_names()` rather than maintained by hand — Section 64
     removed a hand-kept list for exactly this reason, and re-introducing one here would
     resurrect the drift it killed.
+
+    Blocks are APPENDED in a fixed order — price/volume, then derivatives, then news — so
+    enabling one can never move an existing column. A manifest mismatch is then a clean
+    "count changed" rather than a silent shift.
     """
     from .features import get_full_feature_names
 
     if include_derivatives is None:
         include_derivatives = include_derivatives_default()
+    if include_news is None:
+        include_news = include_news_default()
     names = list(get_full_feature_names())
     if include_derivatives:
         names += list(DERIV_FEATURES)
+    if include_news:
+        names += list(NEWS_FEATURES)
     return names

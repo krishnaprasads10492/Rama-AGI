@@ -269,7 +269,8 @@ def forward_chaining_splits(n: int, n_splits: int = 4,
 
 def build_dataset(symbol: str, exchange: str = "NSE", interval: str = "1d",
                   horizon: int = DEFAULT_HORIZON, include_derivatives: bool = False,
-                  max_rows: int = None, stride: int = 1) -> dict:
+                  max_rows: int = None, stride: int = 1,
+                  include_news: bool = False) -> dict:
     """
     Featurise every usable bar of a stored series, causally.
 
@@ -298,7 +299,7 @@ def build_dataset(symbol: str, exchange: str = "NSE", interval: str = "1d",
     atr = None
     y = make_labels(closes, horizon)
 
-    names = featureset.feature_names(include_derivatives)
+    names = featureset.feature_names(include_derivatives, include_news)
     rows, labels, dates = [], [], []
 
     end = len(d) - horizon                     # labels are undefined past this
@@ -313,7 +314,7 @@ def build_dataset(symbol: str, exchange: str = "NSE", interval: str = "1d",
         window = d.iloc[start:i + 1]
         try:
             fmap = featureset.build_feature_map(window, symbol, exchange,
-                                                include_derivatives)
+                                                include_derivatives, include_news)
         except Exception as e:
             logger.debug(f"[training] featurising bar {i} failed: {e}")
             continue
@@ -335,6 +336,9 @@ def build_dataset(symbol: str, exchange: str = "NSE", interval: str = "1d",
         "X": X, "y": yv, "dates": pd.to_datetime(pd.Series(dates)).reset_index(drop=True),
         "featureNames": names, "horizon": horizon,
         "includeDerivatives": bool(include_derivatives),
+        "includeNews": bool(include_news),
+        "newsCoverage": (round(float(X[:, names.index("news_available")].mean()), 4)
+                         if include_news and "news_available" in names else None),
         "rows": int(len(yv)), "positiveRate": round(float(yv.mean()), 4),
         "firstDate": str(dates[0].date()), "lastDate": str(dates[-1].date()),
         "derivativeCoverage": (round(float(X[:, names.index("deriv_available")].mean()), 4)
@@ -615,7 +619,8 @@ def sweep_horizons(symbol: str = "NIFTY50", exchange: str = "NSE", interval: str
 def train(symbol: str = "NIFTY50", exchange: str = "NSE", interval: str = "1d",
           horizon: int = DEFAULT_HORIZON, include_derivatives: bool = False,
           models: list = None, n_splits: int = 4, holdout_frac: float = 0.2,
-          stride: int = 1, max_rows: int = None, dry_run: bool = False) -> dict:
+          stride: int = 1, max_rows: int = None, dry_run: bool = False,
+          include_news: bool = False) -> dict:
     """
     Fit, evaluate on an untouched holdout, and persist only what beats its base rate.
 
@@ -627,7 +632,7 @@ def train(symbol: str = "NIFTY50", exchange: str = "NSE", interval: str = "1d",
     wanted = models or ["random_forest", "mlp", "online_sgd", "lightgbm", "xgboost"]
 
     ds = build_dataset(symbol, exchange, interval, horizon, include_derivatives,
-                       max_rows=max_rows, stride=stride)
+                       max_rows=max_rows, stride=stride, include_news=include_news)
     if not ds.get("ok"):
         return {"ok": False, "reason": ds.get("reason"), "symbol": symbol}
 
@@ -643,6 +648,7 @@ def train(symbol: str = "NIFTY50", exchange: str = "NSE", interval: str = "1d",
     report = {
         "ok": True, "symbol": symbol, "exchange": exchange, "interval": interval,
         "horizonBars": horizon, "includeDerivatives": bool(include_derivatives),
+        "includeNews": bool(include_news), "newsCoverage": ds.get("newsCoverage"),
         "featureCount": len(ds["featureNames"]),
         "rows": ds["rows"], "stride": stride,
         "positiveRate": ds["positiveRate"],
@@ -735,7 +741,8 @@ def train(symbol: str = "NIFTY50", exchange: str = "NSE", interval: str = "1d",
         # The manifest is written only when something was persisted, and it describes the
         # feature contract those artifacts were fitted on. Writing it otherwise would tell
         # inference to build derivative columns no model asked for.
-        featureset.save_manifest(ds["featureNames"], include_derivatives, extra={
+        featureset.save_manifest(ds["featureNames"], include_derivatives,
+                                 include_news=include_news, extra={
             "trainedSymbol": symbol, "trainedExchange": exchange, "interval": interval,
             "horizonBars": horizon,
         })

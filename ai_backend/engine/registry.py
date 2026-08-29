@@ -109,19 +109,25 @@ class ModelRegistry:
             except Exception as e:
                 logger.warning(f"[{model.name}] predict failed: {e}")
 
-        # Sentiment
-        if news_text:
-            try:
-                p = self.sentiment.predict_proba(news_text)
-                probs["sentiment"] = float(np.clip(p, 0.05, 0.95))
-            except Exception:
-                probs["sentiment"] = 0.5
-        else:
-            try:
-                p = self.sentiment.predict_proba_from_features(features)
-                probs["sentiment"] = float(np.clip(p, 0.05, 0.95))
-            except Exception:
-                probs["sentiment"] = 0.5
+        # Sentiment — ABSTAINS rather than voting noise (spec Section 70).
+        #
+        # Both sentiment paths used to return `0.5 + gaussian noise`, and the no-text path was
+        # taken on every request because nothing ever supplied `news_text`. That member voted
+        # in the blend and made `epistemic` — the standard deviation across members — differ
+        # between two identical requests, describing a member disagreeing only with itself.
+        #
+        # Omitting is safe with `_meta.blend` only because sentiment is the LAST slot
+        # (`_base_models + ["sentiment"]`), so a shorter value list still lines up with
+        # `weights[:len(values)]`. That is the positional hazard from Sections 68 and 69, and
+        # it is checked here rather than assumed — `test_news` asserts the ordering.
+        try:
+            p = (self.sentiment.predict_proba(news_text) if news_text
+                 else self.sentiment.predict_proba_from_features(features))
+        except Exception as e:
+            logger.debug(f"[sentiment] skipped: {e}")
+            p = None
+        if p is not None:
+            probs["sentiment"] = float(np.clip(p, 0.05, 0.95))
 
         if not probs:
             return {

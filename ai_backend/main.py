@@ -24,6 +24,10 @@ Endpoints:
   POST /outcomes/learn        — feed resolved outcomes into the ensemble, once each
   GET  /models                — artifacts, training provenance, feature-contract alignment
   POST /train                 — fit models on stored history, persist only what beats base
+  GET  /news/sources          — free feeds, and which are stale
+  GET  /news/{symbol}         — headlines with lexicon polarity, event type, relevance
+  POST /news/sync             — record today's reading (news cannot be backfilled)
+  GET  /news/coverage/{sym}   — days collected, and whether that is enough to train on
 
 Started by electron/ipc/aiProcess.cjs (spawn python -u main.py), reached from
 the renderer through electron/ipc/marketIntel.cjs — this process itself has
@@ -464,6 +468,66 @@ def train_models(req: TrainRequest):
         raise
     except Exception as e:
         logger.error(f"Training error for {req.symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── News (spec Section 70) ────────────────────────────────────────────────────
+#
+# Everything here is `backtestable: False`. No free feed reaches back more than about sixteen
+# days, so a news series can only be accumulated forward — which is why `/news/sync` exists
+# and why `/news/coverage` reports how far off a trainable feature still is. Serving this as
+# context to a reader is honest; treating it as a measured edge would not be, because there
+# is not yet enough history to measure it either way.
+
+@app.get("/news/sources")
+def news_sources():
+    from engine.news import registry as news_registry
+    return {"sources": news_registry()}
+
+
+@app.get("/news/{symbol}")
+def news_for(symbol: str, limit: int = 40, includeGeneral: bool = True):
+    """Current headlines for a symbol: lexicon polarity, event type, relevance."""
+    try:
+        from engine.news import headlines
+        return headlines(symbol.upper(), limit=limit, include_general=includeGeneral)
+    except Exception as e:
+        logger.error(f"News error for {symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class NewsSyncRequest(BaseModel):
+    symbol:   str = "NIFTY50"
+    exchange: str = "NSE"
+    limit:    int = Field(default=60, ge=5, le=200)
+
+
+@app.post("/news/sync")
+def news_sync(req: NewsSyncRequest):
+    """
+    Record today's reading so the series accumulates.
+
+    This is the ONLY way news ever becomes a trainable feature: history cannot be fetched, so
+    it has to be collected daily from whenever collection starts. Rāma's scheduler should call
+    this once a day; not calling it means the feature never becomes possible.
+    """
+    try:
+        from engine.news import sync_today
+        _, info = sync_today(req.symbol.upper(), req.exchange, limit=req.limit)
+        return info
+    except Exception as e:
+        logger.error(f"News sync error for {req.symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/news/coverage/{symbol}")
+def news_coverage(symbol: str, exchange: str = "NSE"):
+    """How many days have been collected, and whether that is yet enough to train on."""
+    try:
+        from engine.news import coverage
+        return coverage(symbol.upper(), exchange)
+    except Exception as e:
+        logger.error(f"News coverage error for {symbol}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -1727,6 +1727,7 @@ authenticated **Master session**, not merely an open store.
 | 85 | StockMind — NSE derivatives and institutional flows, free and backtestable | done | Section 67. Task 2 of 6. New `ai_backend/engine/derivatives.py`; `store.py` generalised; five routes added to `main.py`. **Every endpoint was probed live before the design was fixed**, because NSE moved its archive host and changed the bhavcopy format in 2024 and most published guidance is stale. Findings that shaped the build: **`api/option-chain-indices` is 404** — the endpoint nearly every tutorial and most wrapper libraries still use — and its replacement `option-chain-v3` **requires an expiry**, returning `{}` with status **200** without one, a silent empty that reads as "no options today" rather than a missing parameter. **Derivatives history reaches 2001**: UDiFF (`nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_...`) covers ~2024 onward, the legacy layout (`/content/historical/DERIVATIVES/...`) covers 2001–2024, they agree in the overlap, and 2001 is when index options began trading in India rather than an archive limit — so the two together are the entire history of the instrument class. Decisions: **the archives are primary and the live chain is an intraday top-up**, because the chain describes today while the archive describes every day since 2001 and only the archive can feed a backtest or train a model (same reasoning as Section 65's store-is-primary; the live chain is the more tempting build and can only ever support a dashboard); **derived daily metrics are persisted, not raw contracts** — 21 years at ~30,000 contract rows a day is ~150M rows, which would break the CSV choice of Section 65 and force parquet or a database, whereas one feature row per symbol-day is ~5,000 rows, the same order as an OHLCV series; **`straddle_pct` instead of implied volatility**, since neither bhavcopy carries IV and back-solving Black-Scholes across 21 years needs assumed rate and dividend curves, while the ATM straddle over spot *is* the market's priced expected move and assumes nothing — a computed IV would look more sophisticated and be less honest; **spot comes from the OHLCV store for both formats**, because UDiFF carries `UndrlygPric` and legacy carries none, and a ratio whose denominator changes provenance at the 2024 boundary makes `max_pain_dist` and `fut_basis_pct` encode *which file the row came from* — the model would learn the archive boundary, the same failure as the Section 64 time-features bug; **a 404 means "not published", not "failed"** (holidays and weekends both 404 with an HTML body — verified on 2026-01-15 and Sunday 2026-08-30), remembered in a memo file so a deep backfill does not re-request every holiday since 2001 on every run; **never advertise brotli** — the first probe sent `Accept-Encoding: br`, NSE honoured it, and the bundled httpx has no decoder, so `fiidiiTradeReact` returned **status 200 with 115 bytes of undecodable binary that parsed as neither JSON nor an error**, reading exactly like a working endpoint returning junk (adding a brotli package would fix the symptom and cost a pinned dependency for kilobyte payloads; also `https://www.nseindia.com/` returns **403** while `/option-chain` and `/all-reports` return 200 and set the required cookies, so warming on the root — the obvious choice — yields a 401); **the existing store was generalised rather than duplicated** — `load`/`merge`/`is_stale` take an optional column set defaulting to OHLCV so every existing caller is untouched (I11), because a parallel store would have re-implemented and then drifted from six properties that are easy to get wrong, and ledger row 19 exists precisely because nineteen subsystems were once duplicated this way; **max pain is vectorised** as a broadcast payout matrix, since Section 66 was a session lost to a Python loop over market data and this is the same shape at ~11,000 terms per day across 21 years. Built: both bhavcopy parsers into one canonical frame, the derived metric row (PCR OI and volume, max pain and distance, max CE/PE OI strikes with normalised distances, OI concentration as a Herfindahl index measuring pinning, straddle percentage, futures basis, futures OI and change, rollover percentage, days to expiry), the resumable backfill, participant-wise OI (Client/DII/FII/Pro — **the historical positioning signal**, unlike `fiidiiTradeReact` which is latest-day only), delivery percentage, and the live chain. Routes: `GET /derivatives/sources`, `GET /derivatives/{symbol}`, `POST /derivatives/sync`, `GET /derivatives/chain/{symbol}`, `GET /flows` — **every response carries `backtestable`**, because without it a snapshot and a backfillable series are indistinguishable to the caller and someone will eventually build a "backtest" on a snapshot. **One real defect found by the tests, in a class worth remembering:** `delivery_data` stripped whitespace from text columns behind `if df[c].dtype == object`, and on pandas 3 text columns are dtype `str`, not `object`, so the branch never ran, `SERIES` kept its leading space, every `== "EQ"` filter matched nothing, and RELIANCE looked absent from a file it was plainly in. **On pandas 2 the same code works** — it would have shipped and broken on an upgrade. Fixed by parsing correctly (`skipinitialspace=True`) rather than sniffing dtypes. Also fixed: `latest_metrics` returned `pd.Timestamp` and `np.float64`, which survive a dict comprehension and fail at `json.dumps` — it crosses IPC, so that would have surfaced as a broken panel rather than a type error; and `sync_history` silently skipped weekends, so its counters did not account for every requested day and a quiet fortnight read as a failure. **Verified: 334 assertions green** — `test_derivatives.py` 132 (new: both layouts, the legacy `OPTION_TYP == 'XX'` futures trap, max pain against a brute-force implementation of its definition on 60 random chains, the spot-provenance rules, the store generalisation including that OHLCV behaviour is unchanged, plus live calls against the exchange and a real backfill), `test_defects.py` 83, `test_store.py` 57, `test_backtest.py` 62. Live confirmations: 2026-08-28 NIFTY PCR 0.776, max pain 24,200 against spot 24,175.65, resistance 24,300, support 24,000; legacy 2020-06-10 PCR 0.959; FII index-futures long/short ratio 0.107 (heavily net short); RELIANCE delivery 59.33%; FII net −5,039.8 Cr against DII +5,183.93 Cr. All five routes exercised end to end through `TestClient`, including that `/derivatives/sources` is not shadowed by `/derivatives/{symbol}` and that a malformed date returns 400 rather than being ignored. **Not built** (stated rather than implied): per-contract Greeks and a fitted volatility surface (needs rate and dividend curves to be more than decoration); intraday chain snapshots on a timer (a data-collection service, and it needs master's decision on whether Rāma holds a market-hours process open); BSE derivatives. **Next step: task 3 of 6** — outcome recording and the learning loop: persist every signal, resolve it against later bars, and call `update_from_outcome`, which is **currently never called anywhere**. That is what makes `adaptiveWeight` real and lets `/health` report measured ECE and Brier instead of `null`. The derivative metrics built here are stored but **not yet in the feature vector** — wiring them in changes the model's input dimension, so it belongs with task 4's training rather than being bolted onto a heuristic ensemble that has no way to weigh them. |
 | 86 | StockMind — the learning loop that was never connected | done | Section 68. Task 3 of 6. New `ai_backend/engine/outcomes.py`; `registry.py` persists meta-learner state; `dispatcher.py` records every prediction; `health.py` reports measured calibration; four routes added. **`update_from_outcome`, `StackingMetaLearner.update`, `compute_ece` and `compute_brier_score` all existed and correct, and nothing called any of them.** So `_meta.weights` stayed `np.ones(n)/n` for the life of every process while `status()` advertised `"online_learning"` — a stacking meta-learner that was an unweighted mean wearing a learned-weights interface — and `/health` reported `ece: null` about a measurement with no route to ever being taken. **The deeper problem was that adding a call would not have fixed it:** `MODEL_REGISTRY` is an in-memory singleton in a process `aiProcess.cjs` respawns, so every weight learned would die at exit. That is precisely why `adaptiveWeight` arrived as a **request parameter** — the caller was asked to supply the number that should come out of the engine's own history, and the UI sent 1.0 forever. Learning entered from outside because nothing inside could remember. Decisions: **the resolver calls `backtest._simulate_np`**, not a second implementation — Section 66's rules (stop assumed first on intrabar ambiguity, TIMEOUT marked to market, each target at its own level) must decide live and backtested outcomes identically or the two sets of numbers cannot be compared, and comparing them is the only way to learn whether the backtest predicts anything; two implementations would also drift invisibly, both still producing plausible win rates. **One claim per bar per variant** — identity is `(symbol, instrType, barDate, variant)` and a repeat prediction updates rather than appends, because a UI polling `/predict` every few seconds would otherwise record one claim hundreds of times and ECE, an average over predictions, would be dominated by whichever bar was polled most; **without this the entire measurement is worthless**, and `barDate` is the bar the prediction was computed on rather than the wall clock for exactly this reason. **JSONL, not the CSV store** — the store holds time series (one row per date, fixed columns) while these are events with a nested `modelProbs` dict and a 100-float vector; CSV would mean 100+ columns or JSON inside a cell, and JSONL discards a torn final line while keeping the rest. **One feature vector per prediction, not per signal** — Section 64 established N signals are N geometries over one prediction, so 100 floats serve where 1,600 would be stored. **Learning is exactly-once and persisted** — `learnedAt` is stamped as each record is consumed, so re-running the resolver is safe; without it whoever runs it twice silently doubles every outcome's influence and there is no way to detect it afterwards. Restored state is **discarded rather than padded** when the model count or names differ, because weights are positional and restoring a mismatched vector would apply one model's learned weight to another — starting uniform is recoverable, learning against a permuted mapping is not. **Never learn from synthetic data** — mock-data claims are recorded (hiding them would make the record incomplete) but never resolved and never learned from; training on a random walk produces confident weights derived from noise and would make `/health` report a measured calibration against nothing. **`adaptiveWeight` is now measured** as realised win rate over mean predicted probability, clamped to the `[0.5, 2.0]` the schema already validates, with an explicitly supplied value still winning (I11) and exactly 1.0 below `MIN_SAMPLES_FOR_WEIGHT = 30` — a correction fitted on nine trades is noise with a decimal point. Calibration is likewise withheld below 20 resolved claims. **Two real defects the wiring exposed, both previously unreachable:** (a) `OnlineSGDModel.partial_fit` set `trained = True`, a flag the base class documents as "loaded a fitted artifact from disk" — so `/health` began claiming an artifact that does not exist after a single online sample. Section 64 split `is_available` from `is_trained`; this needed a third distinction, `is_online_fitted` with a sample count, since provenance and state are different claims. Worse, `predict_proba` then started using that one-sample model **instead of the heuristic**, so connecting the loop would have silently made every prediction worse; the fitted path now requires `MIN_ONLINE_SAMPLES = 50` **and both classes seen**, because a single-class SGD is a constant. (b) `partial_fit` caught a feature-width mismatch and logged it, so if the vector ever grew every online update would fail forever with `online_samples` stuck at zero and the only evidence a log line nobody reads — **not hypothetical, since task 4 adds derivative features**. It now resets the estimator and says so, which is also the honest response because coefficients fitted on the old columns do not describe the new ones. **Recorded but deliberately not changed:** `dispatcher._apply_mode` adds `np.random.normal(0, 0.03)` in `"learning"` mode and the default `"both"` blends 40% of it, so **the default prediction path is not reproducible** and measured ECE will include that injected variance as model miscalibration. The recorded value is the probability actually issued, perturbation included, because that is the claim that was made and the only one it is fair to score; `rawProbability` is stored alongside so the two can be separated. Removing the noise is a behaviour change master has not asked for. Also fixed: `test_defects.py` now isolates its data directory — it calls `generate_signals` five times and so records predictions, which made its `/health` assertions depend on leftover state in a gitignored directory. A leaked `STOCKMIND_DATA_DIR` in the verifying shell had it writing to a stale temp dir, which cost a diagnosis and is the same "the environment is not what you think" trap Sections 62, 63 and 66 record. **Verified: 468 assertions green** — `test_outcomes.py` 134 (new: dedup across symbol/instrument/bar/variant, the resolver matching `_simulate_np` exactly on the same inputs, no early scoring before the horizon elapses, mock exclusion even when force-resolved, exactly-once learning, meta-state round-trip plus four rejection cases, torn-line recovery, the calibration and weight thresholds in both directions with an over- and under-confident forecaster, the online/trained distinction, the width-change reset, retention pruning vectors with records, and `/health` surviving the loop raising), `test_derivatives.py` 132, `test_defects.py` 83, `test_backtest.py` 62, `test_store.py` 57. All four routes exercised end to end through `TestClient`: 5 signals recorded from one `/predict`, a repeat call recording nothing new, 5 resolved and 5 learned, a second resolve returning zero for both, and `/health` correctly reporting `ece: null` at 5 resolved with `modelsLoaded=0` and `modelsOnlineFitted=1`. **Next step: task 4 of 6** — train real models with strict time-series splits, persist artifacts, record the training date range so the backtest can flag in-sample, and wire the Section 67 derivative metrics into the feature vector (which is what will trigger the width-reset path above). **Still blocked and asked four times: the trading horizon** — intraday, swing-days, or positional-weeks. The label cannot be defined without it; the default stays 5 bars. Also outstanding for the Electron side: nothing calls `/outcomes/resolve` on a schedule yet, which is a scheduling decision rather than engine work. |
 | 87 | StockMind — training real models, and the contract that keeps them aligned | done (pipeline verified end to end; **no model from real data cleared the gate — that is the finding**) | Section 69. Task 4 of 6. New `ai_backend/engine/featureset.py`, `engine/training.py`, `train.py` CLI, `tests/test_training.py`; `models.py`, `registry.py`, `dispatcher.py`, `backtest.py`, `main.py` updated. **There had never been a training script**, so `data/models/` never existed and every probability came from a heuristic branch. **The trap that would have made a trainer worse than none: there is no feature scaling anywhere at inference** — `predict_proba` feeds the raw vector in, MLP and SGD are scale-sensitive, and `predict_proba` only falls back on an *exception*, never on an implausible number, so a model trained on standardised features and served raw would produce confident nonsense while `/health` reported a trained artifact. Fixed by persisting each sklearn model as a `Pipeline(StandardScaler, estimator)`: the scaler is *inside* the artifact, cannot be forgotten, and **no inference code changed**. Decisions: **the feature manifest is the contract** — a model is a function of a column order, so `data/models/featureset.json` records exact names and order and every load validates against the live builder, refusing the artifact and falling back to the heuristic on mismatch (this is the *third* appearance of that failure class after Section 64's 37-names-vs-59-values and Section 68's positional meta-weights, and it gets the same treatment: refuse, never pad or guess); **one builder serves training and inference** (`featureset.build_feature_map`, now also used by `backtest._model_probability`, since a backtest building a 100-column vector while the model expected more would be measuring a different model than the one that serves); **the label is the sign of the forward return with no neutral band**, because the output is consumed by `barrier_probability` as an unconditional P(up) and dropping small moves would train P(up | the move was large) and overstate the edge on exactly the quiet bars where the model should be least confident; **the horizon is recorded in the artifact**, so a model fitted for one horizon can never be silently served as another; **strict forward-chaining splits with an untouched holdout**, no `KFold`, no shuffling; **derivative columns are constant-width, neutral-filled and carry `deriv_available`** so the model can tell "neutral market" from "no data" and sklearn never sees NaN; **`models.py` now resolves artifact paths through `featureset.models_dir()`** — it had a hardcoded relative path while the trainer honours `STOCKMIND_MODELS_DIR`, which would have meant training writing to one directory and loading reading from another, presenting as "training succeeded, nothing loaded". **The acceptance gate took three attempts and each failure was found by running it, not reading it:** (1) raw accuracy vs the majority class — wrong because a 56%-up series makes "always up" score 0.56 so accuracy mostly measures index drift, and because `class_weight='balanced'` optimises *balanced* accuracy and so could never win that comparison (removing it lifted RF accuracy 0.4943 → 0.5376 and halved its ECE, since balancing distorts probabilities away from the true prior — right when the two errors cost differently, wrong when the probability is the product); (2) AUC plus Brier skill — better, but RF then scored holdout AUC **0.5974 with fold AUC 0.4821, below chance**, which is precisely the error walk-forward validation exists to catch, so a fold-stability condition was added; (3) **a pure random walk then passed with AUC 0.7464 and Brier skill +0.12** on a **47-row** holdout, where AUC's standard error is ~0.10 — the gate was measuring sample size, not skill. Added a 150-row holdout floor and a two-standard-error significance margin computed from the **minority** class. Re-run on an adequate random walk: AUC 0.516 against a 0.593 floor, correctly rejected. Final gate is five conditions in one `gate_verdict` function, shared with `sweep_horizons` because the sweep's first version checked only two and reported horizons as passing that the trainer would refuse. **The measured result, which is the substance of this row:** `sweep_horizons` (featurises once, relabels per horizon) over NIFTY 50, 2,185 rows, 2008-10-03 → 2026-07-31, 437-row holdout — **no horizon from 1 to 20 bars carries a measurable directional edge**, each rejected for a different reason (1/2/5 fail AUC outright; 3/10 rank above chance but inside two standard errors; 20 clears AUC 0.597, significance and Brier skill +0.030 but fails fold stability at 0.487). Signal does rise monotonically with horizon, and the 20-bar labels overlap 18-of-20 forward bars at stride 2 so the effective sample is far below 437 — a reason to trust 0.597 less. **`DEFAULT_HORIZON` stays 5**; moving it on the strength of a result that fails the gate would be the self-deception this work exists to prevent. This is a finding about the data and the current feature set, not a defect — index direction from price and volume alone is close to a martingale — and it points at what tasks 5 and 6 are for, plus a possible change of target since realised volatility is far more forecastable than direction and the risk geometry already consumes it. **Verified: 580 assertions across six suites** (`test_training` 112 new; `test_derivatives` 132, `test_outcomes` 134, `test_defects` 83, `test_backtest` 62, `test_store` 57). Because real data yields no acceptable model, the persist/load path is proved on a synthetic trending series (AUC 0.982, Brier skill 0.775, fold AUC 0.976) — otherwise "nothing persisted" and "persisting is broken" would be indistinguishable. End to end through the API: `/train dryRun` accepts without writing, `/train` persists and reloads in place, `/models` reports `type: "trained"` with the horizon, `/health` moves to `modelsLoaded: 1`, `/predict` serves from the artifact, and **`/backtest` reports `outOfSample: false` with an explicit IN-SAMPLE warning naming both date ranges** — the capability `_trained_model_note` previously could not provide. Two robustness fixes found along the way: `_rewrite_jsonl` now retries `os.replace`, which raises `PermissionError` on Windows whenever anything holds the destination for an instant (an antivirus scan suffices; it appeared as soon as several test processes wrote at once), and `_prune` no longer propagates, because retention is housekeeping and a failed prune should cost a slightly larger file rather than a prediction record that was already assembled. **Not built:** no LSTM (`torch` is not a pinned dependency and adding it is master's call); LightGBM and XGBoost training **is** implemented but **cannot be exercised here** — neither package installs in this workspace — so those paths are written, skipped cleanly and reported as unverified rather than claimed; no hyperparameter search. **Next step: task 5 of 6** — news and sentiment to market impact via free RSS (Google News, Yahoo per-ticker), sentiment without heavy dependencies. Note `SentimentModel` already has a FinBERT path behind an optional `transformers` import and currently returns 0.5 from features. **Still unanswered after five asks: the trading horizon.** The sweep above is now the evidence for that decision, and it says no horizon in 1–20 bars works on price data alone. |
+| 88 | StockMind — news, events, and the random number generator that was voting | done | Section 70. Task 5 of 6. New `ai_backend/engine/news.py` and `tests/test_news.py`; `models.py`, `registry.py`, `featureset.py`, `training.py`, `main.py` updated. **The defect this started from has nothing to do with news:** `SentimentModel.predict_proba_from_features` returned `0.5 + np.random.normal(0, 0.04)` and `predict_proba` with no text returned `0.5 + np.random.normal(0, 0.05)` — and the no-text branch was taken on **every single prediction**, because `ensemble_predict` only calls the text path when `news_text` is non-empty and nothing ever supplied it. So **one of eight ensemble members was a random number generator**, voting in `_meta.blend` and making `epistemic` (the standard deviation across members) differ between two identical requests, part of it describing a member disagreeing only with itself. Fixed by having it **abstain** — return `None` — with `ensemble_predict` omitting it rather than inserting 0.5 or noise. Omitting is safe only because sentiment is the **last** meta-learner slot, so a shorter value list still lines up with `weights[:len(values)]`; that is the positional hazard from Sections 68 and 69 and it is **asserted in the tests rather than assumed**. Verified live: voting members with no news are now seven with `sentiment` absent, adding a headline adds exactly one member at 0.75, and the same headline returns the identical number eight times out of eight — the direct proof the randomness is gone. **The constraint that shaped everything else: news has no history.** No free feed reaches back more than ~16 days and most cover two, which is the reverse of Section 67's archives-to-2001. So news **cannot be backfilled**, only accumulated forward, and therefore **cannot be a trained-model feature yet** — Section 69's gate needs a 150-row holdout with forward-chaining folds and 16 days provides neither. The honest deliverable is therefore collect-and-persist daily, serve as context now, expose as a feature behind an availability flag for when coverage arrives, and **explicitly not assert impact** (task 4 measured no directional edge from price features; asserting one from headline sentiment on 16 days would be unmeasurable by construction). Decisions: **a lexicon, labelled as one**, rather than `transformers`+`torch` — a very large pinned dependency master has not asked for, and FinBERT on CPU is slow per request; the FinBERT path is kept for when it happens to be installed (I11). The lexicon handles the three things that make naive word counting wrong on financial headlines: finance-specific polarity that general lists get backwards, **negation** within a 3-token window (`fails to beat estimates` is a miss), and graded intensity. Scores are normalised by matched **weight**, not token count, so padding a headline cannot dilute it. **Event type is reported alongside polarity** because "three rating downgrades today" tells a trader what "sentiment −0.2" does not. **Relevance weighting** with a 0.15 floor, so a general market story counts less but still counts. **De-duplication on a normalised title**, because ten copies of one wire story is not ten pieces of evidence — without it the daily aggregate is a popularity count of whichever agency was syndicated most. **Every source is staleness-checked on the age of its newest item**, which exists entirely because of Moneycontrol: its business feed answers HTTP 200 with valid well-formed XML whose newest item is **857 days old** (verified live). It is deliberately **not registered**, with the reason recorded in place so nobody re-adds it. Also verified and recorded: **Yahoo's per-ticker feed returns zero items for Indian symbols** (`RELIANCE.NS` and `^NSEI` both 200-with-no-items while `AAPL` returns 15) — the obvious per-ticker source for an Indian tool silently has nothing, so it is registered as US-only rather than left to be re-discovered. Feature plumbing: `NEWS_FEATURES` is a 7-column constant-width block with neutral fill and a `news_available` flag, appended **after** the derivative block so enabling either can never move an existing column; `featureset.feature_names` and the manifest now carry `includeNews`, and `validate_against_live` checks it. **Off by default and expected to stay off for months** — the plumbing exists so that when coverage arrives the decision is a flag rather than a rewrite. **Three classification bugs the tests caught**, all ordering or over-matching: "cuts price target" classified as `guidance` because the greedy `targets?` beat `rating` to it (rating now precedes guidance, guidance no longer matches a bare target); "RBI holds repo rate" classified as `regulatory` because bare `rbi` was in that pattern, which made **every monetary-policy story an enforcement story** (removed — SEBI/CCI/NCLT stay because those appear in news precisely when acting against someone); and "not profitable" scoring 0.0 because the lexicon had `profit` but not `profitable`, so the negation had nothing to flip. That last one is the reminder worth keeping: **a lexicon's failure mode is silence, not error** — a missing word reads as neutral and is indistinguishable from a genuinely neutral headline. **Verified: 718 assertions across seven suites** (`test_news` 138 new; `test_outcomes` 134, `test_derivatives` 132, `test_training` 112, `test_defects` 83, `test_backtest` 62, `test_store` 57). Live: all five registered feeds fresh (0.01–0.05 days), one `POST /news/sync` seeded **28 distinct days spanning 2026-07-03 → 2026-08-29** because items are bucketed by their own publication date rather than all stamped today, re-running left it at 28 (the store de-duplicates on date, so collection converges), and `coverage` reports `trainable: false` naming the ~800 days needed. Routes: `GET /news/sources`, `GET /news/{symbol}`, `POST /news/sync`, `GET /news/coverage/{symbol}` — all exercised through `TestClient`, including that `/news/sources` is not shadowed by `/news/{symbol}`. **Not built:** no article-body fetching (RSS gives title and description; fetching each link is slow, fragile, and a scraping question master has not been asked); no paid news APIs; **no attempt to attribute a price move to a headline**, which is a causal claim this data cannot support. **THE ONE ACTION THAT MATTERS: `POST /news/sync` must run daily** — it is the only way the series ever accumulates, and nothing in Rāma schedules it. That is the same outstanding scheduling decision as `/outcomes/resolve` from Section 68; both belong to the Electron side. **Next step: task 6 of 6** — the chart. `recharts@2.15.3` is installed and **never imported**; needs OHLCV over IPC on `stockmind:` channels (the prefix is already allowlisted in `preload.cjs`), candlesticks with entry/SL/T1–T3 overlays and confidence bands, and note that `!node_modules/recharts/**` is excluded from the asar. |
 
 ### Resume checklist for a cold session
 
@@ -6637,3 +6638,203 @@ retries with a short backoff; on POSIX the rename would simply have succeeded, s
 platform difference rather than a logic error. And `_prune` no longer propagates: retention
 is housekeeping, and a failed prune means a file slightly larger than intended while a
 propagated error would lose a prediction record that had already been assembled.
+
+---
+
+## SECTION 70 — StockMind: news, and what it can honestly be used for
+
+Task 5 of the six-part StockMind build. Master's requirement: "read the news, reports of
+stocks and generate impact on index, stocks and derivatives, commodities."
+
+*Written before implementing, per Section 28's working agreement.*
+
+### The defect this starts from
+
+`SentimentModel.predict_proba_from_features` returns:
+
+```python
+return float(np.clip(0.5 + np.random.normal(0, 0.04), 0.35, 0.65))
+```
+
+**Pure noise.** And that is the branch taken on every single prediction, because
+`registry.ensemble_predict` only calls the text path when `news_text` is non-empty and
+nothing has ever supplied it. `predict_proba` with no pipeline and no text is the same:
+`0.5 + np.random.normal(0, 0.05)`.
+
+So **one of the eight ensemble members is a random number generator**, and it has been
+voting in `_meta.blend` on every request. It also makes `epistemic` — the standard deviation
+across model probabilities — **non-reproducible**: two identical requests report different
+model disagreement, and part of what they report is a member disagreeing only with itself.
+
+That is the concrete thing to fix here, independent of anything news adds.
+
+### What was probed, and what is actually true
+
+| Source | Items | Distinct days | Verdict |
+|---|---|---|---|
+| Google News RSS search | 100 | 10–16 | **works**, per-query, carries publisher name |
+| Economic Times markets | 50 | 2 | works |
+| The Hindu BusinessLine markets | 60 | — | works |
+| Business Standard markets | 35 | — | works, richest tags (category, keywords, section) |
+| Livemint markets | 35 | — | works |
+| Yahoo Finance per-ticker | 15 (AAPL) | — | **US only** |
+| Moneycontrol business | 15 | — | **stale by over two years** |
+
+Two traps worth recording, because both look like success:
+
+**Yahoo's per-ticker feed returns zero items for Indian symbols.** `RELIANCE.NS` and `^NSEI`
+both return HTTP 200 with well-formed XML containing no `<item>` elements, while `AAPL`
+returns 15. The obvious per-ticker source for an Indian tool silently has nothing.
+
+**Moneycontrol's feed is over two years stale.** It answers 200, the XML parses, the items
+are well-formed — and the newest is from April 2024. This is the failure mode that passes
+every check anyone writes by reflex. So every source is **staleness-checked on the age of
+its newest item**, and one that is too old is reported as stale rather than merged.
+
+### The constraint that decides everything: news has no history
+
+**No feed reaches back more than about 16 days**, and most cover two. Google News with
+`when:30d` still returned only 16 distinct days.
+
+This is the opposite of Section 67's situation, where the NSE archives went back to 2001. It
+means:
+
+- **News features cannot be backfilled.** They can only be accumulated forward, one day at a
+  time, starting whenever collection starts.
+- **Therefore news cannot be a trained-model feature today.** Section 69 requires a 150-row
+  holdout and forward-chaining folds; with 16 days there is nothing to fit and nothing to
+  validate on. Claiming a news-driven edge now would be unmeasurable by construction.
+
+So the honest deliverable is three things, and explicitly not a fourth:
+
+1. **Collect and persist daily**, so that in some months the feature becomes trainable. The
+   store already refuses to shrink and de-duplicates on date (Section 65), which is exactly
+   what an accumulating series needs.
+2. **Surface it as context now.** A trader reading "why is this moving?" is served by
+   headlines, classified events and a polarity reading, and that is useful without any claim
+   of predictive power. This is most of what master asked for.
+3. **Wire it as a feature behind the availability flag**, so when coverage exists the
+   Section 69 gate — unchanged — decides whether it adds anything.
+4. **Not** asserting impact. Task 4 established there is no measurable directional edge from
+   price features; asserting one from headline sentiment, on 16 days of data, would be
+   exactly the self-deception the last four sections have been removing.
+
+### Decision — a lexicon, not a language model
+
+`transformers` + `torch` is a very large pinned dependency (I12) that master has not asked
+for, and FinBERT on CPU is slow enough to matter per request. The existing FinBERT path is
+**kept** and used when `transformers` happens to be installed (I11, additive), but the
+default is a compact financial lexicon written in-code.
+
+It is a lexicon and is labelled as one. Specifically it handles the three things that make
+naive word counting wrong on financial headlines:
+
+- **Negation**: "fails to beat estimates", "not profitable" — a polarity word inside a
+  negation window flips.
+- **Finance-specific polarity**: "beat", "upgrade", "buyback", "order win" are positive;
+  "miss", "downgrade", "probe", "impairment", "stake sale" are negative. General-purpose
+  sentiment lists get these wrong or miss them entirely.
+- **Intensity**: "surges" and "edges up" are not the same claim.
+
+No licence question, no dependency, and it can be read and corrected by hand.
+
+### Decision — event type matters more than polarity
+
+A polarity score on a headline is weak. The *kind* of event is both more robustly detectable
+and more actionable: earnings, guidance, rating change, regulatory or legal, M&A, dividend or
+buyback, block or bulk deal, index inclusion, macro.
+
+Classification is keyword-pattern based and reported alongside sentiment, because "three
+rating downgrades today" tells a trader something that "sentiment −0.2" does not.
+
+### Decision — the sentiment member abstains instead of guessing
+
+When there is no news for a symbol, `SentimentModel` returns **`None`**, and
+`registry.ensemble_predict` **omits it from the ensemble** rather than inserting 0.5 or noise.
+
+A model with nothing to say should not vote. Omitting is safe with the existing blend because
+sentiment is the **last** slot (`_base_models + ["sentiment"]`), so a shorter value list still
+lines up with `weights[:len(values)]` — the positional hazard from Sections 68 and 69, checked
+rather than assumed. `epistemic` and `agreement` then describe only members that actually
+had an opinion.
+
+### Decision — relevance weighting, and per-symbol aggregation
+
+A headline naming the symbol is worth more than a general market headline. Each item gets a
+relevance score from symbol and alias matches in the title, and the daily aggregate is
+relevance-weighted.
+
+Persisted per `(symbol, date)`: item count, relevance-weighted mean sentiment, positive and
+negative counts, the dominant event type, an event-type histogram, and the number of distinct
+sources — because ten copies of one wire story is not ten pieces of evidence, which is also
+why items are de-duplicated on a normalised title before aggregation.
+
+### Not built here
+
+No article-body fetching — RSS gives title and description, and fetching each link would be
+slow, fragile and a scraping question master has not been asked. No paid news APIs. No
+attempt to attribute a specific price move to a specific headline; that is a causal claim
+and this data cannot support it.
+
+### Verified live
+
+All five registered feeds answered fresh, and the two traps behaved exactly as described:
+
+| Source | Items | Newest | Stale |
+|---|---|---|---|
+| google_news | 100 | 0.05 d | no |
+| economic_times | 50 | 0.01 d | no |
+| business_standard | 35 | 0.01 d | no |
+| livemint | 35 | 0.05 d | no |
+| businessline | 60 | 0.01 d | no |
+| yahoo_ticker | — | — | skipped, US tickers only |
+| moneycontrol *(not registered)* | 15 | **857.8 d** | **yes** |
+
+Moneycontrol's feed is **857 days stale** while returning HTTP 200 with valid, well-formed
+XML. The staleness check catches it; "the XML parsed" would not have.
+
+One `POST /news/sync` seeded **28 distinct days spanning 2026-07-03 → 2026-08-29**, because
+items are bucketed by their own publication date rather than all stamped today. Re-running
+left it at 28 — the store de-duplicates on date, so collection converges instead of
+accumulating duplicates. `coverage` reports `trainable: false` and names the number needed.
+
+The sentiment fix is visible end to end. With no news, the voting members are
+`['lightgbm', 'lstm', 'mlp', 'online_sgd', 'random_forest', 'regime_aware', 'xgboost']` —
+**seven, with `sentiment` absent** rather than eight with one voting noise. Supplying
+"Stock surges after upgrade" adds `sentiment: 0.75`, and the member count grows by exactly
+one. Repeating the same headline eight times returns the identical number every time, which
+is the direct proof the randomness is gone.
+
+A live reading for NIFTY 50: 12 items after de-duplication from 3 distinct sources,
+aggregate sentiment +0.375, 6 positive and 2 negative, dominant event `guidance`.
+
+### Three classification bugs the tests caught
+
+All three were ordering or over-matching errors, found by asserting expected labels rather
+than by reading the patterns:
+
+1. **"Brokerage downgrades stock, cuts price target" classified as `guidance`.** The greedy
+   `targets?` in the guidance pattern claimed "price target" before `rating` could. `rating`
+   now precedes `guidance`, and `guidance` no longer matches a bare "target".
+2. **"RBI holds repo rate as inflation cools" classified as `regulatory`.** Bare `rbi` was in
+   the regulatory pattern, which made **every** monetary-policy story an enforcement story.
+   `rbi` removed; SEBI, CCI and NCLT stay, because those appear in news precisely when they
+   are acting against someone, and genuine RBI enforcement says penalty, notice or action —
+   which `regulatory` already matches.
+3. **"not profitable" scored 0.0.** The lexicon had `profit` and `profits` but not
+   `profitable`, so the negation had nothing to flip. Added, along with `unprofitable`,
+   `profitability`, `insolvency`, `bankruptcy` and several other common forms.
+
+The third is the useful reminder: a lexicon's failure mode is silence, not error. A missing
+word reads as neutral, which is indistinguishable from a genuinely neutral headline.
+
+### What master should take from this
+
+News is now collected, classified and readable, and the random number generator is gone from
+the ensemble. What is **not** claimed is that any of it predicts price. With 28 days
+collected against roughly 800 needed, that question cannot be asked yet, let alone answered.
+
+The one action that matters: **`POST /news/sync` has to run daily.** It is the only way the
+series accumulates, since history cannot be fetched. Nothing in Rāma schedules it yet — that
+is the same outstanding scheduling decision as `/outcomes/resolve` from Section 68, and both
+belong to the Electron side rather than the engine.

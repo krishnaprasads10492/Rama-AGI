@@ -23,6 +23,7 @@ until real training data and artifacts are available.
 import numpy as np
 import logging
 import os
+from typing import Optional
 
 logger = logging.getLogger("stockmind-ai.models")
 
@@ -108,7 +109,8 @@ def artifact_alignment() -> tuple[bool, str]:
                            f"v{m.get('featuresetVersion')}, this build is "
                            f"v{featureset.FEATURESET_VERSION}")
         return featureset.validate_against_live(m["featureNames"],
-                                                bool(m.get("includeDerivatives")))
+                                                bool(m.get("includeDerivatives")),
+                                                bool(m.get("includeNews")))
     except Exception as e:
         return False, f"could not verify the feature contract: {type(e).__name__}: {e}"
 
@@ -256,21 +258,61 @@ class SentimentModel(BaseModel):
         except Exception as e:
             logger.warning(f"[Sentiment] Failed to load FinBERT: {e}")
 
-    def predict_proba(self, text: str = "") -> float:
-        """Returns bullish probability from news text."""
-        if self.pipeline and text:
-            result = self.pipeline(text[:512])[0]
-            if result["label"] == "positive":
-                return float(np.clip(0.5 + result["score"] * 0.4, 0.5, 0.90))
-            elif result["label"] == "negative":
-                return float(np.clip(0.5 - result["score"] * 0.4, 0.10, 0.5))
-            return 0.5
-        # Mock: neutral sentiment
-        return 0.5 + np.random.normal(0, 0.05)
+    def predict_proba(self, text: str = "") -> Optional[float]:
+        """
+        Bullish probability from news text, or None when there is nothing to read.
 
-    def predict_proba_from_features(self, features: np.ndarray) -> float:
-        """Fallback when no text is available — uses feature proxy."""
-        return float(np.clip(0.5 + np.random.normal(0, 0.04), 0.35, 0.65))
+        RETURNING None IS THE FIX (spec Section 70). This used to return
+        `0.5 + np.random.normal(0, 0.05)` with no text, and
+        `predict_proba_from_features` returned `0.5 + np.random.normal(0, 0.04)` — which was
+        the branch taken on **every** prediction, because `ensemble_predict` only calls the
+        text path when `news_text` is non-empty and nothing ever supplied it. So one of eight
+        ensemble members was a random number generator: it voted in the blend, and because
+        `epistemic` is the standard deviation across members, it made reported model
+        disagreement **non-reproducible** — a quantity that differed between two identical
+        requests, describing a member that was only ever disagreeing with itself.
+
+        A model with nothing to say must not vote. `None` means abstain, and
+        `ensemble_predict` omits it.
+        """
+        if not text or not str(text).strip():
+            return None
+
+        if self.pipeline:
+            try:
+                result = self.pipeline(str(text)[:512])[0]
+                if result["label"] == "positive":
+                    return float(np.clip(0.5 + result["score"] * 0.4, 0.5, 0.90))
+                if result["label"] == "negative":
+                    return float(np.clip(0.5 - result["score"] * 0.4, 0.10, 0.5))
+                return 0.5
+            except Exception as e:
+                logger.debug(f"[Sentiment] FinBERT failed, falling back to lexicon: {e}")
+
+        # Lexicon fallback — declared as a lexicon, not dressed up as a model.
+        try:
+            from .news import score_text
+            sc = score_text(str(text))
+            if not sc["matched"]:
+                return None          # no polarity words found: abstain rather than guess 0.5
+            # A headline is weak evidence, so the mapping is deliberately narrow: a maximally
+            # negative or positive reading moves the probability by 0.25, not to 0 or 1.
+            return float(np.clip(0.5 + sc["score"] * 0.25, 0.15, 0.85))
+        except Exception as e:
+            logger.debug(f"[Sentiment] lexicon scoring failed: {e}")
+            return None
+
+    def predict_proba_from_features(self, features: np.ndarray) -> Optional[float]:
+        """
+        No text, no opinion.
+
+        There is no honest way to read sentiment out of price features — that is what the
+        other seven models already do. This returned gaussian noise; it now abstains.
+        """
+        return None
+
+    def is_lexicon(self) -> bool:
+        return self.pipeline is None
 
 
 # ── 5. Random Forest ──────────────────────────────────────────────────────────
