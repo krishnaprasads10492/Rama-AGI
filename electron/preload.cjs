@@ -172,6 +172,23 @@ const RAMA_API = {
     backtestPresets: (opts) => ipcRenderer.invoke('market:backtest-presets', opts),
     strategyScore:   (opts) => ipcRenderer.invoke('market:strategy-score', opts),
     health:          (opts) => ipcRenderer.invoke('market:health', opts),
+
+    // Read-only surfaces behind the chart and the panels (spec Section 71).
+    ohlcv:           (opts) => ipcRenderer.invoke('market:ohlcv', opts),
+    schedulerStatus: (opts) => ipcRenderer.invoke('market:scheduler-status', opts),
+    inventory:       (opts) => ipcRenderer.invoke('market:inventory', opts),
+    news:            (opts) => ipcRenderer.invoke('market:news', opts),
+    newsCoverage:    (opts) => ipcRenderer.invoke('market:news-coverage', opts),
+    derivatives:     (opts) => ipcRenderer.invoke('market:derivatives', opts),
+    optionChain:     (opts) => ipcRenderer.invoke('market:option-chain', opts),
+    outcomeStats:    (opts) => ipcRenderer.invoke('market:outcome-stats', opts),
+    models:          (opts) => ipcRenderer.invoke('market:models', opts),
+
+    // Actions that cost quota, CPU, or change stored state.
+    newsSync:        (opts) => ipcRenderer.invoke('market:news-sync', opts),
+    resolveOutcomes: (opts) => ipcRenderer.invoke('market:resolve-outcomes', opts),
+    derivativesSync: (opts) => ipcRenderer.invoke('market:derivatives-sync', opts),
+    train:           (opts) => ipcRenderer.invoke('market:train', opts),
   },
 
   // ── Updater ───────────────────────────────────────────────────────────────

@@ -28,6 +28,8 @@ Endpoints:
   GET  /news/{symbol}         — headlines with lexicon polarity, event type, relevance
   POST /news/sync             — record today's reading (news cannot be backfilled)
   GET  /news/coverage/{sym}   — days collected, and whether that is enough to train on
+  GET  /ohlcv/{symbol}        — stored bars, for the chart
+  GET  /store/inventory       — every symbol held locally, with its depth
 
 Started by electron/ipc/aiProcess.cjs (spawn python -u main.py), reached from
 the renderer through electron/ipc/marketIntel.cjs — this process itself has
@@ -48,6 +50,8 @@ import logging
 import os
 import time
 import uuid
+
+import pandas as pd
 
 from engine.dispatcher import generate_signals
 from engine.health import get_health
@@ -528,6 +532,72 @@ def news_coverage(symbol: str, exchange: str = "NSE"):
         return coverage(symbol.upper(), exchange)
     except Exception as e:
         logger.error(f"News coverage error for {symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Bars, for the chart (spec Section 71) ─────────────────────────────────────
+
+@app.get("/ohlcv/{symbol}")
+def ohlcv(symbol: str, exchange: str = "NSE", interval: str = "1d",
+          limit: int = 240, sync: bool = False):
+    """
+    Stored bars, newest last, for drawing.
+
+    `limit` is the tail, because a chart needs the recent window and the store may hold
+    thousands of bars — 4,649 for NIFTY 50. Sending all of them over IPC to render 200
+    candles is waste the renderer then has to slice anyway.
+
+    `sync=true` tops the store up first. Off by default so opening a chart does not fire a
+    network fetch on every render.
+    """
+    try:
+        from engine import store
+        sym = symbol.upper()
+        if sync:
+            df, info = store.sync(sym, exchange, interval)
+        else:
+            df, info = store.load(sym, exchange, interval), {"fromStore": True}
+
+        if df is None or len(df) == 0:
+            return {"symbol": sym, "exchange": exchange, "interval": interval,
+                    "bars": [], "count": 0, "stored": 0,
+                    "note": ("Nothing stored for this symbol. Call again with sync=true to "
+                             "fetch it, which reaches back as far as the provider chain allows."),
+                    "syncInfo": info}
+
+        stored = int(len(df))
+        tail = df.tail(max(10, min(limit, 5000))).copy()
+        tail["date"] = pd.to_datetime(tail["date"], errors="coerce")
+        bars = [{
+            "date":   str(r.date.date()),
+            "open":   round(float(r.open), 4),
+            "high":   round(float(r.high), 4),
+            "low":    round(float(r.low), 4),
+            "close":  round(float(r.close), 4),
+            "volume": float(r.volume or 0),
+        } for r in tail.itertuples(index=False)]
+
+        return {
+            "symbol": sym, "exchange": exchange, "interval": interval,
+            "bars": bars, "count": len(bars), "stored": stored,
+            "firstBar": bars[0]["date"], "lastBar": bars[-1]["date"],
+            "storedFirstBar": str(pd.Timestamp(df["date"].iloc[0]).date()),
+            "meta": store.meta(sym, exchange, interval),
+            "syncInfo": info,
+        }
+    except Exception as e:
+        logger.error(f"OHLCV error for {symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/store/inventory")
+def store_inventory():
+    """Every series held locally, with its depth and provenance."""
+    try:
+        from engine import store
+        return {"inventory": store.inventory(), "root": store.store_root()}
+    except Exception as e:
+        logger.error(f"Inventory error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

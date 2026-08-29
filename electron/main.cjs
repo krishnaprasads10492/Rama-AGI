@@ -1095,6 +1095,11 @@ app.whenReady().then(async () => {
     // applied self-modify proposals → a new branch, never dev/source directly
     ['Proposal publishing',   () => publishProposal.register(ipcRec)],
     ['Appearance',            () => registerAppearance(ipcRec)],
+    // The loops from Sections 68 and 70 exist but nothing called them — resolution never
+    // ran and the news series never gained a second day. Armed here; it declines to start
+    // the Python backend itself, so it is silent until master has used StockMind at least
+    // once. `RAMA_DISABLE_MARKET_SCHEDULER=1` turns it off.
+    ['Market scheduler',      () => marketIPC.startScheduler?.()],
     // startup diagnosis + past crashes, readable from the UI
     ['Startup health',        () => registerHealthIpc(ipcRec)],
     // Genome layer — after the engines it describes, so verify() is honest
