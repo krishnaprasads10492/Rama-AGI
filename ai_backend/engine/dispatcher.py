@@ -11,6 +11,7 @@ Upgrades:
 """
 
 import numpy as np
+import pandas as pd
 import uuid
 import time
 import logging
@@ -226,17 +227,96 @@ def _validity_ts(rank, total=16):
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
+def _fill_ctx(ctx, df, is_real, features, result, raw_prob, fmap=None) -> None:
+    """
+    Hand `generate_signals` what it needs to record the claim.
+
+    `barDate` is THE BAR THE PREDICTION WAS COMPUTED ON, not the wall clock. That is what
+    decides which later bars resolve the claim, and it is also what makes the claim
+    deduplicable — one prediction per bar per variant (Section 68). Using `now()` would
+    make every poll of the same bar a distinct claim and destroy the calibration
+    measurement.
+    """
+    if ctx is None:
+        return
+    bar_date = None
+    try:
+        if df is not None and len(df) and "date" in getattr(df, "columns", []):
+            bar_date = str(pd.Timestamp(df["date"].iloc[-1]).date())
+    except Exception:
+        bar_date = None
+    ctx.update({
+        "predictionId": uuid.uuid4().hex,
+        "barDate":      bar_date,
+        "dataSource":   "real" if is_real else "mock",
+        "features":     features,
+        "featureNames": list(fmap.keys()) if fmap else None,
+        "modelProbs":   (result or {}).get("model_probs") or {},
+        "rawProb":      raw_prob,
+    })
+
+
+def resolve_adaptive_weight(params: dict) -> tuple[float, dict]:
+    """
+    The adaptive weight to apply, and where it came from.
+
+    `adaptiveWeight` USED TO BE PURELY A REQUEST PARAMETER (spec Section 68) — the caller
+    was asked to supply the number that should come out of the engine's own measured
+    history, and the UI sent the default 1.0 forever. It arrived from outside because
+    learning state could not survive a restart.
+
+    Now the engine measures it. An explicitly supplied value still wins, so no existing
+    caller changes behaviour (I11), but the default is a measurement rather than a
+    constant. Below `MIN_SAMPLES_FOR_WEIGHT` resolved outcomes it is exactly 1.0 and says
+    so: a correction fitted on nine trades is noise with a decimal point.
+    """
+    supplied = params.get("adaptiveWeight")
+    if supplied is not None and abs(float(supplied) - 1.0) > 1e-9:
+        return float(supplied), {"source": "request", "measured": False}
+    try:
+        from .outcomes import measured_adaptive_weight
+        w, measured = measured_adaptive_weight(params.get("symbol"))
+        return w, {"source": "measured" if measured else "default",
+                   "measured": measured}
+    except Exception as e:
+        logger.debug(f"[Dispatcher] adaptive weight measurement unavailable: {e}")
+        return float(supplied or 1.0), {"source": "default", "measured": False}
+
+
 def generate_signals(params: dict) -> list[dict]:
+    """
+    The one entry point, and the one place predictions are recorded.
+
+    `ctx` is filled in by whichever builder runs, with what the signal dicts do not carry:
+    the feature vector, the per-model probabilities, and the bar the prediction was
+    computed on. Recording needs all three — the vector for the online update, the model
+    probabilities for the meta-learner, and the bar date to know which later bars resolve
+    the claim. Passing a mutable context keeps that explicit instead of parking it in
+    module state, and it is optional so every existing direct caller of the builders still
+    works (I11).
+    """
     instr_type   = params.get("instrType", "spot")
     is_deriv_rec = params.get("isDerivRec", False) or params.get("isIndexDerivRec", False)
 
+    ctx: dict = {}
     if is_deriv_rec:
-        return _deriv_recommendations(params)
-    if instr_type == "futures":
-        return _futures_signals(params)
-    if instr_type == "options":
-        return _options_signals(params)
-    return _spot_signals(params)
+        signals = _deriv_recommendations(params, ctx)
+    elif instr_type == "futures":
+        signals = _futures_signals(params, ctx)
+    elif instr_type == "options":
+        signals = _options_signals(params, ctx)
+    else:
+        signals = _spot_signals(params, ctx)
+
+    # Recording must never be able to break a prediction. A full disk or a locked file is
+    # a reason to lose the learning opportunity, not the answer master asked for.
+    try:
+        from .outcomes import record_prediction
+        record_prediction(params, signals, ctx)
+    except Exception as e:
+        logger.warning(f"[Dispatcher] could not record prediction: {e}")
+
+    return signals
 
 
 def _signal_count(params: dict) -> int:
@@ -250,14 +330,14 @@ def _signal_count(params: dict) -> int:
 
 # ── Spot signals ──────────────────────────────────────────────────────────────
 
-def _spot_signals(params: dict) -> list[dict]:
+def _spot_signals(params: dict, ctx: dict = None) -> list[dict]:
     symbol         = params["symbol"]
     base           = params["basePrice"]
     capital        = params["capital"]
     risk_pct       = params["riskPct"]
     direction      = params.get("direction", "both")
     mode           = params.get("predictionMode", "both")
-    adaptive_weight = float(params.get("adaptiveWeight", 1.0))
+    adaptive_weight, _aw_src = resolve_adaptive_weight(params)
 
     df, is_real = get_ohlcv(params)
 
@@ -274,6 +354,7 @@ def _spot_signals(params: dict) -> list[dict]:
     result   = MODEL_REGISTRY.ensemble_predict(features, feature_map=fmap)
     raw_prob = result["probability"]
     prob     = _apply_mode(raw_prob, mode, adaptive_weight)
+    _fill_ctx(ctx, df, is_real, features, result, raw_prob, fmap)
 
     # Real measured ATR rather than the hardcoded 0.9% proxy the levels used to be
     # built from — `atr14_pct` was computed on every request and never read.
@@ -352,14 +433,14 @@ def _apply_min_grade(signals: list[dict], params: dict) -> list[dict]:
 
 # ── Futures signals ───────────────────────────────────────────────────────────
 
-def _futures_signals(params: dict) -> list[dict]:
+def _futures_signals(params: dict, ctx: dict = None) -> list[dict]:
     symbol         = params["symbol"]
     base           = params["basePrice"]
     capital        = params["capital"]
     risk_pct       = params["riskPct"]
     direction      = params.get("direction", "both")
     mode           = params.get("predictionMode", "both")
-    adaptive_weight = float(params.get("adaptiveWeight", 1.0))
+    adaptive_weight, _aw_src = resolve_adaptive_weight(params)
 
     # Use futures meta from FuturesPanel if available
     futures_meta = params.get("futuresMeta") or {}
@@ -377,6 +458,7 @@ def _futures_signals(params: dict) -> list[dict]:
     # the same vector plus fresh noise each time (Section 64).
     result   = MODEL_REGISTRY.ensemble_predict(features, feature_map=fmap)
     raw_prob = result["probability"]
+    _fill_ctx(ctx, df, is_real, features, result, raw_prob, fmap)
 
     atr_pct = float(fmap.get("atr14_pct") or 0.0)
     if not (0.0005 < atr_pct < 0.25):
@@ -427,13 +509,13 @@ def _futures_signals(params: dict) -> list[dict]:
 
 # ── Options signals ───────────────────────────────────────────────────────────
 
-def _options_signals(params: dict) -> list[dict]:
+def _options_signals(params: dict, ctx: dict = None) -> list[dict]:
     symbol         = params["symbol"]
     base           = params["basePrice"]
     capital        = params["capital"]
     risk_pct       = params["riskPct"]
     mode           = params.get("predictionMode", "both")
-    adaptive_weight = float(params.get("adaptiveWeight", 1.0))
+    adaptive_weight, _aw_src = resolve_adaptive_weight(params)
 
     # Use options meta from OptionsPanel if available
     option_meta = params.get("optionMeta") or {}
@@ -471,6 +553,8 @@ def _options_signals(params: dict) -> list[dict]:
         )
         raw_prob = float(np.clip(result["probability"] * 0.6 + prob_reach * 0.4, 0.10, 0.95))
         prob = _apply_mode(raw_prob, mode, adaptive_weight)
+        if i == 0:
+            _fill_ctx(ctx, df, is_real, features, result, raw_prob)
 
         entry = max(0.5, premium * (0.95 + np.random.uniform(0, 0.1)))
         sl    = max(0.1, entry * (0.40 + np.random.uniform(0, 0.15)))
@@ -512,7 +596,7 @@ def _options_signals(params: dict) -> list[dict]:
 
 # ── Derivative recommender ────────────────────────────────────────────────────
 
-def _deriv_recommendations(params: dict) -> list[dict]:
+def _deriv_recommendations(params: dict, ctx: dict = None) -> list[dict]:
     """Scan all nearby strikes + futures, rank by profit potential."""
     symbol         = params["symbol"]
     base           = params["basePrice"]
@@ -520,7 +604,7 @@ def _deriv_recommendations(params: dict) -> list[dict]:
     risk_pct       = params["riskPct"]
     direction      = params.get("direction", "both")
     mode           = params.get("predictionMode", "both")
-    adaptive_weight = float(params.get("adaptiveWeight", 1.0))
+    adaptive_weight, _aw_src = resolve_adaptive_weight(params)
     step           = _step(symbol)
     atm            = _atm(base, symbol)
     lot_size       = _lot(symbol)
@@ -538,6 +622,7 @@ def _deriv_recommendations(params: dict) -> list[dict]:
     atr      = fut_base * 0.009
     result   = MODEL_REGISTRY.ensemble_predict(features)
     fut_prob = _apply_mode(result["probability"], mode, adaptive_weight)
+    _fill_ctx(ctx, df, is_real, features, result, result["probability"])
     candidates.append({
         "label": f"{symbol} Futures", "instrType": "futures",
         "symbol": f"{symbol}FUT", "prob": fut_prob,

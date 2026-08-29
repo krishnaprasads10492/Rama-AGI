@@ -10,10 +10,22 @@ runs anywhere the backend runs.
 
 import sys
 import os
+import tempfile
+
 import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# ISOLATE THE DATA DIRECTORY BEFORE IMPORTING ANYTHING THAT TOUCHES IT.
+#
+# `generate_signals` records every prediction since Section 68, and this file calls it five
+# times. Without this the suite writes into whatever store the ambient environment points
+# at, and — worse — its `/health` assertions start depending on how many outcomes happen to
+# be sitting there. A test whose result depends on leftover state in a gitignored directory
+# is not a test. Overriding unconditionally also means a stray `STOCKMIND_DATA_DIR` in the
+# shell cannot change what this measures.
+os.environ["STOCKMIND_DATA_DIR"] = tempfile.mkdtemp(prefix="rama-defects-test-")
 
 from engine.calibration import (               # noqa: E402
     platt_scale, calibrate_ensemble_output, clamp_probability,

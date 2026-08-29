@@ -40,10 +40,21 @@ class BaseModel:
     heuristic model counted as a trained one, and `/health` reported an artifact that
     does not exist. Every consumer that wants to know "should master trust this" wants
     `is_trained()`; only the ensemble loop wants `is_available()`.
+
+    A THIRD QUESTION APPEARED once the outcome loop was actually connected
+    (spec Section 68): `is_online_fitted()` — has this model been fitted incrementally
+    from resolved outcomes, and on how many samples?
+
+    `OnlineSGDModel.partial_fit` used to set `trained = True`, which is false as written:
+    `trained` means an artifact was loaded from disk, and one online sample is not that.
+    It went unnoticed because nothing ever called `partial_fit`. The moment the loop was
+    wired, `/health` began reporting "1/7 models loaded from trained artifacts" after a
+    single update. Provenance and state are different claims and now have different flags.
     """
     name: str = "base"
     loaded: bool = False        # can answer
-    trained: bool = False       # loaded a fitted artifact
+    trained: bool = False       # loaded a fitted artifact from disk
+    online_samples: int = 0     # incremental updates absorbed from resolved outcomes
 
     def predict_proba(self, features: np.ndarray) -> float:
         raise NotImplementedError
@@ -53,6 +64,9 @@ class BaseModel:
 
     def is_trained(self) -> bool:
         return bool(self.trained)
+
+    def is_online_fitted(self) -> bool:
+        return int(self.online_samples) > 0
 
 
 # ── 1. LightGBM ───────────────────────────────────────────────────────────────
@@ -295,7 +309,28 @@ class OnlineSGDModel(BaseModel):
 
     def __init__(self):
         self.model = None
+        self.online_samples = 0
+        self._classes_seen: set = set()
+        self._n_features = None
         self._try_load()
+
+    def _new_estimator(self):
+        from sklearn.linear_model import SGDClassifier
+        return SGDClassifier(loss='log_loss', penalty='elasticnet',
+                             l1_ratio=0.15, alpha=0.0001,
+                             learning_rate='optimal', random_state=42)
+
+    def _reset_model(self):
+        """Start over: a new estimator and zeroed counters, so nothing stale is claimed."""
+        try:
+            self.model = self._new_estimator()
+        except Exception as e:
+            logger.warning(f"[OnlineSGD] could not reset estimator: {e}")
+            return
+        self.online_samples = 0
+        self._classes_seen = set()
+        self._n_features = None
+        self.trained = False
 
     def _try_load(self):
         try:
@@ -317,18 +352,54 @@ class OnlineSGDModel(BaseModel):
         except ImportError:
             logger.warning("[OnlineSGD] scikit-learn not installed")
 
+    # A logistic model fitted on a handful of samples is worse than the heuristic it
+    # would replace, and one fitted on a single class is a constant. So the fitted path
+    # only takes over once there is enough to beat what it displaces. See Section 68.
+    MIN_ONLINE_SAMPLES = 50
+
     def partial_fit(self, features: np.ndarray, label: int):
-        """Online update — call after each resolved prediction."""
-        if self.model is not None:
-            try:
-                self.model.partial_fit(features.reshape(1, -1), [label], classes=[0, 1])
-                self.loaded = True
-                self.trained = True
-            except Exception as e:
-                logger.warning(f"[OnlineSGD] partial_fit error: {e}")
+        """
+        Online update from one resolved outcome.
+
+        DOES NOT SET `trained`. That flag means "an artifact was loaded from disk", and
+        this is neither. It sets `online_samples`, and `predict_proba` consults the fitted
+        model only past `MIN_ONLINE_SAMPLES` with both classes seen — before that the
+        heuristic is the better answer, and switching at sample one would silently make
+        every prediction worse the moment the learning loop was connected.
+
+        A CHANGE IN FEATURE WIDTH RESETS THE MODEL rather than being warned about
+        repeatedly. sklearn raises on a dimension mismatch, and the first version caught it
+        and logged — so if the feature vector ever grew, every online update would fail
+        forever, `online_samples` would sit at zero, and the only evidence would be a log
+        line nobody reads. That is not hypothetical: adding derivative features is the next
+        planned change. Resetting is also the honest response, because coefficients fitted
+        against the old columns do not describe the new ones. See Section 68.
+        """
+        if self.model is None:
+            return
+        n = int(np.asarray(features).size)
+        if self._n_features is not None and n != self._n_features:
+            logger.warning(f"[OnlineSGD] feature width changed {self._n_features} -> {n}; "
+                           f"discarding {self.online_samples} online samples — coefficients "
+                           f"fitted on the old feature set do not describe the new one")
+            self._reset_model()
+        try:
+            self.model.partial_fit(np.asarray(features, dtype=float).reshape(1, -1),
+                                   [label], classes=[0, 1])
+            self._n_features = n
+            self.online_samples += 1
+            self._classes_seen.add(int(label))
+            self.loaded = True
+        except Exception as e:
+            logger.warning(f"[OnlineSGD] partial_fit error: {e}")
+
+    def online_ready(self) -> bool:
+        return (self.online_samples >= self.MIN_ONLINE_SAMPLES
+                and len(self._classes_seen) >= 2)
 
     def predict_proba(self, features: np.ndarray) -> float:
-        if self.loaded and self.model is not None:
+        use_fitted = self.model is not None and (self.trained or self.online_ready())
+        if use_fitted:
             try:
                 proba = self.model.predict_proba(features.reshape(1, -1))[0]
                 return float(np.clip(proba[1] if len(proba) > 1 else proba[0], 0.05, 0.95))

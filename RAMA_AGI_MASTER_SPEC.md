@@ -1725,6 +1725,7 @@ authenticated **Master session**, not merely an open store.
 | 83 | StockMind — real market data, decades deep, free first | done | Section 65. Commit `637ba2c`. Retroactive row, same gap as 82. `ai_backend/engine/providers.py` (free-first chain with premium slots, each independently enable/disable-able by env) + `ai_backend/engine/store.py` (local append-only CSV store) + `get_ohlcv` rewired through both. **Live verified: 4,649 daily NIFTY50 bars, 2007-09-17 → 2026-08-28.** Decisions: **the local store is primary and providers exist to fill it**, not to answer requests — every free provider rate-limits, and a backtest whose data depends on whoever answered an HTTP call is not reproducible; **Alpha Vantage is registered `premium` despite a free key existing**, because 25 calls/day × 100 points means a decade of history costs a month of quota, and classifying it free would strand the chain; **Yahoo is queried with explicit `period1`/`period2` epochs, never `range=max`** — `range=max&interval=1d` **silently downsamples to monthly** (228 bars for 18.9 years), which is the kind of failure that passes every "did we get data?" check, so the test now asserts **bars-per-year ≥ 150 and median gap ≤ 5 days** instead of a bare count; **CSV not parquet**, since `pyarrow` is large, the pins are deliberate (I12), and 30 years of daily bars is ~7,500 rows. The store **refuses to shrink**, writes via atomic `os.replace`, and computes staleness business-day-aware. 57 assertions in `ai_backend/tests/test_store.py`. `ai_backend/data/` is gitignored. |
 | 84 | StockMind — a backtest that measures the predictor, and the infinite loop it uncovered | done | Section 66. Task 1 of 6. `ai_backend/engine/backtest.py` rewritten (499 → 494 lines, ~200 of them previously dead). The old file **did not test the predictor at all**: four functions were defined twice so the first ~210 lines were unreachable including a `run_backtest` whose signature did not match `main.py`'s call; `MODEL_REGISTRY` was never touched and `train_size` was computed and never used, so it measured a fixed ATR bracket. Six defects fixed, each of which moved a reported number: `grade` was `0.5 + rr*0.1 + (0.05 if outcome != "SL_HIT" else -0.1)` — **read off the answer key**, straight lookahead; `TIMEOUT` was booked as a **full stop-loss**, turning "nothing happened" into "maximum loss"; T2/T3 wins were credited at **T1 size**, understating wins while overstating losses and so biasing P&L, Sharpe and Calmar in opposite directions at once; windows advanced by `test_size // 10`, so **each bar was re-tested about ten times** and `signalsTested` was inflated an order of magnitude. Decisions: **windows are non-overlapping** — a trade resolves before the next candidate begins, so `signalsTested` means what it says; **the stop is assumed hit first** on intrabar ambiguity, because OHLC cannot resolve the order and the alternative manufactures profit; **TIMEOUT is marked to market**; **Sharpe/Sortino are annualised** via `INTERVAL_PERIODS_PER_YEAR` scaled by realised trade frequency, since `mean/std` unscaled is not a Sharpe ratio and reporting it as one invites a comparison that cannot be made; **grade comes from pre-trade edge and geometry only**; **`stable = None`, `action = "measured"`** — the old 75% accuracy floor on a mechanical bracket produced a permanent `retrain_required`, which is a verdict nobody can act on; **`FEATURE_WINDOW = 400`** trailing slice, since no feature looks back past 252 bars, so values are identical to passing full history at O(400) rather than O(idx). **The find of this pass is not in this file.** `run_backtest` completed at 100 trades and hung indefinitely at 400 on real NIFTY data. `faulthandler.dump_traceback_later` put three consecutive stack dumps inside a four-line span of `advanced_features.market_profile_features`: the value-area expansion loop read an exhausted side's contribution as `0`, so on a 0-vs-0 tie `add_high >= add_low` chose the high side, `min(va_high_b + 1, n - 1)` clamped to the same index and `va_vol += 0` changed nothing — while the `or` in the loop condition stayed true because the low side still had room. **A genuine infinite loop, reachable on data alone** whenever the POC lands in the top bucket with an empty bucket beneath it, which 20 bars binned into 20 buckets produces routinely, and which Yahoo's zero-volume early NIFTY history makes common. **This hung live `/predict` calls, not only backtests** — it was found through the backtest because the backtest is the first thing to call the feature stack thousands of times. Fixed structurally, not with a counter: a `-1` sentinel keeps an exhausted side out of the comparison and exactly one index moves per iteration, so the loop is bounded by `n_buckets - 1` by construction. Proven both directions before shipping: a crafted frame (POC at bucket 19 holding 200 of 390, bucket 18 holding 0.0) ran the **old** loop 50,000 iterations with *no state change at all*, and returns under the new one. Also **removed** an iteration guard I had added to `run_backtest` while chasing the wrong cause — it was unreachable (`idx` advances on every path) and its comment blamed the wrong thing, and a guard that cannot fire only misdirects the next reader. Verified: **202 assertions green** — `tests/test_defects.py` 83 (74 + 9 new, run on threads with join timeouts because an assertion cannot catch a loop that never returns, including a 180-window sweep with scattered zero volume), `tests/test_store.py` 57, `tests/test_backtest.py` 62 (new file). Full 18.9-year NIFTY run now completes in **4.3s for 715 independent trades**: 48.8% won, Sharpe 0.78, max drawdown 31.8%, ECE 0.017. Note for the next session: the first 100 trades alone showed 58% and Sharpe 2.12 — the 2009-11 recovery — which is exactly why the cap must not be left low. **Next step: task 2 of 6** — free NSE derivatives and flows (Bhavcopy archives, option chain OI/PCR/max pain, FII/DII, delivery %) into `providers.py` + `store.py`. Then task 3 (outcome recording → `update_from_outcome`, which is currently **never called**), task 4 (training, blocked on master's horizon answer — asked 3×, defaulting to 5 bars/swing), task 5 (news → impact via free RSS), task 6 (the chart: `recharts@2.15.3` is installed and **never imported**; needs OHLCV over IPC on `stockmind:` channels, prefix already allowlisted in `preload.cjs`, and note `!node_modules/recharts/**` is excluded from asar). |
 | 85 | StockMind — NSE derivatives and institutional flows, free and backtestable | done | Section 67. Task 2 of 6. New `ai_backend/engine/derivatives.py`; `store.py` generalised; five routes added to `main.py`. **Every endpoint was probed live before the design was fixed**, because NSE moved its archive host and changed the bhavcopy format in 2024 and most published guidance is stale. Findings that shaped the build: **`api/option-chain-indices` is 404** — the endpoint nearly every tutorial and most wrapper libraries still use — and its replacement `option-chain-v3` **requires an expiry**, returning `{}` with status **200** without one, a silent empty that reads as "no options today" rather than a missing parameter. **Derivatives history reaches 2001**: UDiFF (`nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_...`) covers ~2024 onward, the legacy layout (`/content/historical/DERIVATIVES/...`) covers 2001–2024, they agree in the overlap, and 2001 is when index options began trading in India rather than an archive limit — so the two together are the entire history of the instrument class. Decisions: **the archives are primary and the live chain is an intraday top-up**, because the chain describes today while the archive describes every day since 2001 and only the archive can feed a backtest or train a model (same reasoning as Section 65's store-is-primary; the live chain is the more tempting build and can only ever support a dashboard); **derived daily metrics are persisted, not raw contracts** — 21 years at ~30,000 contract rows a day is ~150M rows, which would break the CSV choice of Section 65 and force parquet or a database, whereas one feature row per symbol-day is ~5,000 rows, the same order as an OHLCV series; **`straddle_pct` instead of implied volatility**, since neither bhavcopy carries IV and back-solving Black-Scholes across 21 years needs assumed rate and dividend curves, while the ATM straddle over spot *is* the market's priced expected move and assumes nothing — a computed IV would look more sophisticated and be less honest; **spot comes from the OHLCV store for both formats**, because UDiFF carries `UndrlygPric` and legacy carries none, and a ratio whose denominator changes provenance at the 2024 boundary makes `max_pain_dist` and `fut_basis_pct` encode *which file the row came from* — the model would learn the archive boundary, the same failure as the Section 64 time-features bug; **a 404 means "not published", not "failed"** (holidays and weekends both 404 with an HTML body — verified on 2026-01-15 and Sunday 2026-08-30), remembered in a memo file so a deep backfill does not re-request every holiday since 2001 on every run; **never advertise brotli** — the first probe sent `Accept-Encoding: br`, NSE honoured it, and the bundled httpx has no decoder, so `fiidiiTradeReact` returned **status 200 with 115 bytes of undecodable binary that parsed as neither JSON nor an error**, reading exactly like a working endpoint returning junk (adding a brotli package would fix the symptom and cost a pinned dependency for kilobyte payloads; also `https://www.nseindia.com/` returns **403** while `/option-chain` and `/all-reports` return 200 and set the required cookies, so warming on the root — the obvious choice — yields a 401); **the existing store was generalised rather than duplicated** — `load`/`merge`/`is_stale` take an optional column set defaulting to OHLCV so every existing caller is untouched (I11), because a parallel store would have re-implemented and then drifted from six properties that are easy to get wrong, and ledger row 19 exists precisely because nineteen subsystems were once duplicated this way; **max pain is vectorised** as a broadcast payout matrix, since Section 66 was a session lost to a Python loop over market data and this is the same shape at ~11,000 terms per day across 21 years. Built: both bhavcopy parsers into one canonical frame, the derived metric row (PCR OI and volume, max pain and distance, max CE/PE OI strikes with normalised distances, OI concentration as a Herfindahl index measuring pinning, straddle percentage, futures basis, futures OI and change, rollover percentage, days to expiry), the resumable backfill, participant-wise OI (Client/DII/FII/Pro — **the historical positioning signal**, unlike `fiidiiTradeReact` which is latest-day only), delivery percentage, and the live chain. Routes: `GET /derivatives/sources`, `GET /derivatives/{symbol}`, `POST /derivatives/sync`, `GET /derivatives/chain/{symbol}`, `GET /flows` — **every response carries `backtestable`**, because without it a snapshot and a backfillable series are indistinguishable to the caller and someone will eventually build a "backtest" on a snapshot. **One real defect found by the tests, in a class worth remembering:** `delivery_data` stripped whitespace from text columns behind `if df[c].dtype == object`, and on pandas 3 text columns are dtype `str`, not `object`, so the branch never ran, `SERIES` kept its leading space, every `== "EQ"` filter matched nothing, and RELIANCE looked absent from a file it was plainly in. **On pandas 2 the same code works** — it would have shipped and broken on an upgrade. Fixed by parsing correctly (`skipinitialspace=True`) rather than sniffing dtypes. Also fixed: `latest_metrics` returned `pd.Timestamp` and `np.float64`, which survive a dict comprehension and fail at `json.dumps` — it crosses IPC, so that would have surfaced as a broken panel rather than a type error; and `sync_history` silently skipped weekends, so its counters did not account for every requested day and a quiet fortnight read as a failure. **Verified: 334 assertions green** — `test_derivatives.py` 132 (new: both layouts, the legacy `OPTION_TYP == 'XX'` futures trap, max pain against a brute-force implementation of its definition on 60 random chains, the spot-provenance rules, the store generalisation including that OHLCV behaviour is unchanged, plus live calls against the exchange and a real backfill), `test_defects.py` 83, `test_store.py` 57, `test_backtest.py` 62. Live confirmations: 2026-08-28 NIFTY PCR 0.776, max pain 24,200 against spot 24,175.65, resistance 24,300, support 24,000; legacy 2020-06-10 PCR 0.959; FII index-futures long/short ratio 0.107 (heavily net short); RELIANCE delivery 59.33%; FII net −5,039.8 Cr against DII +5,183.93 Cr. All five routes exercised end to end through `TestClient`, including that `/derivatives/sources` is not shadowed by `/derivatives/{symbol}` and that a malformed date returns 400 rather than being ignored. **Not built** (stated rather than implied): per-contract Greeks and a fitted volatility surface (needs rate and dividend curves to be more than decoration); intraday chain snapshots on a timer (a data-collection service, and it needs master's decision on whether Rāma holds a market-hours process open); BSE derivatives. **Next step: task 3 of 6** — outcome recording and the learning loop: persist every signal, resolve it against later bars, and call `update_from_outcome`, which is **currently never called anywhere**. That is what makes `adaptiveWeight` real and lets `/health` report measured ECE and Brier instead of `null`. The derivative metrics built here are stored but **not yet in the feature vector** — wiring them in changes the model's input dimension, so it belongs with task 4's training rather than being bolted onto a heuristic ensemble that has no way to weigh them. |
+| 86 | StockMind — the learning loop that was never connected | done | Section 68. Task 3 of 6. New `ai_backend/engine/outcomes.py`; `registry.py` persists meta-learner state; `dispatcher.py` records every prediction; `health.py` reports measured calibration; four routes added. **`update_from_outcome`, `StackingMetaLearner.update`, `compute_ece` and `compute_brier_score` all existed and correct, and nothing called any of them.** So `_meta.weights` stayed `np.ones(n)/n` for the life of every process while `status()` advertised `"online_learning"` — a stacking meta-learner that was an unweighted mean wearing a learned-weights interface — and `/health` reported `ece: null` about a measurement with no route to ever being taken. **The deeper problem was that adding a call would not have fixed it:** `MODEL_REGISTRY` is an in-memory singleton in a process `aiProcess.cjs` respawns, so every weight learned would die at exit. That is precisely why `adaptiveWeight` arrived as a **request parameter** — the caller was asked to supply the number that should come out of the engine's own history, and the UI sent 1.0 forever. Learning entered from outside because nothing inside could remember. Decisions: **the resolver calls `backtest._simulate_np`**, not a second implementation — Section 66's rules (stop assumed first on intrabar ambiguity, TIMEOUT marked to market, each target at its own level) must decide live and backtested outcomes identically or the two sets of numbers cannot be compared, and comparing them is the only way to learn whether the backtest predicts anything; two implementations would also drift invisibly, both still producing plausible win rates. **One claim per bar per variant** — identity is `(symbol, instrType, barDate, variant)` and a repeat prediction updates rather than appends, because a UI polling `/predict` every few seconds would otherwise record one claim hundreds of times and ECE, an average over predictions, would be dominated by whichever bar was polled most; **without this the entire measurement is worthless**, and `barDate` is the bar the prediction was computed on rather than the wall clock for exactly this reason. **JSONL, not the CSV store** — the store holds time series (one row per date, fixed columns) while these are events with a nested `modelProbs` dict and a 100-float vector; CSV would mean 100+ columns or JSON inside a cell, and JSONL discards a torn final line while keeping the rest. **One feature vector per prediction, not per signal** — Section 64 established N signals are N geometries over one prediction, so 100 floats serve where 1,600 would be stored. **Learning is exactly-once and persisted** — `learnedAt` is stamped as each record is consumed, so re-running the resolver is safe; without it whoever runs it twice silently doubles every outcome's influence and there is no way to detect it afterwards. Restored state is **discarded rather than padded** when the model count or names differ, because weights are positional and restoring a mismatched vector would apply one model's learned weight to another — starting uniform is recoverable, learning against a permuted mapping is not. **Never learn from synthetic data** — mock-data claims are recorded (hiding them would make the record incomplete) but never resolved and never learned from; training on a random walk produces confident weights derived from noise and would make `/health` report a measured calibration against nothing. **`adaptiveWeight` is now measured** as realised win rate over mean predicted probability, clamped to the `[0.5, 2.0]` the schema already validates, with an explicitly supplied value still winning (I11) and exactly 1.0 below `MIN_SAMPLES_FOR_WEIGHT = 30` — a correction fitted on nine trades is noise with a decimal point. Calibration is likewise withheld below 20 resolved claims. **Two real defects the wiring exposed, both previously unreachable:** (a) `OnlineSGDModel.partial_fit` set `trained = True`, a flag the base class documents as "loaded a fitted artifact from disk" — so `/health` began claiming an artifact that does not exist after a single online sample. Section 64 split `is_available` from `is_trained`; this needed a third distinction, `is_online_fitted` with a sample count, since provenance and state are different claims. Worse, `predict_proba` then started using that one-sample model **instead of the heuristic**, so connecting the loop would have silently made every prediction worse; the fitted path now requires `MIN_ONLINE_SAMPLES = 50` **and both classes seen**, because a single-class SGD is a constant. (b) `partial_fit` caught a feature-width mismatch and logged it, so if the vector ever grew every online update would fail forever with `online_samples` stuck at zero and the only evidence a log line nobody reads — **not hypothetical, since task 4 adds derivative features**. It now resets the estimator and says so, which is also the honest response because coefficients fitted on the old columns do not describe the new ones. **Recorded but deliberately not changed:** `dispatcher._apply_mode` adds `np.random.normal(0, 0.03)` in `"learning"` mode and the default `"both"` blends 40% of it, so **the default prediction path is not reproducible** and measured ECE will include that injected variance as model miscalibration. The recorded value is the probability actually issued, perturbation included, because that is the claim that was made and the only one it is fair to score; `rawProbability` is stored alongside so the two can be separated. Removing the noise is a behaviour change master has not asked for. Also fixed: `test_defects.py` now isolates its data directory — it calls `generate_signals` five times and so records predictions, which made its `/health` assertions depend on leftover state in a gitignored directory. A leaked `STOCKMIND_DATA_DIR` in the verifying shell had it writing to a stale temp dir, which cost a diagnosis and is the same "the environment is not what you think" trap Sections 62, 63 and 66 record. **Verified: 468 assertions green** — `test_outcomes.py` 134 (new: dedup across symbol/instrument/bar/variant, the resolver matching `_simulate_np` exactly on the same inputs, no early scoring before the horizon elapses, mock exclusion even when force-resolved, exactly-once learning, meta-state round-trip plus four rejection cases, torn-line recovery, the calibration and weight thresholds in both directions with an over- and under-confident forecaster, the online/trained distinction, the width-change reset, retention pruning vectors with records, and `/health` surviving the loop raising), `test_derivatives.py` 132, `test_defects.py` 83, `test_backtest.py` 62, `test_store.py` 57. All four routes exercised end to end through `TestClient`: 5 signals recorded from one `/predict`, a repeat call recording nothing new, 5 resolved and 5 learned, a second resolve returning zero for both, and `/health` correctly reporting `ece: null` at 5 resolved with `modelsLoaded=0` and `modelsOnlineFitted=1`. **Next step: task 4 of 6** — train real models with strict time-series splits, persist artifacts, record the training date range so the backtest can flag in-sample, and wire the Section 67 derivative metrics into the feature vector (which is what will trigger the width-reset path above). **Still blocked and asked four times: the trading horizon** — intraday, swing-days, or positional-weeks. The label cannot be defined without it; the default stays 5 bars. Also outstanding for the Electron side: nothing calls `/outcomes/resolve` on a schedule yet, which is a scheduling decision rather than engine work. |
 
 ### Resume checklist for a cold session
 
@@ -6234,3 +6235,160 @@ live chain as a top-up.
 dividend curve to be more than decoration); intraday option-chain snapshots on a timer
 (that is a data-collection service, not a feature, and it needs master's decision on
 whether Rāma should hold a market-hours process open); BSE derivatives.
+
+---
+
+## SECTION 68 — StockMind: outcome recording, and the learning loop that was never connected
+
+Task 3 of the six-part StockMind build.
+
+*Written before implementing, per Section 28's working agreement.*
+
+### What was actually wrong
+
+`ModelRegistry.update_from_outcome` exists. `StackingMetaLearner.update` exists and
+implements a real softmax-over-EMA-performance reweighting. `compute_ece` and
+`compute_brier_score` in `calibration.py` are correct implementations.
+
+**Nothing calls any of them.** Three consequences, none of them visible from the outside:
+
+1. `_meta.weights` are initialised to `np.ones(n) / n` and **stay uniform for the life of
+   every process**. The "stacking meta-learner" is an unweighted mean wearing a
+   learned-weights interface. Its `"capabilities"` list advertises `"online_learning"`.
+2. `/health` reports `ece: null` and `calibrationMeasured: false`. That is honest as of
+   Section 64 — but it is honest about a measurement that had no route to ever being
+   taken.
+3. **`adaptiveWeight` is a *request parameter*.** The caller is asked to supply the
+   number that is supposed to come out of the engine's own measured history, and the UI
+   sends the default 1.0. The learning signal enters from the outside, which is exactly
+   backwards, and it is the shape you get when learning state cannot survive a restart.
+
+That third point is the real one. `MODEL_REGISTRY` is an in-memory singleton in a process
+`aiProcess.cjs` spawns and respawns. **Even if `update_from_outcome` were called, every
+weight it learned would die with the process.** So the loop cannot be closed by adding a
+call; it needs persistence, and that is why this is a section rather than a one-line fix.
+
+### The shape of the problem
+
+A prediction is a claim with a deadline. Learning from it requires three separate moments
+in time, and the gap between them is the entire difficulty:
+
+    record the claim  →  wait for the bars  →  score it, then learn
+
+Nothing in the engine spanned those moments. `/predict` returned and forgot.
+
+### Decision 1 — the resolver reuses the backtest's simulator
+
+This is the load-bearing decision.
+
+`backtest._simulate_np` already encodes the outcome rules Section 66 settled: the stop is
+assumed hit first on intrabar ambiguity, `TIMEOUT` is marked to market rather than booked
+as a stop-loss, each target is credited at its own level. The resolver calls **that
+function**, not a second implementation of the same idea.
+
+If live outcomes were resolved by different rules than backtested ones, the two sets of
+numbers would not be comparable — and comparing them is the only way to find out whether
+the backtest predicts live behaviour. Two implementations would also drift, and the drift
+would be invisible: both would keep producing plausible win rates.
+
+### Decision 2 — one claim per bar per variant, deduplicated
+
+**Without this the measurement is worthless.** If the UI polls `/predict` every few
+seconds, the same bar produces hundreds of near-identical predictions. Recording each one
+would count a single claim hundreds of times, and ECE — an average over predictions —
+would be dominated by whichever bar was polled most.
+
+So a record's identity is `(symbol, instrType, barDate, variant)`. A repeat prediction for
+the same bar **updates** the existing record instead of appending a new one. The number of
+recorded claims then equals the number of distinct claims, which is what every statistic
+computed over them assumes.
+
+### Decision 3 — JSONL for records, not the CSV store
+
+Section 65 chose CSV and Section 67 reused it. This does not, deliberately.
+
+The store holds **time series**: one row per date, fixed columns. Outcome records are
+**events**: several per day, each carrying a nested `model_probs` dict and a reference to a
+100-float feature vector. Forcing that into CSV means either 100+ columns or JSON embedded
+in a cell, and the latter is a CSV that is not really a CSV.
+
+JSONL is append-only, line-atomic, and crash-safe in the way that matters here: a torn
+final line is discarded on read and the rest of the file is intact. Rewrites go through a
+temp file and `os.replace`, as the store does.
+
+### Decision 4 — the feature vector is stored once per prediction, not once per signal
+
+Section 64 established that N signals are N risk-geometry variants of **one** prediction.
+They therefore share one feature vector and one set of model probabilities.
+
+Storing the vector per signal would multiply it by the variant count for no information —
+at 100 floats and 16 variants that is 1,600 floats where 100 will do. Records reference a
+`predictionId`; the vector is written once under that id.
+
+### Decision 5 — learning is exactly-once, and persisted
+
+Each record carries `resolved` and `learnedAt`. `update_from_outcome` is called only for
+records that are resolved and not yet learned, and `learnedAt` is stamped immediately.
+
+Re-running the resolver is therefore safe. Without that, whoever runs it twice silently
+doubles every outcome's influence on the weights, and there is no way to detect it
+afterwards — the weights are just wrong.
+
+The meta-learner's `weights`, `perf_ema` and `_update_count` are persisted and restored at
+startup. This is what makes the loop real rather than per-process theatre.
+
+### Decision 6 — never learn from synthetic data
+
+`dataSource` is already `"mock"` when `get_ohlcv` fell back to a seeded random walk.
+
+Those predictions are **recorded** — they are real outputs and hiding them would make the
+record incomplete — but they are never resolved against price and never fed to the
+learner. Training the ensemble to predict a random walk is worse than not training it: it
+would produce confident weights derived from noise, and `/health` would then report a
+measured calibration for a model calibrated against nothing.
+
+### Decision 7 — `adaptiveWeight` becomes measured, with the parameter as an override
+
+The engine computes it from its own resolved history and uses that. The request parameter
+is honoured when supplied explicitly, so no existing caller breaks (I11), but the default
+stops meaning "1.0 forever".
+
+The measured value is a **calibration correction**: the ratio of realised win rate to mean
+predicted probability over resolved records, clamped to the same `[0.5, 2.0]` the schema
+already validates. It is only applied once there are enough resolved outcomes to mean
+anything (`MIN_SAMPLES_FOR_WEIGHT`), and until then it is exactly 1.0 and says so. A
+correction fitted on nine trades is noise with a decimal point.
+
+### Known distortion this exposes, recorded rather than fixed here
+
+`dispatcher._apply_mode` adds `np.random.normal(0, 0.03)` to the probability in
+`"learning"` mode, and `"both"` — the default — blends 40% of that noisy value.
+
+So **the default prediction path is not reproducible**: the same bar and the same features
+give a different probability on each call. For a "learning/exploration" mode that is a
+defensible choice, but it means the recorded probability is the perturbed one, and
+measured ECE will include that injected variance as if it were model miscalibration.
+
+The recorded value is therefore the probability **actually issued** (perturbation
+included), because that is the claim that was made and the only one it is fair to score.
+`rawProbability` is recorded alongside it so the two can be separated later. Removing the
+noise from the default path is a behaviour change master has not asked for, so it is
+flagged here rather than done quietly.
+
+### What is built
+
+- `ai_backend/engine/outcomes.py` — record, resolve, learn, and the measured statistics.
+- `registry.py` — persist and restore meta-learner state; expose `measured_adaptive_weight`.
+- `dispatcher.py` — records every prediction, via an optional context argument so the four
+  signal builders keep working unchanged.
+- `health.py` — reports measured ECE and Brier once outcomes exist, and keeps reporting
+  `null` with `calibrationMeasured: false` until they do.
+- Routes: `GET /outcomes`, `POST /outcomes/resolve`, `GET /outcomes/stats`,
+  `POST /outcomes/learn`.
+
+### Not built here
+
+No automatic resolution on a timer — that is a scheduling decision for the Electron side
+and belongs with the UI wiring, not the engine. No retraining of base models from
+outcomes; that is task 4, and it needs master's horizon answer. The online SGD update is
+wired but stays skipped while no base model has a fitted artifact to update.

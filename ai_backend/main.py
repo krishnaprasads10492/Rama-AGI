@@ -18,6 +18,10 @@ Endpoints:
   POST /derivatives/sync      — backfill derivative metrics from the NSE archives
   GET  /derivatives/chain/{s} — live option chain snapshot (NOT backtestable)
   GET  /flows                 — FII/DII cash, participant-wise OI, delivery %
+  GET  /outcomes              — recorded predictions and their resolution state
+  GET  /outcomes/stats        — measured win rate, ECE, Brier, adaptive weight
+  POST /outcomes/resolve      — score claims whose bars have since arrived
+  POST /outcomes/learn        — feed resolved outcomes into the ensemble, once each
 
 Started by electron/ipc/aiProcess.cjs (spawn python -u main.py), reached from
 the renderer through electron/ipc/marketIntel.cjs — this process itself has
@@ -305,6 +309,73 @@ def institutional_flows(date: Optional[str] = None, symbol: Optional[str] = None
         raise
     except Exception as e:
         logger.error(f"Flows error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── The outcome loop (spec Section 68) ────────────────────────────────────────
+#
+# Recording happens inside `/predict` automatically. These three exist because the other
+# two moments of the loop cannot happen at prediction time: resolution needs bars that do
+# not exist yet, and learning needs resolution. Rāma's scheduler calls resolve then learn;
+# both are safe to call repeatedly, since resolution skips resolved claims and learning is
+# stamped exactly-once.
+
+@app.get("/outcomes")
+def outcomes_list(symbol: Optional[str] = None, limit: int = 50,
+                  resolvedOnly: bool = False):
+    from engine.outcomes import recent
+    return {"records": recent(limit=limit, symbol=symbol, resolved_only=resolvedOnly)}
+
+
+@app.get("/outcomes/stats")
+def outcomes_stats(symbol: Optional[str] = None):
+    """
+    What the engine has actually learned. The counts are separated on purpose: many
+    predictions recorded with none resolved looks like a working loop and is not.
+    """
+    from engine.outcomes import stats
+    from engine.registry import MODEL_REGISTRY
+    out = stats(symbol)
+    out["metaLearner"] = {"updates": MODEL_REGISTRY.meta_update_count(),
+                          "weights": MODEL_REGISTRY.meta_weights()}
+    return out
+
+
+class ResolveRequest(BaseModel):
+    symbol:     Optional[str] = None
+    maxRecords: int = Field(default=2000, ge=1, le=50000)
+    learn:      bool = True
+
+
+@app.post("/outcomes/resolve")
+def outcomes_resolve(req: ResolveRequest):
+    """
+    Score claims whose horizon has elapsed, then learn from them.
+
+    A claim is only scored once its full declared `validityBars` has passed, or it closed
+    early inside the bars available. Scoring sooner would book a signal that still has room
+    to run as a TIMEOUT — a loss it never took.
+    """
+    try:
+        from engine import outcomes
+        result = {"resolve": outcomes.resolve(req.symbol, req.maxRecords)}
+        if req.learn:
+            result["learn"] = outcomes.learn()
+        result["stats"] = outcomes.stats(req.symbol)
+        return result
+    except Exception as e:
+        logger.error(f"Outcome resolution error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/outcomes/learn")
+def outcomes_learn():
+    """Consume resolved-but-unlearned outcomes. Idempotent — each is learned exactly once."""
+    try:
+        from engine import outcomes
+        return outcomes.learn()
+    except Exception as e:
+        logger.error(f"Outcome learning error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
