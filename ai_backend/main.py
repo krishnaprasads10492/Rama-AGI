@@ -707,6 +707,217 @@ def train_horizons_route(req: TrainHorizonsRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Position ledger (spec Section 74) ────────────────────────────────────────
+#
+# What master actually has on the table, as opposed to what the engine predicts. Every write
+# here is master asserting a fact about his own capital, so the Electron side gates all of them
+# on `stockmind.config` rather than on the viewer capability.
+#
+# A bad input is a 400, not a 500: "quantity must be greater than zero" is something master can
+# act on, an opaque server error is not.
+
+class ThesisModel(BaseModel):
+    direction:   Optional[str] = None
+    horizon:     Optional[str] = None
+    targetPrice: Optional[float] = None
+    stopPrice:   Optional[float] = None
+    probability: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    predictionId: Optional[str] = None
+    rationale:   Optional[str] = None
+
+
+class OpenPositionRequest(BaseModel):
+    symbol:    str
+    exchange:  str = "NSE"
+    instrType: str = "EQUITY"
+    side:      str = "BUY"
+    quantity:  float = Field(gt=0)
+    price:     float = Field(gt=0)
+    date:      Optional[str] = None
+    fees:      float = Field(default=0.0, ge=0)
+    note:      Optional[str] = None
+    predictionId: Optional[str] = None
+    thesis:    Optional[ThesisModel] = None
+    interval:  str = "1d"
+
+
+class FillRequest(BaseModel):
+    positionId: str
+    side:       str
+    quantity:   float = Field(gt=0)
+    price:      float = Field(gt=0)
+    date:       Optional[str] = None
+    fees:       float = Field(default=0.0, ge=0)
+    note:       Optional[str] = None
+    predictionId: Optional[str] = None
+    interval:   str = "1d"
+
+
+class ClosePositionRequest(BaseModel):
+    positionId: str
+    price:      float = Field(gt=0)
+    date:       Optional[str] = None
+    fees:       float = Field(default=0.0, ge=0)
+    note:       Optional[str] = None
+    interval:   str = "1d"
+
+
+class RemoveFillRequest(BaseModel):
+    positionId: str
+    fillId:     str
+    interval:   str = "1d"
+
+
+class ThesisRequest(BaseModel):
+    positionId: str
+    thesis:     ThesisModel
+    interval:   str = "1d"
+
+
+class LedgerNoteRequest(BaseModel):
+    positionId: str
+    text:       str
+
+
+@app.get("/ledger/positions")
+def ledger_positions(status: Optional[str] = None, symbol: Optional[str] = None,
+                     interval: str = "1d"):
+    """
+    Every tracked position, marked to market against stored bars.
+
+    A position whose price could not be resolved carries `unrealisedPnl: null` and a flag
+    saying so — it is never marked at its entry price and reported as flat P&L.
+    """
+    try:
+        from engine import ledger
+        rows = ledger.positions(status=status, symbol=symbol, interval=interval)
+        return {"positions": rows, "count": len(rows),
+                "open": sum(1 for r in rows if r["status"] == "open")}
+    except Exception as e:
+        logger.error(f"Ledger list error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/ledger/portfolio")
+def ledger_portfolio(interval: str = "1d"):
+    """The whole book. `unpricedSymbols` is reported rather than folded into the totals."""
+    try:
+        from engine import ledger
+        return ledger.portfolio(interval=interval)
+    except Exception as e:
+        logger.error(f"Ledger portfolio error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/ledger/position/{position_id}")
+def ledger_position(position_id: str, interval: str = "1d"):
+    try:
+        from engine import ledger
+        return ledger.position_detail(position_id, interval=interval)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"no position {position_id}")
+    except Exception as e:
+        logger.error(f"Ledger detail error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ledger/open")
+def ledger_open(req: OpenPositionRequest):
+    """
+    Record a position master has taken.
+
+    An existing OPEN position in the same symbol and instrument is added to rather than
+    duplicated: two rows for one holding would show two different average costs for the same
+    money, and neither would reconcile against his broker.
+    """
+    try:
+        from engine import ledger
+        return ledger.open_position(
+            symbol=req.symbol, exchange=req.exchange, instr_type=req.instrType,
+            side=req.side, quantity=req.quantity, price=req.price, date=req.date,
+            fees=req.fees, thesis=(req.thesis.model_dump() if req.thesis else None),
+            note=req.note, prediction_id=req.predictionId, interval=req.interval)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Ledger open error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ledger/fill")
+def ledger_fill(req: FillRequest):
+    """Add to or reduce a tracked position — the "buy more / sell more" path."""
+    try:
+        from engine import ledger
+        return ledger.add_fill(
+            position_id=req.positionId, side=req.side, quantity=req.quantity,
+            price=req.price, date=req.date, fees=req.fees, note=req.note,
+            prediction_id=req.predictionId, interval=req.interval)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Ledger fill error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ledger/close")
+def ledger_close(req: ClosePositionRequest):
+    """Exit the whole open quantity. Writes a closing fill so the exit price is on the record."""
+    try:
+        from engine import ledger
+        return ledger.close_position(
+            position_id=req.positionId, price=req.price, date=req.date,
+            fees=req.fees, note=req.note, interval=req.interval)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Ledger close error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ledger/fill/remove")
+def ledger_fill_remove(req: RemoveFillRequest):
+    """Delete a mistyped fill. The removal is recorded in the position's notes."""
+    try:
+        from engine import ledger
+        return ledger.remove_fill(req.positionId, req.fillId, interval=req.interval)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Ledger fill removal error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ledger/thesis")
+def ledger_thesis(req: ThesisRequest):
+    """Revise why a position is being held. The previous reason is kept."""
+    try:
+        from engine import ledger
+        return ledger.set_thesis(req.positionId, req.thesis.model_dump(),
+                                 interval=req.interval)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Ledger thesis error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ledger/note")
+def ledger_note(req: LedgerNoteRequest):
+    try:
+        from engine import ledger
+        return ledger.add_note(req.positionId, req.text)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Ledger note error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("STOCKMIND_PYTHON_PORT", "8001"))

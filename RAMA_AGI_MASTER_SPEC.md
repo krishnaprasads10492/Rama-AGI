@@ -1731,6 +1731,7 @@ authenticated **Master session**, not merely an open store.
 | 89 | StockMind — the chart, the field contract, and the scheduler that makes the loops run | done (renderer genuinely built and verified; scheduler verified against stubs, not in a running app) | Section 71. Task 6 of 6, completing the StockMind build. New `src/pages/StockMind/PriceChart.jsx`; `StockMind.jsx` rewritten; `marketIntel.cjs`, `preload.cjs`, `main.cjs`, `ai_backend/main.py` updated. **The page was not showing what the engine produced.** It read `signal.strategy \|\| signal.name \|\| signal.algorithm` while the engine emits `variant`, and `signal.direction === 'long'` while the engine emits `type: "LONG"` — so the **SETUP and DIR columns were permanently blank for every signal, always** — and **entry, stop-loss and the three targets were never displayed at all**, which is the entire product of a trading signal. Sections 64–70 made the engine honest; this decides whether any of it reaches the screen. `basePrice` was also free text the master typed, inviting a signal priced off a stale number; it now comes from the last stored close and is read-only. **Two assumptions about recharts were both wrong.** (a) `"!node_modules/recharts/**"` in `build.files` looks like a packaging bug that would stop the chart shipping — it is not: it sits alongside `!node_modules/react/**`, `react-dom` and `zustand`, all of which the renderer obviously uses, because **Vite bundles the renderer into `build/`** so renderer deps are compiled in and never need to exist in node_modules at runtime. Excluding recharts is exactly as correct as excluding React. **Nothing to fix.** (b) Whether to use it at all: **recharts has no candlestick chart**, so building one means a custom `<Bar shape>`/`Customized` component — writing the SVG by hand anyway — while carrying ~500 kB and fighting its scale model to place five horizontal level lines. The custom-shape work is identical either way, so the dependency buys nothing. `PriceChart.jsx` is inline SVG: candlesticks, volume, both axes, crosshair readout, the entry zone as a band, and SL/entry/T1/T2/T3 as labelled lines. One detail that is invisible when wrong: **the y-scale spans the bars AND the signal levels** — scaling to bars alone clips a stop below the visible range and the chart then shows a trade that appears to have no risk. `recharts` is now genuinely unused; flagged for master rather than removed, since it is a `package.json` change with no functional benefit and this build was verified with it present. **Channels are `market:`, not `stockmind:`** — the `stockmind:` prefix is allowlisted and unused, and adopting it would split one subsystem across two naming schemes while `marketIntel` remains the single bridge object (ledger row 19 exists because subsystems were once duplicated that way). Thirteen channels added: read-only surfaces on `stockmind.view`, quota- or state-changing actions on `stockmind.request`, and **training on `stockmind.config` (tier 2)** — the strictest existing StockMind gate, because a retrain rewrites the artifacts every prediction then loads and so changes what the whole engine answers. **No new capability was invented** (I8). Every symbol is `encodeURIComponent`-ed into the path, which is not decoration: the symbol comes from a text input and `^NSEI` or a stray slash would otherwise change which route is hit. **THE SCHEDULER CLOSES THE ITEM SECTIONS 68 AND 70 BOTH LEFT OPEN.** `/outcomes/resolve` and `/news/sync` existed and **nothing called them**, so the learning loop never resolved a claim and the news series never gained a second day — both features complete and inert. `startScheduler()` is armed from `main.cjs`: outcomes every 6h, news daily, first run 5 minutes after launch. **It has no capability gate, deliberately, and that is not a hole**: `denyUnless` protects the *renderer* boundary, and this is main-process housekeeping with no session behind it hitting the same read-and-store endpoints — **fabricating a user object to satisfy a gate would be the actual hole**, which is precisely what `server/index.cjs` was corrected for in Section 59. Four constraints, each a defect if reversed: **it does not start the Python backend** (a timer that spawns Python even when master never opened StockMind is a decision, not housekeeping — verified that a tick with the backend down makes **zero** HTTP calls); it touches **only** read-and-store endpoints, never train/predict/backtest; **arming is idempotent**, since two timer sets would double every outcome's influence on the learned weights (Section 68's exactly-once `learnedAt` protects the records, not the schedule); and timers are `unref`'d with every tick wrapped, so nothing can hold the app open or reach the event loop. `RAMA_DISABLE_MARKET_SCHEDULER=1` disables it; `market:scheduler-status` reports state and last-run times. Backend additions: `GET /ohlcv/{symbol}` (tail semantics, `sync=false` by default so opening a chart does not fire a network fetch) and `GET /store/inventory`. **A STATED LIMIT THAT NO LONGER APPLIES:** Sections 66 and 69 both record that `vite build` could not be verified here because `node_modules` was absent. **It is present and the build completes in ~4s**, so the renderer half of this task is genuinely verified rather than reviewed — a first for the UI work in this project. The Electron main process still cannot be launched here, so the scheduler is verified against stubs. **Verified:** `node --check` clean on all three `.cjs`; `npm run audit` clean with 35 store destructures and **89 bridge calls all resolving**, which is what proves the renderer's `window.rama.marketIntel.*` calls match `preload.cjs`; **`vite build` succeeds** (StockMind chunk 21.57 kB → 7.11 kB gzipped); **34 scheduler assertions** against a stubbed HTTP client and process manager; **the field contract checked against a live `/predict` — every one of the 27 keys the renderer reads is present, `MISSING: NONE`**, with levels correctly ordered for a SHORT, variants distinct, ids present and reasons non-empty; `/ohlcv` verified for tail semantics, `high >= low` on every bar, ascending dates, and an unknown symbol yielding an empty list with guidance rather than a 500. **718 Python assertions still green across seven suites.** **Not built:** no intraday interval switching (the plumbing exists; an intraday provider is a separate data question); no drawing tools or indicator overlays beyond the signal's own levels, because an indicator drawn in the renderer would be a second implementation of something `features.py` already computes and the two would drift; no option-chain table (`market:option-chain` is wired and unused). **All six StockMind tasks are now complete.** The honest summary of where the tool stands: the data layer reaches 2001 for derivatives and 2007 for NIFTY bars, the backtest and the outcome loop are measurable and share one set of outcome rules, artifacts cannot load misaligned, and the UI now shows the levels. **What it does not have is a demonstrated edge** — Section 69 measured none at any horizon from 1 to 20 bars on price features alone, and Section 70 cannot yet measure news because 28 days are collected against ~800 needed. The next real gains are the derivative features (a deep `POST /derivatives/sync` backfill is needed — coverage is currently days, not years), accumulated news, or a change of target to realised volatility, which is far more forecastable than direction and which the risk geometry already consumes. **Still unanswered after five asks: the trading horizon.** |
 | 90 | StockMind — historical news from GDELT, and a measurement pipeline proven trustworthy | done (source proven, pipeline proven; **the live 9-year pull still has to run — GDELT throttled this machine**) | Section 72. Master asked for old data to be used to train on news impact. **Section 70's conclusion was right about RSS and wrong as a general claim** — it never tested a news *archive*. **GDELT DOC 2.0** (`api.gdeltproject.org/api/v2/doc/doc`, free, no key) exposes `TimelineTone` (daily average tone), `TimelineVol` (daily article volume — attention, a separate signal) and `ArtList`. **History floor verified as 2017-01-01**: 2015-06 and 2016-06 both return the plain-text body `Invalid query start date.` — *plain text on HTTP 200*, so a parser checking only the status code treats it as success and then throws at `json.loads`. Nine years is ~2,250 trading days, past both the 800-day threshold `coverage()` asks for and Section 69's 150-row holdout. **The finding that justified building it:** mean tone Feb 2020 −0.688 → **Mar 2020 −1.529** → Apr 2020 −0.756, with the single most negative day **2020-02-28**, the first major global covid selloff. Negativity more than doubled during the crash month and recovered — a series that moves like that is a legitimate candidate, though still only a candidate. Decisions: **GDELT tone gets its own columns, never merged into `sentiment`** — the lexicon column is this module's own measure over RSS headlines, GDELT tone is someone else's measure over a different corpus on a different scale, and one column carrying both would make a feature whose **meaning changes with its source**, the exact defect Section 67 removed for spot provenance; a model would simply learn the date RSS collection began. **The access pattern is part of the design**: GDELT throttles hard, and **once a pooled keep-alive socket is reset it stays poisoned for every later request**, so a **fresh client per call with `Connection: close`** is mandatory rather than an optimisation to undo, plus ~6s pacing, a year-sized window per call (nine years = eighteen calls, not hundreds), and resumability. OR'd terms **must** be parenthesised or GDELT returns `Queries containing OR'd terms must be surrounded by ()`. **Tone is joined STRICTLY BEFORE the bar, never its own date** — GDELT's tone for D aggregates articles *seen* on D, including ones published after that session closed, so joining tone(D) to bar D leaks post-close information into a prediction made at it; verified with a series whose tone equals its row index so the pick is unambiguous (bar 2026-01-20, index 15, reads 14.0). **Three defects found while building.** (a) **`store.merge` replaced whole rows, so the two news writers erased each other**: `drop_duplicates(keep="last")` is right for bars but wrong for a series two sources populate different columns of — the RSS write carried `gdelt_tone: None` and so **nulled the tone**, meaning "the columns are disjoint" was only true if the merge respected fields. Added `combine=True`, a field-level merge where the newest **non-null** value wins per column so a newer null cannot erase an older value; both news writers use it, bars untouched. (b) **The backfill persisted only after all years completed**, so a budget-stopped or interrupted run kept **nothing** — the first attempt spent fifteen minutes on paced requests and wrote zero rows; it now merges after each year and converges on re-run. (c) **The pre-2017 floor check was unreachable**, sitting after the empty-window guard which is already true for a pre-2017 year, so a caller asking for twelve years got an empty `skipped` list and no explanation. Also tightened the per-request timeout from 90s/4 attempts to 30s/3, because one throttled year could otherwise consume a whole 900-second budget. **What could not be verified: the live nine-year pull.** After the probing burst GDELT began refusing this machine at the **TLS handshake** (`ConnectTimeout: handshake operation timed out`) — a throttle window, not a code fault. The source is proven working; the backfill must run in a fresh window, which is what the resumable design and `POST /news/backfill` exist for. **So: source proven, pipeline proven, answer not yet in.** **Verified offline with GDELT stubbed — 60 assertions in `tests/test_histnews.py`**, the two decisive ones being that a tone series **constructed to predict** five bars ahead **passes** the unchanged gate (AUC 0.6715, Brier skill +0.0653, fold AUC 0.6894) while a **random** tone series **fails** it (AUC 0.4576, Brier skill −0.0514) with identical feature width and only the data differing. That is what makes the eventual real answer trustworthy. Note the test itself had to be corrected twice: i.i.d. tone driving `steps[i]` cannot predict `close[i+5] > close[i]` because it only moves the label's *base* (measured AUC 0.425), so tone is now AR(1) with φ=0.9 — which is also the realistic shape, since sentiment is persistent; and at stride 3 the holdout was 129 rows and the gate **correctly** refused to offer a verdict, so the test was too small rather than the gate too strict. **778 assertions green across eight suites** (`test_news` 138, `test_outcomes` 134, `test_derivatives` 132, `test_training` 112, `test_defects` 83, `test_histnews` 60, `test_backtest` 62, `test_store` 57); `npm run audit` clean at 89 bridge calls; `node --check` clean. Feature vector with news is **113 columns** (100 price + 7 lexicon + 6 GDELT). **Next step: run `POST /news/backfill` for NIFTY50 in a fresh window, then `POST /train` with `includeNews: true` and report what the gate says.** Then task 3 — multi-horizon models, master having answered that all three of intraday, swing and positional are wanted. |
 | 91 | StockMind — three horizons, and the defect that would have destroyed every intraday series | done (horizons wired, fitted and reported separately; **no horizon's model clears the gate yet, and a real hourly training run is the next step**) | Section 73. Master finally answered the question asked five times: **intraday AND swing AND positional**. **A horizon is now `(interval, bars)`, not a number** — `DEFAULT_HORIZON = 5` meant five *daily* bars, and "intraday" cannot be expressed that way at all since the smallest daily horizon is one day. `intraday` = 60m/3 (~3 hours), `swing` = 1d/5, `positional` = 1d/20. **Intraday means hourly because that is the only depth that exists**, measured against Yahoo per symbol: 1m caps at 5d (1,876 bars), 5m/15m/30m at one month (three months returns **HTTP 422**), and only **60m reaches 2y with 3,499 bars**; bars-per-session cross-checked against the NSE's 6h15m day gave 5m→82 (expect ~75), 15m→27 (~25), 60m→6.8 (~7). Section 69's gate needs a 150-row holdout and forward-chaining folds, which thirty days cannot supply — and thirty days is one market regime, so a model fitted on it measures one month's weather. 5m/15m stay fetchable for a chart and are recorded in `horizons.DISPLAY_ONLY` **with the reason**, so nobody re-discovers the limit and assumes an oversight. **The three answers are reported separately and never averaged** — a three-hour call and a one-month call are claims about different questions, a blend describes neither, and it would bury the most informative case: **when the horizons disagree**. Intraday bearish against positional bullish is the shape of a pullback inside an uptrend and it is what decides whether to hold, trim or wait, so `agreement()` names that configuration explicitly (and its mirror, "the rallies that trap buyers") and reports cross-horizon conviction as the **weakest** of the three rather than the mean, because the strongest reading cannot vouch for the others. **Artifacts and provenance are horizon-scoped**: `rf_direction.pkl` → `rf_direction__1d_h5.pkl` / `__60m_h3` / `__1d_h20`, with an unsuffixed legacy file still honoured so a pre-Section-73 install keeps working (I11); the **feature manifest stays single** since names come from one builder and do not depend on horizon, but **provenance splits per horizon** because train range, holdout range and gate verdict are all horizon-specific and one shared file would let a positional model's evidence vouch for an intraday one. `registry.ensemble_predict` takes a `horizon_key` and prefers that horizon's own fitted pipeline **per member**, falling through to the shared model for any member without one, so a partially-trained horizon still gets a full ensemble; the singleton's own model objects are deliberately **not** swapped per call, since other modules hold references (Section 68) and mutating them per horizon would make concurrent predictions interfere. **TWO DEFECTS FOUND BEFORE A LINE OF THE FEATURE WAS WRITTEN.** (a) **`store.merge` would have destroyed every intraday series**: it wrote `date_format="%Y-%m-%d"` unconditionally, so every bar in a session serialised to the same midnight timestamp and the de-duplication on `date` kept **one bar per day** — verified live, a real 60m NIFTY sync returns **3,448 bars across 494 sessions at exactly 7.0 per session**, and before the fix those 3,448 would have become **494**, silently, with no error anywhere. Now writes the time component whenever the interval is intraday; daily still writes date-only, confirmed unchanged at 4,649 bars serialised as `2007-09-17`. (b) **`providers._fetch_yahoo` hardcoded `interval=1d`** so no intraday fetch was possible; it now takes an interval and uses Yahoo's `range=` form for intraday, because those windows are capped server-side against `range` (three-month 5m → HTTP 422), while daily keeps explicit epochs since Section 65 measured that `range=max&interval=1d` silently downsamples to monthly. `Provider.fetch` falls back to the old four-positional signature on `TypeError`, so a fetcher written before this change still works (I11), and `fetch_history` skips non-Yahoo providers for intraday rather than accepting daily bars mislabelled as hourly. **Verified: 878 assertions across nine suites**, `tests/test_horizons.py` contributing 100 — 70 synthetic hourly bars surviving a round-trip with distinct closes and preserved intra-session order while a daily file still serialises date-only; swing and positional producing **different** artifact names despite sharing an interval; `None` yielding the legacy name; a permuted manifest **refusing** the horizon artifact while the prediction still answers from the heuristic ensemble; `horizonModels: ["random_forest"]` on a horizon-scoped call versus `[]` on the shared one; and the agreement block emitting **no** blended probability anywhere. Live: 60m sync 3,448 bars / 7.0 per session / 3,448 distinct timestamps / round-trip lossless, 15m sync 576 bars / 25.0 per session. `npm run audit` clean, `vite build` succeeds, `node --check` clean. **What master does not yet have: a horizon whose model clears the gate.** None did in Section 69 and adding intervals does not by itself add signal; the intraday test run trained on 379 rows with a 76-row holdout so the gate correctly declined to judge it, whereas real hourly data gives 3,448 bars and enough rows for a real verdict. **Next steps, both blocked on the outside world rather than code:** `POST /train/horizons` on the real hourly series, and the GDELT backfill (re-checked this session, still TLS-throttled). Then task 4 — the position ledger. |
+| 92 | StockMind — the position ledger, and the first honest verdict on live data | done | Section 74, plus the measured verdict recorded at the end of Section 73. **The training run that was "the next step" for eleven ledger rows has now been executed against the live store** — 4,649 daily and 3,448 hourly bars, `random_forest`, 111 seconds. **All three horizons were judged this time** (holdouts of 319 / 439 / 437 rows, all clearing the 150 floor, so the gate could not decline) and **all three were refused**: intraday 60m/3 AUC 0.5283 inside 2 SE of chance (floor 0.5793) with Brier skill −0.0199; swing 1d/5 AUC 0.5026, flat chance; positional 1d/20 AUC **0.5974** with the only positive Brier skill (**+0.0297**) and 62.9% accuracy — **refused because its walk-forward fold AUC was 0.4873**, worse than chance across earlier segments, and because its holdout base rate was 0.6178 so 62.9% accuracy is worth about one point over always saying "up". **The gate caught exactly the trap it was built for, on real data, unmodified.** So StockMind still has no model entitled to advise master, and that is now a *measurement* rather than an assumption: price history alone does not predict NIFTY50 direction at these horizons, which makes the exogenous data (GDELT tone, derivatives/flows) the lever that matters rather than another model type. **GDELT re-probed and proven environmental, not a code defect**: four request shapes including one with **no `mode` at all** every failed at the TLS handshake (`WinError 10054`, handshake timeout), which rules out query syntax and the endpoint path; one attempt returned an Apache-style `404` **HTML** body, which a valid GDELT path would not, pointing at egress interception on this machine's network (the class of policy that blocked `7za.exe` in Section 45). **The ledger itself**: `engine/ledger.py`, JSONL at `_ledger/positions.jsonl`, reusing `outcomes`' proven atomic write helpers rather than a second copy of the Windows sharing-violation retry. **A position is a list of fills, never an entry price** — master explicitly asked to be told when to "buy more/sell more", so the record has to survive the action Rāma recommends, and one `entryPrice` field cannot hold "100 at 2,400 then 50 at 2,310" without destroying a price that is then unrecoverable. **Nothing derived is stored**: net quantity, average cost, realised/unrealised P&L and days held are all computed on read by `derive()`, because a stored total is a second source of truth that goes stale the moment a fill is corrected — asserted in the tests by checking no stored row carries `netQty`, `avgCost` or a P&L field. **The thesis is stored with the position** (`direction`, `horizon`, `targetPrice`, `stopPrice`, `probability`, `predictionId`, `rationale`), because master's instruction was "based on projection he made the decision of investing", and without it "was I right, or lucky?" is unanswerable and an exit alert would reason about a number with no intent attached; revising it keeps the previous one in `notes` so an alert cannot fire against a thesis abandoned months ago. **Signed quantity so a short is the same code path as a long** — two branches would be two places for the sign to be wrong, and this is money; a fill against the net realises `(fillPrice − avgCost) × closed × sign`, a fill exceeding the open quantity closes it and opens the remainder the other way at the fill price. **Realised P&L uses the average cost at the moment of the reducing fill**, so a later add cannot retroactively rewrite a booked profit — tested explicitly. **Fees are tracked separately and kept out of `avgCost`** so the average still matches the broker's holdings screen, which is what makes the ledger reconcilable. **Mark-to-market never invents a price**: no bar, or a bar older than the newest fill, yields `unrealisedPnl: null` plus `priceStale` and a stated reason, never the entry price passed off as flat P&L; `portfolio()` names `unpricedSymbols` instead of folding them in as zero. **Stated plainly, not glossed: the file is plaintext on disk** and describes master's real exposure (`data/` is gitignored so it cannot leave via git); it is not behind Electron's encrypted `dataStore` because the Python engine must read it to mark to market and holds no key material (I2/I9), and moving it there is **master's decision** at the cost of in-engine mark-to-market. **One defect found by the tests**: `last_close` reported a daily bar's `priceAsOf` as `2026-08-28 00:00:00`, because `store.load` parses the date column into a Timestamp — a midnight on a daily bar invites the reader to think the price is from midnight; now trimmed to the date for daily and **kept in full for intraday, where the time is real information**, the same distinction `store._date_format_for` draws on the way in. Seven routes (`GET /ledger/positions|portfolio|position/{id}`, `POST /ledger/open|fill|close|fill/remove|thesis|note`), a bad input returning **400 with an actionable message** rather than an opaque 500. Nine bridge methods; **reads gated on `stockmind.view`, every write on `stockmind.config`** — deliberately stricter than the read side, because a write is master asserting a fact about his own capital and is the record his exit alerts will be computed from, so a tier that may merely request a signal must not be able to edit it. **The ledger holds no trading authority and never contacts a broker** — it records what master says he did. **Verified: 1,049 assertions across ten suites**, `tests/test_ledger.py` contributing 171 with hand-computed rupee figures rather than "is a number" — 2,370 weighted average, 6,500 realised on a partial exit with the average unmoved, 1,000 unchanged by a later buy, a short from 2,400 bought back at 2,300 as a **profit** of 10,000, a 150-lot sell against 100 held leaving a 50 short carried at the reversing price, `None` rather than zero on a missing price, a torn final JSONL line discarded without losing the ledger, and a re-entry after a full exit getting a fresh row rather than reviving the closed one. `node --check` clean on both `.cjs`, `py_compile` clean, `npm run audit` clean (89 bridge calls), `vite build` succeeds in 8.59s. **Next: task 5** — exit/add/reduce alerts computed from a tracked position plus a fresh multi-horizon prediction, which must never fire on stale data (the `priceStale` flag exists for exactly this) and must state which horizon and which thesis field triggered them. Then task 6 — justification bullets and capital-protection warnings. |
 
 ### Resume checklist for a cold session
 
@@ -7281,10 +7282,196 @@ the **weakest** rather than the mean, because the strongest reading cannot vouch
 
 The horizons are wired, fitted separately and reported separately. **No horizon has a model
 that clears the gate**, because none did in Section 69 and adding intervals does not by itself
-add signal. The intraday horizon in testing trained on 379 rows with a 76-row holdout — below
-the 150 floor — so the gate correctly declined to judge it; real hourly data gives 3,448 bars
-and enough rows to be judged properly, and that run is the next step.
+add signal.
 
-Two live items remain blocked on the outside world rather than on code: the GDELT backfill
-(still TLS-throttled, re-checked and still refusing) and a full `POST /train/horizons` on real
-hourly data.
+### THE REAL VERDICT ON LIVE DATA (run, not projected)
+
+The run this section called "the next step" has now happened, against the live store — 4,649
+daily bars and 3,448 hourly bars, `random_forest`, `n_splits=3`, `stride=2`, 111 seconds.
+**All three horizons produced a judged verdict this time** (every holdout cleared the 150-row
+floor, so the gate could not decline), and **all three were refused**. Each failed differently,
+and the differences are the useful part:
+
+| Horizon | Rows | Holdout | Base rate | Holdout AUC | Brier skill | Fold AUC | Refused because |
+|---|---|---|---|---|---|---|---|
+| intraday 60m/3 | 1,593 | 319 | 0.5016 | 0.5283 | −0.0199 | 0.5424 | inside 2 SE of chance (floor 0.5793, SE 0.0397) **and** negative Brier skill |
+| swing 1d/5 | 2,192 | 439 | 0.5467 | 0.5026 | −0.0087 | 0.5143 | AUC below the 0.52 floor — it does not rank better than chance |
+| positional 1d/20 | 2,185 | 437 | 0.6178 | **0.5974** | **+0.0297** | **0.4873** | walk-forward fold AUC below 0.50 — it did not hold across time |
+
+**The positional row is the one to read carefully, and it is why the gate exists.** It has the
+best holdout AUC (0.5974), the only *positive* Brier skill (+0.0297) and 62.9% accuracy — it
+looks like a working model. Two facts kill it. Its holdout base rate is 0.6178, so 61.8% of
+20-day windows were up anyway and 62.9% accuracy is worth about one point over always saying
+"up". And its walk-forward fold AUC is 0.4873: across earlier time segments it was *worse than
+chance*, so the holdout figure is that segment's bull regime rather than skill. Accepting it
+would have shipped a model that says "up" and takes credit for the market's drift. The gate
+caught exactly the trap it was built for, on real data, unmodified.
+
+So: **StockMind still has no model that has earned the right to advise master**, and that is
+now a measured statement about NIFTY50 daily and hourly bars plus price features, not an
+assumption. Price history alone does not predict direction at these horizons. The remaining
+untested lever is exogenous data — GDELT tone (Section 72) and the derivatives/flows series
+(Section 67) — which is why the backfill matters more than trying another model type.
+
+### GDELT: blocked by the network, not by the code
+
+Re-probed this session with four different request shapes — `TimelineTone`, lowercase
+`timelinetone`, a bare `artlist`, and a query with **no `mode` at all**. Every one failed at
+the TLS handshake (`WinError 10054`, `_ssl.c:1063: handshake operation timed out`). A request
+with no mode failing identically **rules out query syntax and the endpoint path**; the URL is
+unchanged and correct. One earlier attempt returned an Apache-style `404 Not Found` **HTML**
+page, which a valid GDELT path would not produce — together with the resets that points at
+egress interception on this machine's network (the same class of endpoint policy that blocked
+`7za.exe` in Section 45) at least as much as at a GDELT-side block after the original probing
+burst. Either way it is **environmental**: the source itself was proven working earlier
+(181 tone points; the covid tone series), the client already implements the mandated
+fresh-client / `Connection: close` / paced / resumable pattern, and `POST /news/backfill`
+stays correct and resumable for a machine that can reach the host.
+
+---
+
+## SECTION 74 — StockMind: the position ledger, because a forecast master acted on is a different object from a forecast
+
+Master's words: *"maintain a ledger so that user can input current investment in stockmarket
+based on projection he made the decision of investing so it can be tracked, updated/intimated
+to user when to leave, buy more/sell more at any point of time."*
+
+Everything StockMind held until now was a **claim about the future** (`/predict`) or a
+**score of past claims** (`outcomes`). Neither knows whether master has money on the table.
+A position is a third kind of object: it has a cost, it moves every session, and being wrong
+about it costs capital rather than accuracy.
+
+### What a position record is
+
+`engine/ledger.py`, JSONL in the store beside `_outcomes`, at `_ledger/positions.jsonl`.
+
+A position is keyed by **(symbol, exchange, instrType)** and holds a **list of fills**, not a
+single entry price:
+
+```
+{ "positionId", "symbol", "exchange", "instrType",       # EQUITY | FUTURES | OPTIONS
+  "openedAt", "closedAt", "status",                       # open | closed
+  "thesis": { "direction", "horizon", "targetPrice", "stopPrice",
+              "probability", "predictionId", "rationale", "recordedAt" },
+  "fills": [ { "fillId", "side", "quantity", "price", "date", "fees", "note",
+               "predictionId" } ],
+  "notes": [ ... ] }
+```
+
+Everything else — net quantity, average cost, realised and unrealised P&L, days held — is
+**derived on read**, never stored. A stored derived total is a second source of truth that
+goes stale the moment a fill is corrected.
+
+### Decisions
+
+**A position is a list of fills, not an entry price.** Rejected one row per position with
+`entryPrice`/`quantity`. Master explicitly asked to be told when to *"buy more/sell more"*,
+so the design has to survive the very action it recommends. A single-entry record cannot
+represent "bought 100 at 2,400, added 50 at 2,310" without destroying one of the two prices,
+and average cost cannot be recovered afterwards.
+
+**The thesis is stored with the position.** Rejected recording the trade alone. Master's
+phrasing — *"based on projection he made the decision of investing"* — is the whole point:
+without the projection the position was opened on, the question "was I right, or lucky?"
+has no answer later, and every exit alert would be reasoning about a number with no
+intent attached. `thesis.predictionId` links back to the `outcomes` record when the position
+came from a StockMind call, so a real trade can be scored against the forecast that caused it.
+
+**Weighted-average cost, and the fills are kept so FIFO stays derivable.** Rejected
+implementing FIFO lots now. Weighted average is what Indian brokers display on a holdings
+screen, so it is the number master can reconcile against his account, and reconciliation is
+what makes a ledger trustworthy. Indian equity **tax** is FIFO, so this is deliberately not a
+tax record; because every fill is retained with its date, FIFO realised P&L can be computed
+later without a migration. **Stated plainly: this is not a tax or accounting record.**
+
+**Fees are tracked separately, not folded into average cost.** Folding them in would make
+`avgCost` disagree with the broker screen, which defeats reconciliation. They are summed into
+`feesTotal` and subtracted from net P&L, so both numbers are available and neither is a lie.
+
+**Signed quantity, so shorts are the same code path.** `netQty > 0` long, `< 0` short.
+Unrealised P&L is `(lastPrice - avgCost) * netQty` for both. A fill in the same direction as
+the current net is an **add** and re-averages the cost; a fill in the opposite direction is a
+**reduce** and realises `(fillPrice - avgCost) * closedQty * sign(netQtyBefore)`; a fill that
+exceeds the open quantity closes it and opens the remainder the other way at the fill price.
+Rejected separate long/short branches: two branches means two places for the sign to be
+wrong, and this is money.
+
+**Realised P&L uses the average cost at the moment of the reducing fill**, not the final
+average. Using the final average would let a later add retroactively change a profit already
+booked.
+
+**Mark-to-market never invents a price.** The last close comes from the stored bars for the
+position's symbol. If there is no bar, or the newest bar is older than the newest fill, the
+response carries `priceAsOf`, `priceStale: true` and a reason — it does not fall back to the
+entry price and call the result P&L. Section 66's rule, applied to money instead of a
+backtest: a missing input is reported, not substituted.
+
+**The ledger never places an order and never talks to a broker.** It records what master
+tells it he did. Rāma has no trading authority, and inventing one would be the largest
+possible expansion of blast radius in this codebase.
+
+### Where it is stored, said plainly
+
+`_ledger/positions.jsonl` under the StockMind store root is **plaintext on disk**. That file
+describes master's real financial exposure, so this is stated rather than glossed: anyone with
+read access to the data directory can read it. `data/` is gitignored (ledger row 35), so it
+cannot leave the machine through git.
+
+It is *not* behind Electron's encrypted `dataStore` because the Python engine has to read it
+to mark positions to market against the bar store, and it cannot open Rāma's nucleus-derived
+envelopes (I2/I9 — the engine has no key material and must not acquire any). Moving the
+ledger behind `dataStore` is therefore a real option but a **decision for master**, and it
+costs mark-to-market inside the engine: the Electron side would have to pass positions in on
+every call. Recorded here rather than chosen unilaterally.
+
+### API
+
+`ledger.open_position(...)` / `add_fill(...)` / `close_position(...)` / `remove_fill(...)`
+/ `positions(...)` / `position_detail(...)` / `portfolio(...)` / `set_thesis(...)`.
+`derive(position, last_price)` is the pure function every one of them uses for the money math,
+so there is exactly one implementation of the sign and averaging rules.
+
+Routes: `GET /ledger/positions`, `GET /ledger/portfolio`, `POST /ledger/open`,
+`POST /ledger/fill`, `POST /ledger/close`, `DELETE /ledger/fill`, `POST /ledger/thesis`.
+Channels `market:ledger-*`; **reads on `stockmind.view`, every write on `stockmind.config`**
+— a write here is master asserting a fact about his own capital, which is not a viewer action.
+
+### Verification
+
+**1,049 assertions across ten suites**, `tests/test_ledger.py` contributing **171**. The
+arithmetic assertions use rupee figures computed by hand, not "is a number", because every
+figure here either matches what master's broker shows him or it is worthless:
+
+- 100 at 2,400 plus 50 at 2,310 gives an average of **exactly 2,370** — and neither 2,400 nor
+  2,310 survives alone, which is what a single `entryPrice` field would have produced
+- selling 50 of that at 2,500 realises **exactly 6,500** and **leaves the average at 2,370**
+- a profit of 1,000 booked in February is **still 1,000** after a buy in March
+- shorting 100 at 2,400 and buying back at 2,300 is a **profit of 10,000**, not a loss
+- selling 150 against 100 held realises 10,000 and leaves a **50 short carried at 2,500**,
+  the reversing price, not the old average
+- fees of 999 do not move the average cost
+- a missing price gives `unrealisedPnl: None`, `marketValue: None`, `pnlPct: None` — never 0.0
+- a fill dated before one typed earlier is still replayed in date order
+- a torn final line in the JSONL is discarded and the rest of the ledger survives
+- no stored row carries `netQty`, `avgCost` or any P&L field
+- a re-entry after a full exit gets a **fresh row** with its own cost, not a revived closed one
+- `"sometime last week"` as a date is an **error**, not silently today
+
+One defect surfaced by these tests: `last_close` reported a daily bar's `priceAsOf` as
+`2026-08-28 00:00:00`, because `store.load` parses the date column into a Timestamp. A midnight
+stamped on a daily bar invites the reader to believe the price is from midnight. It is now
+trimmed to the date for daily intervals and **kept in full for intraday**, where the time is
+real information — the same distinction `store._date_format_for` draws on the way in.
+
+`node --check` clean on `marketIntel.cjs` and `preload.cjs`, `py_compile` clean on `main.py`
+and `ledger.py`, `npm run audit` clean at 89 bridge calls, `vite build` succeeds in 8.59s.
+
+### What this does not yet give master
+
+The ledger records and prices positions. It does **not** yet tell him what to do about them —
+that is task 5, and it needs the `priceStale` flag this section built, because an exit alert
+fired on a stale price is worse than no alert. Nor does it protect him from himself: no
+correlation check across positions, no drawdown breach, no expiry or event risk. That is task 6.
+
+And the ledger cannot yet be reached from the UI. Nine bridge methods exist and resolve, but no
+StockMind panel calls them, so the positions are enterable by API only for now.

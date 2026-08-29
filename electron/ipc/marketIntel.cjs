@@ -192,6 +192,37 @@ async function trainHorizons(body) {
   return postPath('/train/horizons', body, { timeout: 1800000 });
 }
 
+// ─── Position ledger (Section 74) ────────────────────────────────────────────
+//
+// Reads are cheap local file reads plus a mark-to-market against stored bars. Writes are
+// master asserting a fact about his own capital, which is why they carry `stockmind.config`
+// below rather than the viewer or request gate.
+
+async function ledgerPositions({ status = null, symbol = null, interval = '1d' } = {}) {
+  const q = [`interval=${encodeURIComponent(interval)}`];
+  if (status) q.push(`status=${encodeURIComponent(status)}`);
+  if (symbol) q.push(`symbol=${encodeURIComponent(symbol)}`);
+  return getPath(`/ledger/positions?${q.join('&')}`);
+}
+
+async function ledgerPortfolio({ interval = '1d' } = {}) {
+  return getPath(`/ledger/portfolio?interval=${encodeURIComponent(interval)}`);
+}
+
+async function ledgerPosition({ positionId, interval = '1d' } = {}) {
+  return getPath(`/ledger/position/${encodeURIComponent(String(positionId || ''))}`
+    + `?interval=${encodeURIComponent(interval)}`);
+}
+
+// 30s, not the 120s default: these are local file writes, so a long hang means something is
+// wrong rather than something is slow, and master should be told quickly.
+async function ledgerOpen(body)        { return postPath('/ledger/open', body, { timeout: 30000 }); }
+async function ledgerFill(body)        { return postPath('/ledger/fill', body, { timeout: 30000 }); }
+async function ledgerClose(body)       { return postPath('/ledger/close', body, { timeout: 30000 }); }
+async function ledgerRemoveFill(body)  { return postPath('/ledger/fill/remove', body, { timeout: 30000 }); }
+async function ledgerSetThesis(body)   { return postPath('/ledger/thesis', body, { timeout: 30000 }); }
+async function ledgerNote(body)        { return postPath('/ledger/note', body, { timeout: 30000 }); }
+
 // ─── Register IPC ───────────────────────────────────────────────────────────
 function register(ipcMain) {
   ipcMain.handle('market:predict', async (_e, { user, ...body } = {}) => {
@@ -251,6 +282,9 @@ function register(ipcMain) {
     'market:models':          modelsStatus,
     'market:horizons':        horizonsList,
     'market:predict-multi':   predictMulti,
+    'market:ledger-positions': ledgerPositions,
+    'market:ledger-portfolio': ledgerPortfolio,
+    'market:ledger-position':  ledgerPosition,
   };
   for (const [channel, fn] of Object.entries(readOnly)) {
     ipcMain.handle(channel, async (_e, { user, ...args } = {}) => {
@@ -317,6 +351,29 @@ function register(ipcMain) {
     try { return { ok: true, data: schedulerStatus() }; }
     catch (err) { return { ok: false, error: err.message }; }
   });
+
+  // ── Ledger writes (Section 74) ───────────────────────────────────────────────
+  //
+  // `stockmind.config`, the strictest StockMind gate, not `stockmind.request`. A write here is
+  // master stating what he owns; it is the record his exit alerts will be computed from, so a
+  // tier that may merely ask for a signal must not be able to edit it. Deliberately stricter
+  // than the read side, which sits on `stockmind.view` above.
+  const ledgerWrites = {
+    'market:ledger-open':        ledgerOpen,
+    'market:ledger-fill':        ledgerFill,
+    'market:ledger-close':       ledgerClose,
+    'market:ledger-remove-fill': ledgerRemoveFill,
+    'market:ledger-thesis':      ledgerSetThesis,
+    'market:ledger-note':        ledgerNote,
+  };
+  for (const [channel, fn] of Object.entries(ledgerWrites)) {
+    ipcMain.handle(channel, async (_e, { user, ...body } = {}) => {
+      const denied = denyUnless(user, 'stockmind.config');
+      if (denied) return denied;
+      try { return await fn(body); }
+      catch (err) { return { ok: false, error: err.message }; }
+    });
+  }
 }
 
 // ─── The scheduler that makes the loops actually run (Section 71) ─────────────

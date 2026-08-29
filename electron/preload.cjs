@@ -193,6 +193,18 @@ const RAMA_API = {
     derivativesSync: (opts) => ipcRenderer.invoke('market:derivatives-sync', opts),
     train:           (opts) => ipcRenderer.invoke('market:train', opts),
     trainHorizons:   (opts) => ipcRenderer.invoke('market:train-horizons', opts),
+
+    // Position ledger (Section 74). Reads on `stockmind.view`, every write on
+    // `stockmind.config` — a write is master asserting a fact about his own capital.
+    ledgerPositions:  (opts) => ipcRenderer.invoke('market:ledger-positions', opts),
+    ledgerPortfolio:  (opts) => ipcRenderer.invoke('market:ledger-portfolio', opts),
+    ledgerPosition:   (opts) => ipcRenderer.invoke('market:ledger-position', opts),
+    ledgerOpen:       (opts) => ipcRenderer.invoke('market:ledger-open', opts),
+    ledgerFill:       (opts) => ipcRenderer.invoke('market:ledger-fill', opts),
+    ledgerClose:      (opts) => ipcRenderer.invoke('market:ledger-close', opts),
+    ledgerRemoveFill: (opts) => ipcRenderer.invoke('market:ledger-remove-fill', opts),
+    ledgerThesis:     (opts) => ipcRenderer.invoke('market:ledger-thesis', opts),
+    ledgerNote:       (opts) => ipcRenderer.invoke('market:ledger-note', opts),
   },
 
   // ── Updater ───────────────────────────────────────────────────────────────
