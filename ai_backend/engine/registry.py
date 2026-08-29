@@ -91,6 +91,7 @@ class ModelRegistry:
         regime: str = "trending",
         news_text: str = "",
         feature_map: dict = None,
+        horizon_key: str = None,
     ) -> dict:
         """
         AGI-grade ensemble prediction:
@@ -102,9 +103,23 @@ class ModelRegistry:
         """
         probs = {}
 
+        # A horizon's own fitted artifacts take precedence for the models that have them
+        # (spec Section 73). Anything without a horizon-scoped artifact falls through to the
+        # shared model below, so a partially-trained horizon still gets a full ensemble.
+        h_models = self.horizon_models(horizon_key) if horizon_key else {}
+        used_horizon = []
+
         for model in self._base_models:
             try:
-                p = model.predict_proba(features)
+                pipe = h_models.get(model.name)
+                if pipe is not None:
+                    # A Pipeline carries its own scaler (Section 69), so the raw vector is
+                    # correct here exactly as it is for the default artifacts.
+                    p = float(pipe.predict_proba(np.asarray(features, dtype=float)
+                                                 .reshape(1, -1))[0][1])
+                    used_horizon.append(model.name)
+                else:
+                    p = model.predict_proba(features)
                 probs[model.name] = float(np.clip(p, 0.05, 0.95))
             except Exception as e:
                 logger.warning(f"[{model.name}] predict failed: {e}")
@@ -192,6 +207,11 @@ class ModelRegistry:
             "aleatoric":      round(aleatoric, 3),
             "regime_detected": self.regime.detect_regime(features, feature_map=feature_map),
             "reasons":        reasons,
+            # Which members answered from this horizon's own fitted artifact rather than the
+            # shared one. Empty means the whole answer came from the shared ensemble, which is
+            # the current state everywhere since Section 69 persisted nothing.
+            "horizonKey":     horizon_key,
+            "horizonModels":  used_horizon,
         }
 
     # ── Persisted learning state (spec Section 68) ────────────────────────────
@@ -202,6 +222,73 @@ class ModelRegistry:
     # parameter*: the learning signal had to come from outside because nothing inside
     # could remember it. Adding a call to `update_from_outcome` would not have been
     # enough on its own.
+
+    # ── Horizon-scoped artifacts (spec Section 73) ────────────────────────────
+    #
+    # Master wants intraday, swing and positional, so there are now up to three artifacts per
+    # model rather than one. These are loaded lazily and cached, and a horizon with no fitted
+    # artifact simply falls through to the shared heuristic ensemble — which is what every
+    # horizon does today, since Section 69 measured no model good enough to persist.
+    #
+    # `MODEL_REGISTRY`'s own model objects are deliberately NOT swapped per call. They are a
+    # process-wide singleton other modules hold references to (Section 68), and mutating them
+    # per horizon would make two concurrent predictions interfere.
+
+    _HORIZON_FILES = {
+        "random_forest": "rf_direction.pkl",
+        "mlp":           "mlp_direction.pkl",
+        "online_sgd":    "sgd_direction.pkl",
+    }
+
+    def _horizon_cache(self) -> dict:
+        if not hasattr(self, "_h_cache"):
+            self._h_cache = {}
+        return self._h_cache
+
+    def horizon_models(self, horizon_key: str) -> dict:
+        """
+        `{model_name: fitted_pipeline}` for one horizon, or `{}` when none are fitted.
+
+        The alignment check is the same one `models.artifact_alignment` applies to the default
+        artifacts: a pipeline fitted against a different feature contract is refused rather
+        than fed a misaligned vector (Sections 64, 68, 69 — refuse, never guess).
+        """
+        cache = self._horizon_cache()
+        if horizon_key in cache:
+            return cache[horizon_key]
+
+        loaded = {}
+        try:
+            from . import featureset
+            from . import horizons as _h
+            from .models import artifact_alignment
+            ok, reason = artifact_alignment()
+            if not ok:
+                logger.warning(f"[Registry] horizon '{horizon_key}' artifacts refused — {reason}")
+                cache[horizon_key] = {}
+                return {}
+
+            import joblib
+            hz = next((x for x in _h.HORIZONS.values() if x.key == horizon_key), None)
+            for name, base in self._HORIZON_FILES.items():
+                fname = _h.artifact_name(base, hz) if hz else base
+                path = os.path.join(featureset.models_dir(), fname)
+                if not os.path.exists(path):
+                    continue
+                try:
+                    loaded[name] = joblib.load(path)
+                except Exception as e:
+                    logger.warning(f"[Registry] could not load {fname}: {e}")
+        except Exception as e:
+            logger.debug(f"[Registry] horizon model load skipped for {horizon_key}: {e}")
+
+        if loaded:
+            logger.info(f"[Registry] horizon '{horizon_key}': loaded {sorted(loaded)}")
+        cache[horizon_key] = loaded
+        return loaded
+
+    def clear_horizon_cache(self) -> None:
+        self._h_cache = {}
 
     def reload_models(self) -> dict:
         """
@@ -215,6 +302,7 @@ class ModelRegistry:
         """
         from . import models as _models
         _models._ALIGNMENT_WARNED = False        # a retrain may have fixed the mismatch
+        self.clear_horizon_cache()               # a retrain may have written new per-horizon files
 
         before = {m.name: m.is_trained() for m in self._all_models()}
         self.lgbm      = LightGBMModel()

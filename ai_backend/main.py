@@ -31,6 +31,9 @@ Endpoints:
   GET  /news/coverage/{sym}   — days collected, and whether that is enough to train on
   GET  /ohlcv/{symbol}        — stored bars, for the chart
   GET  /store/inventory       — every symbol held locally, with its depth
+  GET  /horizons              — intraday/swing/positional, and display-only intervals
+  GET  /predict/multi/{sym}   — one read per horizon, plus what their agreement means
+  POST /train/horizons        — fit a model set per horizon, each on its own interval
 
 Started by electron/ipc/aiProcess.cjs (spawn python -u main.py), reached from
 the renderer through electron/ipc/marketIntel.cjs — this process itself has
@@ -632,6 +635,75 @@ def store_inventory():
         return {"inventory": store.inventory(), "root": store.store_root()}
     except Exception as e:
         logger.error(f"Inventory error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Multi-horizon (spec Section 73) ───────────────────────────────────────────
+
+@app.get("/horizons")
+def horizons_list():
+    """
+    The three horizons, and which intervals are display-only.
+
+    A horizon is `(interval, bars)`. "Intraday" cannot be expressed as a count of daily bars,
+    which is why the pair is the unit.
+    """
+    from engine.horizons import registry as h_registry
+    return h_registry()
+
+
+@app.get("/predict/multi/{symbol}")
+def predict_multi(symbol: str, exchange: str = "NSE", horizons: Optional[str] = None,
+                  sync: bool = False):
+    """
+    One directional read per horizon, plus what their agreement means.
+
+    NOT AVERAGED, deliberately. A three-hour call and a one-month call answer different
+    questions; a blended number would describe neither and would hide the most informative
+    case — a short horizon leaning against a long one, which is the shape of a pullback inside
+    a trend.
+    """
+    try:
+        from engine.horizons import predict_all
+        names = [h.strip() for h in horizons.split(",")] if horizons else None
+        return predict_all(symbol.upper(), exchange, names, sync_if_missing=sync)
+    except Exception as e:
+        logger.error(f"Multi-horizon predict error for {symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class TrainHorizonsRequest(BaseModel):
+    symbol:   str = "NIFTY50"
+    exchange: str = "NSE"
+    horizons: Optional[list[str]] = None
+    includeDerivatives: bool = False
+    includeNews: bool = False
+    models:   Optional[list[str]] = None
+    splits:   int = Field(default=3, ge=1, le=12)
+    holdoutFrac: float = Field(default=0.2, gt=0.02, le=0.5)
+    stride:   int = Field(default=2, ge=1, le=20)
+    dryRun:   bool = False
+    syncMissing: bool = True
+
+
+@app.post("/train/horizons")
+def train_horizons_route(req: TrainHorizonsRequest):
+    """
+    Fit a model set per horizon, each on its own bar interval.
+
+    Intraday bars are usually absent because nothing has asked for them before, so this fetches
+    them when `syncMissing` — the difference between "no intraday model" and "no intraday data".
+    The Section 69 gate is unchanged: three horizons means three verdicts, not a softer bar.
+    """
+    try:
+        from engine.training import train_horizons
+        return train_horizons(
+            symbol=req.symbol.upper(), exchange=req.exchange, names=req.horizons,
+            include_derivatives=req.includeDerivatives, include_news=req.includeNews,
+            models=req.models, n_splits=req.splits, holdout_frac=req.holdoutFrac,
+            stride=req.stride, dry_run=req.dryRun, sync_missing=req.syncMissing)
+    except Exception as e:
+        logger.error(f"Horizon training error for {req.symbol}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

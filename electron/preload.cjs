@@ -183,6 +183,8 @@ const RAMA_API = {
     optionChain:     (opts) => ipcRenderer.invoke('market:option-chain', opts),
     outcomeStats:    (opts) => ipcRenderer.invoke('market:outcome-stats', opts),
     models:          (opts) => ipcRenderer.invoke('market:models', opts),
+    horizons:        (opts) => ipcRenderer.invoke('market:horizons', opts),
+    predictMulti:    (opts) => ipcRenderer.invoke('market:predict-multi', opts),
 
     // Actions that cost quota, CPU, or change stored state.
     newsSync:        (opts) => ipcRenderer.invoke('market:news-sync', opts),
@@ -190,6 +192,7 @@ const RAMA_API = {
     resolveOutcomes: (opts) => ipcRenderer.invoke('market:resolve-outcomes', opts),
     derivativesSync: (opts) => ipcRenderer.invoke('market:derivatives-sync', opts),
     train:           (opts) => ipcRenderer.invoke('market:train', opts),
+    trainHorizons:   (opts) => ipcRenderer.invoke('market:train-horizons', opts),
   },
 
   // ── Updater ───────────────────────────────────────────────────────────────

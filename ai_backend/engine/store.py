@@ -123,6 +123,18 @@ def meta(symbol: str, exchange: str = "NSE", interval: str = "1d") -> dict:
 
 # ── Write ─────────────────────────────────────────────────────────────────────
 
+# Intervals finer than a day. Anything in this set is serialised with its time component.
+INTRADAY_INTERVALS = {"1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "4h"}
+
+
+def is_intraday(interval: str) -> bool:
+    return str(interval or "").strip().lower() in INTRADAY_INTERVALS
+
+
+def _date_format_for(interval: str) -> str:
+    return "%Y-%m-%d %H:%M:%S" if is_intraday(interval) else "%Y-%m-%d"
+
+
 def _last_valid(series):
     """The newest non-null value in a group, or NaN when the group is entirely null."""
     s = series.dropna()
@@ -182,7 +194,14 @@ def merge(symbol: str, incoming: pd.DataFrame, exchange: str = "NSE",
 
     csv_path, meta_path = paths(symbol, exchange, interval)
     tmp = csv_path + ".tmp"
-    combined.to_csv(tmp, index=False, date_format="%Y-%m-%d")
+    # INTRADAY SERIES MUST KEEP THEIR TIME COMPONENT (spec Section 73).
+    #
+    # This wrote `%Y-%m-%d` unconditionally. For an hourly series every bar in a session
+    # serialises to the same midnight timestamp, and the de-duplication on `date` above then
+    # keeps **one bar per day** — a 3,499-bar hourly series silently reduced to ~500 rows with
+    # no error anywhere. Daily and coarser keep the date-only form because it is what the
+    # existing files contain and what makes them readable by hand.
+    combined.to_csv(tmp, index=False, date_format=_date_format_for(interval))
     os.replace(tmp, csv_path)   # atomic — a crash mid-write cannot leave a half file
 
     record = {
@@ -252,7 +271,7 @@ def sync(symbol: str, exchange: str = "NSE", interval: str = "1d",
         return stored, info
 
     want_years = years or (30 if stored is None else 1)
-    fetched, source = providers.fetch_history(symbol, exchange, want_years)
+    fetched, source = providers.fetch_history(symbol, exchange, want_years, interval)
 
     if fetched is None:
         info["reason"] = "no provider returned data"

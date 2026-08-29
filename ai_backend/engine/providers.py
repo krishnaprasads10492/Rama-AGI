@@ -170,9 +170,17 @@ class Provider:
             return True
         return False
 
-    def fetch(self, symbol, exchange, years) -> Optional[pd.DataFrame]:
+    def fetch(self, symbol, exchange, years, interval="1d") -> Optional[pd.DataFrame]:
+        """
+        `interval` is passed only to fetchers that accept it, so a provider written before
+        Section 73 keeps its old two-positional signature and still works (I11).
+        """
         try:
-            return normalise(self._fetch(symbol, exchange, years, self.api_key()))
+            try:
+                raw = self._fetch(symbol, exchange, years, self.api_key(), interval)
+            except TypeError:
+                raw = self._fetch(symbol, exchange, years, self.api_key())
+            return normalise(raw)
         except Exception as e:
             logger.warning(f"[{self.name}] fetch failed for {symbol}: {e}")
             return None
@@ -200,7 +208,17 @@ def _http_get(url: str, headers: dict = None, timeout: float = 15.0):
 
 # ── FREE: Yahoo Finance chart API ─────────────────────────────────────────────
 
-def _fetch_yahoo(symbol, exchange, years, _key):
+# The deepest range Yahoo will serve for each intraday interval, measured rather than assumed
+# (spec Section 73). Anything beyond these returns HTTP 422:
+#   1m -> 5d (1,876 bars) | 5m, 15m, 30m -> 1mo | 60m -> 2y (3,499 bars)
+# Only 60m has enough depth to train on; the finer ones are for display.
+INTRADAY_RANGE = {
+    "1m": "5d", "2m": "5d", "5m": "1mo", "15m": "1mo", "30m": "1mo",
+    "60m": "2y", "1h": "2y", "90m": "1mo",
+}
+
+
+def _fetch_yahoo(symbol, exchange, years, _key, interval="1d"):
     """
     Synchronous Yahoo chart fetch — deepest free daily history available without a key.
 
@@ -217,11 +235,23 @@ def _fetch_yahoo(symbol, exchange, years, _key):
     # year. That is useless for daily prediction and, worse, arrives looking like a
     # successful deep-history fetch. `period1`/`period2` with an explicit interval
     # returns true daily bars for the window. See spec Section 65.
-    now    = int(time.time())
-    span   = int((years or 40) * 365.25 * 86400)
-    period1 = max(0, now - span)
-    url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
-           f"?interval=1d&period1={period1}&period2={now}&events=div%2Csplit")
+    # INTRADAY USES `range=`, DAILY USES EPOCHS (spec Section 73).
+    #
+    # The two forms are not interchangeable. Yahoo caps intraday windows server-side and those
+    # caps are expressed against `range` — asking for `5m` over three months returns **HTTP
+    # 422**, verified — so `range` is what an intraday request must send. Daily keeps the
+    # explicit epochs because Section 65 measured that `range=max&interval=1d` silently
+    # downsamples to roughly monthly bars while looking like a successful deep fetch.
+    iv = str(interval or "1d").strip().lower()
+    if iv in INTRADAY_RANGE:
+        url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
+               f"?interval={iv}&range={INTRADAY_RANGE[iv]}")
+    else:
+        now    = int(time.time())
+        span   = int((years or 40) * 365.25 * 86400)
+        period1 = max(0, now - span)
+        url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
+               f"?interval={iv}&period1={period1}&period2={now}&events=div%2Csplit")
 
     data   = _http_get(url).json()
     result = (data.get("chart") or {}).get("result") or [{}]
@@ -242,7 +272,11 @@ def _fetch_yahoo(symbol, exchange, years, _key):
         if close is None:
             continue
         rows.append({
-            "date":   _dt.datetime.utcfromtimestamp(int(ts)).date(),
+            # `.date()` on an intraday bar throws away the time and every bar in a session
+            # collapses to one timestamp — the same destruction Section 73 fixed in the store.
+            "date":   (_dt.datetime.utcfromtimestamp(int(ts))
+                       if iv in INTRADAY_RANGE
+                       else _dt.datetime.utcfromtimestamp(int(ts)).date()),
             "open":   at(quote.get("open")   or [], i),
             "high":   at(quote.get("high")   or [], i),
             "low":    at(quote.get("low")    or [], i),
@@ -401,14 +435,19 @@ def active(tier: str = None) -> list[Provider]:
     return sorted(out, key=lambda p: 0 if p.tier == "free" else 1)
 
 
-def fetch_history(symbol: str, exchange: str = "NSE", years: int = None) -> tuple[Optional[pd.DataFrame], str]:
+def fetch_history(symbol: str, exchange: str = "NSE", years: int = None,
+                  interval: str = "1d") -> tuple[Optional[pd.DataFrame], str]:
     """
     Walk the chain and return the first usable frame, with the provider that supplied it.
 
     @returns (df, source_name) — (None, 'none') when every provider declined.
     """
     for p in active():
-        df = p.fetch(symbol, exchange, years)
+        # Only Yahoo serves intraday. Skipping the rest avoids a pointless call that would
+        # return daily bars for an intraday request and quietly mislabel them.
+        if interval != "1d" and p.name != "yahoo":
+            continue
+        df = p.fetch(symbol, exchange, years, interval)
         if df is not None and len(df) >= 20:
             logger.info(f"[providers] {symbol}: {len(df)} bars from {p.name} "
                         f"({df['date'].iloc[0].date()} → {df['date'].iloc[-1].date()})")

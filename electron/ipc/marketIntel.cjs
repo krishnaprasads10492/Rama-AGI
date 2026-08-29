@@ -172,6 +172,26 @@ async function modelsStatus() {
   return getPath('/models');
 }
 
+// ── Multi-horizon (Section 73) ────────────────────────────────────────────────
+
+async function horizonsList() {
+  return getPath('/horizons');
+}
+
+async function predictMulti({ symbol, exchange = 'NSE', horizons = null, sync = false } = {}) {
+  const q = [`exchange=${encodeURIComponent(exchange)}`];
+  if (horizons) q.push(`horizons=${encodeURIComponent(horizons)}`);
+  if (sync) q.push('sync=true');
+  // A sync may fetch two years of hourly bars, so it needs a longer budget than a read.
+  return getPath(`/predict/multi/${sym(symbol)}?${q.join('&')}`,
+    { timeout: sync ? 120000 : 30000 });
+}
+
+async function trainHorizons(body) {
+  // Up to three horizons, each fitting several models over thousands of rows.
+  return postPath('/train/horizons', body, { timeout: 1800000 });
+}
+
 // ─── Register IPC ───────────────────────────────────────────────────────────
 function register(ipcMain) {
   ipcMain.handle('market:predict', async (_e, { user, ...body } = {}) => {
@@ -229,6 +249,8 @@ function register(ipcMain) {
     'market:option-chain':    optionChain,
     'market:outcome-stats':   outcomeStats,
     'market:models':          modelsStatus,
+    'market:horizons':        horizonsList,
+    'market:predict-multi':   predictMulti,
   };
   for (const [channel, fn] of Object.entries(readOnly)) {
     ipcMain.handle(channel, async (_e, { user, ...args } = {}) => {
@@ -279,6 +301,13 @@ function register(ipcMain) {
     const denied = denyUnless(user, 'stockmind.config');
     if (denied) return denied;
     try { return await postPath('/train', body, { timeout: 900000 }); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+
+  ipcMain.handle('market:train-horizons', async (_e, { user, ...body } = {}) => {
+    const denied = denyUnless(user, 'stockmind.config');
+    if (denied) return denied;
+    try { return await trainHorizons(body); }
     catch (err) { return { ok: false, error: err.message }; }
   });
 
@@ -418,7 +447,7 @@ function schedulerStatus() {
 module.exports = {
   register, predict, backtest, backtestPresets, strategyScore, health,
   ohlcv, inventory, news, newsCoverage, newsBackfill, derivatives, optionChain,
-  outcomeStats, modelsStatus,
+  outcomeStats, modelsStatus, horizonsList, predictMulti, trainHorizons,
   startScheduler, stopScheduler, schedulerStatus,
   tickResolveOutcomes, tickSyncNews,
 };

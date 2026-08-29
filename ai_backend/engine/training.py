@@ -172,12 +172,21 @@ ARTIFACTS = {
 }
 
 
-def provenance_path() -> str:
-    return os.path.join(featureset.models_dir(), "training.json")
+def provenance_path(horizon=None) -> str:
+    """
+    Where a training report lives.
+
+    PER-HORIZON (spec Section 73). Train range, holdout range and the gate verdict are all
+    horizon-specific, so one shared file would let a positional model's evidence vouch for an
+    intraday one. `horizon=None` keeps the legacy path, which is what an install trained before
+    this change already has.
+    """
+    from . import horizons as _h
+    return os.path.join(featureset.models_dir(), _h.provenance_name(horizon))
 
 
-def load_provenance() -> Optional[dict]:
-    p = provenance_path()
+def load_provenance(horizon=None) -> Optional[dict]:
+    p = provenance_path(horizon)
     if not os.path.exists(p):
         return None
     try:
@@ -491,8 +500,10 @@ def _fit_predict(kind: str, Xtr, ytr, Xte):
     raise ValueError(f"unknown model {kind}")
 
 
-def _persist(kind: str, obj, native: str) -> Optional[str]:
-    path = os.path.join(featureset.models_dir(), ARTIFACTS[kind])
+def _persist(kind: str, obj, native: str, horizon=None) -> Optional[str]:
+    from . import horizons as _h
+    path = os.path.join(featureset.models_dir(),
+                        _h.artifact_name(ARTIFACTS[kind], horizon))
     tmp = path + ".tmp"
     try:
         if native == "sklearn":
@@ -620,7 +631,7 @@ def train(symbol: str = "NIFTY50", exchange: str = "NSE", interval: str = "1d",
           horizon: int = DEFAULT_HORIZON, include_derivatives: bool = False,
           models: list = None, n_splits: int = 4, holdout_frac: float = 0.2,
           stride: int = 1, max_rows: int = None, dry_run: bool = False,
-          include_news: bool = False) -> dict:
+          include_news: bool = False, horizon_obj=None) -> dict:
     """
     Fit, evaluate on an untouched holdout, and persist only what beats its base rate.
 
@@ -711,7 +722,7 @@ def train(symbol: str = "NIFTY50", exchange: str = "NSE", interval: str = "1d",
                 "artifact": None,
             }
             if accept and not dry_run:
-                p = _persist(kind, obj, native)
+                p = _persist(kind, obj, native, horizon_obj)
                 entry["persisted"] = p is not None
                 entry["artifact"] = os.path.basename(p) if p else None
             if not accept:
@@ -747,11 +758,11 @@ def train(symbol: str = "NIFTY50", exchange: str = "NSE", interval: str = "1d",
             "horizonBars": horizon,
         })
         try:
-            tmp = provenance_path() + ".tmp"
+            tmp = provenance_path(horizon_obj) + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump({k: v for k, v in report.items() if k not in ("ok",)}, fh,
                           indent=2, default=str)
-            os.replace(tmp, provenance_path())
+            os.replace(tmp, provenance_path(horizon_obj))
         except Exception as e:
             logger.warning(f"[training] could not write provenance: {e}")
         try:
@@ -767,3 +778,94 @@ def train(symbol: str = "NIFTY50", exchange: str = "NSE", interval: str = "1d",
         + (f"; skipped {len(report['skipped'])}" if report["skipped"] else "")
     )
     return report
+
+
+# ── Multi-horizon training (spec Section 73) ──────────────────────────────────
+
+def train_horizons(symbol: str = "NIFTY50", exchange: str = "NSE",
+                   names=None, include_derivatives: bool = False,
+                   include_news: bool = False, models: list = None,
+                   n_splits: int = 3, holdout_frac: float = 0.2,
+                   stride: int = 2, dry_run: bool = False,
+                   sync_missing: bool = True) -> dict:
+    """
+    Fit one model set per horizon — intraday, swing, positional.
+
+    Each horizon trains on **its own bar interval**, so intraday uses hourly bars and the other
+    two use daily. Running a three-hour question against daily bars would produce a number
+    about a different question.
+
+    THE GATE IS UNCHANGED. Three horizons means three verdicts from the same five conditions,
+    not a softer bar for the harder question. A horizon that fails is reported as failing.
+    """
+    from . import horizons as _h
+    from . import store
+
+    out = {"symbol": symbol.upper(), "exchange": exchange, "dryRun": bool(dry_run),
+           "includeDerivatives": bool(include_derivatives),
+           "includeNews": bool(include_news),
+           "horizons": {}, "persisted": [], "gate": None}
+
+    for h in _h.resolve(names):
+        entry = {**h.describe()}
+        if not h.trainable:
+            entry["skipped"] = "not trainable — see horizons.DISPLAY_ONLY"
+            out["horizons"][h.name] = entry
+            continue
+
+        # Intraday bars are usually absent because nothing has asked for them before. Fetching
+        # here is the difference between "no intraday model" and "no intraday data".
+        df = store.load(symbol, exchange, h.interval)
+        if (df is None or len(df) < h.min_bars) and sync_missing:
+            try:
+                df, info = store.sync(symbol, exchange, h.interval)
+                entry["fetched"] = {"bars": 0 if df is None else len(df),
+                                    "source": info.get("source")}
+            except Exception as e:
+                entry["fetchError"] = f"{type(e).__name__}: {e}"
+        if df is None or len(df) < h.min_bars:
+            entry["skipped"] = (f"need at least {h.min_bars} {h.interval} bars, have "
+                                f"{0 if df is None else len(df)}")
+            out["horizons"][h.name] = entry
+            continue
+
+        rep = train(symbol, exchange, h.interval, horizon=h.bars,
+                    include_derivatives=include_derivatives, include_news=include_news,
+                    models=models, n_splits=n_splits, holdout_frac=holdout_frac,
+                    stride=stride, dry_run=dry_run, horizon_obj=h)
+        if not rep.get("ok"):
+            entry["skipped"] = rep.get("reason")
+            out["horizons"][h.name] = entry
+            continue
+
+        entry.update({
+            "rows": rep["rows"], "featureCount": rep["featureCount"],
+            "trainRange": rep["trainRange"], "holdoutRange": rep["holdoutRange"],
+            "holdoutRows": rep["holdoutRows"],
+            "holdoutBaseRate": rep["holdoutBaseRate"],
+            "persistedModels": rep["persistedModels"],
+            "models": {k: {"holdout": v["holdout"], "accepted": v["accepted"],
+                           "persisted": v["persisted"], "foldMeanAuc": v.get("foldMeanAuc"),
+                           "reason": v.get("reason")}
+                       for k, v in rep["models"].items()},
+            "skippedModels": rep.get("skipped"),
+        })
+        out["gate"] = out["gate"] or rep.get("gate")
+        out["persisted"].extend(f"{h.name}:{m}" for m in rep["persistedModels"])
+        out["horizons"][h.name] = entry
+
+    answered = [k for k, v in out["horizons"].items() if "models" in v]
+    out["summary"] = (
+        f"{len(answered)} of {len(out['horizons'])} horizons trained; "
+        f"{len(out['persisted'])} model-horizon pairs passed the gate"
+        + (f" ({', '.join(out['persisted'])})" if out["persisted"] else
+           " — nothing cleared it, which is a finding about the data rather than an error")
+    )
+    if out["persisted"] and not dry_run:
+        try:
+            from .registry import MODEL_REGISTRY
+            MODEL_REGISTRY.clear_horizon_cache()
+            out["reloaded"] = MODEL_REGISTRY.reload_models()
+        except Exception as e:
+            out["reloaded"] = {"error": str(e)}
+    return out
