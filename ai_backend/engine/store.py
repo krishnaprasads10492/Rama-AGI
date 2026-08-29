@@ -123,9 +123,15 @@ def meta(symbol: str, exchange: str = "NSE", interval: str = "1d") -> dict:
 
 # ── Write ─────────────────────────────────────────────────────────────────────
 
+def _last_valid(series):
+    """The newest non-null value in a group, or NaN when the group is entirely null."""
+    s = series.dropna()
+    return s.iloc[-1] if len(s) else float("nan")
+
+
 def merge(symbol: str, incoming: pd.DataFrame, exchange: str = "NSE",
           interval: str = "1d", source: str = "unknown",
-          columns: Optional[list] = None) -> Optional[pd.DataFrame]:
+          columns: Optional[list] = None, combine: bool = False) -> Optional[pd.DataFrame]:
     """
     Merge `incoming` into whatever is stored and persist the union.
 
@@ -152,11 +158,23 @@ def merge(symbol: str, incoming: pd.DataFrame, exchange: str = "NSE",
     before   = 0 if existing is None else len(existing)
 
     combined = inc if existing is None else pd.concat([existing, inc], ignore_index=True)
-    combined = (combined
-                .dropna(subset=required)
-                .drop_duplicates(subset=["date"], keep="last")   # newer fetch corrects older
-                .sort_values("date")
-                .reset_index(drop=True))
+    combined = combined.dropna(subset=required).sort_values("date")
+
+    if combine:
+        # FIELD-LEVEL merge: the newest NON-NULL value wins per column.
+        #
+        # `drop_duplicates(keep="last")` replaces the whole ROW, which is right for bars — a
+        # re-fetch corrects every field at once — and wrong for a series two sources write
+        # different columns of. News is exactly that: `news.py` writes the RSS lexicon columns
+        # and the GDELT backfill writes `gdelt_*`, and row-replacement meant whichever wrote
+        # second silently erased the other's columns with its own nulls. "The columns are
+        # disjoint" is only true if the merge respects fields. See Section 72.
+        combined = (combined
+                    .groupby("date", as_index=False, sort=True)
+                    .agg({c: _last_valid for c in combined.columns if c != "date"}))
+    else:
+        combined = combined.drop_duplicates(subset=["date"], keep="last")  # newer corrects older
+    combined = combined.sort_values("date").reset_index(drop=True)
 
     if existing is not None and len(combined) < before:
         logger.error(f"[store] refusing to shrink {symbol} from {before} to {len(combined)} rows")

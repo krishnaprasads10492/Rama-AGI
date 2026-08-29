@@ -148,6 +148,12 @@ async function newsCoverage({ symbol, exchange = 'NSE' } = {}) {
   return getPath(`/news/coverage/${sym(symbol)}?exchange=${encodeURIComponent(exchange)}`);
 }
 
+async function newsBackfill(body) {
+  // Nine years is eighteen paced GDELT calls, so this needs a much longer budget than a read.
+  // It persists per year, so a timeout here still leaves whatever it managed to fetch.
+  return postPath('/news/backfill', body, { timeout: 1800000 });
+}
+
 async function derivatives({ symbol, exchange = 'NSE', history = 0 } = {}) {
   return getPath(`/derivatives/${sym(symbol)}?exchange=${encodeURIComponent(exchange)}`
     + `&history=${Number(history) || 0}`);
@@ -238,6 +244,15 @@ function register(ipcMain) {
     const denied = denyUnless(user, 'stockmind.request');
     if (denied) return denied;
     try { return await postPath('/news/sync', body, { timeout: 90000 }); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+
+  // A deep archive pull. `stockmind.config` rather than `request`: it runs for minutes,
+  // hits a third-party API that throttles, and materially changes what the models train on.
+  ipcMain.handle('market:news-backfill', async (_e, { user, ...body } = {}) => {
+    const denied = denyUnless(user, 'stockmind.config');
+    if (denied) return denied;
+    try { return await newsBackfill(body); }
     catch (err) { return { ok: false, error: err.message }; }
   });
 
@@ -402,7 +417,7 @@ function schedulerStatus() {
 
 module.exports = {
   register, predict, backtest, backtestPresets, strategyScore, health,
-  ohlcv, inventory, news, newsCoverage, derivatives, optionChain,
+  ohlcv, inventory, news, newsCoverage, newsBackfill, derivatives, optionChain,
   outcomeStats, modelsStatus,
   startScheduler, stopScheduler, schedulerStatus,
   tickResolveOutcomes, tickSyncNews,

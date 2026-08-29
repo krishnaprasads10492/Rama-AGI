@@ -26,9 +26,11 @@ It does NOT assert impact. Task 4 measured no directional edge from price featur
 one from headline sentiment on sixteen days of data would be unmeasurable by construction.
 """
 
+import json
 import logging
 import os
 import re
+import time
 import unicodedata
 import datetime as _dt
 import email.utils as _eut
@@ -45,11 +47,251 @@ logger = logging.getLogger("stockmind-ai.news")
 NEWS_INTERVAL = "news1d"
 
 # One row per symbol per day.
+#
+# `gdelt_*` ARE SEPARATE COLUMNS FROM `sentiment`, DELIBERATELY (spec Section 72). `sentiment`
+# is this module's lexicon over RSS headlines; GDELT tone is a different measure, computed by
+# someone else, over a different corpus, on a different scale. Writing both into one column
+# would make a feature whose MEANING CHANGES WITH ITS SOURCE — the defect Section 67 removed
+# when it stopped spot coming from `UndrlygPric` on some dates and the OHLCV store on others.
+# A model would simply learn the date where RSS collection began.
 NEWS_COLUMNS = [
     "date", "items", "sources",
     "sentiment", "sentiment_abs", "positive", "negative", "neutral",
     "relevance_mean", "dominant_event", "event_counts", "top_headline",
+    # Historical, from GDELT — the only free source with real depth.
+    "gdelt_tone", "gdelt_volume", "gdelt_articles",
 ]
+
+# ── GDELT (spec Section 72) ───────────────────────────────────────────────────
+
+GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
+
+# Verified, not assumed: 2015-06 and 2016-06 both return the plain-text body
+# "Invalid query start date." — plain text on HTTP 200, so a parser that assumes JSON throws
+# instead of reporting. Nine years of depth from here.
+GDELT_FLOOR = _dt.date(2017, 1, 1)
+
+# GDELT throttles hard on a burst, and once a pooled keep-alive socket has been reset it stays
+# poisoned for every later request. These numbers are the access pattern that actually works.
+GDELT_PAUSE_SECONDS = 6.0
+GDELT_ATTEMPTS = 3
+# Per-request ceiling. A first backfill attempt used 90s and the retry ladder then blew a
+# 900-second budget on a single year without persisting anything, because GDELT was
+# throttling and every attempt ran to timeout. A refusal that arrives quickly is worth more
+# than a response that might arrive eventually.
+GDELT_TIMEOUT_SECONDS = 30.0
+
+GDELT_QUERIES = {
+    "NIFTY50":   '("nifty" OR "sensex") sourcecountry:IN',
+    "NIFTY":     '("nifty" OR "sensex") sourcecountry:IN',
+    "BANKNIFTY": '("bank nifty" OR "banking stocks") sourcecountry:IN',
+    "SENSEX":    '("sensex" OR "bse") sourcecountry:IN',
+    "RELIANCE":  '"reliance industries" sourcecountry:IN',
+    "TCS":       '"tata consultancy" sourcecountry:IN',
+    "INFY":      '"infosys" sourcecountry:IN',
+    "HDFCBANK":  '"hdfc bank" sourcecountry:IN',
+    "ICICIBANK": '"icici bank" sourcecountry:IN',
+    "SBIN":      '"state bank of india" sourcecountry:IN',
+    "GOLD":      '("gold price" OR "bullion") sourcecountry:IN',
+    "SILVER":    '"silver price" sourcecountry:IN',
+    "CRUDEOIL":  '("crude oil" OR "brent crude")',
+}
+
+
+def gdelt_query_for(symbol: str) -> str:
+    """
+    The GDELT query for a symbol.
+
+    OR'd TERMS MUST BE PARENTHESISED. `"a" OR "b"` returns the plain-text error
+    `Queries containing OR'd terms must be surrounded by ()`, so every multi-term entry above
+    is wrapped and any generated fallback is too.
+    """
+    s = (symbol or "").upper().strip()
+    if s in GDELT_QUERIES:
+        return GDELT_QUERIES[s]
+    return f'"{s}" sourcecountry:IN'
+
+
+def gdelt_timeline(query: str, mode: str, start: _dt.date, end: _dt.date) -> tuple[list, Optional[str]]:
+    """
+    One GDELT timeline call. @returns (points, error).
+
+    A FRESH CLIENT PER CALL WITH `Connection: close` IS NOT AN OPTIMISATION TO UNDO. A shared
+    pooled client is the failure mode: GDELT resets the connection after a burst and the
+    poisoned socket then breaks every subsequent request, so a run that starts fine keeps
+    failing afterwards. See Section 72.
+    """
+    import httpx
+
+    params = {
+        "query": query, "mode": mode, "format": "json",
+        "startdatetime": start.strftime("%Y%m%d") + "000000",
+        "enddatetime":   end.strftime("%Y%m%d") + "000000",
+    }
+    last = None
+    for attempt in range(GDELT_ATTEMPTS):
+        try:
+            with httpx.Client(timeout=GDELT_TIMEOUT_SECONDS, follow_redirects=True, headers={
+                "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                               "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"),
+                "Accept": "application/json,*/*",
+                "Accept-Encoding": "gzip, deflate",
+                "Connection": "close",
+            }) as client:
+                r = client.get(GDELT_URL, params=params)
+            body = r.text.strip()
+            # GDELT reports its own errors as PLAIN TEXT on HTTP 200 — "Invalid query start
+            # date.", "Queries containing OR'd terms must be surrounded by ()". Checking the
+            # status code alone would treat those as success and then fail at json.loads.
+            if not body.startswith("{"):
+                return [], f"GDELT refused: {body[:150]}"
+            payload = json.loads(body)
+            tl = payload.get("timeline") or []
+            return ((tl[0].get("data") or []) if tl else []), None
+        except Exception as e:
+            last = f"{type(e).__name__}: {e}"
+            time.sleep(GDELT_PAUSE_SECONDS * (attempt + 1))
+    return [], last
+
+
+def _gdelt_points_to_map(points: list) -> dict:
+    """`[{date: '20180101T000000Z', value: 0.17}]` → `{'2018-01-01': 0.17}`."""
+    out = {}
+    for p in points or []:
+        raw = str(p.get("date") or "")
+        if len(raw) < 8:
+            continue
+        day = f"{raw[0:4]}-{raw[4:6]}-{raw[6:8]}"
+        v = p.get("value")
+        if v is None:
+            continue
+        try:
+            out[day] = float(v)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _merge_gdelt_rows(symbol: str, exchange: str, rows_by_day: dict):
+    """
+    Write the GDELT columns for the days gathered so far.
+
+    Only `date` plus the `gdelt_*` columns are set; every other column is left `None` so
+    `store.merge` fills it as NaN rather than overwriting an RSS row that already exists for
+    that day. The two column groups are disjoint by design (Section 72), which is what lets
+    the same date carry both without either erasing the other.
+    """
+    if not rows_by_day:
+        return None
+    rows = []
+    for day, vals in sorted(rows_by_day.items()):
+        row = {c: None for c in NEWS_COLUMNS}
+        row["date"] = day
+        row.update(vals)
+        rows.append(row)
+    return store.merge(symbol, pd.DataFrame(rows), exchange, NEWS_INTERVAL,
+                       source="gdelt", columns=NEWS_COLUMNS, combine=True)
+
+
+def backfill_history(symbol: str = "NIFTY50", exchange: str = "NSE",
+                     years: int = 9, until: Optional[_dt.date] = None,
+                     force: bool = False,
+                     budget_seconds: float = 600.0) -> tuple[Optional[pd.DataFrame], dict]:
+    """
+    Fetch GDELT tone and volume year by year and merge them into the news series.
+
+    A YEAR PER CALL, newest first. Nine years is then nine calls per mode rather than
+    hundreds, which matters because each call needs ~6 seconds of spacing. Newest first so a
+    partial or budget-stopped run still leaves the most recent data present — the same choice
+    `derivatives.sync_history` makes and for the same reason.
+
+    Already-covered years are skipped unless `force`, so re-running converges instead of
+    re-fetching.
+    """
+    t0 = _dt.datetime.now()
+    end = until or _dt.date.today()
+    query = gdelt_query_for(symbol)
+
+    existing = load_series(symbol, exchange)
+    have_years = set()
+    if existing is not None and len(existing):
+        d = pd.to_datetime(existing["date"], errors="coerce").dropna()
+        tone = pd.to_numeric(existing.get("gdelt_tone"), errors="coerce") \
+            if "gdelt_tone" in existing.columns else None
+        if tone is not None:
+            covered = d[tone.reindex(d.index).notna()]
+            # A year counts as covered only with real density, or one stray row would block
+            # the whole year from ever being fetched.
+            for year, grp in covered.groupby(covered.dt.year):
+                if len(grp) >= 200:
+                    have_years.add(int(year))
+
+    stats = {"symbol": symbol, "yearsRequested": years, "fetched": [], "skipped": [],
+             "failed": {}, "tonePoints": 0, "volPoints": 0, "budgetHit": False,
+             "floor": GDELT_FLOOR.isoformat()}
+    rows_by_day: dict = {}
+
+    for i in range(years):
+        year = end.year - i
+        # THE FLOOR CHECK COMES FIRST. Ordered the other way round, `y_end <= y_start` was
+        # already true for a pre-2017 year (start clamps up to the floor, end clamps down to
+        # December of that year) and the loop `continue`d before recording *why* — so a caller
+        # asking for 12 years saw an empty `skipped` list and no explanation.
+        if year < GDELT_FLOOR.year:
+            stats["skipped"].append({"year": year, "why": "before the GDELT floor (2017)"})
+            continue
+        y_start = max(GDELT_FLOOR, _dt.date(year, 1, 1))
+        y_end = min(end, _dt.date(year, 12, 31))
+        if y_end <= y_start:
+            stats["skipped"].append({"year": year, "why": "empty window"})
+            continue
+        if not force and year in have_years:
+            stats["skipped"].append({"year": year, "why": "already covered"})
+            continue
+        if (_dt.datetime.now() - t0).total_seconds() > budget_seconds:
+            stats["budgetHit"] = True
+            break
+
+        tone_pts, tone_err = gdelt_timeline(query, "TimelineTone", y_start, y_end)
+        time.sleep(GDELT_PAUSE_SECONDS)
+        vol_pts, vol_err = gdelt_timeline(query, "TimelineVol", y_start, y_end)
+        time.sleep(GDELT_PAUSE_SECONDS)
+
+        if tone_err and not tone_pts:
+            stats["failed"][str(year)] = tone_err
+            continue
+
+        tone_map = _gdelt_points_to_map(tone_pts)
+        vol_map = _gdelt_points_to_map(vol_pts)
+        stats["tonePoints"] += len(tone_map)
+        stats["volPoints"] += len(vol_map)
+        stats["fetched"].append({"year": year, "tone": len(tone_map), "volume": len(vol_map)})
+        if vol_err:
+            stats["failed"][f"{year}-volume"] = vol_err
+
+        for day, tone in tone_map.items():
+            rows_by_day.setdefault(day, {})["gdelt_tone"] = round(tone, 5)
+        for day, vol in vol_map.items():
+            rows_by_day.setdefault(day, {})["gdelt_volume"] = round(vol, 6)
+
+        # PERSIST AFTER EVERY YEAR, not once at the end. The first version merged only after
+        # the whole loop, so a run that hit its budget or was interrupted kept **nothing** —
+        # fifteen minutes of paced requests thrown away. Each year is independently useful,
+        # and `store.merge` de-duplicates on date, so writing repeatedly converges.
+        merged = _merge_gdelt_rows(symbol, exchange, rows_by_day)
+
+    if merged is None:
+        merged = load_series(symbol, exchange)
+    stats["rows"] = 0 if merged is None else len(merged)
+    stats["elapsedSeconds"] = round((_dt.datetime.now() - t0).total_seconds(), 1)
+    if merged is not None and len(merged):
+        stats["firstDate"] = str(pd.Timestamp(merged["date"].iloc[0]).date())
+        stats["lastDate"] = str(pd.Timestamp(merged["date"].iloc[-1]).date())
+        tone_col = pd.to_numeric(merged.get("gdelt_tone"), errors="coerce")
+        stats["toneDays"] = int(tone_col.notna().sum()) if tone_col is not None else 0
+    stats["note"] = ("GDELT reaches back to 2017 — the only free news archive with real depth. "
+                     "Re-run to extend; covered years are skipped.")
+    return merged, stats
 
 # A source whose newest item is older than this is reported stale and not merged.
 #
@@ -582,7 +824,7 @@ def sync_today(symbol: str = "NIFTY50", exchange: str = "NSE",
         })
 
     merged = store.merge(symbol, pd.DataFrame(rows), exchange, NEWS_INTERVAL,
-                         source="rss", columns=NEWS_COLUMNS)
+                         source="rss", columns=NEWS_COLUMNS, combine=True)
     info = {"symbol": symbol, "exchange": exchange, "recorded": len(rows),
             "days": [r["date"] for r in rows],
             "rows": 0 if merged is None else len(merged),

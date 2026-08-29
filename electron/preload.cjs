@@ -186,6 +186,7 @@ const RAMA_API = {
 
     // Actions that cost quota, CPU, or change stored state.
     newsSync:        (opts) => ipcRenderer.invoke('market:news-sync', opts),
+    newsBackfill:    (opts) => ipcRenderer.invoke('market:news-backfill', opts),
     resolveOutcomes: (opts) => ipcRenderer.invoke('market:resolve-outcomes', opts),
     derivativesSync: (opts) => ipcRenderer.invoke('market:derivatives-sync', opts),
     train:           (opts) => ipcRenderer.invoke('market:train', opts),

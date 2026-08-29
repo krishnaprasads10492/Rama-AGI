@@ -26,7 +26,8 @@ Endpoints:
   POST /train                 — fit models on stored history, persist only what beats base
   GET  /news/sources          — free feeds, and which are stale
   GET  /news/{symbol}         — headlines with lexicon polarity, event type, relevance
-  POST /news/sync             — record today's reading (news cannot be backfilled)
+  POST /news/sync             — record today's RSS reading
+  POST /news/backfill         — pull historical tone/volume from GDELT (2017 onward)
   GET  /news/coverage/{sym}   — days collected, and whether that is enough to train on
   GET  /ohlcv/{symbol}        — stored bars, for the chart
   GET  /store/inventory       — every symbol held locally, with its depth
@@ -521,6 +522,39 @@ def news_sync(req: NewsSyncRequest):
         return info
     except Exception as e:
         logger.error(f"News sync error for {req.symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class NewsBackfillRequest(BaseModel):
+    symbol:   str = "NIFTY50"
+    exchange: str = "NSE"
+    # GDELT reaches back to 2017, so 9 years is the whole archive.
+    years:    int = Field(default=9, ge=1, le=12)
+    force:    bool = False
+    # Each year needs two paced calls, so a full pull takes minutes. Bounded and resumable.
+    budgetSeconds: float = Field(default=600.0, gt=10, le=3600)
+
+
+@app.post("/news/backfill")
+def news_backfill(req: NewsBackfillRequest):
+    """
+    Pull historical news tone and volume from GDELT — the only free archive with real depth.
+
+    This is what makes news trainable at all. RSS reaches back about sixteen days; GDELT
+    reaches 2017, which is roughly 2,250 trading days. Persists after every year, so a run
+    that hits its budget keeps what it got, and already-covered years are skipped so
+    re-running converges rather than re-fetching.
+
+    GDELT throttles hard. If it starts refusing, wait and call again — the design is built for
+    exactly that, and a partial series is still useful.
+    """
+    try:
+        from engine.news import backfill_history
+        _, info = backfill_history(req.symbol.upper(), req.exchange, years=req.years,
+                                   force=req.force, budget_seconds=req.budgetSeconds)
+        return info
+    except Exception as e:
+        logger.error(f"News backfill error for {req.symbol}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

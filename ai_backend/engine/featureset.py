@@ -41,12 +41,19 @@ FEATURESET_VERSION = 2
 NEWS_FEATURES = [
     "news_sentiment", "news_sentiment_abs", "news_items_norm",
     "news_pos_ratio", "news_neg_ratio", "news_relevance", "news_available",
+    # GDELT, the historical half (spec Section 72). Separate from the lexicon columns above
+    # because it is a different measure over a different corpus on a different scale, and one
+    # column carrying both would encode which source a row came from.
+    "gdelt_tone", "gdelt_tone_5d", "gdelt_tone_delta",
+    "gdelt_volume", "gdelt_volume_5d", "gdelt_available",
 ]
 
 NEWS_NEUTRAL = {
     "news_sentiment": 0.0, "news_sentiment_abs": 0.0, "news_items_norm": 0.0,
     "news_pos_ratio": 0.0, "news_neg_ratio": 0.0, "news_relevance": 0.0,
     "news_available": 0.0,
+    "gdelt_tone": 0.0, "gdelt_tone_5d": 0.0, "gdelt_tone_delta": 0.0,
+    "gdelt_volume": 0.0, "gdelt_volume_5d": 0.0, "gdelt_available": 0.0,
 }
 
 # Derivative columns joined from the Section 67 store, in a fixed order.
@@ -275,11 +282,44 @@ def news_features(symbol: str, exchange: str, bar_date) -> dict:
             return out
         d = df.copy()
         d["date"] = pd.to_datetime(d["date"], errors="coerce")
-        d = d.dropna(subset=["date"]).sort_values("date")
-        upto = d[d["date"] <= pd.Timestamp(bar_date).normalize()]
+        d = d.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+        bar = pd.Timestamp(bar_date).normalize()
+
+        # LEXICON COLUMNS: as-of, inclusive. These come from headlines collected for that day.
+        upto = d[d["date"] <= bar]
         if len(upto) == 0:
             return out
         row = upto.iloc[-1].to_dict()
+
+        # GDELT COLUMNS: STRICTLY BEFORE the bar, never the same date (spec Section 72).
+        #
+        # GDELT's tone for date D aggregates articles *seen* on D, which includes articles
+        # published during and after that trading session. Joining tone(D) to bar D would leak
+        # information from after the close into a prediction made at it. One day of freshness
+        # is a cheap price for removing a whole class of invisible lookahead — Section 66's
+        # lookahead grade and Section 69's in-sample flag both exist because that class of
+        # error produces excellent numbers that mean nothing.
+        prior = d[d["date"] < bar]
+        gtone = pd.to_numeric(prior.get("gdelt_tone"), errors="coerce").dropna() \
+            if "gdelt_tone" in prior.columns else pd.Series(dtype=float)
+        gvol = pd.to_numeric(prior.get("gdelt_volume"), errors="coerce").dropna() \
+            if "gdelt_volume" in prior.columns else pd.Series(dtype=float)
+
+        if len(gtone):
+            latest = float(gtone.iloc[-1])
+            out["gdelt_tone"] = float(np.clip(latest, -20.0, 20.0))
+            recent = gtone.iloc[-5:]
+            mean5 = float(recent.mean())
+            out["gdelt_tone_5d"] = float(np.clip(mean5, -20.0, 20.0))
+            # Change against the recent baseline. A tone of -1 means nothing on its own; a
+            # tone of -1 where the last week averaged +0.5 is a shift.
+            out["gdelt_tone_delta"] = float(np.clip(latest - mean5, -20.0, 20.0))
+            out["gdelt_available"] = 1.0
+        if len(gvol):
+            # GDELT volume is a percentage of all monitored articles, so it is already
+            # normalised across time — no scaling needed, only clipping.
+            out["gdelt_volume"] = float(np.clip(float(gvol.iloc[-1]), 0.0, 100.0))
+            out["gdelt_volume_5d"] = float(np.clip(float(gvol.iloc[-5:].mean()), 0.0, 100.0))
     except Exception as e:
         logger.debug(f"[featureset] news lookup failed for {symbol}: {e}")
         return out
