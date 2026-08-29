@@ -1726,6 +1726,7 @@ authenticated **Master session**, not merely an open store.
 | 84 | StockMind — a backtest that measures the predictor, and the infinite loop it uncovered | done | Section 66. Task 1 of 6. `ai_backend/engine/backtest.py` rewritten (499 → 494 lines, ~200 of them previously dead). The old file **did not test the predictor at all**: four functions were defined twice so the first ~210 lines were unreachable including a `run_backtest` whose signature did not match `main.py`'s call; `MODEL_REGISTRY` was never touched and `train_size` was computed and never used, so it measured a fixed ATR bracket. Six defects fixed, each of which moved a reported number: `grade` was `0.5 + rr*0.1 + (0.05 if outcome != "SL_HIT" else -0.1)` — **read off the answer key**, straight lookahead; `TIMEOUT` was booked as a **full stop-loss**, turning "nothing happened" into "maximum loss"; T2/T3 wins were credited at **T1 size**, understating wins while overstating losses and so biasing P&L, Sharpe and Calmar in opposite directions at once; windows advanced by `test_size // 10`, so **each bar was re-tested about ten times** and `signalsTested` was inflated an order of magnitude. Decisions: **windows are non-overlapping** — a trade resolves before the next candidate begins, so `signalsTested` means what it says; **the stop is assumed hit first** on intrabar ambiguity, because OHLC cannot resolve the order and the alternative manufactures profit; **TIMEOUT is marked to market**; **Sharpe/Sortino are annualised** via `INTERVAL_PERIODS_PER_YEAR` scaled by realised trade frequency, since `mean/std` unscaled is not a Sharpe ratio and reporting it as one invites a comparison that cannot be made; **grade comes from pre-trade edge and geometry only**; **`stable = None`, `action = "measured"`** — the old 75% accuracy floor on a mechanical bracket produced a permanent `retrain_required`, which is a verdict nobody can act on; **`FEATURE_WINDOW = 400`** trailing slice, since no feature looks back past 252 bars, so values are identical to passing full history at O(400) rather than O(idx). **The find of this pass is not in this file.** `run_backtest` completed at 100 trades and hung indefinitely at 400 on real NIFTY data. `faulthandler.dump_traceback_later` put three consecutive stack dumps inside a four-line span of `advanced_features.market_profile_features`: the value-area expansion loop read an exhausted side's contribution as `0`, so on a 0-vs-0 tie `add_high >= add_low` chose the high side, `min(va_high_b + 1, n - 1)` clamped to the same index and `va_vol += 0` changed nothing — while the `or` in the loop condition stayed true because the low side still had room. **A genuine infinite loop, reachable on data alone** whenever the POC lands in the top bucket with an empty bucket beneath it, which 20 bars binned into 20 buckets produces routinely, and which Yahoo's zero-volume early NIFTY history makes common. **This hung live `/predict` calls, not only backtests** — it was found through the backtest because the backtest is the first thing to call the feature stack thousands of times. Fixed structurally, not with a counter: a `-1` sentinel keeps an exhausted side out of the comparison and exactly one index moves per iteration, so the loop is bounded by `n_buckets - 1` by construction. Proven both directions before shipping: a crafted frame (POC at bucket 19 holding 200 of 390, bucket 18 holding 0.0) ran the **old** loop 50,000 iterations with *no state change at all*, and returns under the new one. Also **removed** an iteration guard I had added to `run_backtest` while chasing the wrong cause — it was unreachable (`idx` advances on every path) and its comment blamed the wrong thing, and a guard that cannot fire only misdirects the next reader. Verified: **202 assertions green** — `tests/test_defects.py` 83 (74 + 9 new, run on threads with join timeouts because an assertion cannot catch a loop that never returns, including a 180-window sweep with scattered zero volume), `tests/test_store.py` 57, `tests/test_backtest.py` 62 (new file). Full 18.9-year NIFTY run now completes in **4.3s for 715 independent trades**: 48.8% won, Sharpe 0.78, max drawdown 31.8%, ECE 0.017. Note for the next session: the first 100 trades alone showed 58% and Sharpe 2.12 — the 2009-11 recovery — which is exactly why the cap must not be left low. **Next step: task 2 of 6** — free NSE derivatives and flows (Bhavcopy archives, option chain OI/PCR/max pain, FII/DII, delivery %) into `providers.py` + `store.py`. Then task 3 (outcome recording → `update_from_outcome`, which is currently **never called**), task 4 (training, blocked on master's horizon answer — asked 3×, defaulting to 5 bars/swing), task 5 (news → impact via free RSS), task 6 (the chart: `recharts@2.15.3` is installed and **never imported**; needs OHLCV over IPC on `stockmind:` channels, prefix already allowlisted in `preload.cjs`, and note `!node_modules/recharts/**` is excluded from asar). |
 | 85 | StockMind — NSE derivatives and institutional flows, free and backtestable | done | Section 67. Task 2 of 6. New `ai_backend/engine/derivatives.py`; `store.py` generalised; five routes added to `main.py`. **Every endpoint was probed live before the design was fixed**, because NSE moved its archive host and changed the bhavcopy format in 2024 and most published guidance is stale. Findings that shaped the build: **`api/option-chain-indices` is 404** — the endpoint nearly every tutorial and most wrapper libraries still use — and its replacement `option-chain-v3` **requires an expiry**, returning `{}` with status **200** without one, a silent empty that reads as "no options today" rather than a missing parameter. **Derivatives history reaches 2001**: UDiFF (`nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_...`) covers ~2024 onward, the legacy layout (`/content/historical/DERIVATIVES/...`) covers 2001–2024, they agree in the overlap, and 2001 is when index options began trading in India rather than an archive limit — so the two together are the entire history of the instrument class. Decisions: **the archives are primary and the live chain is an intraday top-up**, because the chain describes today while the archive describes every day since 2001 and only the archive can feed a backtest or train a model (same reasoning as Section 65's store-is-primary; the live chain is the more tempting build and can only ever support a dashboard); **derived daily metrics are persisted, not raw contracts** — 21 years at ~30,000 contract rows a day is ~150M rows, which would break the CSV choice of Section 65 and force parquet or a database, whereas one feature row per symbol-day is ~5,000 rows, the same order as an OHLCV series; **`straddle_pct` instead of implied volatility**, since neither bhavcopy carries IV and back-solving Black-Scholes across 21 years needs assumed rate and dividend curves, while the ATM straddle over spot *is* the market's priced expected move and assumes nothing — a computed IV would look more sophisticated and be less honest; **spot comes from the OHLCV store for both formats**, because UDiFF carries `UndrlygPric` and legacy carries none, and a ratio whose denominator changes provenance at the 2024 boundary makes `max_pain_dist` and `fut_basis_pct` encode *which file the row came from* — the model would learn the archive boundary, the same failure as the Section 64 time-features bug; **a 404 means "not published", not "failed"** (holidays and weekends both 404 with an HTML body — verified on 2026-01-15 and Sunday 2026-08-30), remembered in a memo file so a deep backfill does not re-request every holiday since 2001 on every run; **never advertise brotli** — the first probe sent `Accept-Encoding: br`, NSE honoured it, and the bundled httpx has no decoder, so `fiidiiTradeReact` returned **status 200 with 115 bytes of undecodable binary that parsed as neither JSON nor an error**, reading exactly like a working endpoint returning junk (adding a brotli package would fix the symptom and cost a pinned dependency for kilobyte payloads; also `https://www.nseindia.com/` returns **403** while `/option-chain` and `/all-reports` return 200 and set the required cookies, so warming on the root — the obvious choice — yields a 401); **the existing store was generalised rather than duplicated** — `load`/`merge`/`is_stale` take an optional column set defaulting to OHLCV so every existing caller is untouched (I11), because a parallel store would have re-implemented and then drifted from six properties that are easy to get wrong, and ledger row 19 exists precisely because nineteen subsystems were once duplicated this way; **max pain is vectorised** as a broadcast payout matrix, since Section 66 was a session lost to a Python loop over market data and this is the same shape at ~11,000 terms per day across 21 years. Built: both bhavcopy parsers into one canonical frame, the derived metric row (PCR OI and volume, max pain and distance, max CE/PE OI strikes with normalised distances, OI concentration as a Herfindahl index measuring pinning, straddle percentage, futures basis, futures OI and change, rollover percentage, days to expiry), the resumable backfill, participant-wise OI (Client/DII/FII/Pro — **the historical positioning signal**, unlike `fiidiiTradeReact` which is latest-day only), delivery percentage, and the live chain. Routes: `GET /derivatives/sources`, `GET /derivatives/{symbol}`, `POST /derivatives/sync`, `GET /derivatives/chain/{symbol}`, `GET /flows` — **every response carries `backtestable`**, because without it a snapshot and a backfillable series are indistinguishable to the caller and someone will eventually build a "backtest" on a snapshot. **One real defect found by the tests, in a class worth remembering:** `delivery_data` stripped whitespace from text columns behind `if df[c].dtype == object`, and on pandas 3 text columns are dtype `str`, not `object`, so the branch never ran, `SERIES` kept its leading space, every `== "EQ"` filter matched nothing, and RELIANCE looked absent from a file it was plainly in. **On pandas 2 the same code works** — it would have shipped and broken on an upgrade. Fixed by parsing correctly (`skipinitialspace=True`) rather than sniffing dtypes. Also fixed: `latest_metrics` returned `pd.Timestamp` and `np.float64`, which survive a dict comprehension and fail at `json.dumps` — it crosses IPC, so that would have surfaced as a broken panel rather than a type error; and `sync_history` silently skipped weekends, so its counters did not account for every requested day and a quiet fortnight read as a failure. **Verified: 334 assertions green** — `test_derivatives.py` 132 (new: both layouts, the legacy `OPTION_TYP == 'XX'` futures trap, max pain against a brute-force implementation of its definition on 60 random chains, the spot-provenance rules, the store generalisation including that OHLCV behaviour is unchanged, plus live calls against the exchange and a real backfill), `test_defects.py` 83, `test_store.py` 57, `test_backtest.py` 62. Live confirmations: 2026-08-28 NIFTY PCR 0.776, max pain 24,200 against spot 24,175.65, resistance 24,300, support 24,000; legacy 2020-06-10 PCR 0.959; FII index-futures long/short ratio 0.107 (heavily net short); RELIANCE delivery 59.33%; FII net −5,039.8 Cr against DII +5,183.93 Cr. All five routes exercised end to end through `TestClient`, including that `/derivatives/sources` is not shadowed by `/derivatives/{symbol}` and that a malformed date returns 400 rather than being ignored. **Not built** (stated rather than implied): per-contract Greeks and a fitted volatility surface (needs rate and dividend curves to be more than decoration); intraday chain snapshots on a timer (a data-collection service, and it needs master's decision on whether Rāma holds a market-hours process open); BSE derivatives. **Next step: task 3 of 6** — outcome recording and the learning loop: persist every signal, resolve it against later bars, and call `update_from_outcome`, which is **currently never called anywhere**. That is what makes `adaptiveWeight` real and lets `/health` report measured ECE and Brier instead of `null`. The derivative metrics built here are stored but **not yet in the feature vector** — wiring them in changes the model's input dimension, so it belongs with task 4's training rather than being bolted onto a heuristic ensemble that has no way to weigh them. |
 | 86 | StockMind — the learning loop that was never connected | done | Section 68. Task 3 of 6. New `ai_backend/engine/outcomes.py`; `registry.py` persists meta-learner state; `dispatcher.py` records every prediction; `health.py` reports measured calibration; four routes added. **`update_from_outcome`, `StackingMetaLearner.update`, `compute_ece` and `compute_brier_score` all existed and correct, and nothing called any of them.** So `_meta.weights` stayed `np.ones(n)/n` for the life of every process while `status()` advertised `"online_learning"` — a stacking meta-learner that was an unweighted mean wearing a learned-weights interface — and `/health` reported `ece: null` about a measurement with no route to ever being taken. **The deeper problem was that adding a call would not have fixed it:** `MODEL_REGISTRY` is an in-memory singleton in a process `aiProcess.cjs` respawns, so every weight learned would die at exit. That is precisely why `adaptiveWeight` arrived as a **request parameter** — the caller was asked to supply the number that should come out of the engine's own history, and the UI sent 1.0 forever. Learning entered from outside because nothing inside could remember. Decisions: **the resolver calls `backtest._simulate_np`**, not a second implementation — Section 66's rules (stop assumed first on intrabar ambiguity, TIMEOUT marked to market, each target at its own level) must decide live and backtested outcomes identically or the two sets of numbers cannot be compared, and comparing them is the only way to learn whether the backtest predicts anything; two implementations would also drift invisibly, both still producing plausible win rates. **One claim per bar per variant** — identity is `(symbol, instrType, barDate, variant)` and a repeat prediction updates rather than appends, because a UI polling `/predict` every few seconds would otherwise record one claim hundreds of times and ECE, an average over predictions, would be dominated by whichever bar was polled most; **without this the entire measurement is worthless**, and `barDate` is the bar the prediction was computed on rather than the wall clock for exactly this reason. **JSONL, not the CSV store** — the store holds time series (one row per date, fixed columns) while these are events with a nested `modelProbs` dict and a 100-float vector; CSV would mean 100+ columns or JSON inside a cell, and JSONL discards a torn final line while keeping the rest. **One feature vector per prediction, not per signal** — Section 64 established N signals are N geometries over one prediction, so 100 floats serve where 1,600 would be stored. **Learning is exactly-once and persisted** — `learnedAt` is stamped as each record is consumed, so re-running the resolver is safe; without it whoever runs it twice silently doubles every outcome's influence and there is no way to detect it afterwards. Restored state is **discarded rather than padded** when the model count or names differ, because weights are positional and restoring a mismatched vector would apply one model's learned weight to another — starting uniform is recoverable, learning against a permuted mapping is not. **Never learn from synthetic data** — mock-data claims are recorded (hiding them would make the record incomplete) but never resolved and never learned from; training on a random walk produces confident weights derived from noise and would make `/health` report a measured calibration against nothing. **`adaptiveWeight` is now measured** as realised win rate over mean predicted probability, clamped to the `[0.5, 2.0]` the schema already validates, with an explicitly supplied value still winning (I11) and exactly 1.0 below `MIN_SAMPLES_FOR_WEIGHT = 30` — a correction fitted on nine trades is noise with a decimal point. Calibration is likewise withheld below 20 resolved claims. **Two real defects the wiring exposed, both previously unreachable:** (a) `OnlineSGDModel.partial_fit` set `trained = True`, a flag the base class documents as "loaded a fitted artifact from disk" — so `/health` began claiming an artifact that does not exist after a single online sample. Section 64 split `is_available` from `is_trained`; this needed a third distinction, `is_online_fitted` with a sample count, since provenance and state are different claims. Worse, `predict_proba` then started using that one-sample model **instead of the heuristic**, so connecting the loop would have silently made every prediction worse; the fitted path now requires `MIN_ONLINE_SAMPLES = 50` **and both classes seen**, because a single-class SGD is a constant. (b) `partial_fit` caught a feature-width mismatch and logged it, so if the vector ever grew every online update would fail forever with `online_samples` stuck at zero and the only evidence a log line nobody reads — **not hypothetical, since task 4 adds derivative features**. It now resets the estimator and says so, which is also the honest response because coefficients fitted on the old columns do not describe the new ones. **Recorded but deliberately not changed:** `dispatcher._apply_mode` adds `np.random.normal(0, 0.03)` in `"learning"` mode and the default `"both"` blends 40% of it, so **the default prediction path is not reproducible** and measured ECE will include that injected variance as model miscalibration. The recorded value is the probability actually issued, perturbation included, because that is the claim that was made and the only one it is fair to score; `rawProbability` is stored alongside so the two can be separated. Removing the noise is a behaviour change master has not asked for. Also fixed: `test_defects.py` now isolates its data directory — it calls `generate_signals` five times and so records predictions, which made its `/health` assertions depend on leftover state in a gitignored directory. A leaked `STOCKMIND_DATA_DIR` in the verifying shell had it writing to a stale temp dir, which cost a diagnosis and is the same "the environment is not what you think" trap Sections 62, 63 and 66 record. **Verified: 468 assertions green** — `test_outcomes.py` 134 (new: dedup across symbol/instrument/bar/variant, the resolver matching `_simulate_np` exactly on the same inputs, no early scoring before the horizon elapses, mock exclusion even when force-resolved, exactly-once learning, meta-state round-trip plus four rejection cases, torn-line recovery, the calibration and weight thresholds in both directions with an over- and under-confident forecaster, the online/trained distinction, the width-change reset, retention pruning vectors with records, and `/health` surviving the loop raising), `test_derivatives.py` 132, `test_defects.py` 83, `test_backtest.py` 62, `test_store.py` 57. All four routes exercised end to end through `TestClient`: 5 signals recorded from one `/predict`, a repeat call recording nothing new, 5 resolved and 5 learned, a second resolve returning zero for both, and `/health` correctly reporting `ece: null` at 5 resolved with `modelsLoaded=0` and `modelsOnlineFitted=1`. **Next step: task 4 of 6** — train real models with strict time-series splits, persist artifacts, record the training date range so the backtest can flag in-sample, and wire the Section 67 derivative metrics into the feature vector (which is what will trigger the width-reset path above). **Still blocked and asked four times: the trading horizon** — intraday, swing-days, or positional-weeks. The label cannot be defined without it; the default stays 5 bars. Also outstanding for the Electron side: nothing calls `/outcomes/resolve` on a schedule yet, which is a scheduling decision rather than engine work. |
+| 87 | StockMind — training real models, and the contract that keeps them aligned | done (pipeline verified end to end; **no model from real data cleared the gate — that is the finding**) | Section 69. Task 4 of 6. New `ai_backend/engine/featureset.py`, `engine/training.py`, `train.py` CLI, `tests/test_training.py`; `models.py`, `registry.py`, `dispatcher.py`, `backtest.py`, `main.py` updated. **There had never been a training script**, so `data/models/` never existed and every probability came from a heuristic branch. **The trap that would have made a trainer worse than none: there is no feature scaling anywhere at inference** — `predict_proba` feeds the raw vector in, MLP and SGD are scale-sensitive, and `predict_proba` only falls back on an *exception*, never on an implausible number, so a model trained on standardised features and served raw would produce confident nonsense while `/health` reported a trained artifact. Fixed by persisting each sklearn model as a `Pipeline(StandardScaler, estimator)`: the scaler is *inside* the artifact, cannot be forgotten, and **no inference code changed**. Decisions: **the feature manifest is the contract** — a model is a function of a column order, so `data/models/featureset.json` records exact names and order and every load validates against the live builder, refusing the artifact and falling back to the heuristic on mismatch (this is the *third* appearance of that failure class after Section 64's 37-names-vs-59-values and Section 68's positional meta-weights, and it gets the same treatment: refuse, never pad or guess); **one builder serves training and inference** (`featureset.build_feature_map`, now also used by `backtest._model_probability`, since a backtest building a 100-column vector while the model expected more would be measuring a different model than the one that serves); **the label is the sign of the forward return with no neutral band**, because the output is consumed by `barrier_probability` as an unconditional P(up) and dropping small moves would train P(up | the move was large) and overstate the edge on exactly the quiet bars where the model should be least confident; **the horizon is recorded in the artifact**, so a model fitted for one horizon can never be silently served as another; **strict forward-chaining splits with an untouched holdout**, no `KFold`, no shuffling; **derivative columns are constant-width, neutral-filled and carry `deriv_available`** so the model can tell "neutral market" from "no data" and sklearn never sees NaN; **`models.py` now resolves artifact paths through `featureset.models_dir()`** — it had a hardcoded relative path while the trainer honours `STOCKMIND_MODELS_DIR`, which would have meant training writing to one directory and loading reading from another, presenting as "training succeeded, nothing loaded". **The acceptance gate took three attempts and each failure was found by running it, not reading it:** (1) raw accuracy vs the majority class — wrong because a 56%-up series makes "always up" score 0.56 so accuracy mostly measures index drift, and because `class_weight='balanced'` optimises *balanced* accuracy and so could never win that comparison (removing it lifted RF accuracy 0.4943 → 0.5376 and halved its ECE, since balancing distorts probabilities away from the true prior — right when the two errors cost differently, wrong when the probability is the product); (2) AUC plus Brier skill — better, but RF then scored holdout AUC **0.5974 with fold AUC 0.4821, below chance**, which is precisely the error walk-forward validation exists to catch, so a fold-stability condition was added; (3) **a pure random walk then passed with AUC 0.7464 and Brier skill +0.12** on a **47-row** holdout, where AUC's standard error is ~0.10 — the gate was measuring sample size, not skill. Added a 150-row holdout floor and a two-standard-error significance margin computed from the **minority** class. Re-run on an adequate random walk: AUC 0.516 against a 0.593 floor, correctly rejected. Final gate is five conditions in one `gate_verdict` function, shared with `sweep_horizons` because the sweep's first version checked only two and reported horizons as passing that the trainer would refuse. **The measured result, which is the substance of this row:** `sweep_horizons` (featurises once, relabels per horizon) over NIFTY 50, 2,185 rows, 2008-10-03 → 2026-07-31, 437-row holdout — **no horizon from 1 to 20 bars carries a measurable directional edge**, each rejected for a different reason (1/2/5 fail AUC outright; 3/10 rank above chance but inside two standard errors; 20 clears AUC 0.597, significance and Brier skill +0.030 but fails fold stability at 0.487). Signal does rise monotonically with horizon, and the 20-bar labels overlap 18-of-20 forward bars at stride 2 so the effective sample is far below 437 — a reason to trust 0.597 less. **`DEFAULT_HORIZON` stays 5**; moving it on the strength of a result that fails the gate would be the self-deception this work exists to prevent. This is a finding about the data and the current feature set, not a defect — index direction from price and volume alone is close to a martingale — and it points at what tasks 5 and 6 are for, plus a possible change of target since realised volatility is far more forecastable than direction and the risk geometry already consumes it. **Verified: 580 assertions across six suites** (`test_training` 112 new; `test_derivatives` 132, `test_outcomes` 134, `test_defects` 83, `test_backtest` 62, `test_store` 57). Because real data yields no acceptable model, the persist/load path is proved on a synthetic trending series (AUC 0.982, Brier skill 0.775, fold AUC 0.976) — otherwise "nothing persisted" and "persisting is broken" would be indistinguishable. End to end through the API: `/train dryRun` accepts without writing, `/train` persists and reloads in place, `/models` reports `type: "trained"` with the horizon, `/health` moves to `modelsLoaded: 1`, `/predict` serves from the artifact, and **`/backtest` reports `outOfSample: false` with an explicit IN-SAMPLE warning naming both date ranges** — the capability `_trained_model_note` previously could not provide. Two robustness fixes found along the way: `_rewrite_jsonl` now retries `os.replace`, which raises `PermissionError` on Windows whenever anything holds the destination for an instant (an antivirus scan suffices; it appeared as soon as several test processes wrote at once), and `_prune` no longer propagates, because retention is housekeeping and a failed prune should cost a slightly larger file rather than a prediction record that was already assembled. **Not built:** no LSTM (`torch` is not a pinned dependency and adding it is master's call); LightGBM and XGBoost training **is** implemented but **cannot be exercised here** — neither package installs in this workspace — so those paths are written, skipped cleanly and reported as unverified rather than claimed; no hyperparameter search. **Next step: task 5 of 6** — news and sentiment to market impact via free RSS (Google News, Yahoo per-ticker), sentiment without heavy dependencies. Note `SentimentModel` already has a FinBERT path behind an optional `transformers` import and currently returns 0.5 from features. **Still unanswered after five asks: the trading horizon.** The sweep above is now the evidence for that decision, and it says no horizon in 1–20 bars works on price data alone. |
 
 ### Resume checklist for a cold session
 
@@ -6392,3 +6393,247 @@ No automatic resolution on a timer — that is a scheduling decision for the Ele
 and belongs with the UI wiring, not the engine. No retraining of base models from
 outcomes; that is task 4, and it needs master's horizon answer. The online SGD update is
 wired but stays skipped while no base model has a fitted artifact to update.
+
+---
+
+## SECTION 69 — StockMind: training real models, and the contract that keeps them aligned
+
+Task 4 of the six-part StockMind build.
+
+*Written before implementing, per Section 28's working agreement.*
+
+### The state before this
+
+Every model in `models.py` has a `_try_load` that looks for an artifact under
+`ai_backend/data/models/` and, finding none, constructs an unfitted estimator and falls
+back to a hand-written heuristic. **That directory does not exist.** So every probability
+StockMind has ever produced came from the heuristic branch, which Sections 64 and 68 made
+`/health` say honestly.
+
+There has never been a training script.
+
+### The trap that would have made this worse than useless
+
+**There is no feature scaling anywhere at inference.** `predict_proba` does
+`self.model.predict_proba(features.reshape(1, -1))` on the raw vector.
+
+Two of the three trainable models here — MLP and SGD — are scale-sensitive. Training them
+on standardised features and then serving raw features would produce confident nonsense.
+And it would be **silent**: `predict_proba` only falls back to the heuristic on an
+*exception*, never on an implausible output. `/health` would report a trained artifact,
+grades would look normal, and the numbers would be meaningless.
+
+**Decision: the scaler travels inside the artifact.** Each sklearn model is persisted as a
+`Pipeline(StandardScaler, estimator)`, so `joblib.load(...).predict_proba(raw_vector)`
+scales internally. **No inference code changes**, the artifact is self-contained, and it is
+impossible to load the model without its scaler because they are one object. Tree models
+(LightGBM, XGBoost) are scale-invariant and keep their native formats.
+
+### Decision — the feature manifest is the contract
+
+A model is a function of a **vector position order**. `compute_full_features_dict` returns
+100 features today; if a feature is ever added, removed or reordered, every column shifts
+and a loaded model silently predicts from misaligned inputs.
+
+This is the third time the same failure class has appeared in this codebase: Section 64's
+37 feature names zipped against a 59-value vector, and Section 68's positional
+meta-learner weights that had to be refused rather than padded. So it is handled the same
+way, by refusing rather than guessing.
+
+`data/models/featureset.json` records the exact feature names, their order, the featureset
+version, and whether derivative columns are included. On load, each model **validates its
+artifact against the live feature builder**. On mismatch the artifact is rejected, the
+model falls back to its heuristic, and the reason is logged and surfaced in `/health`.
+Predicting from a misaligned vector is strictly worse than not predicting.
+
+**One builder serves both training and inference.** `featureset.build_feature_map` is
+called by the trainer and by the dispatcher. Two code paths assembling "the same" vector is
+how alignment rots.
+
+### Decision — the label is the sign of the forward return, with no neutral band
+
+The model's output is consumed by `dispatcher.barrier_probability(directional_prob, reward,
+risk)`, which converts a **directional edge** into a barrier-hit probability. So the model
+must produce P(up over the horizon), unconditionally.
+
+A common refinement is to drop small moves and label only `|return| > k·ATR`. That is
+rejected here: it trains P(up | the move was large) and the engine would consume it as
+P(up), which **overstates the edge** on exactly the quiet bars where the model should be
+least confident. The threshold variant is available as a parameter, defaulting off, with
+this reason recorded next to it.
+
+Labels are built from the **forward** return and are therefore only defined for bars that
+have `horizon` bars after them. The last `horizon` rows are dropped, not filled.
+
+### Decision — the horizon is recorded in the artifact
+
+Master has been asked four times whether the target is intraday, swing-days or
+positional-weeks, and has not answered. Rather than block, the horizon is a first-class
+parameter, **default 5 bars** (swing), and it is written into the artifact's provenance.
+
+The safety property that matters: **a model trained for one horizon can never be silently
+used as though it were trained for another.** When master answers, changing the default
+retrains rather than reinterprets, and any stale artifact is visibly for a different
+horizon.
+
+### Decision — strict forward-chaining splits, and an untouched holdout
+
+No `KFold`, no shuffling. Market data is ordered and any shuffled split lets the model see
+the future.
+
+Splits are forward-chaining — train on `[0, k)`, validate on `[k, k+v)`, advance — and the
+final segment of the series is a **holdout that no fold touches**. Reported metrics are
+holdout metrics. Train and holdout **date ranges** are recorded, so
+`backtest._trained_model_note()` can finally answer whether a backtest window overlaps the
+training data instead of returning `"unknown"`.
+
+### Decision — refuse to persist a model that does not beat its base rate
+
+Accuracy alone hides the only thing that matters at this stage. A series that rose on 54%
+of days makes "always up" a 54% classifier, and a model scoring 52% is **worse than a
+constant** while looking like a working model.
+
+So training reports the majority-class base rate beside every score, and **a model is not
+written to disk unless it beats that base rate on the holdout** by a stated margin. The
+alternative is that `/health` starts reporting a trained artifact whose predictions are
+worse than the heuristic it replaced — the exact outcome Sections 64 and 68 were about.
+
+A refusal is reported as a result, not an error. "Nothing beat the base rate" is a true and
+useful answer about this data.
+
+### Decision — derivative features are constant-width, neutral-filled, and flagged
+
+Section 67 stores option and future metrics per symbol-day, but only for NSE F&O symbols
+and only for dates that have been backfilled. A model needs a fixed input width, so the
+columns cannot appear and disappear.
+
+When derivatives are enabled the columns are always present. Where a bar has no metric row
+they are filled with a neutral constant and `deriv_available` is `0`, so the model can
+learn to discount them rather than being fed NaN — which sklearn rejects outright.
+
+Enabling them changes the vector from 100 columns to wider, which will trigger the
+online-SGD width reset built in Section 68. That was predicted there and is the first real
+exercise of it.
+
+### What is built
+
+- `ai_backend/engine/featureset.py` — the one feature builder, the derivative join, and the
+  manifest that is the contract.
+- `ai_backend/engine/training.py` — labels, forward-chaining splits, fitting, holdout
+  evaluation, the base-rate gate, artifact and provenance writing.
+- `ai_backend/train.py` — a CLI so master can retrain without the app running.
+- `models.py` — manifest validation on load; artifacts refused rather than misapplied.
+- `dispatcher.py` — assembles features through the shared builder.
+- `backtest.py` — `_trained_model_note` reports the real training range and in-sample overlap.
+- Routes: `POST /train`, `GET /models`.
+
+### Not built here
+
+No LSTM: `torch` is not in `requirements.txt` and adding it is a large pinned dependency
+master has not asked for; `LSTMModel` keeps its heuristic and reports why. LightGBM and
+XGBoost training **is** implemented but cannot be exercised in this workspace — neither
+package installs here — so those paths are written, skipped cleanly, and reported as
+unverified rather than claimed. No hyperparameter search; the existing architectures are
+kept so this change is about correctness of the pipeline, not about squeezing the models.
+
+### The gate, and the two times it was wrong before it was right
+
+The acceptance criterion took three attempts, and each failure was found by running it
+rather than by reading it. This is recorded in full because the gate is the only thing
+standing between a meaningless model and `/health` reporting a trained artifact.
+
+**Attempt 1 — raw accuracy against the majority class.** Wrong for two reasons. NIFTY rose
+over 5 bars on 56% of the sample, so "always up" scores 0.56 and raw accuracy mostly
+measures the index's drift. And `RandomForestClassifier(class_weight='balanced')` optimises
+*balanced* accuracy — it deliberately refuses to exploit the prior — so judging it against a
+majority-class baseline compared two different objectives and it could never win. Removing
+`class_weight='balanced'` lifted RF's accuracy from 0.4943 to 0.5376 and halved its ECE:
+balancing distorts predicted probabilities away from the true prior, which is right when the
+two errors cost differently and wrong when the probability itself is the product.
+
+**Attempt 2 — AUC plus Brier skill.** Better: AUC is invariant to the class prior, and Brier
+skill against climatology tests whether the probabilities beat always predicting the
+historical up-frequency. But Random Forest then scored holdout AUC **0.5974 while its
+forward-chaining folds averaged 0.4821 — below chance**. Accepting that is exactly the error
+walk-forward validation exists to catch: one final segment looked good while every earlier
+one did not. Added a fold-stability condition.
+
+**Attempt 3 — and a random walk passed.** A synthetic pure random walk scored holdout AUC
+**0.7464** with Brier skill +0.12 and cleared all three conditions. Its holdout was **47
+rows**, where the standard error of AUC is about 0.10, so 0.75 is unremarkable noise. The
+gate was measuring sample size, not skill. Two guards added: a hard floor of 150 holdout
+rows, and a requirement that AUC clear 0.5 by two standard errors, computed from the
+**minority** class because that is what limits precision. Re-run on an adequately sized
+random walk, AUC was 0.516 against a significance floor of 0.593 — correctly rejected.
+
+The final gate is five conditions, all of which must pass: holdout size, AUC above 0.52, AUC
+above the significance floor, Brier skill above zero, and mean fold AUC at least 0.50. It
+lives in one function, `gate_verdict`, because `train` and `sweep_horizons` both need it and
+the sweep's first version checked only two conditions — so it reported horizons as passing
+that the trainer would have refused.
+
+### The measured result: no directional edge, at any horizon tested
+
+Master has been asked four times which horizon to target, so the tool now answers with
+measurements. `sweep_horizons` featurises once and relabels per horizon, since features do
+not depend on the horizon and rebuilding the dataset per horizon would cost N times as much
+for identical inputs.
+
+NIFTY 50, 2,185 rows (stride 2), 100 price/volume features, 2008-10-03 → 2026-07-31, Random
+Forest, 437-row holdout:
+
+| Horizon | Up rate | AUC | Sig. floor | Brier skill | Fold AUC | Accuracy | Verdict |
+|---|---|---|---|---|---|---|---|
+| 1 | 0.529 | 0.518 | 0.568 | −0.006 | 0.553 | 0.520 | rejected |
+| 2 | 0.541 | 0.520 | 0.570 | −0.005 | 0.513 | 0.536 | rejected |
+| 3 | 0.552 | 0.527 | 0.570 | −0.002 | 0.518 | 0.547 | rejected |
+| 5 | 0.565 | 0.508 | 0.571 | −0.006 | 0.518 | 0.542 | rejected |
+| 10 | 0.584 | 0.550 | 0.573 | +0.005 | 0.501 | 0.558 | rejected |
+| 20 | 0.611 | **0.597** | 0.577 | **+0.030** | **0.487** | 0.629 | rejected |
+
+**No horizon from 1 to 20 bars carries a measurable directional edge**, and each is rejected
+for a different, specific reason: 1, 2 and 5 fail AUC outright; 3 and 10 rank above chance
+but not beyond two standard errors; 20 clears AUC, significance *and* Brier skill but fails
+fold stability at 0.487 — its apparent skill is that holdout segment's regime.
+
+Two things worth stating about this table. There **is** a monotonic trend: signal rises with
+horizon, which is consistent with longer-horizon index returns being more drift-dominated
+and therefore more forecastable. And the 20-bar labels overlap heavily — at stride 2,
+consecutive rows share 18 of their 20 forward bars — so the effective sample is far smaller
+than 437 and the AUC has a wide interval. That is the standard overlapping-label problem in
+financial ML and it is a reason to trust 0.597 less, not more.
+
+`DEFAULT_HORIZON` therefore stays at 5. Nothing in the sweep justifies moving it, and moving
+it on the strength of a result that fails the gate would be exactly the self-deception this
+section is built to prevent.
+
+**This is a finding about the data and the current feature set, not a defect.** Directional
+prediction of a broad index from price and volume alone is close to a martingale, which is
+the well-documented prior. It points at what the next tasks are actually for: the Section 67
+derivative features (positioning, not price), news and sentiment (task 5), and possibly a
+different target — realised volatility is far more forecastable than direction, and the risk
+geometry already consumes it.
+
+### Verified
+
+- 580 assertions across six suites, `test_training.py` contributing 112.
+- Because real data yields no acceptable model, the persist/load path is proved on a
+  synthetic trending series (AUC 0.982, Brier skill 0.775, fold AUC 0.976) — otherwise
+  "nothing persisted" and "persisting is broken" would be indistinguishable.
+- End to end through the API: `/models` reports no contract before training; `/train
+  dryRun` accepts without writing; `/train` persists, reloads in place and reports
+  `newlyTrained`; `/models` then shows `type: "trained"` with the horizon; `/health` moves to
+  `modelsLoaded: 1`; `/predict` serves from the artifact; and **`/backtest` reports
+  `outOfSample: false` with an explicit IN-SAMPLE warning** naming both date ranges, which is
+  the capability `_trained_model_note` could not provide before.
+- A missing symbol returns 400 with the reason, not 500.
+
+### Two robustness fixes made along the way
+
+`os.replace` raises `PermissionError` on Windows when anything holds a handle on the
+destination for an instant — an antivirus scan of the file just written is enough, and it
+surfaced as soon as several test processes wrote outcome files at once. `_rewrite_jsonl` now
+retries with a short backoff; on POSIX the rename would simply have succeeded, so this is a
+platform difference rather than a logic error. And `_prune` no longer propagates: retention
+is housekeeping, and a failed prune means a file slightly larger than intended while a
+propagated error would lose a prediction record that had already been assembled.

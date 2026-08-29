@@ -19,6 +19,7 @@ from typing import Any
 
 from .registry import MODEL_REGISTRY
 from .features import compute_features, compute_full_features_dict
+from .featureset import build_feature_map
 from .calibration import clamp_probability, regime_adjust
 from .data_fetcher import get_ohlcv
 
@@ -344,7 +345,10 @@ def _spot_signals(params: dict, ctx: dict = None) -> list[dict]:
     # Full feature set (base + Ichimoku/Fibonacci/Supertrend/profile/order-flow/ICT).
     # `compute_full_features` existed but had no callers, so /predict ran on 59 of the
     # 100 available features while the advanced buckets reached only /strategy/score.
-    fmap     = compute_full_features_dict(df)
+    # Built through `featureset`, the same builder the trainer uses (spec Section 69). Two
+    # code paths assembling "the same" vector is how a trained model ends up predicting from
+    # misaligned columns; one builder plus a checked manifest is how it cannot.
+    fmap     = build_feature_map(df, symbol, params.get("exchange", "NSE"))
     features = np.array(list(fmap.values()), dtype=np.float32)
 
     if not is_real:
@@ -451,7 +455,7 @@ def _futures_signals(params: dict, ctx: dict = None) -> list[dict]:
     series       = futures_meta.get("series", "Near")
 
     df, is_real = get_ohlcv(params)
-    fmap     = compute_full_features_dict(df)
+    fmap     = build_feature_map(df, symbol, params.get("exchange", "NSE"))
     features = np.array(list(fmap.values()), dtype=np.float32)
 
     # One bar, one ensemble call — hoisted out of the loop. It used to run inside, on

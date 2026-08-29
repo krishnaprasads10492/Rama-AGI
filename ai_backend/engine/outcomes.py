@@ -28,6 +28,7 @@ the only way to learn whether the backtest predicts anything.
 import json
 import logging
 import os
+import time
 import datetime as _dt
 from typing import Optional
 
@@ -106,13 +107,37 @@ def _append_jsonl(path: str, rows: list[dict]) -> None:
             fh.write(json.dumps(r, default=str) + "\n")
 
 
-def _rewrite_jsonl(path: str, rows: list[dict]) -> None:
-    """Atomic whole-file replace, for updates and pruning."""
+def _rewrite_jsonl(path: str, rows: list[dict], attempts: int = 5) -> None:
+    """
+    Atomic whole-file replace, for updates and pruning.
+
+    RETRIES ON WINDOWS SHARING VIOLATIONS. `os.replace` raises `PermissionError`
+    (WinError 5/32) when anything else holds a handle on the destination for an instant —
+    an antivirus scan of the file just written is enough, and it showed up here as soon as
+    several processes wrote outcome files at once. On POSIX the rename would simply succeed,
+    so this is a platform difference rather than a logic error, and a brief backoff is the
+    normal remedy. Failing the caller over a transient lock would lose a prediction record
+    that had already been assembled.
+    """
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         for r in rows:
             fh.write(json.dumps(r, default=str) + "\n")
-    os.replace(tmp, path)
+    last = None
+    for i in range(max(1, attempts)):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError as e:
+            last = e
+            time.sleep(0.05 * (i + 1))
+    logger.warning(f"[outcomes] could not replace {os.path.basename(path)} after "
+                   f"{attempts} attempts: {last}")
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+    raise last
 
 
 # ── Recording ─────────────────────────────────────────────────────────────────
@@ -232,16 +257,26 @@ def record_prediction(params: dict, signals: list[dict], ctx: dict) -> dict:
 
 
 def _prune() -> None:
-    """Keep the newest MAX_RECORDS claims, and only the feature vectors they reference."""
-    recs = _read_jsonl(records_path())
-    if len(recs) <= MAX_RECORDS:
-        return
-    recs = sorted(recs, key=lambda r: r.get("recordedAt") or "")[-MAX_RECORDS:]
-    _rewrite_jsonl(records_path(), recs)
-    keep = {r.get("predictionId") for r in recs}
-    feats = [f for f in _read_jsonl(features_path()) if f.get("predictionId") in keep]
-    _rewrite_jsonl(features_path(), feats)
-    logger.info(f"[outcomes] pruned to {len(recs)} records and {len(feats)} feature vectors")
+    """
+    Keep the newest MAX_RECORDS claims, and only the feature vectors they reference.
+
+    NEVER RAISES. Pruning is housekeeping, and housekeeping that can break the thing it
+    maintains is a liability: a failed prune means the file is a little larger than intended,
+    while a propagated error means a prediction that was already computed is lost. Retention
+    is the least important guarantee here and it yields first.
+    """
+    try:
+        recs = _read_jsonl(records_path())
+        if len(recs) <= MAX_RECORDS:
+            return
+        recs = sorted(recs, key=lambda r: r.get("recordedAt") or "")[-MAX_RECORDS:]
+        _rewrite_jsonl(records_path(), recs)
+        keep = {r.get("predictionId") for r in recs}
+        feats = [f for f in _read_jsonl(features_path()) if f.get("predictionId") in keep]
+        _rewrite_jsonl(features_path(), feats)
+        logger.info(f"[outcomes] pruned to {len(recs)} records and {len(feats)} feature vectors")
+    except Exception as e:
+        logger.warning(f"[outcomes] prune skipped: {type(e).__name__}: {e}")
 
 
 # ── Resolution ────────────────────────────────────────────────────────────────

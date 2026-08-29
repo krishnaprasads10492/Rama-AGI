@@ -236,7 +236,8 @@ def _pre_trade_probability(directional_prob: float, reward: float, risk: float) 
 FEATURE_WINDOW = 400
 
 
-def _model_probability(df: pd.DataFrame, idx: int) -> Optional[float]:
+def _model_probability(df: pd.DataFrame, idx: int, symbol: str = None,
+                       exchange: str = "NSE") -> Optional[float]:
     """
     The ensemble's directional probability using only bars up to `idx`.
 
@@ -245,13 +246,16 @@ def _model_probability(df: pd.DataFrame, idx: int) -> Optional[float]:
     features cannot see a bar that has not happened.
     """
     try:
-        from .features import compute_full_features_dict
+        from .featureset import build_feature_map
         from .registry import MODEL_REGISTRY
         start  = max(0, idx + 1 - FEATURE_WINDOW)
         window = df.iloc[start: idx + 1]
         if len(window) < 60:
             return None
-        fmap = compute_full_features_dict(window)
+        # Same builder as the trainer and the dispatcher (Section 69). If the backtest built
+        # a 100-column vector while a trained model expected the derivative columns too, it
+        # would be measuring a different model than the one that serves predictions.
+        fmap = build_feature_map(window, symbol, exchange)
         vec  = np.array(list(fmap.values()), dtype=np.float32)
         return float(MODEL_REGISTRY.ensemble_predict(vec, feature_map=fmap)["probability"])
     except Exception as e:
@@ -274,7 +278,7 @@ def run_backtest(df: pd.DataFrame, symbol: str, model_version: str = "v1.0.0",
                  from_date: Optional[str] = None, to_date: Optional[str] = None,
                  preset: Optional[str] = None, interval: str = "1d",
                  use_model: bool = True, horizon_bars: int = 10,
-                 max_signals: int = 2000) -> dict:
+                 max_signals: int = 2000, exchange: str = "NSE") -> dict:
     """
     Walk-forward evaluation over **non-overlapping** test windows.
 
@@ -320,7 +324,7 @@ def run_backtest(df: pd.DataFrame, symbol: str, model_version: str = "v1.0.0",
             idx += 1
             continue
 
-        prob = _model_probability(df, idx) if use_model else None
+        prob = _model_probability(df, idx, symbol, exchange) if use_model else None
         source = "ensemble"
         if prob is None:
             prob = _momentum_probability(df, idx)
@@ -444,7 +448,7 @@ def _summarise(df, symbol, model_version, interval, preset, from_date, to_date,
         ec = ec[::max(1, len(ec) // 300)]
 
     prob_sources = {t["probSource"] for t in trades}
-    trained = _trained_model_note()
+    trained = _trained_model_note(df)
 
     return {
         "symbol":        symbol,
@@ -511,27 +515,67 @@ def _summarise(df, symbol, model_version, interval, preset, from_date, to_date,
     }
 
 
-def _trained_model_note() -> dict:
+def _trained_model_note(df: pd.DataFrame = None) -> dict:
     """
     Whether a trained artifact is in the loop, and whether this evaluation is in-sample.
 
-    An out-of-sample claim has to be checkable. When the training script records its date
-    range, this reports whether the backtest window overlaps it — because a model
-    evaluated on its own training data will look excellent and mean nothing.
+    An out-of-sample claim has to be checkable. Now that `training.py` records its train and
+    holdout date ranges (spec Section 69), this compares the backtest window against them
+    instead of returning `"unknown"` — because a model evaluated on its own training data
+    will look excellent and mean nothing, and a reader has no way to notice from the metrics.
     """
     try:
         from .registry import MODEL_REGISTRY
         st = MODEL_REGISTRY.status()
         trained = [n for n, m in st["models"].items() if m.get("trained")]
-        return {
-            "count": len(trained), "models": trained,
-            "outOfSample": "unknown" if trained else "n/a — no trained model in the loop",
-            "note": ("Heuristic ensemble; nothing was fitted, so there is no in-sample risk."
-                     if not trained else
-                     "Check the artifact's training range against this window before trusting it."),
-        }
-    except Exception:
-        return {"count": 0, "models": [], "outOfSample": "unknown", "note": "registry unavailable"}
+        out = {"count": len(trained), "models": trained}
+        if not trained:
+            out.update({
+                "outOfSample": "n/a — no trained model in the loop",
+                "note": "Heuristic ensemble; nothing was fitted, so there is no in-sample risk.",
+            })
+            return out
+
+        from .training import load_provenance
+        prov = load_provenance()
+        if not prov:
+            out.update({"outOfSample": "unknown",
+                        "note": "Artifacts exist but carry no training provenance — "
+                                "their date range cannot be checked against this window."})
+            return out
+
+        tr = prov.get("trainRange") or {}
+        out["trainedOn"] = tr
+        out["holdoutRange"] = prov.get("holdoutRange")
+        out["horizonBars"] = prov.get("horizonBars")
+        if df is None or "date" not in getattr(df, "columns", []) or len(df) == 0:
+            out.update({"outOfSample": "unknown",
+                        "note": "This window carries no dates to compare."})
+            return out
+
+        w0 = pd.Timestamp(df["date"].iloc[0]).normalize()
+        w1 = pd.Timestamp(df["date"].iloc[-1]).normalize()
+        t0 = pd.Timestamp(tr.get("first")) if tr.get("first") else None
+        t1 = pd.Timestamp(tr.get("last")) if tr.get("last") else None
+        if t0 is None or t1 is None:
+            out.update({"outOfSample": "unknown", "note": "Training range incomplete."})
+            return out
+
+        overlaps = not (w1 < t0 or w0 > t1)
+        out["backtestWindow"] = {"first": str(w0.date()), "last": str(w1.date())}
+        out["outOfSample"] = not overlaps
+        out["note"] = (
+            f"IN-SAMPLE: this window ({w0.date()} → {w1.date()}) overlaps the training range "
+            f"({t0.date()} → {t1.date()}). These results are not evidence of out-of-sample "
+            f"skill — the model saw these bars while fitting."
+            if overlaps else
+            f"Out of sample: this window ends before or starts after the training range "
+            f"({t0.date()} → {t1.date()})."
+        )
+        return out
+    except Exception as e:
+        return {"count": 0, "models": [], "outOfSample": "unknown",
+                "note": f"registry or provenance unavailable: {type(e).__name__}"}
 
 
 def _max_streak(trades: list, won: bool) -> int:

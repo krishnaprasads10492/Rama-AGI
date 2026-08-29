@@ -197,6 +197,45 @@ class ModelRegistry:
     # could remember it. Adding a call to `update_from_outcome` would not have been
     # enough on its own.
 
+    def reload_models(self) -> dict:
+        """
+        Re-read artifacts from disk after training, without restarting the process.
+
+        Rebuilds the model objects in place rather than replacing the registry, so
+        `MODEL_REGISTRY` stays the same singleton every module already imported — swapping
+        the object would leave other modules holding the old one. The meta-learner is
+        deliberately NOT reset: its weights describe how much to trust each *slot*, and the
+        slots are unchanged.
+        """
+        from . import models as _models
+        _models._ALIGNMENT_WARNED = False        # a retrain may have fixed the mismatch
+
+        before = {m.name: m.is_trained() for m in self._all_models()}
+        self.lgbm      = LightGBMModel()
+        self.xgb       = XGBoostModel()
+        self.lstm      = LSTMModel()
+        self.rf        = RandomForestModel()
+        self.mlp       = MLPModel()
+        self.sgd       = OnlineSGDModel()
+        self.regime    = RegimeAwareModel()
+        self.sentiment = SentimentModel()
+        self._base_models = [self.lgbm, self.xgb, self.lstm,
+                             self.rf, self.mlp, self.sgd, self.regime]
+
+        after = {m.name: m.is_trained() for m in self._all_models()}
+        newly = [n for n in after if after[n] and not before.get(n)]
+        ok, reason = _models.artifact_alignment()
+        logger.info(f"[Registry] reloaded models; now trained: "
+                    f"{[n for n, v in after.items() if v]}")
+        return {"trainedBefore": [n for n, v in before.items() if v],
+                "trainedAfter": [n for n, v in after.items() if v],
+                "newlyTrained": newly,
+                "featureContract": {"aligned": ok, "reason": reason}}
+
+    def _all_models(self) -> list:
+        return [self.lgbm, self.xgb, self.lstm, self.rf, self.mlp,
+                self.sgd, self.regime, self.sentiment]
+
     def meta_update_count(self) -> int:
         return int(self._meta._update_count)
 

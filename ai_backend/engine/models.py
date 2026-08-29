@@ -69,6 +69,65 @@ class BaseModel:
         return int(self.online_samples) > 0
 
 
+# ── The feature contract (spec Section 69) ────────────────────────────────────
+#
+# A trained model is a function of a COLUMN ORDER. If the feature set changes after an
+# artifact was fitted, every position shifts and the model predicts from misaligned inputs
+# while looking perfectly healthy.
+#
+# So no artifact is loaded without checking it against the live feature builder. On mismatch
+# the artifact is REFUSED and the model keeps its heuristic — predicting from a misaligned
+# vector is strictly worse than not predicting. Same treatment as Section 64's name/vector
+# drift and Section 68's positional meta-learner weights: refuse, never pad or guess.
+
+def _models_dir() -> str:
+    """
+    One place artifacts live, shared with the trainer.
+
+    These paths used to be `os.path.dirname(__file__) + "../data/models"` computed
+    independently here. The trainer honours `STOCKMIND_MODELS_DIR`, so a hardcoded path here
+    would have training write to one directory and loading read from another — and the
+    symptom would be "training succeeded, nothing loaded", which reads as a persistence bug.
+    """
+    from . import featureset
+    return featureset.models_dir()
+
+
+def artifact_alignment() -> tuple[bool, str]:
+    """
+    @returns (ok, reason). `ok` is True when there is no manifest at all, because that is an
+             install where nothing was ever trained — there is no contract to violate.
+    """
+    try:
+        from . import featureset
+        m = featureset.load_manifest()
+        if not m:
+            return True, "no manifest — nothing was trained against a contract"
+        if int(m.get("featuresetVersion", -1)) != featureset.FEATURESET_VERSION:
+            return False, (f"featureset version changed: artifacts were fitted against "
+                           f"v{m.get('featuresetVersion')}, this build is "
+                           f"v{featureset.FEATURESET_VERSION}")
+        return featureset.validate_against_live(m["featureNames"],
+                                                bool(m.get("includeDerivatives")))
+    except Exception as e:
+        return False, f"could not verify the feature contract: {type(e).__name__}: {e}"
+
+
+_ALIGNMENT_WARNED = False
+
+
+def _artifacts_usable(model_name: str) -> bool:
+    global _ALIGNMENT_WARNED
+    ok, reason = artifact_alignment()
+    if not ok and not _ALIGNMENT_WARNED:
+        _ALIGNMENT_WARNED = True
+        logger.warning(f"[models] REFUSING every trained artifact — {reason}. "
+                       f"Falling back to heuristics. Retrain to realign.")
+    if not ok:
+        logger.debug(f"[{model_name}] artifact refused: {reason}")
+    return ok
+
+
 # ── 1. LightGBM ───────────────────────────────────────────────────────────────
 
 class LightGBMModel(BaseModel):
@@ -81,8 +140,8 @@ class LightGBMModel(BaseModel):
     def _try_load(self):
         try:
             import lightgbm as lgb
-            model_path = os.path.join(os.path.dirname(__file__), "../data/models/lgbm_direction.txt")
-            if os.path.exists(model_path):
+            model_path = os.path.join(_models_dir(), "lgbm_direction.txt")
+            if os.path.exists(model_path) and _artifacts_usable(self.name):
                 self.model = lgb.Booster(model_file=model_path)
                 self.loaded = True
                 self.trained = True
@@ -113,8 +172,8 @@ class XGBoostModel(BaseModel):
     def _try_load(self):
         try:
             import xgboost as xgb
-            model_path = os.path.join(os.path.dirname(__file__), "../data/models/xgb_direction.json")
-            if os.path.exists(model_path):
+            model_path = os.path.join(_models_dir(), "xgb_direction.json")
+            if os.path.exists(model_path) and _artifacts_usable(self.name):
                 self.model = xgb.Booster()
                 self.model.load_model(model_path)
                 self.loaded = True
@@ -147,8 +206,8 @@ class LSTMModel(BaseModel):
     def _try_load(self):
         try:
             import torch
-            model_path = os.path.join(os.path.dirname(__file__), "../data/models/lstm_direction.pt")
-            if os.path.exists(model_path):
+            model_path = os.path.join(_models_dir(), "lstm_direction.pt")
+            if os.path.exists(model_path) and _artifacts_usable(self.name):
                 self.model = torch.load(model_path, map_location="cpu")
                 self.model.eval()
                 self.loaded = True
@@ -227,8 +286,8 @@ class RandomForestModel(BaseModel):
         try:
             from sklearn.ensemble import RandomForestClassifier
             import joblib
-            model_path = os.path.join(os.path.dirname(__file__), "../data/models/rf_direction.pkl")
-            if os.path.exists(model_path):
+            model_path = os.path.join(_models_dir(), "rf_direction.pkl")
+            if os.path.exists(model_path) and _artifacts_usable(self.name):
                 self.model = joblib.load(model_path)
                 self.loaded = True
                 self.trained = True
@@ -268,8 +327,8 @@ class MLPModel(BaseModel):
         try:
             from sklearn.neural_network import MLPClassifier
             import joblib
-            model_path = os.path.join(os.path.dirname(__file__), "../data/models/mlp_direction.pkl")
-            if os.path.exists(model_path):
+            model_path = os.path.join(_models_dir(), "mlp_direction.pkl")
+            if os.path.exists(model_path) and _artifacts_usable(self.name):
                 self.model = joblib.load(model_path)
                 self.loaded = True
                 self.trained = True
@@ -336,8 +395,8 @@ class OnlineSGDModel(BaseModel):
         try:
             from sklearn.linear_model import SGDClassifier
             import joblib
-            model_path = os.path.join(os.path.dirname(__file__), "../data/models/sgd_direction.pkl")
-            if os.path.exists(model_path):
+            model_path = os.path.join(_models_dir(), "sgd_direction.pkl")
+            if os.path.exists(model_path) and _artifacts_usable(self.name):
                 self.model = joblib.load(model_path)
                 self.loaded = True
                 self.trained = True

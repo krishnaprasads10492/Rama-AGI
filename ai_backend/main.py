@@ -22,6 +22,8 @@ Endpoints:
   GET  /outcomes/stats        — measured win rate, ECE, Brier, adaptive weight
   POST /outcomes/resolve      — score claims whose bars have since arrived
   POST /outcomes/learn        — feed resolved outcomes into the ensemble, once each
+  GET  /models                — artifacts, training provenance, feature-contract alignment
+  POST /train                 — fit models on stored history, persist only what beats base
 
 Started by electron/ipc/aiProcess.cjs (spawn python -u main.py), reached from
 the renderer through electron/ipc/marketIntel.cjs — this process itself has
@@ -376,6 +378,92 @@ def outcomes_learn():
         return outcomes.learn()
     except Exception as e:
         logger.error(f"Outcome learning error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Training (spec Section 69) ────────────────────────────────────────────────
+
+@app.get("/models")
+def models_status():
+    """
+    What is actually loaded, what it was fitted on, and whether it still lines up.
+
+    `featureContract.aligned` is the one to read. A trained artifact is a function of a
+    column order; if the feature set changed since it was fitted, the artifact is refused and
+    every model falls back to its heuristic. Reporting that is the difference between "the
+    models are not being used" and "the models are quietly wrong".
+    """
+    try:
+        from engine.registry import MODEL_REGISTRY
+        from engine.models import artifact_alignment
+        from engine.training import load_provenance
+        from engine import featureset
+
+        ok, reason = artifact_alignment()
+        prov = load_provenance()
+        return {
+            "featureContract": {
+                "aligned": ok, "reason": reason,
+                "featuresetVersion": featureset.FEATURESET_VERSION,
+                "liveFeatureCount": len(featureset.feature_names()),
+                "includeDerivatives": featureset.include_derivatives_default(),
+                "manifest": featureset.load_manifest(),
+            },
+            "registry": MODEL_REGISTRY.status(),
+            "training": prov,
+            "note": ("No training provenance — nothing has been fitted yet, so every "
+                     "probability is a heuristic. POST /train to fit on stored history."
+                     if not prov else
+                     f"Fitted on {prov.get('symbol')} {prov.get('trainRange', {}).get('first')} "
+                     f"→ {prov.get('trainRange', {}).get('last')} at a "
+                     f"{prov.get('horizonBars')}-bar horizon."),
+        }
+    except Exception as e:
+        logger.error(f"Models status error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class TrainRequest(BaseModel):
+    symbol:   str = "NIFTY50"
+    exchange: str = "NSE"
+    interval: str = "1d"
+    # The horizon master has been asked about four times. It is recorded in the artifact, so
+    # a model fitted for one horizon can never be silently served as another.
+    horizon:  int = Field(default=5, ge=1, le=250)
+    includeDerivatives: bool = False
+    models:   Optional[list[str]] = None
+    splits:   int = Field(default=4, ge=1, le=12)
+    holdoutFrac: float = Field(default=0.2, gt=0.02, le=0.5)
+    stride:   int = Field(default=1, ge=1, le=20)
+    maxRows:  Optional[int] = None
+    dryRun:   bool = False
+
+
+@app.post("/train")
+def train_models(req: TrainRequest):
+    """
+    Fit on stored history with forward-chaining splits and an untouched holdout.
+
+    A model is persisted only if it beats the holdout's majority-class base rate. A refusal
+    is returned as a result with its numbers — shipping a model that loses to always
+    guessing the majority would make predictions worse while `/health` reported a trained
+    artifact.
+    """
+    try:
+        from engine.training import train as run_training
+        report = run_training(
+            symbol=req.symbol, exchange=req.exchange, interval=req.interval,
+            horizon=req.horizon, include_derivatives=req.includeDerivatives,
+            models=req.models, n_splits=req.splits, holdout_frac=req.holdoutFrac,
+            stride=req.stride, max_rows=req.maxRows, dry_run=req.dryRun,
+        )
+        if not report.get("ok"):
+            raise HTTPException(status_code=400, detail=report.get("reason", "training failed"))
+        return report
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Training error for {req.symbol}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
