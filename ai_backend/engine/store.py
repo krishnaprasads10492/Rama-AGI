@@ -40,6 +40,26 @@ logger = logging.getLogger("stockmind-ai.store")
 
 COLUMNS = ["date", "open", "high", "low", "close", "volume"]
 
+# A series does not have to be OHLCV. `derivatives.py` stores one row of derived
+# option/future metrics per symbol per day, and it needs exactly the properties this
+# module already has and that are easy to get wrong: de-duplication on the date key,
+# a refusal to shrink, atomic replacement, provenance, business-day staleness.
+#
+# So the column set is a parameter, defaulting to OHLCV. Every existing caller is
+# unchanged (I11 — additive), and there is no second store to drift out of sync. Ledger
+# row 19 exists because nineteen subsystems were once duplicated this way.
+#
+# `required` names the columns a row cannot be missing. For bars that is `close`, since a
+# bar with no close is not a bar. For a derived series it is only `date`, because a
+# legitimate row may have every metric null on a day with no open interest.
+def _column_spec(columns: Optional[list] = None) -> tuple[list, list]:
+    if not columns:
+        return COLUMNS, ["date", "close"]
+    cols = list(columns)
+    if "date" not in cols:
+        cols = ["date"] + cols
+    return cols, ["date"]
+
 
 def store_root() -> str:
     """
@@ -67,7 +87,9 @@ def paths(symbol: str, exchange: str = "NSE", interval: str = "1d"):
 
 # ── Read ──────────────────────────────────────────────────────────────────────
 
-def load(symbol: str, exchange: str = "NSE", interval: str = "1d") -> Optional[pd.DataFrame]:
+def load(symbol: str, exchange: str = "NSE", interval: str = "1d",
+         columns: Optional[list] = None) -> Optional[pd.DataFrame]:
+    cols, _ = _column_spec(columns)
     csv_path, _ = paths(symbol, exchange, interval)
     if not os.path.exists(csv_path):
         return None
@@ -75,7 +97,16 @@ def load(symbol: str, exchange: str = "NSE", interval: str = "1d") -> Optional[p
         df = pd.read_csv(csv_path, parse_dates=["date"])
         if df is None or len(df) == 0:
             return None
-        return df[COLUMNS].sort_values("date").reset_index(drop=True)
+        # Only project onto the requested columns when they are all present. A stored
+        # series written by an older version may legitimately lack a column added since,
+        # and failing the read would look like "no data" rather than "one column is new".
+        present = [c for c in cols if c in df.columns]
+        if len(present) < len(cols):
+            missing = [c for c in cols if c not in df.columns]
+            logger.warning(f"[store] {symbol} {interval}: stored series lacks {missing}")
+            for c in missing:
+                df[c] = float("nan")
+        return df[cols].sort_values("date").reset_index(drop=True)
     except Exception as e:
         logger.warning(f"[store] could not read {csv_path}: {e}")
         return None
@@ -93,7 +124,8 @@ def meta(symbol: str, exchange: str = "NSE", interval: str = "1d") -> dict:
 # ── Write ─────────────────────────────────────────────────────────────────────
 
 def merge(symbol: str, incoming: pd.DataFrame, exchange: str = "NSE",
-          interval: str = "1d", source: str = "unknown") -> Optional[pd.DataFrame]:
+          interval: str = "1d", source: str = "unknown",
+          columns: Optional[list] = None) -> Optional[pd.DataFrame]:
     """
     Merge `incoming` into whatever is stored and persist the union.
 
@@ -101,29 +133,33 @@ def merge(symbol: str, incoming: pd.DataFrame, exchange: str = "NSE",
     already on disk must not shrink the store — that loss would be silent and
     permanent, and it is exactly what a "refresh" button would cause on a bad day.
     """
+    cols, required = _column_spec(columns)
     if incoming is None or len(incoming) == 0:
-        return load(symbol, exchange, interval)
+        return load(symbol, exchange, interval, columns)
 
     inc = incoming.copy()
     inc["date"] = pd.to_datetime(inc["date"], errors="coerce")
     inc = inc.dropna(subset=["date"])
-    for col in COLUMNS:
+    for col in cols:
         if col not in inc.columns:
-            inc[col] = 0.0
-    inc = inc[COLUMNS]
+            # NaN, not 0.0, for a non-OHLCV series: a missing metric is unknown, and 0
+            # is a value a model would learn from. Bars keep the old 0.0 fill because a
+            # provider omitting volume genuinely means none was reported.
+            inc[col] = 0.0 if not columns else float("nan")
+    inc = inc[cols]
 
-    existing = load(symbol, exchange, interval)
+    existing = load(symbol, exchange, interval, columns)
     before   = 0 if existing is None else len(existing)
 
     combined = inc if existing is None else pd.concat([existing, inc], ignore_index=True)
     combined = (combined
-                .dropna(subset=["date", "close"])
+                .dropna(subset=required)
                 .drop_duplicates(subset=["date"], keep="last")   # newer fetch corrects older
                 .sort_values("date")
                 .reset_index(drop=True))
 
     if existing is not None and len(combined) < before:
-        logger.error(f"[store] refusing to shrink {symbol} from {before} to {len(combined)} bars")
+        logger.error(f"[store] refusing to shrink {symbol} from {before} to {len(combined)} rows")
         return existing
 
     csv_path, meta_path = paths(symbol, exchange, interval)
@@ -147,13 +183,14 @@ def merge(symbol: str, incoming: pd.DataFrame, exchange: str = "NSE",
     except Exception as e:
         logger.warning(f"[store] could not write provenance for {symbol}: {e}")
 
-    logger.info(f"[store] {symbol} {exchange} {interval}: {len(combined)} bars "
+    unit = "bars" if not columns else "rows"
+    logger.info(f"[store] {symbol} {exchange} {interval}: {len(combined)} {unit} "
                 f"({record['firstBar']} → {record['lastBar']}, +{record['barsAdded']} from {source})")
     return combined
 
 
 def is_stale(symbol: str, exchange: str = "NSE", interval: str = "1d",
-             max_age_days: int = 1) -> bool:
+             max_age_days: int = 1, columns: Optional[list] = None) -> bool:
     """
     Does the store need topping up?
 
@@ -161,7 +198,7 @@ def is_stale(symbol: str, exchange: str = "NSE", interval: str = "1d",
     today": on a Sunday the newest available bar is Friday's, and treating that as
     stale would re-fetch all weekend for nothing.
     """
-    df = load(symbol, exchange, interval)
+    df = load(symbol, exchange, interval, columns)
     if df is None or len(df) == 0:
         return True
     last = pd.Timestamp(df["date"].iloc[-1]).normalize()

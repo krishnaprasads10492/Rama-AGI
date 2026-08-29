@@ -1724,6 +1724,7 @@ authenticated **Master session**, not merely an open store.
 | 82 | StockMind — the defects that made its prediction output meaningless | done | Section 64. Commit `48af9c1`. Retroactive row: Section 64 was written but never given a ledger row, so a cold session reading the ledger alone would not have known this work existed. Twelve fixes, the load-bearing ones being: `platt_scale` computed `1/(1+exp(p))` and was documented as "identity" while being monotonically **decreasing** — a more confident input produced a *lower* calibrated probability, so the whole grade ladder was inverted and A+ was unreachable; `/health` reported a hardcoded 7-of-4 models loaded; 37 feature names were zipped against a 59-value vector, so every named lookup past the drift point read a different feature than it claimed; `detect_regime` indexed the wrong vector positions; the ensemble's output was computed and discarded; and signal multiplicity was faked by re-calling the model with jittered noise. Decisions that must not be re-litigated: **Platt is applied to the log-odds** (`sigmoid(A*logit(p)+B)`), which is a genuine identity at `A=1,B=0` — merely flipping the sign still scales the wrong quantity and breaks the moment real `A,B` are fitted; **`ece`/`brierScore` report `null` with `calibrationMeasured:false`**, never `0`, because 0 reads as perfect calibration; **`is_available()` (can answer) is split from `is_trained()` (loaded artifact)**, found because `RegimeAwareModel` set `loaded=True` in its constructor and counted itself as trained; **feature names are derived from `compute_features_dict`**, which kills the name/vector drift class permanently rather than repairing the hand-maintained list; and **N signals are N risk-geometry variants of ONE prediction** (`RISK_VARIANTS`) with `barrier_probability = pb/(pb+(1-p)a)`, which reduces to `b/(a+b)` driftless and to `p` at symmetric barriers. 74 assertions in `ai_backend/tests/test_defects.py`. |
 | 83 | StockMind — real market data, decades deep, free first | done | Section 65. Commit `637ba2c`. Retroactive row, same gap as 82. `ai_backend/engine/providers.py` (free-first chain with premium slots, each independently enable/disable-able by env) + `ai_backend/engine/store.py` (local append-only CSV store) + `get_ohlcv` rewired through both. **Live verified: 4,649 daily NIFTY50 bars, 2007-09-17 → 2026-08-28.** Decisions: **the local store is primary and providers exist to fill it**, not to answer requests — every free provider rate-limits, and a backtest whose data depends on whoever answered an HTTP call is not reproducible; **Alpha Vantage is registered `premium` despite a free key existing**, because 25 calls/day × 100 points means a decade of history costs a month of quota, and classifying it free would strand the chain; **Yahoo is queried with explicit `period1`/`period2` epochs, never `range=max`** — `range=max&interval=1d` **silently downsamples to monthly** (228 bars for 18.9 years), which is the kind of failure that passes every "did we get data?" check, so the test now asserts **bars-per-year ≥ 150 and median gap ≤ 5 days** instead of a bare count; **CSV not parquet**, since `pyarrow` is large, the pins are deliberate (I12), and 30 years of daily bars is ~7,500 rows. The store **refuses to shrink**, writes via atomic `os.replace`, and computes staleness business-day-aware. 57 assertions in `ai_backend/tests/test_store.py`. `ai_backend/data/` is gitignored. |
 | 84 | StockMind — a backtest that measures the predictor, and the infinite loop it uncovered | done | Section 66. Task 1 of 6. `ai_backend/engine/backtest.py` rewritten (499 → 494 lines, ~200 of them previously dead). The old file **did not test the predictor at all**: four functions were defined twice so the first ~210 lines were unreachable including a `run_backtest` whose signature did not match `main.py`'s call; `MODEL_REGISTRY` was never touched and `train_size` was computed and never used, so it measured a fixed ATR bracket. Six defects fixed, each of which moved a reported number: `grade` was `0.5 + rr*0.1 + (0.05 if outcome != "SL_HIT" else -0.1)` — **read off the answer key**, straight lookahead; `TIMEOUT` was booked as a **full stop-loss**, turning "nothing happened" into "maximum loss"; T2/T3 wins were credited at **T1 size**, understating wins while overstating losses and so biasing P&L, Sharpe and Calmar in opposite directions at once; windows advanced by `test_size // 10`, so **each bar was re-tested about ten times** and `signalsTested` was inflated an order of magnitude. Decisions: **windows are non-overlapping** — a trade resolves before the next candidate begins, so `signalsTested` means what it says; **the stop is assumed hit first** on intrabar ambiguity, because OHLC cannot resolve the order and the alternative manufactures profit; **TIMEOUT is marked to market**; **Sharpe/Sortino are annualised** via `INTERVAL_PERIODS_PER_YEAR` scaled by realised trade frequency, since `mean/std` unscaled is not a Sharpe ratio and reporting it as one invites a comparison that cannot be made; **grade comes from pre-trade edge and geometry only**; **`stable = None`, `action = "measured"`** — the old 75% accuracy floor on a mechanical bracket produced a permanent `retrain_required`, which is a verdict nobody can act on; **`FEATURE_WINDOW = 400`** trailing slice, since no feature looks back past 252 bars, so values are identical to passing full history at O(400) rather than O(idx). **The find of this pass is not in this file.** `run_backtest` completed at 100 trades and hung indefinitely at 400 on real NIFTY data. `faulthandler.dump_traceback_later` put three consecutive stack dumps inside a four-line span of `advanced_features.market_profile_features`: the value-area expansion loop read an exhausted side's contribution as `0`, so on a 0-vs-0 tie `add_high >= add_low` chose the high side, `min(va_high_b + 1, n - 1)` clamped to the same index and `va_vol += 0` changed nothing — while the `or` in the loop condition stayed true because the low side still had room. **A genuine infinite loop, reachable on data alone** whenever the POC lands in the top bucket with an empty bucket beneath it, which 20 bars binned into 20 buckets produces routinely, and which Yahoo's zero-volume early NIFTY history makes common. **This hung live `/predict` calls, not only backtests** — it was found through the backtest because the backtest is the first thing to call the feature stack thousands of times. Fixed structurally, not with a counter: a `-1` sentinel keeps an exhausted side out of the comparison and exactly one index moves per iteration, so the loop is bounded by `n_buckets - 1` by construction. Proven both directions before shipping: a crafted frame (POC at bucket 19 holding 200 of 390, bucket 18 holding 0.0) ran the **old** loop 50,000 iterations with *no state change at all*, and returns under the new one. Also **removed** an iteration guard I had added to `run_backtest` while chasing the wrong cause — it was unreachable (`idx` advances on every path) and its comment blamed the wrong thing, and a guard that cannot fire only misdirects the next reader. Verified: **202 assertions green** — `tests/test_defects.py` 83 (74 + 9 new, run on threads with join timeouts because an assertion cannot catch a loop that never returns, including a 180-window sweep with scattered zero volume), `tests/test_store.py` 57, `tests/test_backtest.py` 62 (new file). Full 18.9-year NIFTY run now completes in **4.3s for 715 independent trades**: 48.8% won, Sharpe 0.78, max drawdown 31.8%, ECE 0.017. Note for the next session: the first 100 trades alone showed 58% and Sharpe 2.12 — the 2009-11 recovery — which is exactly why the cap must not be left low. **Next step: task 2 of 6** — free NSE derivatives and flows (Bhavcopy archives, option chain OI/PCR/max pain, FII/DII, delivery %) into `providers.py` + `store.py`. Then task 3 (outcome recording → `update_from_outcome`, which is currently **never called**), task 4 (training, blocked on master's horizon answer — asked 3×, defaulting to 5 bars/swing), task 5 (news → impact via free RSS), task 6 (the chart: `recharts@2.15.3` is installed and **never imported**; needs OHLCV over IPC on `stockmind:` channels, prefix already allowlisted in `preload.cjs`, and note `!node_modules/recharts/**` is excluded from asar). |
+| 85 | StockMind — NSE derivatives and institutional flows, free and backtestable | done | Section 67. Task 2 of 6. New `ai_backend/engine/derivatives.py`; `store.py` generalised; five routes added to `main.py`. **Every endpoint was probed live before the design was fixed**, because NSE moved its archive host and changed the bhavcopy format in 2024 and most published guidance is stale. Findings that shaped the build: **`api/option-chain-indices` is 404** — the endpoint nearly every tutorial and most wrapper libraries still use — and its replacement `option-chain-v3` **requires an expiry**, returning `{}` with status **200** without one, a silent empty that reads as "no options today" rather than a missing parameter. **Derivatives history reaches 2001**: UDiFF (`nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_...`) covers ~2024 onward, the legacy layout (`/content/historical/DERIVATIVES/...`) covers 2001–2024, they agree in the overlap, and 2001 is when index options began trading in India rather than an archive limit — so the two together are the entire history of the instrument class. Decisions: **the archives are primary and the live chain is an intraday top-up**, because the chain describes today while the archive describes every day since 2001 and only the archive can feed a backtest or train a model (same reasoning as Section 65's store-is-primary; the live chain is the more tempting build and can only ever support a dashboard); **derived daily metrics are persisted, not raw contracts** — 21 years at ~30,000 contract rows a day is ~150M rows, which would break the CSV choice of Section 65 and force parquet or a database, whereas one feature row per symbol-day is ~5,000 rows, the same order as an OHLCV series; **`straddle_pct` instead of implied volatility**, since neither bhavcopy carries IV and back-solving Black-Scholes across 21 years needs assumed rate and dividend curves, while the ATM straddle over spot *is* the market's priced expected move and assumes nothing — a computed IV would look more sophisticated and be less honest; **spot comes from the OHLCV store for both formats**, because UDiFF carries `UndrlygPric` and legacy carries none, and a ratio whose denominator changes provenance at the 2024 boundary makes `max_pain_dist` and `fut_basis_pct` encode *which file the row came from* — the model would learn the archive boundary, the same failure as the Section 64 time-features bug; **a 404 means "not published", not "failed"** (holidays and weekends both 404 with an HTML body — verified on 2026-01-15 and Sunday 2026-08-30), remembered in a memo file so a deep backfill does not re-request every holiday since 2001 on every run; **never advertise brotli** — the first probe sent `Accept-Encoding: br`, NSE honoured it, and the bundled httpx has no decoder, so `fiidiiTradeReact` returned **status 200 with 115 bytes of undecodable binary that parsed as neither JSON nor an error**, reading exactly like a working endpoint returning junk (adding a brotli package would fix the symptom and cost a pinned dependency for kilobyte payloads; also `https://www.nseindia.com/` returns **403** while `/option-chain` and `/all-reports` return 200 and set the required cookies, so warming on the root — the obvious choice — yields a 401); **the existing store was generalised rather than duplicated** — `load`/`merge`/`is_stale` take an optional column set defaulting to OHLCV so every existing caller is untouched (I11), because a parallel store would have re-implemented and then drifted from six properties that are easy to get wrong, and ledger row 19 exists precisely because nineteen subsystems were once duplicated this way; **max pain is vectorised** as a broadcast payout matrix, since Section 66 was a session lost to a Python loop over market data and this is the same shape at ~11,000 terms per day across 21 years. Built: both bhavcopy parsers into one canonical frame, the derived metric row (PCR OI and volume, max pain and distance, max CE/PE OI strikes with normalised distances, OI concentration as a Herfindahl index measuring pinning, straddle percentage, futures basis, futures OI and change, rollover percentage, days to expiry), the resumable backfill, participant-wise OI (Client/DII/FII/Pro — **the historical positioning signal**, unlike `fiidiiTradeReact` which is latest-day only), delivery percentage, and the live chain. Routes: `GET /derivatives/sources`, `GET /derivatives/{symbol}`, `POST /derivatives/sync`, `GET /derivatives/chain/{symbol}`, `GET /flows` — **every response carries `backtestable`**, because without it a snapshot and a backfillable series are indistinguishable to the caller and someone will eventually build a "backtest" on a snapshot. **One real defect found by the tests, in a class worth remembering:** `delivery_data` stripped whitespace from text columns behind `if df[c].dtype == object`, and on pandas 3 text columns are dtype `str`, not `object`, so the branch never ran, `SERIES` kept its leading space, every `== "EQ"` filter matched nothing, and RELIANCE looked absent from a file it was plainly in. **On pandas 2 the same code works** — it would have shipped and broken on an upgrade. Fixed by parsing correctly (`skipinitialspace=True`) rather than sniffing dtypes. Also fixed: `latest_metrics` returned `pd.Timestamp` and `np.float64`, which survive a dict comprehension and fail at `json.dumps` — it crosses IPC, so that would have surfaced as a broken panel rather than a type error; and `sync_history` silently skipped weekends, so its counters did not account for every requested day and a quiet fortnight read as a failure. **Verified: 334 assertions green** — `test_derivatives.py` 132 (new: both layouts, the legacy `OPTION_TYP == 'XX'` futures trap, max pain against a brute-force implementation of its definition on 60 random chains, the spot-provenance rules, the store generalisation including that OHLCV behaviour is unchanged, plus live calls against the exchange and a real backfill), `test_defects.py` 83, `test_store.py` 57, `test_backtest.py` 62. Live confirmations: 2026-08-28 NIFTY PCR 0.776, max pain 24,200 against spot 24,175.65, resistance 24,300, support 24,000; legacy 2020-06-10 PCR 0.959; FII index-futures long/short ratio 0.107 (heavily net short); RELIANCE delivery 59.33%; FII net −5,039.8 Cr against DII +5,183.93 Cr. All five routes exercised end to end through `TestClient`, including that `/derivatives/sources` is not shadowed by `/derivatives/{symbol}` and that a malformed date returns 400 rather than being ignored. **Not built** (stated rather than implied): per-contract Greeks and a fitted volatility surface (needs rate and dividend curves to be more than decoration); intraday chain snapshots on a timer (a data-collection service, and it needs master's decision on whether Rāma holds a market-hours process open); BSE derivatives. **Next step: task 3 of 6** — outcome recording and the learning loop: persist every signal, resolve it against later bars, and call `update_from_outcome`, which is **currently never called anywhere**. That is what makes `adaptiveWeight` real and lets `/health` report measured ECE and Brier instead of `null`. The derivative metrics built here are stored but **not yet in the feature vector** — wiring them in changes the model's input dimension, so it belongs with task 4's training rather than being bolted onto a heuristic ensemble that has no way to weigh them. |
 
 ### Resume checklist for a cold session
 
@@ -6050,3 +6051,186 @@ PCR / max pain, FII-DII flows, delivery percentage) into `providers.py` and `sto
 Still blocked and asked three times: **the trading horizon** — intraday, swing-days, or
 positional-weeks. Task 4 cannot define a training label without it, and the current
 default of 5 bars is a placeholder for a decision only master can make.
+
+---
+
+## SECTION 67 — StockMind: NSE derivatives and institutional flows, free and backtestable
+
+Task 2 of the six-part StockMind build. Master's requirement covers "derivatives" and
+"impact on index, stocks and derivatives" explicitly, on free resources.
+
+*Written before implementing, per Section 28's working agreement.*
+
+### What was probed, and what is actually true today
+
+Nothing here is assumed. Every endpoint below was called from this machine before the
+design was fixed, because NSE moved its archive host in 2024 and changed the bhavcopy
+format, and most published guidance is stale.
+
+**Works — archives (`nsearchives.nseindia.com`), and therefore backtestable:**
+
+| What | Path | Verified |
+|---|---|---|
+| F&O bhavcopy, UDiFF | `/content/fo/BhavCopy_NSE_FO_0_0_0_{YYYYMMDD}_F_0000.csv.zip` | 29,852 rows for 2026-08-28 |
+| F&O bhavcopy, legacy | `/content/historical/DERIVATIVES/{YYYY}/{MON}/fo{DDMONYYYY}bhav.csv.zip` | 38,267 rows for 2020-06-10 |
+| Cash bhavcopy, UDiFF | `/content/cm/BhavCopy_NSE_CM_0_0_0_{YYYYMMDD}_F_0000.csv.zip` | 3,613 rows |
+| Delivery percentage | `/products/content/sec_bhavdata_full_{DDMMYYYY}.csv` | 3,461 rows, `DELIV_QTY` + `DELIV_PER` |
+| Participant-wise OI | `/content/nsccl/fao_participant_oi_{DDMMYYYY}.csv` | Client / DII / FII / Pro / TOTAL |
+| Participant-wise volume | `/content/nsccl/fao_participant_vol_{DDMMYYYY}.csv` | same shape |
+
+**Works — live JSON (`www.nseindia.com/api`), snapshot only:**
+`marketStatus`; `fiidiiTradeReact` (FII/FPI and DII buy/sell/net, latest day);
+`option-chain-contract-info?symbol=X` (expiry and strike lists);
+`option-chain-v3?type=Indices&symbol=X&expiry=DD-MMM-YYYY` (full chain, plus
+`filtered.CE.totOI` / `filtered.PE.totOI`).
+
+**Dead:** `api/option-chain-indices?symbol=NIFTY` returns **404**. This is the endpoint
+almost every tutorial and most wrapper libraries still use. `option-chain-v3` **without**
+an `expiry` returns `{}` with status 200 — a silent empty, not an error, which is the
+failure mode most likely to be mistaken for "no options today".
+
+### Depth: derivatives history goes back to 2001
+
+| Date | UDiFF | Legacy |
+|---|---|---|
+| 2026-08-28 | 29,852 | 404 |
+| 2025-06-10 | 33,933 | 404 |
+| 2024-06-10 | 46,303 | 46,303 |
+| 2022-06-10 | 404 | 63,559 |
+| 2010-06-10 | 404 | 26,637 |
+| 2004-06-10 | 404 | 6,044 |
+| 2002-06-10 | 404 | 1,667 |
+| 2001-06-11 | 404 | **39** |
+
+UDiFF covers roughly 2024 onward; legacy covers 2001 to 2024, with an overlap where both
+answer identically. 2001 is not a limit of the archive — it is when index options started
+trading in India. **So the two formats together are the entire history of the instrument
+class**, which is the honest answer to master's "since the introduction of online market
+data".
+
+### Decision 1 — derivatives history comes from the archives, not the live option chain
+
+The live chain describes today. The archive describes every day since 2001. Only the
+archive can feed a backtest or train a model, so **the archive is the primary source and
+the live chain is an intraday top-up**, labelled as not backtestable wherever it appears.
+
+This is the same reasoning as Section 65's "the store is primary, providers fill it", and
+it is worth restating because the live chain is the more tempting thing to build: it is
+one HTTP call, it looks impressive, and it can only ever support a dashboard.
+
+### Decision 2 — persist derived daily metrics, not raw contract rows
+
+Twenty-one years at ~30,000 contract rows a day is on the order of 150 million rows. That
+would break the CSV choice made in Section 65 and force parquet or a database.
+
+The model consumes **features**, not contracts. So for each `(symbol, date)` one row is
+computed and stored — about 5,000 rows for the full history, which is the same order as
+an OHLCV series and fits the existing store exactly. Raw contract frames are parsed,
+used, and dropped.
+
+Stored per symbol per day:
+
+- **Options:** `pcr_oi`, `pcr_volume`, `ce_oi`, `pe_oi`, `ce_oi_chg`, `pe_oi_chg`,
+  `max_pain`, `max_pain_dist`, `max_ce_oi_strike`, `max_pe_oi_strike`,
+  `resistance_dist`, `support_dist`, `oi_concentration` (Herfindahl across strikes —
+  measures pinning), `straddle_pct`, `strikes_count`, `days_to_expiry`
+- **Futures:** `fut_close`, `fut_basis_pct`, `fut_oi`, `fut_oi_chg`, `rollover_pct`
+- **Provenance:** `spot`, `expiry`, `source` (`udiff` / `legacy`)
+
+**`straddle_pct` is used instead of implied volatility.** Neither bhavcopy format carries
+an IV column, and back-solving Black-Scholes per contract across 21 years is a large
+amount of machinery resting on assumed rates and dividends. The ATM straddle as a
+fraction of spot *is* the market's priced expected move to expiry, it is one subtraction
+away from the raw data, and it needs no assumptions. Reporting a computed IV would be
+more impressive and less honest.
+
+### Decision 3 — spot comes from the OHLCV store, not from the file
+
+UDiFF carries `UndrlygPric`. **Legacy does not.** Rather than have two different notions
+of spot depending on which archive a date came from, spot is read from the existing
+OHLCV store for that date, for both formats.
+
+That also removes a class of silent inconsistency: `max_pain_dist` and `fut_basis_pct`
+are ratios against spot, and a metric whose denominator changes source mid-history is a
+feature that encodes *which file it came from*. The model would learn the archive
+boundary. This is the same failure the Section 64 time-features bug had — a feature
+carrying provenance rather than market state.
+
+### Decision 4 — a 404 means "not published", not "failed"
+
+Holidays and weekends both return **404 with an HTML body** (verified: 2026-01-15, a
+trading holiday, and Sunday 2026-08-30). A 404 is therefore normal and expected for a
+large fraction of calendar dates.
+
+It is recorded as a known non-publication so a historical backfill does not re-request it
+on every run, and it is reported separately from a genuine fetch failure. Conflating the
+two would either spam the exchange or make a backfill look broken.
+
+### Decision 5 — never advertise brotli
+
+The first probe sent `Accept-Encoding: gzip, deflate, br`. NSE honoured `br`, and the
+bundled `httpx` has no brotli decoder, so `fiidiiTradeReact` and `marketStatus` returned
+**status 200 with 115 bytes of undecodable binary that parsed as neither JSON nor an
+error**. It read exactly like a working endpoint returning junk.
+
+Advertising an encoding we cannot decode is the bug. Adding a brotli dependency would fix
+the symptom at the cost of a new pinned package (I12) for no benefit — the payloads are
+kilobytes. `Accept-Encoding: gzip, deflate` only.
+
+Also: `https://www.nseindia.com/` returns **403**, while `/option-chain` and
+`/all-reports` return 200 and set the cookies the API requires. Warming on the root — the
+obvious choice — yields one cookie and a subsequent 401.
+
+### Decision 6 — generalise the existing store rather than write a second one
+
+`store.py` had `COLUMNS` fixed to OHLCV. It also has the properties this data needs and
+that are easy to get wrong: append-only with de-duplication on the date key, **refuses to
+shrink**, atomic `os.replace`, per-symbol provenance, business-day-aware staleness.
+
+So `load` / `merge` / `sync` take an optional column set, defaulting to OHLCV so every
+existing caller is untouched (I11, additive). A parallel derivatives store would have
+duplicated all six properties and drifted from them — and ledger row 19 exists precisely
+because nineteen subsystems were once duplicated this way.
+
+### Decision 7 — max pain is vectorised
+
+Max pain is the strike at which option writers pay out least, evaluated across every
+strike: an O(strikes²) computation, ~11,000 terms for a NIFTY expiry. Computed as a
+broadcast payout matrix (`clip(S[:,None] - S[None,:], 0, None) @ ce_oi` plus the mirror
+for puts) rather than a nested Python loop.
+
+Section 66 was lost to a Python loop over market data. Doing this one per-day across 21
+years in nested Python would be ~55 million interpreted iterations for a number that
+numpy produces in milliseconds.
+
+### Verified derivations, before any of it was wired in
+
+Against 2026-08-28 NIFTY, nearest expiry 2026-09-01, spot 24,175.65:
+
+- CE OI 181,520,495 / PE OI 140,861,175 → **PCR(OI) 0.776**
+- Max CE OI strike **24,300** (resistance), max PE OI strike **24,000** (support)
+- **Max pain 24,200** — 24 points from spot, which is what pinning near expiry should look
+  like
+- Futures: three expiries, near 24,341.9 with OI 15,370,875 and OI change +359,840
+- Participant OI: FII index futures **long 24,157 vs short 226,790** — a real
+  institutional-positioning signal, and available historically, unlike `fiidiiTradeReact`
+  which only gives the latest day
+
+And against legacy 2020-06-10 NIFTY, expiry 2020-06-11: 88 CE / 88 PE, PCR 0.959. The
+same derivation runs on both formats.
+
+One legacy detail that will bite anyone who assumes otherwise: **`OPTION_TYP` is `XX` for
+futures rows**, not blank or null, and there is a trailing `Unnamed: 15` column. The
+participant-OI file has a quoted title on line 1 with the real header on line 2, and
+several column names carry trailing spaces.
+
+### Scope, stated
+
+Built here: both bhavcopy parsers, the canonical contract frame, the derived metric row,
+the historical backfill, participant-wise OI, delivery percentage, FII/DII latest, and the
+live chain as a top-up.
+
+**Not built here:** per-contract Greeks and a fitted volatility surface (needs a rate and
+dividend curve to be more than decoration); intraday option-chain snapshots on a timer
+(that is a data-collection service, not a feature, and it needs master's decision on
+whether Rāma should hold a market-hours process open); BSE derivatives.

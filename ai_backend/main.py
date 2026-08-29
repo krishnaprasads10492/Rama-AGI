@@ -13,6 +13,11 @@ Endpoints:
   GET  /backtest/presets     — timeframe presets for the backtest UI
   POST /backtest              — walk-forward backtest
   POST /strategy/score        — composite strategy score (10 algorithms)
+  GET  /derivatives/sources   — NSE derivative sources, and which are backtestable
+  GET  /derivatives/{symbol}  — stored option/future metrics (PCR, max pain, basis)
+  POST /derivatives/sync      — backfill derivative metrics from the NSE archives
+  GET  /derivatives/chain/{s} — live option chain snapshot (NOT backtestable)
+  GET  /flows                 — FII/DII cash, participant-wise OI, delivery %
 
 Started by electron/ipc/aiProcess.cjs (spawn python -u main.py), reached from
 the renderer through electron/ipc/marketIntel.cjs — this process itself has
@@ -179,6 +184,127 @@ def strategy_score(req: StrategyScoreRequest):
         return result
     except Exception as e:
         logger.error(f"Strategy score error for {req.symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Derivatives and flows (spec Section 67) ───────────────────────────────────
+#
+# `backtestable` is returned on every response here, deliberately. The archive-derived
+# metrics can be recomputed for any past day and so can train a model or feed a backtest;
+# the live chain and the FII/DII cash number describe one moment and cannot. Without that
+# flag on the response, the two are indistinguishable to the caller and someone will
+# eventually build a "backtest" on a snapshot.
+
+@app.get("/derivatives/sources")
+def derivative_sources():
+    from engine.derivatives import registry as deriv_registry
+    return {"sources": deriv_registry()}
+
+
+@app.get("/derivatives/{symbol}")
+def derivative_metrics(symbol: str, exchange: str = "NSE", history: int = 0):
+    """Stored option/future metrics for a symbol. `history=N` returns the last N rows."""
+    try:
+        from engine import derivatives as dv
+        latest = dv.latest_metrics(symbol, exchange)
+        out = {"symbol": symbol.upper(), "exchange": exchange, "backtestable": True,
+               "latest": latest, "rows": 0, "history": []}
+        df = dv.load_metrics(symbol, exchange)
+        if df is not None and len(df):
+            out["rows"] = int(len(df))
+            out["firstDate"] = str(df["date"].iloc[0])[:10]
+            out["lastDate"]  = str(df["date"].iloc[-1])[:10]
+            if history > 0:
+                tail = df.tail(min(history, 2000)).copy()
+                tail["date"] = tail["date"].astype(str).str.slice(0, 10)
+                out["history"] = tail.where(tail.notna(), None).to_dict("records")
+        if latest is None:
+            out["note"] = ("Nothing stored yet for this symbol. POST /derivatives/sync "
+                           "to backfill from the NSE archives.")
+        return out
+    except Exception as e:
+        logger.error(f"Derivative metrics error for {symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DerivativeSyncRequest(BaseModel):
+    symbol:   str = "NIFTY"
+    exchange: str = "NSE"
+    # One bhavcopy is roughly a megabyte, so a deep backfill is thousands of requests.
+    # It is bounded and resumable rather than one heroic call: re-running continues.
+    days:     int = Field(default=30, ge=1, le=9000)
+    budgetSeconds: float = Field(default=120.0, gt=0, le=3600)
+    force:    bool = False
+
+
+@app.post("/derivatives/sync")
+def derivative_sync(req: DerivativeSyncRequest):
+    """
+    Backfill derivative metrics, newest first, within a time budget.
+
+    Newest-first so a partial run still leaves the most recent data present — which is
+    what a prediction needs. Re-run to go deeper; stored dates and known holidays are
+    skipped, so it converges rather than re-fetching.
+    """
+    try:
+        from engine import derivatives as dv
+        _, info = dv.sync_history(req.symbol, req.exchange, days=req.days,
+                                  force=req.force, budget_seconds=req.budgetSeconds)
+        if info.get("budgetHit"):
+            info["note"] = ("Time budget reached — this is normal for a deep backfill. "
+                            "Call again to continue from where it stopped.")
+        return info
+    except Exception as e:
+        logger.error(f"Derivative sync error for {req.symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/derivatives/chain/{symbol}")
+def derivative_chain(symbol: str, expiry: Optional[str] = None, kind: str = "Indices"):
+    """Live option chain. A snapshot — use /derivatives/{symbol} for anything historical."""
+    try:
+        from engine.derivatives import option_chain
+        return option_chain(symbol.upper(), expiry, kind)
+    except Exception as e:
+        logger.error(f"Option chain error for {symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/flows")
+def institutional_flows(date: Optional[str] = None, symbol: Optional[str] = None):
+    """
+    Institutional positioning: FII/DII cash, participant-wise OI, and delivery percentage.
+
+    Participant-wise OI is the one worth building on — it is a dated archive file, so it
+    can be backfilled, and it says whether foreign institutions are net long or short
+    index futures. The FII/DII cash figure is latest-day only and cannot be backfilled
+    from this endpoint at all.
+    """
+    try:
+        import datetime as _dt
+        from engine import derivatives as dv
+
+        d = None
+        if date:
+            try:
+                d = _dt.date.fromisoformat(date)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+        if d is None:
+            d = _dt.date.today()
+            while d.weekday() >= 5:
+                d -= _dt.timedelta(days=1)
+
+        out = {"date": d.isoformat(),
+               "cash": dv.fii_dii_latest(),
+               "participantOi": dv.participant_oi(d)}
+        if symbol:
+            out["delivery"] = dv.delivery_data(d, symbol=symbol.upper())
+        return out
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Flows error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
