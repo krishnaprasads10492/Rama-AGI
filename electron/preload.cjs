@@ -311,6 +311,8 @@ const RAMA_API = {
 
   // ── Local Update (master's own local CI/CD — pull → install → build → apply) ──
   update: {
+    // Respawns only the Python engine — for a pull that changed ai_backend but nothing else.
+    restartBackend: (opts)        => ipcRenderer.invoke('update:restart-backend', opts),
     check:        (repoPath)      => ipcRenderer.invoke('update:check', { repoPath }),
     pullBuild:    (opts)          => ipcRenderer.invoke('update:pull-build', opts),
     reloadWindow: (opts)          => ipcRenderer.invoke('update:reload-window', opts),

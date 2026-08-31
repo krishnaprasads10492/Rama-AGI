@@ -1738,6 +1738,8 @@ authenticated **Master session**, not merely an open store.
 | 96 | StockMind — the projection cone and the risk ruler | done | Section 78. Master asked for the prediction *"visually displayed in the charts in the form of graph"*. A forecast drawn on a chart is the most persuasive object a trading tool can produce, so the question was what shape is honest. **A CONE, NEVER A PATH** — rejected drawing a predicted price line forward, because a line implies Rāma knows the path, which it does not know even with a good model, and none has cleared the gate; a line would be the chart-shaped version of the failure Section 76 exists to prevent. **THE WIDTH OF THE CONE IS MEASURED, THE TILT OF ITS CENTRE IS THE MODEL'S** — that split is the whole design. Width is realised volatility over stored bars scaled `σ_h = σ_1 √h`, bands at ±1σ and ±2σ, a fact. The centre stays **flat** unless a model is entitled, and a gate-refused model tilts it by **nothing at all** while `tilted: false` and `tiltReason` say so — so on today's data master gets a correct, useful, honest cone with a flat centre, answering "what is a normal move from here over five days?", which StockMind could not previously answer at all. **THE RISK RULER is the part worth more than the cone**: a stop within one bar's ordinary range will be hit by noise rather than by being wrong (`stopBarsOfNoise`), and a target within 1σ of the horizon is a move the instrument makes anyway, so the thesis is not what would produce the profit even if the trade works. Both are arithmetic — `MEASURED`, actionable today, no model needed, the same discipline as Section 75. Reward-to-risk is computed against master's own levels. **Volatility from log returns with ATR reported alongside** rather than one chosen: σ is the right input for √h scaling, ATR is what a trader reads a stop against, and their disagreement is informative. **Sigma is measured on the interval being projected** — scaling a daily sigma to hours by ÷√7 would assume intraday variance is uniform across the session, which is false since the open and close carry most of it. **Forward timestamps come from the observed median bar spacing, not a calendar assumption** — hardcoding "one day" would put a daily cone on Saturdays and an hourly cone in the middle of the night. **Capped at 40 bars** because √h growth makes a 200-bar cone say only "anything can happen", which is true and useless. `engine/projection.py`: `volatility`, `project`, `assess_levels`, `forecast`. Routes `GET /forecast/{symbol}` and `GET /volatility/{symbol}`, channels `market:forecast` / `market:volatility` on `stockmind.view`. **Verified: `test_projection.py`, 77 assertions, passing first run** — sigma recovers a constructed 1% step series to 0.02, sigma at bar 9 is exactly 3× bar 1, a **0.95 probability with no entitlement leaves every centre point equal to the anchor** while the width still measures correctly, the same 0.95 *with* an entitlement does tilt it (so the gate does the work, not a hardcoded refusal), the tilt never exceeds one horizon-sigma, and no daily forward stamp lands on a weekend. |
 | 97 | StockMind — the chart that was actually broken, and the UI the last four sections lacked | done | Section 79. Master: *"the charts... I don't think they are working as expected"*. **He was right and the cause was specific.** `PriceChart.jsx` rendered `viewBox="0 0 900 h"` with **`preserveAspectRatio="none"`** at `width: 100%`, which stretches the entire drawing horizontally to fit the container — so at any width other than exactly 900px, which is every real window, glyphs distorted, `strokeWidth="1"` stopped being one pixel, and candle bodies widened independently of their height. Four faults compounded it: **no zoom or pan** (the 4,649 stored daily bars render at 0.19px per slot, a grey smear, with no way to look closer), rising candles drawn `fill: 'none'` so a 1px hollow body was near-invisible, **one React mouse handler per candle**, and date labels via `slice(2)` which turned an intraday stamp into seventeen overlapping characters. **Replaced with `lightweight-charts@5.2.1`** (pinned exact, Apache-2.0, canvas). **This does not contradict Section 71**: that decision was against *recharts* and still stands, because recharts has no candlestick primitive so using it means writing the custom SVG anyway. That reasoning is about recharts. lightweight-charts is TradingView's charting core — candles, panes, price lines, markers, zoom and crosshair are what it is built from. Section 71 is superseded on its own terms rather than reversed. **Stated plainly: this adds a runtime dependency**, and the licence requires the TradingView attribution notice, which is rendered in the chart footer, not stripped. `recharts` stays declared but unused; removing it is master's call. **What the chart draws now**, in toggleable layers defaulting to legible rather than complete: candles, volume in its own pane, **master's own fills as arrows at the bars they happened on** (the layer that changes how the page feels — "where am I inside this move?" previously required reading the table and the chart separately and doing it in your head), his thesis stop and target as thick labelled price lines (drawn heavier than a signal's suggestion, because Section 75 treats his own declarations as the strongest evidence class), signal levels, and the projection cone. **The cone is drawn dashed and grey while its centre is untilted**, with the caveat in the footer, so visual weight tracks evidence and an unvalidated projection cannot look authoritative; a flat centre gets only a faint dotted line because drawing it boldly would imply a forecast of no change. **Intraday times are converted to UTC epoch seconds, daily stays a date string** — lightweight-charts treats `'YYYY-MM-DD'` as a whole day and would collapse every bar in a session onto one point, the same defect class Section 73 fixed inside the store; the store holds intraday stamps in UTC (03:45:00 is the 09:15 IST open) so this is a parse, not a guess. **Theme colours are resolved from the app's CSS custom properties at mount** via `getComputedStyle`, because passing `var(--green)` to a canvas library silently yields no colour. **One chart instance, reused** — recreating it per render would drop master's zoom on every poll; a `ResizeObserver` handles width. **The UI: tabs, not a seven-card scroll** (CHART / SIGNALS / YOUR BOOK / WHY / ENGINE), which is what "don't cram the UI" required, with one always-visible control bar for symbol, exchange, interval and loading. New `BookPanel.jsx` (positions with trade style as a first-class column, portfolio by style, a record-a-trade form that asks for the thesis, inline restyle and close, and **alerts split by whether they may be acted on** — actionable shown, withheld collapsed behind a count with their reasons, so an unvalidated model reading never sits beside a real stop breach as if they were the same kind of statement) and `WhyPanel.jsx` (bullets grouped by `basis` in the deliberate gate→forecast→observation→convention order, conventions in muted italic, the risk ruler, and unchecked warnings shown because silence must never read as safety). The interval switcher is now a real control rather than a hardcoded `'1d'`. **A footgun fixed**: `const [interval, setInterval]` shadows the global `setInterval` inside the component, so any later timer call would fail as a mystery rather than a name collision — renamed `barInterval`. **A VERIFICATION DEFECT FOUND AND FIXED**: the first version of the panels aliased the bridge (`const bridge = window.rama?.marketIntel`) and the audit passed at 92 calls — because its static check only matches the full `window.rama.<ns>.<fn>` form, **eight real bridge calls were invisible to the very check built to catch the "not a function" bug class** (ledger row 42). The panels now use the full path. **`npm run audit` checks 100 bridge calls, up from the 89 it had been stuck at across Sections 74, 75 and 76** — that number is the real verification that the ledger, alerts, justification and forecast are finally reachable from the UI. `node --check` clean, `py_compile` clean, `vite build` succeeds, **1,421 assertions across thirteen suites**. **NOT VERIFIED, stated rather than implied: the chart has not been rendered on screen.** The shell was not launched here, so "it builds and every bridge call resolves" is not "candles draw correctly". StockMind's route chunk grew 21.6 kB → 234 kB (72.8 kB gzipped), lazy-loaded so the cost is paid only on opening the page. |
 
+| 98 | Local self-update — the Python engine was invisible, and a packaged install said so cryptically | done | Section 80. Master installed Rāma from the NSIS setup file and asked whether the latest changes could be pulled in as an update. Answering honestly surfaced two defects in `localUpdateEngine.cjs`. **(a) `classifyChange` returned `null` for the entire Python engine.** It mapped `package.json`→`deps`, `electron/`→`main`, `server/`→`server`, `src/`+`shared/`→`renderer`, and nothing else — so a pull containing new engine code set **no restart flag**, the already-running Python child kept serving the **old module set**, and new routes 404'd against a repo that visibly contained them. **The update reported success while the running system did not have the code**, which is the worst shape a bug can take; Sections 77–79 would have landed exactly this way had `electron/` not also changed and forced a full restart by luck. Two new domains: `ai_backend/requirements.txt`→`pydeps` (runs `python -m pip install -r`, then respawn) and `ai_backend/**`→`python` (respawn). **`requiresBackendRestart` is reported separately from `requiresAppRestart`, not folded into it** — relaunching the whole application to pick up an engine edit is heavier than the change needs and throws away master's window state, and the backend is a child process that can be respawned alone; rejected treating `python` as `deps`, which would have made every engine edit demand a full relaunch. **pip runs via `python -m pip`, never a bare `pip`**, because a bare `pip` on PATH can belong to a different interpreter than the one `aiProcess.cjs` spawns — the install would succeed and the backend still would not have the package; going through `-m` against the same command string aiProcess resolves makes that mismatch impossible by construction. New `aiProcess.stopPythonBackendPublic()` and an `update:restart-backend` IPC gated on `system.self-update` (stop → 700ms for the port to free → start). **(b) A packaged install cannot self-update, and failed at `git status` with a raw git error** that reads like a broken feature rather than a category error. `checkForUpdates`/`pullBuildApply` now take `packaged` and `appPath` **injected by `main.cjs` rather than read from `electron` inside the library**, which keeps the module a pure unit testable without an Electron runtime, and return `packaged`, `updatesRunningInstance` and plain-text `guidance`. **It still performs the pull when `updatesRunningInstance` is false** — rejected blocking it, because master may legitimately keep a clone on the same machine, update it through Rāma's own git UI and rebuild the installer from it, and refusing would remove a working capability (I11); what changed is that Rāma now says the running app will not be affected and names the rebuild step. When the pull does not update the running instance, the pip install and backend respawn are **skipped and reported as skipped** — installing dependencies for code that will not be loaded, or respawning a backend that reads from `resources/ai_backend`, would both be theatre. `GitSync → UPDATE` renders the guidance and the `git pull / npm install / npm run package:win` sequence on screen for a packaged install, plus a separate "Respawn Python Engine" button for an engine-only change. **Verified: `scripts/verifyUpdateEngine.cjs`, 44 assertions, `npm run verify:update`** — the first JS test harness kept in the repo, and the reason this defect survived is that row 54 verified `classifyChange` "by review", and a review cannot notice a path nobody considered. Load-bearing assertions: `ai_backend/**` classifies as `python` and **explicitly not `null`**; `requirements.txt` is `pydeps` and asserted **not** `python` (or pip would be skipped) **nor** `deps` (or npm install would fire); `docs/ai_backend-notes.md` is not python; and **a sibling with a prefix-matching name is not "inside"** — repo `C:/clones/Rama` with app `C:/clones/Rama_AGI` reports `updatesRunningInstance: false`, where a naive `startsWith` would have told master a pull updated a different install. `node --check` clean on all five touched `.cjs`, `npm run audit` clean at **101** bridge calls, `vite build` succeeds. **NOT VERIFIED: no real pull has been run end to end** — `pullBuildApply`'s pull/install/build/pip/respawn sequence and `update:restart-backend` actually cycling a Python child have not been executed against a live behind-by-N repo from here. Row 54 has carried that same gap since Section 40 and this does not close it. **For master's own machine: a setup-file install has no in-place update path**, and inventing one would mean shipping an auto-updater against unsigned artefacts with nothing published to update from (row 53 is dormant precisely because that needs his decisions on signing and publishing). The supported route is `git pull && npm install && npm run package:win`, then run the produced installer over the existing one; `data/` sits outside the app directory so passcode, users, nucleus and the StockMind store all survive. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -8043,3 +8045,128 @@ Stated rather than implied.
 The StockMind bundle grew from 21.6 kB to 234 kB (72.8 kB gzipped) with lightweight-charts
 included. It is a lazy-loaded route chunk, so this cost is paid only when master opens StockMind,
 not at app start.
+
+---
+
+## SECTION 80 — The update engine's two blind spots
+
+Master installed Rāma on his personal machine from the NSIS setup file, then asked whether the
+latest changes can be pulled in like an update. Answering that honestly surfaced two defects in
+`localUpdateEngine.cjs`.
+
+### Blind spot 1 — `ai_backend/` was invisible, so Python changes were pulled and never applied
+
+`classifyChange` mapped `package.json`→`deps`, `electron/`→`main`, `server/`→`server`,
+`src/`+`shared/`→`renderer`, and returned **`null` for everything else** — including the entire
+Python engine. Every consequence follows from that one omission:
+
+- a pull containing new engine code set **no** restart flag
+- the already-running Python child process kept serving the **old** module set
+- new routes returned 404 against a repo that visibly contained them
+
+This is the worst shape a bug can take: the update reports success, the files are genuinely on
+disk, and the running system does not have them. Section 77–79's work would have landed exactly
+this way had `electron/` not also changed and forced a full restart by luck.
+
+Two new domains:
+
+| Path | Domain | Consequence |
+|---|---|---|
+| `ai_backend/requirements.txt` | `pydeps` | `python -m pip install -r requirements.txt`, then restart the backend |
+| `ai_backend/**` (anything else) | `python` | restart the backend |
+
+**`requiresBackendRestart` is reported separately from `requiresAppRestart`, not folded into it.**
+Restarting the whole application to pick up a Python change is heavier than the change needs and
+throws away master's window state; the backend is a child process that can be respawned alone.
+Rejected treating `python` as `deps`: that would have made every engine edit demand a full app
+relaunch.
+
+**pip runs through `python -m pip`, not a bare `pip`.** A bare `pip` on PATH can belong to a
+different interpreter than the one `aiProcess.cjs` spawns, so the install would succeed and the
+backend would still not have the package. Using `-m` against the same command string aiProcess
+resolves (`python` on Windows, `python3` elsewhere) makes that impossible by construction.
+
+### Blind spot 2 — a packaged install cannot self-update, and said so cryptically
+
+Master's install came from the setup file. That copy has no `.git`, no `src/`, no `node_modules`;
+its code lives inside a read-only `app.asar`. The Update tab still appeared, and pointing it at
+the install folder failed at `git status` with a raw git error — which reads like a broken feature
+rather than a category error.
+
+`checkForUpdates` and `pullBuildApply` now take `packaged` and `appPath`, **injected by
+`main.cjs` rather than read from `electron` inside the library**, so the module stays a pure unit
+that can be tested without an Electron runtime. They return:
+
+- `packaged` — whether the running app is a packaged build
+- `updatesRunningInstance` — whether pulling this particular path would change the code this
+  process is actually executing, decided by whether `appPath` sits inside `repoPath`
+- `guidance` — plain text saying what will and will not happen
+
+**It still performs the pull when `updatesRunningInstance` is false.** Rejected blocking it:
+master may legitimately keep a clone on the same machine, update it through Rāma's own git UI, and
+rebuild the installer from it. Refusing would remove a working capability (I11). What changes is
+that Rāma now says the running app will not be affected, and names the rebuild step, instead of
+implying the update landed.
+
+When the pull does not update the running instance, the pip install and the backend restart are
+**skipped and reported as skipped** — installing dependencies for code that will not be loaded,
+or respawning a backend that reads from `resources/ai_backend`, would both be theatre.
+
+### What master has to do, given a packaged install
+
+There is no in-place update path for a setup-file install, and inventing one would mean shipping
+an auto-updater against unsigned artefacts with nothing published to update from (ledger row 53
+is dormant precisely because that needs master's decisions on signing and publishing). The
+supported route is rebuild and reinstall:
+
+```
+git pull
+npm install
+npm run package:win
+```
+
+then run the produced installer over the existing one. `data/` lives outside the app directory and
+is untouched, so the passcode, users, nucleus and StockMind store all survive.
+
+`GitSync → UPDATE` now states this on screen when it detects a packaged install, rather than
+leaving master to infer it from a git error.
+
+### Verification
+
+**`scripts/verifyUpdateEngine.cjs`, 44 assertions, `npm run verify:update`.** The first JS test
+harness kept in the repo — earlier `.cjs` logic was verified by direct invocation and the
+scripts were discarded, which is why this defect survived: `classifyChange` had been "verified by
+review against `start.cjs`'s proven classifyChange" (ledger row 54) and a review cannot notice a
+path that was never considered.
+
+It runs under plain `node` with no Electron, which is the payoff for injecting
+`packaged`/`appPath` instead of requiring `electron` inside the library.
+
+The assertions that matter:
+
+- `ai_backend/main.py` and `ai_backend/engine/projection.py` classify as `python`, and
+  **explicitly not as `null`** — that omission was the whole defect
+- `ai_backend/requirements.txt` gets its own `pydeps` domain, and is asserted **not** to classify
+  as `python` (or a pip change would skip the install) **nor** as `deps` (or it would trigger
+  `npm install`)
+- `docs/ai_backend-notes.md` is **not** python — a path merely containing the string does not count
+- **a sibling directory with a prefix-matching name is not "inside"**: repo `C:/clones/Rama` with
+  app `C:/clones/Rama_AGI` reports `updatesRunningInstance: false`. A naive `startsWith` check
+  would have said true and told master a pull had updated a different install
+- a packaged install reports `packaged: true`, `updatesRunningInstance: false`, and guidance that
+  names the setup file, the `package:win` rebuild, and that the data directory is untouched
+- an unknown `appPath` resolves to "does not update the instance" — the safe direction
+- the existing domains (`deps`, `main`, `server`, `renderer`, backslash normalisation) are pinned
+  so they cannot regress
+
+`node --check` clean on `localUpdateEngine.cjs`, `main.cjs`, `aiProcess.cjs`, `preload.cjs` and
+the new script. `npm run audit` clean at **101** bridge calls (up from 100 — `update.restartBackend`
+is now called from `GitSync.jsx`). `vite build` succeeds.
+
+### Not verified
+
+**No real pull has been run through this.** The classification and targeting are unit-tested, but
+`pullBuildApply` end to end — pull, `npm install`, `npm run build`, `pip install`, respawn — has
+not been executed against a live behind-by-N repository from here, and neither has
+`update:restart-backend` actually stopped and restarted a Python child. Ledger row 54 has carried
+the same gap since Section 40 and this does not close it.

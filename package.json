@@ -26,6 +26,7 @@
     "build:all": "vite build && electron-builder --win --mac --linux",
     "icons": "node scripts/generateIcons.cjs",
     "audit": "node scripts/auditRenderer.cjs",
+    "verify:update": "node scripts/verifyUpdateEngine.cjs",
     "rebuild": "electron-rebuild",
     "start": "electron .",
     "preview": "vite preview"

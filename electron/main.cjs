@@ -440,8 +440,15 @@ function clampZoom(v) {
 function registerLocalUpdate(ipcMain) {
   const capability = require('./lib/capability.cjs');
 
+  // `packaged` and `appPath` are INJECTED rather than read from `electron` inside the library, so
+  // localUpdateEngine stays a pure unit testable without an Electron runtime (Section 80).
+  const updateContext = () => ({
+    packaged: app.isPackaged,
+    appPath:  (() => { try { return app.getAppPath(); } catch { return null; } })(),
+  });
+
   ipcMain.handle('update:check', async (_e, { repoPath } = {}) => {
-    return localUpdateEngine.checkForUpdates(repoPath);
+    return localUpdateEngine.checkForUpdates(repoPath, updateContext());
   });
 
   ipcMain.handle('update:pull-build', async (event, { user, repoPath, force } = {}) => {
@@ -450,7 +457,7 @@ function registerLocalUpdate(ipcMain) {
       return { ok: false, error: `${who} may not trigger a local update (needs "system.self-update")` };
     }
     return localUpdateEngine.pullBuildApply({
-      repoPath, force,
+      repoPath, force, ...updateContext(),
       onLog: (chunk) => event.sender.send('update:log', chunk),
     });
   });
@@ -472,6 +479,28 @@ function registerLocalUpdate(ipcMain) {
     app.isQuiting = true;
     app.exit(0);
     return { ok: true };
+  });
+
+  // Respawn just the Python engine — needed when only ai_backend changed (Section 80). Kept
+  // separate from `update:restart-app` because relaunching the whole application to pick up an
+  // engine change is heavier than the change needs and loses master's window state.
+  ipcMain.handle('update:restart-backend', async (_e, { user } = {}) => {
+    if (!capability.can(user, 'system.self-update')) return { ok: false, error: 'Not permitted' };
+    const aiProcess = safeRequire('./ipc/aiProcess.cjs', 'AI process');
+    if (!aiProcess?.stopPythonBackendPublic) {
+      return { ok: false, error: 'AI process controls unavailable' };
+    }
+    try {
+      aiProcess.stopPythonBackendPublic();
+      // The port needs a moment to free before the new process binds it.
+      await new Promise(r => setTimeout(r, 700));
+      const started = await aiProcess.startPythonBackendPublic();
+      return started?.ok
+        ? { ok: true, pid: started.pid ?? null, message: 'Python engine respawned' }
+        : { ok: false, error: started?.error || 'the engine did not come back up' };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   });
 }
 

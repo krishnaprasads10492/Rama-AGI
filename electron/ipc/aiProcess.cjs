@@ -155,6 +155,17 @@ function resolveBackendPath() {
   return null;
 }
 
+/**
+ * Stop the Python backend from inside the main process (spec Section 80).
+ *
+ * Needed so a local update that pulled new engine code can respawn the backend without
+ * relaunching the whole application. Mirrors `startPythonBackendPublic` — the same reason it
+ * exists: main-process callers must not have to round-trip through `ipcMain.handle`.
+ */
+function stopPythonBackendPublic() {
+  return stopProcess('python');
+}
+
 function stopAll() {
   for (const key of Object.keys(processes)) {
     stopProcess(key);
@@ -184,4 +195,7 @@ async function startPythonBackendPublic() {
   }
 }
 
-module.exports = { register, stopAll, getRunningStatus, startPythonBackendPublic };
+module.exports = {
+  register, stopAll, getRunningStatus,
+  startPythonBackendPublic, stopPythonBackendPublic,
+};

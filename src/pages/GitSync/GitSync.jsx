@@ -101,6 +101,7 @@ function LocalUpdatePanel({ repoPath }) {
   const [busy,    setBusy]    = useState(false);
   const [result,  setResult]  = useState(null);
   const [log,     setLog]     = useState('');
+  const [backendMsg, setBackendMsg] = useState(null);
 
   const canUpdate = canDo('system.self-update');
 
@@ -128,6 +129,12 @@ function LocalUpdatePanel({ repoPath }) {
     if (res?.ok) load();
   };
 
+  const restartBackend = async () => {
+    setBackendMsg(null);
+    const res = await window.rama.update.restartBackend({ user: currentUser });
+    setBackendMsg(res);
+  };
+
   const applyNow = async () => {
     if (result?.requiresAppRestart) {
       await window.rama.update.restartApp({ user: currentUser });
@@ -143,9 +150,29 @@ function LocalUpdatePanel({ repoPath }) {
       <div className="section-label">LOCAL SELF-UPDATE</div>
       <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6 }}>
         Pulls the tracked branch on this machine, installs dependencies only if
-        package.json changed, and rebuilds the renderer only if src/shared changed.
+        package.json changed, rebuilds the renderer only if src/shared changed, and
+        respawns the Python engine only if ai_backend changed.
         Nothing here runs on GitHub — this is local to this install.
       </div>
+
+      {/* A packaged install cannot be self-updated. Saying so beats leaving master to infer it
+          from a raw git error (Section 80). */}
+      {(state?.packaged || result?.packaged
+        || (state && state.updatesRunningInstance === false)) && (
+        <div style={{
+          padding: '10px 12px', borderRadius: 'var(--radius)', fontSize: 11, lineHeight: 1.7,
+          background: 'rgba(255,170,0,0.06)', border: '1px solid rgba(255,170,0,0.3)',
+          color: 'var(--amber)',
+        }}>
+          {(state?.guidance || result?.guidance)}
+          {(state?.packaged || result?.packaged) && (
+            <pre style={{
+              margin: '8px 0 0', fontSize: 10, color: 'var(--text-dim)',
+              whiteSpace: 'pre-wrap',
+            }}>{'git pull\nnpm install\nnpm run package:win'}</pre>
+          )}
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 11 }}>
         <div><span style={{ color: 'var(--muted)' }}>Branch: </span>
@@ -202,10 +229,31 @@ function LocalUpdatePanel({ repoPath }) {
             </div>
           )}
 
-          {result?.ok && result.changed && (result.requiresAppRestart || result.requiresWindowReload) && (
-            <button className="btn btn-sm" onClick={applyNow}>
-              {result.requiresAppRestart ? '↻ Restart App to Apply' : '↻ Reload Window to Apply'}
-            </button>
+          {result?.ok && result.changed && result.outcome && (
+            <div style={{ fontSize: 10.5, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+              {result.outcome}
+              {result.pipSkippedReason && ` (${result.pipSkippedReason})`}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {result?.ok && result.changed
+              && (result.requiresAppRestart || result.requiresWindowReload) && (
+              <button className="btn btn-sm" onClick={applyNow}>
+                {result.requiresAppRestart ? '↻ Restart App to Apply' : '↻ Reload Window to Apply'}
+              </button>
+            )}
+            {/* Engine-only change: respawn the backend without losing the window. */}
+            {result?.ok && result.changed && result.requiresBackendRestart && (
+              <button className="btn btn-sm" disabled={busy} onClick={restartBackend}>
+                ↻ Respawn Python Engine
+              </button>
+            )}
+          </div>
+          {backendMsg && (
+            <div style={{ fontSize: 10.5, color: backendMsg.ok ? 'var(--green)' : 'var(--red)' }}>
+              {backendMsg.ok ? `✓ ${backendMsg.message}` : `✕ ${backendMsg.error}`}
+            </div>
           )}
         </>
       )}
