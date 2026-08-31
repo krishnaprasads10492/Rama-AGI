@@ -241,11 +241,12 @@ function setupAutoUpdater() {
  *      One static meta tag cannot be correct for both, and the version that
  *      "works everywhere" is the loosened one.
  *
- * The Monaco CDN is allowed in both because the IDE loads the editor from it.
- * With the old meta policy (`script-src 'self'`) Monaco was silently blocked and
- * the IDE fell back to a plain textarea without saying why.
+ * The Monaco CDN allowance that used to be here has been removed — the editor is
+ * bundled now (Section 82), so the remote origin was dead policy surface.
  */
-const MONACO_CDN = 'https://cdn.jsdelivr.net';
+// MONACO_CDN IS GONE (spec Section 82). The editor is bundled locally now, so allowing a remote
+// script origin bought nothing and widened the policy for no reason. Removing an unused allowance
+// is a tightening, not a feature change: `script-src` is back to 'self' plus inline.
 const FONTS_CSS  = 'https://fonts.googleapis.com';
 const FONTS_FILE = 'https://fonts.gstatic.com';
 
@@ -258,12 +259,13 @@ function buildCsp() {
 
   return [
     `default-src ${local}`,
-    `script-src ${local} 'unsafe-inline' ${MONACO_CDN}`,
+    `script-src ${local} 'unsafe-inline'`,
+    // Monaco's base editor worker is inlined as a blob so it can start from a file:// document.
     `worker-src ${local} blob:`,
-    `style-src ${local} 'unsafe-inline' ${FONTS_CSS} ${MONACO_CDN}`,
-    `font-src ${local} ${FONTS_FILE} ${MONACO_CDN} data:`,
+    `style-src ${local} 'unsafe-inline' ${FONTS_CSS}`,
+    `font-src ${local} ${FONTS_FILE} data:`,
     `img-src ${local} data: blob:`,
-    `connect-src ${local} ${api} ${MONACO_CDN} ${viteOrigin}`.trim(),
+    `connect-src ${local} ${api} ${viteOrigin}`.trim(),
     `object-src 'none'`,
     `base-uri ${local}`,
     `form-action 'none'`,

@@ -1742,6 +1742,8 @@ authenticated **Master session**, not merely an open store.
 
 | 99 | Two dead pages, the audit that could not see them, and the contrast that was hurting | done | Section 81. **The IDE and Resources tabs both failed, and neither was an IPC, dependency or data-file problem** — each referenced an identifier with no binding in that scope, so React threw a `ReferenceError` during render and the boundary swallowed the page. `IDE.jsx:107/109` used `currentUser` inside `FileTree` while `useUserStore()` is only called in the sibling `IDE()`; the `useCallback` dependency array is evaluated eagerly during render and `FileTree` renders unconditionally, so the page died on mount with no interaction. `Resources.jsx:470` used `os?.cpus?.()?.length` in the default overview tab — `os` is a Node builtin absent from the sandboxed renderer, copied from `resourceOrchestrator.cjs` where it is legitimate; **optional chaining does not save it, because `os?.x` evaluates the identifier first**. Fixed by adding `useUserStore()` to `FileTree` and by reading `s.workers.max`, which the orchestrator already computes from the real CPU count, rather than recomputing it where the input does not exist. **THE REAL DEFECT IS THAT THE AUDIT WAS BUILT FOR THIS CLASS AND MISSED IT.** `auditRenderer.cjs` (row 42) checks Zustand destructures and `window.rama.<ns>.<fn>` against preload — a free variable is outside that model, `node --check` cannot see it since both lines are valid syntax, and Vite bundles them happily. A third check now runs: **undefined identifiers with real scope resolution**. **A flat "declared anywhere in the module" check would have missed the IDE bug**, because `currentUser` *is* declared in that file, just out of reach — so it uses Babel's own scope chain (`scope.getBinding`). `@babel/parser` and `@babel/traverse` were present transitively and are now **explicit pinned devDependencies**, since depending on a transitive package by accident is how a working check silently disappears. The globals allowlist is **deliberately generous** — a false positive blocks a commit over working code and erodes trust faster than a miss — and it found its first one immediately: `caches` in `ghostMode.js`, a real `CacheStorage` global guarded by `window.caches` one line above. Lowercase JSX identifiers, attribute names and the property half of `<Foo.Bar>` are skipped. `auditRenderer.cjs` is now guarded by `require.main === module` and exports its checker so the checker itself can be tested. **CONTRAST WAS BELOW THE ACCESSIBILITY FLOOR ON THE TEXT THAT CARRIES MOST OF THE INTERFACE**, measured against `--bg: #030810`: `--muted` `#1e3a5a` at **1.73:1** against the 4.5:1 WCAG AA asks for body text — and it is used for labels, units, timestamps and hints on every page, which is precisely why master reported eye strain; `--border` `#0d2444` at **1.29:1**, so card edges and table rules were invisible and the eye had to hunt for structure; `.section-label` at **2.4:1** on the smallest text in the app, which is the worst possible place to hide contrast since section labels are how a dense panel is navigated. Now `--muted` **6.4:1**, `--text-dim` **11.1:1**, `--border` **~2.9:1**, section labels `--accent-soft` at 12px **~11:1**, and `--violet` nudged `#5b4fff`→`#6d61ff` (3.83→4.6:1). **The hues are unchanged — only luminance moved, so the cyberpunk look survives** and three clearly separated text steps remain (17 / 11 / 6.4) so hierarchy still reads; a `--muted-faint` exists for what genuinely should recede and is documented as below AA so using it is an explicit choice. Base type `14→15px`, `--text-xs 11.5→12px`, sub-11px inline sizes in the StockMind and GitSync surfaces raised to an 11.5px floor. **AND THE CONTROL THAT ACTUALLY FIXES SIZE EVERYWHERE**: raising `--font-size` only moves text that reads the token, and this codebase has hundreds of inline `fontSize: 10` values no CSS rule can override — `setZoomFactor` scales the rendered surface, so it is the only thing that reaches them. That IPC has existed since Section 35 and was reachable **by chat or voice only**; ledger row 48 has sat open on exactly this. Settings gains an **Appearance** tab: 70–200% slider, A−/A+, presets, fit-to-display, and a live contrast sample showing the three steps with their measured ratios. **Verified: `scripts/verifyAudit.cjs`, 15 assertions (`npm run verify:audit`)**, which reproduces both real bug shapes as fixtures — the sibling-scope leak and the Node-builtin-in-renderer — and asserts the checker catches both while staying silent on working code, browser globals, hoisting, namespace imports, labels, catch params, destructured props and object keys, plus reporting a parse error rather than throwing on an unparseable file. `npm run audit` clean at **105** bridge calls with all 53 files scope-checked, `verifyUpdateEngine` still 44, `vite build` succeeds. **NOT DONE, and deliberately not guessed at:** Kiro-like IDE capabilities (the IDE is a file tree, a textarea, an AST panel and a prompt box — and `useMonaco()` is **dead code**, defined and never called, so `monacoEditor` is permanently null and the textarea is the only editor while the header still advertises "Monaco", with a CDN loader the CSP would block anyway; making this Kiro-like is a multi-session build needing master's priorities); project scaffolding in GitSync; a self-contained pipeline that assimilates into the running install (a packaged Windows app cannot overwrite its own running .exe, which is why `electron-updater` exists and why row 53 is dormant pending master's signing and publishing decisions). Also found and **not** fixed: `sandbox:execute` is called from the IDE without a `user`, so it is always denied by its capability gate. |
 
+| 100 | IDE — a real editor, bundled, and a diff master must approve before an AI edit lands | done | Section 82. Master asked for Kiro-like capabilities; the honest starting point was that **the IDE had no editor**. `useMonaco()` was defined and **never called**, so `monacoEditor` was permanently null, a `<textarea>` was the only editor, and the header advertised "Monaco" — and it could not have worked anyway, because it loaded from `cdn.jsdelivr.net` while the packaged app loads the renderer with `loadFile()`, making a remote script exactly the wrong dependency. **`monaco-editor@0.56.0` pinned (MIT), bundled — no CDN, offline, no CSP hole.** **The editor-only build was chosen for a concrete reason**: production runs from a `file://` origin, Chromium treats every `file://` document as an opaque origin and refuses to start a worker from a sibling path, so Monaco's *language* workers (TypeScript/JSON/CSS/HTML) cannot load — and importing the whole package wires them up eagerly then fails at runtime. So: `editor/editor.api.js` (core, including the **diff** editor) + `features/register.all.js` (find/replace, folding, multi-cursor, brackets, suggest) + `basic-languages/monaco.contribution.js` (Monarch grammars for ~90 languages, **no worker**) + `editor/editor.worker.js?worker&inline`. **`?worker&inline` is load-bearing**: Vite would otherwise emit a sibling `.js` worker that a `file://` document may not start, whereas inlined it becomes a blob URL and `worker-src 'self' blob:` already permits it — verified in the build output, no worker chunk emitted and `createObjectURL` present in the bundle. **THREE 0.56 VERSION TRAPS recorded because every tutorial still shows the old shape**: (1) the `exports` map is `{"./*.js": "./esm/vs/*.js"}` so it **already** prefixes `esm/vs/`, and the familiar `monaco-editor/esm/vs/editor/editor.api` resolves to `esm/vs/esm/vs/…` and fails with "Rollup failed to resolve import"; (2) `editor/editor.all.js` **no longer exists**, the contributions barrel moved to `features/register.all.js`; (3) `editor.worker.js` is still the worker entry, `editor.worker.start.js` is not. **Stated rather than implied: no cross-file IntelliSense, type checking or schema validation**, because those are the blocked workers; serving the renderer over a custom privileged protocol would unlock them and is the follow-up, deliberately not done in the same pass as introducing the editor since startup reliability took Sections 26/29/32 to get right and is not worth risking for autocomplete. **CSP tightened as a side effect** — the `cdn.jsdelivr.net` allowance on `script-src`/`style-src`/`font-src`/`connect-src` became dead policy surface and is removed, so `script-src` is back to `'self' 'unsafe-inline'`. **`CodeEditor`: one editor instance, models swapped per file** with a model cache keyed by path and view state saved/restored on each swap — creating an editor per tab would discard cursor, scroll and fold state on every switch, which is the entire point of tabs. `monacoEditor` state and the container ref are gone; `tabs[].content` is now the single source of truth, where previously the editor and the tab array each held a copy and could disagree (which is why `saveFile` had to ask `monacoEditor ? getValue() : content`). **The textarea fallback survives deliberately** — if Monaco fails to start the editor degrades to a textarea and says so on screen, because the IDE was a textarea permanently before this and a blank panel would be a silent regression. **`DiffReview` is the piece that actually matters**: the patch path existed (the AI returned code, `onApplyPatch` wrote it) with **no way to see what would change**, and applying an edit you cannot inspect is the most dangerous thing an assistant can do to a codebase. A patch now opens a Monaco diff (side-by-side or inline, hunk and ±line counts) and **nothing is written until Apply is pressed**; discard is the default with Escape and the backdrop both rejecting; an identical proposal disables Apply and says so; and if the diff view itself fails, **applying blind is not offered**. The diff is computed by the base editor worker, which is exactly why that worker is inlined. **A DEAD CAPABILITY GATE FOUND ON THE WAY**: `sandbox:execute` was invoked from the AI panel with **no `user`**, and the handler runs `capability.deny(user, 'sandbox.execute')` immediately — so every sandbox run master ever triggered was refused, silently, because the result was only consumed when `ok` was present. The panel now passes `currentUser`. **Verified**: `vite build` 24.7s, `npm run audit` clean at 105 bridge calls across 56 files all scope-checked, `verifyAudit` 15, `verifyUpdateEngine` 44, `node --check` clean. **Cost stated plainly: the IDE route chunk is 4.21 MB (1.10 MB gzipped) + 162 kB CSS**, lazy-loaded so it is paid only on opening the IDE and the startup bundle is unchanged. **NOT VERIFIED: the editor has not been rendered on screen** — the build resolving Monaco and the worker being inlined is not the same as seeing highlighting and a working diff. **STILL NOT KIRO**: this is a real editor plus safe review of a single-file change; Kiro-like also needs multi-file edits proposed as a set, a tool-calling loop that can read and search the repo on its own initiative, and terminal integration. Those build on this. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -8285,3 +8287,118 @@ answer to "everything is too small" in a place master can find by looking.
   and why row 53 is dormant pending master's decisions on code signing and publishing.
 - **`sandbox:execute` from the IDE will always be denied**: it is called without a `user`, and the
   handler gates on `sandbox.execute`. Found during this investigation, not fixed here.
+
+---
+
+## SECTION 82 — A real editor, and seeing a change before it lands
+
+Master asked for Kiro-like capabilities in the IDE. The honest starting point was that the IDE had
+no editor: `useMonaco()` was defined and **never called**, so `monacoEditor` was permanently
+`null`, a `<textarea>` was the only editor, and the header advertised "Monaco". It also could not
+have worked — it loaded from `https://cdn.jsdelivr.net`, and the packaged app loads the renderer
+with `win.loadFile()`, so a remote script is exactly the wrong dependency for an editor.
+
+This section builds the two things everything else depends on: a real editor, and a diff you must
+approve before an AI edit touches a file.
+
+### Monaco, bundled, and why the editor-only build
+
+`monaco-editor@0.56.0` pinned (MIT), bundled — no CDN, works offline, no CSP hole.
+
+Production runs from a `file://` origin. Chromium treats every `file://` document as an opaque
+origin and refuses to start a worker from a sibling path, so Monaco's **language** workers
+(TypeScript, JSON, CSS, HTML) cannot load the usual way. Importing the whole package wires those
+up eagerly and then fails at runtime asking for them.
+
+So the imports are deliberate:
+
+| Import | Gives |
+|---|---|
+| `monaco-editor/editor/editor.api.js` | the editor core, including the **diff** editor |
+| `monaco-editor/features/register.all.js` | find/replace, folding, multi-cursor, brackets, suggest widget |
+| `monaco-editor/basic-languages/monaco.contribution.js` | Monarch grammars for ~90 languages — **no worker** |
+| `monaco-editor/editor/editor.worker.js?worker&inline` | the small base worker, inlined as a blob |
+
+**`?worker&inline` is the load-bearing detail.** Vite would otherwise emit the worker as a sibling
+`.js`, which a `file://` document may not start. Inlined, it becomes a blob URL — and the CSP
+already allows `worker-src 'self' blob:`. Verified in the build output: no worker chunk is emitted
+and `createObjectURL` appears in the IDE bundle.
+
+**Three version traps, recorded because every tutorial online still shows the old shape.**
+0.56's `exports` map is `{"./*.js": "./esm/vs/*.js", "./*": "./esm/vs/*.js"}` — it *already*
+prefixes `esm/vs/`, so the familiar `monaco-editor/esm/vs/editor/editor.api` resolves to
+`esm/vs/esm/vs/...` and the build dies on "Rollup failed to resolve import". Second,
+`editor/editor.all.js` **no longer exists**; the contributions barrel moved to
+`features/register.all.js`. Third, `editor.worker.js` is still the correct worker entry (it sets
+`self.onmessage` and calls `start()` from `editor.worker.start.js`) — the `.start.js` file is not
+an entry point.
+
+**What this does not give, stated rather than implied:** cross-file IntelliSense, type checking and
+JSON schema validation, because those are the language workers that cannot run under `file://`.
+Serving the renderer over a custom privileged protocol instead of `file://` would unlock them and
+is the natural follow-up — but not in the same pass as introducing the editor, because startup
+reliability took Sections 26, 29 and 32 to get right and is not worth risking for autocomplete.
+
+**CSP tightened as a side effect.** With the editor bundled, the `https://cdn.jsdelivr.net`
+allowance on `script-src`, `style-src`, `font-src` and `connect-src` was dead policy surface, so it
+is gone. `script-src` is back to `'self' 'unsafe-inline'`. Removing an unused allowance is a
+tightening, not a feature change.
+
+### `CodeEditor` — one instance, models swapped per file
+
+Creating an editor per tab would discard cursor, scroll and fold state on every switch, which is
+the entire point of tabs. So there is one editor, a model cache keyed by path, and view state saved
+and restored on each swap.
+
+`monacoEditor` state and the container ref are gone from `IDE.jsx`. The editor reports changes
+upward through `onChange` and `tabs[].content` remains the single source of truth for a file's
+text — previously the editor and the tab array each held a copy and could disagree, which is why
+`saveFile` had to ask `monacoEditor ? getValue() : content`.
+
+**The textarea fallback survives, deliberately.** If Monaco fails to initialise, the editor
+degrades to a textarea and says so on screen. The IDE was a textarea permanently before this; a
+blank panel would be a regression, and a silent one.
+
+### `DiffReview` — the piece that actually matters
+
+The IDE already had a patch path: the AI returned code and `onApplyPatch` wrote it. What it had no
+way to do was **show what would change**. Applying an edit you cannot inspect is the single most
+dangerous thing an assistant can do to a codebase, and it is the difference between a tool master
+can point at his own source and one he cannot.
+
+Now a patch opens a Monaco diff — side-by-side or inline, with hunk and ±line counts — and
+**nothing is written until Apply is pressed**. Discard is the default: Escape and the backdrop
+both reject. An identical proposal disables Apply and says so rather than pretending to do work.
+If the diff view itself fails, applying blind is **not offered** — the alternative is to copy the
+content and edit by hand, which is worse but honest.
+
+The diff is computed by the base editor worker, which is precisely why that worker is inlined.
+
+### A dead capability gate, found on the way
+
+`sandbox:execute` was called from the AI panel as
+`invoke('sandbox:execute', { code, language })` — **with no `user`**. `sandboxEngine`'s handler
+runs `capability.deny(user, 'sandbox.execute')` immediately, so every run master ever triggered
+was refused. It failed silently because the result was only consumed when `ok` was present. The
+panel now reads `currentUser` from the store and passes it, so the gate can actually make a
+decision instead of always rejecting.
+
+### Verification
+
+`vite build` succeeds in 24.7s. `npm run audit` clean at 105 bridge calls across 56 files with all
+of them scope-checked; `verifyAudit` 15, `verifyUpdateEngine` 44; `node --check` clean on
+`main.cjs`.
+
+**Cost, stated plainly:** the IDE route chunk is now **4.21 MB (1.10 MB gzipped)** plus 162 kB of
+CSS. It is lazy-loaded, so that is paid when master opens the IDE and at no other time, and the
+app's startup bundle is unchanged.
+
+**Not verified: the editor has not been rendered on screen.** The build resolving Monaco and the
+worker being inlined is not the same as seeing syntax highlighting and a working diff. That needs
+the shell.
+
+### Still not Kiro
+
+What exists now is a real editor and safe review of a single-file change. Kiro-like also means
+multi-file edits proposed as a set, a tool-calling loop that can read and search the repo on its
+own initiative, and terminal integration. Those are the next increments, and they build on this.

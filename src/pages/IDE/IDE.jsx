@@ -5,6 +5,9 @@ import { ramaChat }      from '@services/ramaClient.js';
 import { getSystemPrompt } from '@services/consciousness.js';
 import { emitActivity }  from '@components/ActivityStream.jsx';
 
+import CodeEditor from './CodeEditor.jsx';
+import DiffReview from './DiffReview.jsx';
+
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
 /**
@@ -21,50 +24,11 @@ const isElectron = typeof window !== 'undefined' && !!window.rama;
  *   ✓ Multi-tab editor with dirty state tracking
  */
 
-// ─── Monaco editor loader ──────────────────────────────────────────────────
-function useMonaco(containerRef, options = {}) {
-  const editorRef = useRef(null);
-  const [ready,   setReady]   = useState(false);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const script = document.createElement('script');
-    script.src   = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.47.0/min/vs/loader.js';
-    script.onload = () => {
-      window.require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.47.0/min/vs' } });
-      window.require(['vs/editor/editor.main'], () => {
-        if (!containerRef.current) return;
-        const editor = window.monaco.editor.create(containerRef.current, {
-          value:            options.value || '',
-          language:         options.language || 'javascript',
-          theme:            'vs-dark',
-          fontSize:         13,
-          fontFamily:       "'JetBrains Mono', monospace",
-          lineNumbers:      'on',
-          minimap:          { enabled: true, scale: 0.5 },
-          scrollBeyondLastLine: false,
-          automaticLayout:  true,
-          cursorBlinking:   'phase',
-          renderLineHighlight: 'all',
-          padding:          { top: 12 },
-          ...options.editorOptions,
-        });
-        editorRef.current = editor;
-        setReady(true);
-        options.onReady?.(editor);
-      });
-    };
-    document.head.appendChild(script);
-    return () => {
-      editorRef.current?.dispose();
-      editorRef.current = null;
-    };
-  }, []);  // eslint-disable-line
-
-  return { editor: editorRef.current, ready };
-}
-
+// The CDN-loading `useMonaco()` hook that used to live here has been REMOVED (spec Section 82).
+// It was dead code: defined, never called, so `monacoEditor` stayed null forever and the
+// textarea was the only editor while the header advertised "Monaco". It also could not have
+// worked — the packaged app loads the renderer with `loadFile()`, so a remote script is exactly
+// the wrong dependency. Monaco is now bundled locally; see ./monacoSetup.js and ./CodeEditor.jsx.
 // ─── Language detection ────────────────────────────────────────────────────
 function detectLang(filename) {
   const ext = (filename || '').split('.').pop().toLowerCase();
@@ -191,6 +155,8 @@ function renderItems(items, depth, expanded, children, toggle, activeFile) {
 
 // ─── AI Panel v2 ───────────────────────────────────────────────────────────
 function AIPanel({ currentFile, currentContent, repoPath, onApplyPatch, onRunCode, astData }) {
+  // Needed for the sandbox capability gate below — it was calling without a user and being denied.
+  const { currentUser } = useUserStore();
   const [mode,       setMode]       = useState('chat');
   const [prompt,     setPrompt]     = useState('');
   const [response,   setResponse]   = useState('');
@@ -279,7 +245,11 @@ function AIPanel({ currentFile, currentContent, repoPath, onApplyPatch, onRunCod
             const lang = codeMatch[1].toLowerCase();
             const code = codeMatch[2];
             if (['javascript', 'js', 'python', 'py'].includes(lang)) {
-              const execRes = await window.ipcRenderer?.invoke('sandbox:execute', { code, language: lang });
+              // `user` is REQUIRED. Without it `sandboxEngine`'s `capability.deny(user,
+              // 'sandbox.execute')` rejected every run, so this path could never once have
+              // worked — it failed silently because the result was only used when `ok` existed.
+              const execRes = await window.ipcRenderer?.invoke('sandbox:execute',
+                { user: currentUser, code, language: lang });
               if (execRes?.ok !== undefined) setExecResult(execRes);
             }
           }
@@ -292,7 +262,8 @@ function AIPanel({ currentFile, currentContent, repoPath, onApplyPatch, onRunCod
     } finally {
       setLoading(false);
     }
-  }, [prompt, loading, mode, currentFile, currentContent, astData, provider, model, onApplyPatch]);
+  }, [prompt, loading, mode, currentFile, currentContent, astData, provider, model, onApplyPatch,
+    currentUser]);
 
   const activeMode = AI_MODES.find(m => m.id === mode);
 
@@ -496,8 +467,9 @@ export default function IDE() {
   const [layout,      setLayout]      = useState('split'); // split|editor|ai
   const [astData,     setAstData]     = useState(null);
   const [astLoading,  setAstLoading]  = useState(false);
-  const editorContainerRef = useRef(null);
-  const [monacoEditor, setMonacoEditor] = useState(null);
+  // `monacoEditor` state and a container ref are gone: CodeEditor owns the editor instance and
+  // keeps this component's `tabs[].content` in sync through onChange, so there is one source of
+  // truth for a file's text instead of two that could disagree (spec Section 82).
 
   const activeTab = tabs.find(t => t.id === activeTabId);
 
@@ -526,13 +498,7 @@ export default function IDE() {
       });
     }
 
-    // Update Monaco if ready
-    if (monacoEditor) {
-      monacoEditor.setValue(content);
-      const model = window.monaco?.editor?.createModel(content, detectLang(item.name));
-      monacoEditor.setModel(model);
-    }
-  }, [tabs, monacoEditor]);
+  }, [tabs, currentUser]);
 
   // ── Content change ────────────────────────────────────────────────────────
   const onContentChange = useCallback((content) => {
@@ -542,13 +508,13 @@ export default function IDE() {
   // ── Save file ─────────────────────────────────────────────────────────────
   const saveFile = useCallback(async () => {
     if (!activeTab || !isElectron) return;
-    const content = monacoEditor ? monacoEditor.getValue() : activeTab.content;
+    const content = activeTab.content;
     const res = await window.rama.fs.writeFile(currentUser, activeTab.file.path, content);
     if (res.ok) {
       setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, content, dirty: false } : t));
       emitActivity('complete', `Saved: ${activeTab.file.name}`);
     }
-  }, [activeTab, activeTabId, monacoEditor, currentUser]);
+  }, [activeTab, activeTabId, currentUser]);
 
   // ── Close tab ─────────────────────────────────────────────────────────────
   const closeTab = useCallback((tabId) => {
@@ -561,20 +527,23 @@ export default function IDE() {
 
   // ── Apply patch ───────────────────────────────────────────────────────────
   const handlePatch = useCallback((patchedContent, description) => {
-    const original = monacoEditor ? monacoEditor.getValue() : (activeTab?.content || '');
-    setPendingPatch({ content: patchedContent, original, description });
-  }, [activeTab, monacoEditor]);
+    setPendingPatch({
+      content: patchedContent,
+      original: activeTab?.content || '',
+      path: activeTab?.file?.path || activeTab?.file?.name || '',
+      description,
+    });
+  }, [activeTab]);
 
   const acceptPatch = useCallback(async () => {
     if (!pendingPatch) return;
-    if (monacoEditor) monacoEditor.setValue(pendingPatch.content);
     onContentChange(pendingPatch.content);
     setPendingPatch(null);
     if (activeTab && isElectron) {
       await window.rama.fs.writeFile(currentUser, activeTab.file.path, pendingPatch.content);
       setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, content: pendingPatch.content, dirty: false } : t));
     }
-  }, [pendingPatch, monacoEditor, activeTab, activeTabId, onContentChange, currentUser]);
+  }, [pendingPatch, activeTab, activeTabId, onContentChange, currentUser]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -588,10 +557,16 @@ export default function IDE() {
 
   return (
     <div style={{ height:'100%', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+      {/* Nothing the AI proposes reaches the file until master has seen the diff (Section 82). */}
       {pendingPatch && (
-        <DiffModal original={pendingPatch.original} modified={pendingPatch.content}
-          description={pendingPatch.description}
-          onAccept={acceptPatch} onReject={() => setPendingPatch(null)} />
+        <DiffReview
+          path={pendingPatch.path}
+          original={pendingPatch.original}
+          modified={pendingPatch.content}
+          note={pendingPatch.description}
+          onApply={acceptPatch}
+          onReject={() => setPendingPatch(null)}
+        />
       )}
 
       {/* Header */}
@@ -656,22 +631,15 @@ export default function IDE() {
           <div style={{ flex:1, overflow:'hidden', minWidth:0, display:'flex', flexDirection:'column' }}>
             {activeTab ? (
               <>
-                {/* Editor area — Monaco or textarea fallback */}
+                {/* A real editor now. CodeEditor falls back to a textarea only if Monaco itself
+                    fails to start, and says so on screen rather than showing an empty panel. */}
                 <div style={{ flex:1, overflow:'hidden', position:'relative' }}>
-                  <div ref={editorContainerRef} style={{ position:'absolute', inset:0 }} />
-                  {!monacoEditor && (
-                    <textarea
-                      value={activeTab.content}
-                      onChange={e => onContentChange(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key==='Tab') { e.preventDefault(); document.execCommand('insertText',false,'  '); }
-                      }}
-                      spellCheck={false}
-                      style={{ position:'absolute', inset:0, resize:'none', outline:'none', border:'none',
-                        background:'var(--bg)', color:'var(--text)', fontFamily:'var(--font)',
-                        fontSize:13, lineHeight:1.7, padding:16, tabSize:2 }}
-                    />
-                  )}
+                  <CodeEditor
+                    path={activeTab.file?.path || activeTab.file?.name || 'untitled'}
+                    value={activeTab.content}
+                    onChange={onContentChange}
+                    onSave={saveFile}
+                  />
                 </div>
                 <ASTPanel astData={astData} loading={astLoading} />
               </>
@@ -701,3 +669,4 @@ export default function IDE() {
     </div>
   );
 }
+
