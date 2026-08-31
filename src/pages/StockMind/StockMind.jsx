@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useUserStore } from '@store/userStore.js';
 import PriceChart from './PriceChart.jsx';
+import BookPanel from './BookPanel.jsx';
+import WhyPanel from './WhyPanel.jsx';
 
 /**
  * StockMind — market intelligence panel.
@@ -129,8 +131,19 @@ export default function StockMind() {
   const [derivs, setDerivs]   = useState(null);
   const [engine, setEngine]   = useState(null);
 
+  // Tabs rather than one long scroll (Section 79). Seven stacked cards was the cramming; the
+  // chart is the primary surface and everything else is a deliberate visit.
+  const [tab, setTab] = useState('chart');
+  // NOT named `interval`/`setInterval`: that shadows the global `setInterval` inside this
+  // component, and the failure would look like a mystery rather than a name collision.
+  const [barInterval, setBarInterval] = useState('1d');
+  const [cone, setCone] = useState(null);
+  const [coneOn, setConeOn] = useState(false);
+  const [held, setHeld] = useState(null);   // the tracked position in this symbol, if any
+
   const canRequest = canDo ? canDo('stockmind.request') : false;
   const canView    = canDo ? canDo('stockmind.view') : false;
+  const canConfig  = canDo ? canDo('stockmind.config') : false;
 
   const sym = symbol.trim().toUpperCase();
 
@@ -144,7 +157,7 @@ export default function StockMind() {
     setBarsNote(null);
     const res = await window.rama.marketIntel.ohlcv({
       user: currentUser, symbol: sym, exchange,
-      interval: '1d', limit: parseInt(barCount, 10) || 180, sync: doSync,
+      interval: barInterval, limit: parseInt(barCount, 10) || 180, sync: doSync,
     });
     setBarsBusy(false);
     if (res?.ok === false) {
@@ -154,7 +167,35 @@ export default function StockMind() {
     setBars(res.data?.bars || []);
     setBarsMeta(res.data || null);
     if (res.data?.note) setBarsNote(res.data.note);
-  }, [sym, exchange, barCount, currentUser]);
+  }, [sym, exchange, barCount, currentUser, barInterval]);
+
+  // The tracked position in this symbol, so the chart can mark master's own fills and draw the
+  // levels he committed to. Section 79: "where am I inside this move?" was previously answerable
+  // only by reading the table and the chart separately and doing it in your head.
+  const loadHeld = useCallback(async () => {
+    if (!inElectron || !sym) return;
+    const res = await window.rama.marketIntel.ledgerPositions({
+      user: currentUser, symbol: sym, status: 'open',
+    });
+    const first = res?.ok === false ? null : (res.data?.positions || [])[0] || null;
+    if (!first) { setHeld(null); return; }
+    const detail = await window.rama.marketIntel.ledgerPosition({
+      user: currentUser, positionId: first.positionId,
+    });
+    setHeld(detail?.ok === false ? first : (detail.data || first));
+  }, [sym, currentUser]);
+
+  const loadCone = useCallback(async (horizonName) => {
+    if (!inElectron || !sym) return;
+    const res = await window.rama.marketIntel.forecast({
+      user: currentUser, symbol: sym, exchange,
+      horizon: horizonName || (barInterval === '60m' ? 'intraday' : 'swing'),
+      stop: held?.thesis?.stopPrice ?? null,
+      target: held?.thesis?.targetPrice ?? null,
+    });
+    setCone(res?.ok === false ? { error: res.error } : (res.data?.cone || null));
+  }, [sym, exchange, currentUser, barInterval,
+    held?.thesis?.stopPrice, held?.thesis?.targetPrice]);
 
   const loadNews = useCallback(async () => {
     if (!inElectron || !sym) return;
@@ -179,9 +220,22 @@ export default function StockMind() {
     if (inElectron && canView) {
       loadBars(false);
       loadContext();
+      loadHeld();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Re-read bars when the interval changes, so the 60m/1d switch is not a dead control.
+  useEffect(() => {
+    if (inElectron && canView) loadBars(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [barInterval]);
+
+  useEffect(() => {
+    if (coneOn) loadCone();
+    else setCone(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coneOn, sym, barInterval]);
 
   const runPredict = async () => {
     if (!inElectron) {
@@ -247,6 +301,33 @@ export default function StockMind() {
         )}
       </div>
 
+      {/* Tabs, not a seven-card scroll (Section 79). The chart is the primary surface. */}
+      <div style={{
+        display: 'flex', gap: '2px', padding: '0 20px', background: 'var(--surface)',
+        borderBottom: '1px solid var(--border)', flexShrink: 0,
+      }} role="tablist">
+        {[
+          ['chart', 'CHART'],
+          ['signals', 'SIGNALS'],
+          ['book', 'YOUR BOOK'],
+          ['why', 'WHY'],
+          ['engine', 'ENGINE'],
+        ].map(([id, label]) => (
+          <button key={id} type="button" role="tab" aria-selected={tab === id}
+                  onClick={() => setTab(id)}
+                  style={{
+                    padding: '8px 14px', fontSize: '10.5px', letterSpacing: '0.08em',
+                    background: 'none', cursor: 'pointer',
+                    border: 'none',
+                    borderBottom: `2px solid ${tab === id ? 'var(--magenta)' : 'transparent'}`,
+                    color: tab === id ? 'var(--text)' : 'var(--muted)',
+                    fontWeight: tab === id ? 700 : 400,
+                  }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div style={{ flex: 1, overflow: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
         {/* Disclaimer — non-removable per spec */}
@@ -304,6 +385,14 @@ export default function StockMind() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
+            {/* Interval is a real control now, not a hardcoded '1d' (Section 79). 60m is the only
+                intraday depth Yahoo gives — 5m and 15m cap at a month, see horizons.DISPLAY_ONLY. */}
+            <div style={{ fontSize: '10px', color: 'var(--muted)' }}>INTERVAL</div>
+            <select className="input" style={{ width: '78px' }} value={barInterval}
+                    onChange={e => setBarInterval(e.target.value)}>
+              <option value="1d">1d</option>
+              <option value="60m">60m</option>
+            </select>
             <div style={{ fontSize: '10px', color: 'var(--muted)' }}>BARS</div>
             <input className="input" type="number" min="40" max="1200" step="20"
                    style={{ width: '84px' }}
@@ -350,30 +439,70 @@ export default function StockMind() {
         )}
 
         {/* Chart */}
-        {bars.length > 0 && (
+        {tab === 'chart' && (
           <div className="hud-card" style={{ padding: '14px 16px 4px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
-              <div className="section-label">
-                {sym} — {bars.length} DAILY BARS
-              </div>
               {barsMeta?.stored != null && (
                 <span style={{ fontSize: '10px', color: 'var(--muted)' }}>
                   {barsMeta.stored} stored from {barsMeta.storedFirstBar}
                 </span>
               )}
               <div style={{ flex: 1 }} />
+              {held && (
+                <span style={{ fontSize: '10px', color: 'var(--green)' }}
+                      title="your tracked position in this symbol">
+                  you hold {held.netQty} @ {held.avgCost} ({held.tradeStyle})
+                </span>
+              )}
               {selected && (
                 <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
                   overlay: {selected.variant || `#${selected.rank}`} ({String(selected.type || '').toUpperCase()})
                 </span>
               )}
+              <label style={{ fontSize: '10px', color: 'var(--muted)', display: 'flex',
+                gap: '4px', alignItems: 'center' }}
+                     title="Draw the range this instrument's own volatility calls ordinary over the horizon">
+                <input type="checkbox" checked={coneOn}
+                       onChange={e => setConeOn(e.target.checked)} />
+                projection
+              </label>
             </div>
-            <PriceChart bars={bars} signal={selected} symbol={sym} height={340} />
+            <PriceChart
+              bars={bars}
+              signal={selected}
+              symbol={sym}
+              interval={barInterval}
+              height={400}
+              fills={held?.fills || []}
+              thesis={held?.thesis || null}
+              cone={cone}
+            />
+            {cone?.error && (
+              <div style={{ fontSize: '10px', color: 'var(--amber)', padding: '2px' }}>
+                Projection unavailable: {cone.error}
+              </div>
+            )}
+            {cone && cone.ok === false && (
+              <div style={{ fontSize: '10px', color: 'var(--muted)', padding: '2px' }}>
+                Projection unavailable: {cone.reason}
+              </div>
+            )}
           </div>
         )}
 
+        {tab === 'book' && (
+          <BookPanel currentUser={currentUser} canConfig={canConfig}
+                     symbol={sym} exchange={exchange} lastClose={lastClose}
+                     onPickSymbol={(s) => { setSymbol(s); setTab('chart'); }} />
+        )}
+
+        {tab === 'why' && (
+          <WhyPanel currentUser={currentUser} symbol={sym} exchange={exchange}
+                    thesis={held?.thesis || null} />
+        )}
+
         {/* Signals */}
-        {result && (
+        {tab === 'signals' && result && (
           <div className="hud-card" style={{ padding: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', flexWrap: 'wrap' }}>
               <div className="section-label">SIGNALS — {result.symbol} ({result.exchange})</div>
@@ -452,7 +581,7 @@ export default function StockMind() {
         )}
 
         {/* Derivatives context */}
-        {latestDeriv && (
+        {tab === 'engine' && latestDeriv && (
           <div className="hud-card" style={{ padding: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
               <div className="section-label">DERIVATIVES — {derivs.symbol}</div>
@@ -483,7 +612,7 @@ export default function StockMind() {
         )}
 
         {/* News */}
-        {news && (
+        {tab === 'engine' && news && (
           <div className="hud-card" style={{ padding: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
               <div className="section-label">NEWS — {sym}</div>
@@ -530,6 +659,45 @@ export default function StockMind() {
                   <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '10px' }}>{news.note}</div>
                 )}
               </>
+            )}
+          </div>
+        )}
+
+        {/* Engine state. Says plainly whether any model has earned the right to advise. */}
+        {tab === 'engine' && (
+          <div className="hud-card" style={{ padding: '16px' }}>
+            <div className="section-label" style={{ marginBottom: '10px' }}>ENGINE</div>
+            {engine && !engine.error ? (
+              <>
+                <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+                  <Stat label="MODELS TRAINED" value={String(engine.registry?.models_trained ?? '—')} />
+                  <Stat label="FEATURE CONTRACT"
+                        value={engine.featureContract?.aligned ? 'ALIGNED' : 'MISALIGNED'}
+                        color={engine.featureContract?.aligned ? 'var(--green)' : 'var(--red)'} />
+                  <Stat label="AVAILABLE" value={String(engine.registry?.available?.length ?? '—')} />
+                </div>
+                <div style={{ fontSize: '10.5px', color: 'var(--amber)', marginTop: '12px',
+                  lineHeight: 1.7 }}>
+                  No horizon's model currently clears the acceptance gate, measured on live data.
+                  Every directional reading in this page is therefore reported but not acted on —
+                  see the WHY tab for the recorded reason. The stop, drawdown, concentration and
+                  holding-period warnings do not depend on a model and are live.
+                </div>
+                {engine.note && (
+                  <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '8px' }}>
+                    {engine.note}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ fontSize: '11px', color: engine?.error ? 'var(--red)' : 'var(--muted)' }}>
+                {engine?.error || 'Engine state not loaded.'}
+              </div>
+            )}
+            {!news && (
+              <div style={{ fontSize: '10.5px', color: 'var(--muted)', marginTop: '10px' }}>
+                Use “Read news” above to pull headlines for {sym}.
+              </div>
             )}
           </div>
         )}

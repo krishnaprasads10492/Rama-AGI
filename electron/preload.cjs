@@ -215,6 +215,11 @@ const RAMA_API = {
     // must not cost a higher tier than being told what.
     explain:             (opts) => ipcRenderer.invoke('market:explain', opts),
     explainCorrelations: (opts) => ipcRenderer.invoke('market:explain-correlations', opts),
+
+    // Projection cone and risk ruler (Section 78) — what the chart draws forward.
+    forecast:         (opts) => ipcRenderer.invoke('market:forecast', opts),
+    volatility:       (opts) => ipcRenderer.invoke('market:volatility', opts),
+    ledgerSetStyle:   (opts) => ipcRenderer.invoke('market:ledger-style', opts),
   },
 
   // ── Updater ───────────────────────────────────────────────────────────────

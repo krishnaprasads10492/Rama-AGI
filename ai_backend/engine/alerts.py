@@ -328,6 +328,59 @@ def evaluate_position(view: dict, book_invested: Optional[float] = None,
                            "peakDate": pk["peakDate"]},
                     actionable=price_ok, why_not=stale_why))
 
+    # ── Trade style (Section 77) ──────────────────────────────────────────────
+    #
+    # INTRADAY_NOT_SQUARED is pure arithmetic — a date comparison, no model — so it is actionable
+    # today under this module's own rules. It is also the most expensive item in the list: a
+    # broker's auto-square-off executes at whatever price the market offers, usually with a
+    # penalty, and an unsquared intraday equity short becomes a short-delivery settlement
+    # failure. Rāma can see this with certainty and could not say it before styles existed.
+    style = view.get("tradeStyle")
+    last_fill = view.get("lastFillDate")
+    if style == "INTRADAY" and last_fill:
+        try:
+            opened_on = _dt.date.fromisoformat(str(last_fill)[:10])
+            stale_days = (_dt.date.today() - opened_on).days
+        except ValueError:
+            stale_days = None
+        if stale_days and stale_days >= 1:
+            out.append(_alert(
+                "INTRADAY_NOT_SQUARED", MEASURED, "EXIT", CRITICAL,
+                f"{view['symbol']}: an INTRADAY position is still open {stale_days} day"
+                f"{'s' if stale_days != 1 else ''} after {last_fill}",
+                (f"You recorded this as an intraday trade of {abs(view['netQty']):g}. It has not "
+                 "been squared off. Either it was closed and the exit is missing from the "
+                 "ledger, or it is genuinely still open — in which case a broker auto-square-off "
+                 "executes at whatever price is available, usually with a penalty, and a short "
+                 "carried past settlement becomes a delivery failure. Record the exit or change "
+                 "the trade style to what you actually intend."),
+                view, {"field": "tradeStyle", "threshold": "same session",
+                       "observed": f"{stale_days} days", "lastFillDate": last_fill},
+                actionable=True))
+
+    if style == "SWING" and view.get("daysHeld") is not None:
+        span = ledger.STYLE_SPAN_DAYS.get("SWING")
+        if span and view["daysHeld"] > span:
+            out.append(_alert(
+                "SWING_OVERHELD", MEASURED, "REVIEW", WARNING,
+                f"{view['symbol']}: a SWING trade has been held {view['daysHeld']} days",
+                (f"A swing trade is meant to run about {span} days. Past that it is a position "
+                 "you are holding for a reason you have not recorded — either restate it as "
+                 "positional with a fresh thesis, or close it."),
+                view, {"field": "daysHeld", "threshold": span,
+                       "observed": view["daysHeld"], "tradeStyle": "SWING"},
+                actionable=True))
+
+    if view.get("styleVsThesis"):
+        out.append(_alert(
+            "STYLE_THESIS_MISMATCH", MEASURED, "REVIEW", INFO,
+            f"{view['symbol']}: trade style and thesis horizon disagree",
+            view["styleVsThesis"] + ". Neither is overridden — Rāma is telling you they differ "
+            "so you can decide which one you actually meant.",
+            view, {"field": "tradeStyle", "observed": view.get("tradeStyle"),
+                   "thesisHorizon": (thesis or {}).get("horizon")},
+            actionable=True))
+
     days = view.get("daysHeld")
     hz_name = thesis.get("horizon")
     if days is not None and hz_name:

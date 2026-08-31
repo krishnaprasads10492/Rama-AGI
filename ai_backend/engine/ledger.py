@@ -48,6 +48,19 @@ INSTRUMENT_TYPES = ("EQUITY", "FUTURES", "OPTIONS")
 STATUS_OPEN = "open"
 STATUS_CLOSED = "closed"
 
+# ── Trade style (spec Section 77) ─────────────────────────────────────────────
+#
+# PART OF THE POSITION KEY, not a decorative label. Master buying RELIANCE for delivery and
+# separately scalping RELIANCE intraday the same week is completely ordinary, and under a key
+# that ignores style those two merge into one weighted-average cost — corrupting the holding's
+# basis, hiding the scalp's result, and matching neither line on his broker's screen.
+TRADE_STYLES = ("INTRADAY", "SWING", "POSITIONAL", "LONGTERM")
+DEFAULT_TRADE_STYLE = "POSITIONAL"
+
+# How long each style is *meant* to be held, in calendar days. INTRADAY is 0 because it must not
+# survive its own session at all. LONGTERM is None — it has no expiry to breach.
+STYLE_SPAN_DAYS = {"INTRADAY": 0, "SWING": 14, "POSITIONAL": 56, "LONGTERM": None}
+
 # A tracked position whose price is older than this is not marked to market silently.
 MAX_PRICE_AGE_DAYS = 5
 
@@ -122,6 +135,42 @@ def _instr(value: Optional[str]) -> str:
     if s not in INSTRUMENT_TYPES:
         raise ValueError(f"instrType must be one of {', '.join(INSTRUMENT_TYPES)}, got {value!r}")
     return s
+
+
+def _style(value: Optional[str]) -> str:
+    """
+    How long master intends to hold this, declared by him rather than guessed by Rāma.
+
+    Rejected inferring INTRADAY from a same-day open and close: the inference only becomes
+    available *after* the position closes, which is exactly too late for the alert that matters.
+    He states the intent, and the value is that Rāma can then hold him to it.
+    """
+    s = str(value or DEFAULT_TRADE_STYLE).strip().upper().replace("-", "").replace(" ", "")
+    aliases = {"INTRA": "INTRADAY", "DAY": "INTRADAY", "MIS": "INTRADAY",
+               "BTST": "SWING", "SHORTTERM": "SWING",
+               "CNC": "POSITIONAL", "DELIVERY": "POSITIONAL", "POSITION": "POSITIONAL",
+               "LONG": "LONGTERM", "INVEST": "LONGTERM", "INVESTMENT": "LONGTERM"}
+    s = aliases.get(s, s)
+    if s not in TRADE_STYLES:
+        raise ValueError(f"tradeStyle must be one of {', '.join(TRADE_STYLES)}, got {value!r}")
+    return s
+
+
+def style_of(position: dict) -> tuple[str, bool]:
+    """
+    A position's style, and whether it had to be inferred.
+
+    A record written before Section 77 has no style. It is keyed as POSITIONAL, which is what the
+    old behaviour actually was, but `inferred` is True so the view can say the style was never
+    stated. An old record is never silently promoted into a category master did not choose (I11).
+    """
+    raw = (position or {}).get("tradeStyle")
+    if not raw:
+        return DEFAULT_TRADE_STYLE, True
+    try:
+        return _style(raw), False
+    except ValueError:
+        return DEFAULT_TRADE_STYLE, True
 
 
 def _sign(x: float) -> int:
@@ -275,10 +324,26 @@ def derive(position: dict, last_price: Optional[float] = None,
         except (ValueError, KeyError, TypeError):
             days_held = None
 
+    style, style_inferred = style_of(position)
+    thesis_horizon = (position.get("thesis") or {}).get("horizon")
+    # The two are different claims and are allowed to disagree: `thesis.horizon` is the horizon
+    # whose MODEL informed the decision, `tradeStyle` is how long master means to hold. Reported
+    # rather than reconciled — silently overriding one of his own two statements would be worse.
+    style_vs_thesis = None
+    if thesis_horizon and style != DEFAULT_TRADE_STYLE:
+        if str(thesis_horizon).strip().upper() != style:
+            style_vs_thesis = (f"held as {style} on a {thesis_horizon} thesis — the model that "
+                               f"informed this looked at a different span than you intend to hold")
+
     flags = []
-    if net < 0 and position.get("instrType") == "EQUITY":
-        flags.append("net short on equity — deliverable short selling is not permitted in "
-                     "Indian cash equity, so this must be an intraday position")
+    # NARROWED BY SECTION 77. Any net short on EQUITY used to be flagged, because delivery short
+    # selling is not permitted in India. An INTRADAY short is simply a legal intraday short, so
+    # the flag now only fires when the declared style says the position is meant to be held. The
+    # old flag was right given what the record knew; it knows more now.
+    if net < 0 and position.get("instrType") == "EQUITY" and style != "INTRADAY":
+        flags.append(f"net short on equity while marked {style} — deliverable short selling is "
+                     "not permitted in Indian cash equity, so this is either an intraday trade "
+                     "recorded under the wrong style or a position that cannot be held")
     if price_stale:
         flags.append(price_note or "price is stale, so P&L is not current")
     if net != 0 and last_price is None:
@@ -289,6 +354,10 @@ def derive(position: dict, last_price: Optional[float] = None,
         "symbol": position.get("symbol"),
         "exchange": position.get("exchange"),
         "instrType": position.get("instrType"),
+        "tradeStyle": style,
+        "styleInferred": style_inferred,
+        "styleVsThesis": style_vs_thesis,
+        "styleSpanDays": STYLE_SPAN_DAYS.get(style),
         "status": position.get("status"),
         "direction": "LONG" if net > 0 else ("SHORT" if net < 0 else "FLAT"),
         "netQty": _round(net, 4),
@@ -426,24 +495,30 @@ def open_position(symbol: str, exchange: str = "NSE", instr_type: str = "EQUITY"
                   side: str = "BUY", quantity: float = 0, price: float = 0,
                   date=None, fees: float = 0.0, thesis: Optional[dict] = None,
                   note: Optional[str] = None, prediction_id: Optional[str] = None,
-                  interval: str = "1d") -> dict:
+                  interval: str = "1d", trade_style: Optional[str] = None) -> dict:
     """
     Record a position master has taken.
 
-    An existing OPEN position for the same (symbol, exchange, instrType) is added to rather
-    than duplicated — two open rows for the same holding would each show a different average
+    An existing OPEN position for the same (symbol, exchange, instrType, TRADESTYLE) is added to
+    rather than duplicated — two open rows for one holding would each show a different average
     cost for the same money, and neither would match the broker.
+
+    STYLE IS PART OF THE KEY (Section 77). An intraday scalp in a symbol master also holds for
+    delivery is a separate position, not an addition to the holding: merging them corrupts the
+    holding's cost basis and hides the scalp's result.
     """
     sym = str(symbol or "").strip().upper()
     if not sym:
         raise ValueError("symbol is required")
     itype = _instr(instr_type)
+    style = _style(trade_style)
     fill = _make_fill(side, quantity, price, date, fees, note, prediction_id)
 
     rows = _all()
     for i, r in enumerate(rows):
         if (r.get("symbol") == sym and r.get("exchange") == exchange
-                and r.get("instrType") == itype and r.get("status") == STATUS_OPEN):
+                and r.get("instrType") == itype
+                and style_of(r)[0] == style and r.get("status") == STATUS_OPEN):
             rows[i].setdefault("fills", []).append(fill)
             if thesis:
                 rows[i]["thesis"] = _clean_thesis(thesis)
@@ -455,7 +530,7 @@ def open_position(symbol: str, exchange: str = "NSE", instr_type: str = "EQUITY"
 
     pos = {
         "positionId": uuid.uuid4().hex[:12],
-        "symbol": sym, "exchange": exchange, "instrType": itype,
+        "symbol": sym, "exchange": exchange, "instrType": itype, "tradeStyle": style,
         "openedAt": _now(), "closedAt": None, "status": STATUS_OPEN,
         "thesis": _clean_thesis(thesis),
         "fills": [fill],
@@ -584,13 +659,36 @@ def _mark(pos: dict, interval: str = "1d") -> dict:
     return derive(pos, px["price"], px["asOf"], px["stale"], px["note"])
 
 
+def set_style(position_id: str, trade_style: str, interval: str = "1d") -> dict:
+    """
+    Correct a mis-recorded trade style.
+
+    Recorded in `notes` rather than overwritten quietly: the style drives the squared-off alert,
+    so a change to it changes what Rāma will warn about, and that is worth an audit line.
+    """
+    style = _style(trade_style)
+    rows = _all()
+    i = _find(rows, position_id)
+    old, inferred = style_of(rows[i])
+    rows[i]["tradeStyle"] = style
+    rows[i].setdefault("notes", []).append({
+        "at": _now(), "kind": "style-changed",
+        "text": f"trade style {'set' if inferred else 'changed'} from {old} to {style}"})
+    rows[i]["updatedAt"] = _now()
+    _save(rows)
+    return {"ok": True, "position": _mark(rows[i], interval)}
+
+
 def positions(status: Optional[str] = None, symbol: Optional[str] = None,
-              interval: str = "1d") -> list[dict]:
+              interval: str = "1d", trade_style: Optional[str] = None) -> list[dict]:
     rows = _all()
     if status:
         rows = [r for r in rows if r.get("status") == status]
     if symbol:
         rows = [r for r in rows if r.get("symbol") == str(symbol).strip().upper()]
+    if trade_style:
+        want = _style(trade_style)
+        rows = [r for r in rows if style_of(r)[0] == want]
     rows.sort(key=lambda r: str(r.get("openedAt") or ""), reverse=True)
     return [_mark(r, interval) for r in rows]
 
@@ -642,5 +740,22 @@ def portfolio(interval: str = "1d") -> dict:
         "priceCoverage": (f"{len(open_views) - len(unpriced)} of {len(open_views)} open "
                           f"positions could be marked to market"),
         "symbols": sorted({v["symbol"] for v in open_views}),
+        # Broken out by style (Section 77) because intraday exposure and long-term holdings are
+        # different kinds of risk and a single total hides which one master is actually carrying.
+        "byStyle": {
+            s: {
+                "open": sum(1 for v in open_views if v["tradeStyle"] == s),
+                "investedValue": _round(sum(v["investedValue"] or 0 for v in open_views
+                                            if v["tradeStyle"] == s)),
+                "unrealisedPnl": _round(sum(v["unrealisedPnl"] or 0 for v in open_views
+                                            if v["tradeStyle"] == s
+                                            and v["unrealisedPnl"] is not None)),
+                "realisedPnl": _round(sum(v["realisedPnl"] or 0 for v in views
+                                          if v["tradeStyle"] == s)),
+            }
+            for s in TRADE_STYLES
+            if any(v["tradeStyle"] == s for v in views)
+        },
+        "inferredStyleCount": sum(1 for v in open_views if v.get("styleInferred")),
         "generatedAt": _now(),
     }

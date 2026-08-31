@@ -262,6 +262,27 @@ async function explainCorrelations({ symbol, exchange = 'NSE', against = null,
   return getPath(`/explain/${sym(symbol)}/correlations?${q.join('&')}`);
 }
 
+// ─── Projection cone and risk ruler (Section 78) ─────────────────────────────
+
+async function forecast({ symbol, exchange = 'NSE', horizon = 'swing', probability = null,
+  stop = null, target = null, entry = null, lookback = 120 } = {}) {
+  const q = [`exchange=${encodeURIComponent(exchange)}`,
+    `horizon=${encodeURIComponent(horizon)}`, `lookback=${Number(lookback) || 120}`];
+  for (const [k, v] of Object.entries({ probability, stop, target, entry })) {
+    if (v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v))) {
+      q.push(`${k}=${encodeURIComponent(Number(v))}`);
+    }
+  }
+  return getPath(`/forecast/${sym(symbol)}?${q.join('&')}`);
+}
+
+async function volatility({ symbol, exchange = 'NSE', interval = '1d', lookback = 120 } = {}) {
+  return getPath(`/volatility/${sym(symbol)}?exchange=${encodeURIComponent(exchange)}`
+    + `&interval=${encodeURIComponent(interval)}&lookback=${Number(lookback) || 120}`);
+}
+
+async function ledgerSetStyle(body) { return postPath('/ledger/style', body, { timeout: 30000 }); }
+
 // ─── Register IPC ───────────────────────────────────────────────────────────
 function register(ipcMain) {
   ipcMain.handle('market:predict', async (_e, { user, ...body } = {}) => {
@@ -328,6 +349,8 @@ function register(ipcMain) {
     'market:alert-entitlement': alertEntitlement,
     'market:explain':          explain,
     'market:explain-correlations': explainCorrelations,
+    'market:forecast':         forecast,
+    'market:volatility':       volatility,
   };
   for (const [channel, fn] of Object.entries(readOnly)) {
     ipcMain.handle(channel, async (_e, { user, ...args } = {}) => {
@@ -408,6 +431,7 @@ function register(ipcMain) {
     'market:ledger-remove-fill': ledgerRemoveFill,
     'market:ledger-thesis':      ledgerSetThesis,
     'market:ledger-note':        ledgerNote,
+    'market:ledger-style':       ledgerSetStyle,
   };
   for (const [channel, fn] of Object.entries(ledgerWrites)) {
     ipcMain.handle(channel, async (_e, { user, ...body } = {}) => {

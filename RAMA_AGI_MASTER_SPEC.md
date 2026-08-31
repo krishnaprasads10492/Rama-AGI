@@ -1734,6 +1734,9 @@ authenticated **Master session**, not merely an open store.
 | 92 | StockMind — the position ledger, and the first honest verdict on live data | done | Section 74, plus the measured verdict recorded at the end of Section 73. **The training run that was "the next step" for eleven ledger rows has now been executed against the live store** — 4,649 daily and 3,448 hourly bars, `random_forest`, 111 seconds. **All three horizons were judged this time** (holdouts of 319 / 439 / 437 rows, all clearing the 150 floor, so the gate could not decline) and **all three were refused**: intraday 60m/3 AUC 0.5283 inside 2 SE of chance (floor 0.5793) with Brier skill −0.0199; swing 1d/5 AUC 0.5026, flat chance; positional 1d/20 AUC **0.5974** with the only positive Brier skill (**+0.0297**) and 62.9% accuracy — **refused because its walk-forward fold AUC was 0.4873**, worse than chance across earlier segments, and because its holdout base rate was 0.6178 so 62.9% accuracy is worth about one point over always saying "up". **The gate caught exactly the trap it was built for, on real data, unmodified.** So StockMind still has no model entitled to advise master, and that is now a *measurement* rather than an assumption: price history alone does not predict NIFTY50 direction at these horizons, which makes the exogenous data (GDELT tone, derivatives/flows) the lever that matters rather than another model type. **GDELT re-probed and proven environmental, not a code defect**: four request shapes including one with **no `mode` at all** every failed at the TLS handshake (`WinError 10054`, handshake timeout), which rules out query syntax and the endpoint path; one attempt returned an Apache-style `404` **HTML** body, which a valid GDELT path would not, pointing at egress interception on this machine's network (the class of policy that blocked `7za.exe` in Section 45). **The ledger itself**: `engine/ledger.py`, JSONL at `_ledger/positions.jsonl`, reusing `outcomes`' proven atomic write helpers rather than a second copy of the Windows sharing-violation retry. **A position is a list of fills, never an entry price** — master explicitly asked to be told when to "buy more/sell more", so the record has to survive the action Rāma recommends, and one `entryPrice` field cannot hold "100 at 2,400 then 50 at 2,310" without destroying a price that is then unrecoverable. **Nothing derived is stored**: net quantity, average cost, realised/unrealised P&L and days held are all computed on read by `derive()`, because a stored total is a second source of truth that goes stale the moment a fill is corrected — asserted in the tests by checking no stored row carries `netQty`, `avgCost` or a P&L field. **The thesis is stored with the position** (`direction`, `horizon`, `targetPrice`, `stopPrice`, `probability`, `predictionId`, `rationale`), because master's instruction was "based on projection he made the decision of investing", and without it "was I right, or lucky?" is unanswerable and an exit alert would reason about a number with no intent attached; revising it keeps the previous one in `notes` so an alert cannot fire against a thesis abandoned months ago. **Signed quantity so a short is the same code path as a long** — two branches would be two places for the sign to be wrong, and this is money; a fill against the net realises `(fillPrice − avgCost) × closed × sign`, a fill exceeding the open quantity closes it and opens the remainder the other way at the fill price. **Realised P&L uses the average cost at the moment of the reducing fill**, so a later add cannot retroactively rewrite a booked profit — tested explicitly. **Fees are tracked separately and kept out of `avgCost`** so the average still matches the broker's holdings screen, which is what makes the ledger reconcilable. **Mark-to-market never invents a price**: no bar, or a bar older than the newest fill, yields `unrealisedPnl: null` plus `priceStale` and a stated reason, never the entry price passed off as flat P&L; `portfolio()` names `unpricedSymbols` instead of folding them in as zero. **Stated plainly, not glossed: the file is plaintext on disk** and describes master's real exposure (`data/` is gitignored so it cannot leave via git); it is not behind Electron's encrypted `dataStore` because the Python engine must read it to mark to market and holds no key material (I2/I9), and moving it there is **master's decision** at the cost of in-engine mark-to-market. **One defect found by the tests**: `last_close` reported a daily bar's `priceAsOf` as `2026-08-28 00:00:00`, because `store.load` parses the date column into a Timestamp — a midnight on a daily bar invites the reader to think the price is from midnight; now trimmed to the date for daily and **kept in full for intraday, where the time is real information**, the same distinction `store._date_format_for` draws on the way in. Seven routes (`GET /ledger/positions|portfolio|position/{id}`, `POST /ledger/open|fill|close|fill/remove|thesis|note`), a bad input returning **400 with an actionable message** rather than an opaque 500. Nine bridge methods; **reads gated on `stockmind.view`, every write on `stockmind.config`** — deliberately stricter than the read side, because a write is master asserting a fact about his own capital and is the record his exit alerts will be computed from, so a tier that may merely request a signal must not be able to edit it. **The ledger holds no trading authority and never contacts a broker** — it records what master says he did. **Verified: 1,049 assertions across ten suites**, `tests/test_ledger.py` contributing 171 with hand-computed rupee figures rather than "is a number" — 2,370 weighted average, 6,500 realised on a partial exit with the average unmoved, 1,000 unchanged by a later buy, a short from 2,400 bought back at 2,300 as a **profit** of 10,000, a 150-lot sell against 100 held leaving a 50 short carried at the reversing price, `None` rather than zero on a missing price, a torn final JSONL line discarded without losing the ledger, and a re-entry after a full exit getting a fresh row rather than reviving the closed one. `node --check` clean on both `.cjs`, `py_compile` clean, `npm run audit` clean (89 bridge calls), `vite build` succeeds in 8.59s. **Next: task 5** — exit/add/reduce alerts computed from a tracked position plus a fresh multi-horizon prediction, which must never fire on stale data (the `priceStale` flag exists for exactly this) and must state which horizon and which thesis field triggered them. Then task 6 — justification bullets and capital-protection warnings. |
 | 93 | StockMind — alerts, and what entitles one to tell master to act | done | Section 75. **The section where StockMind could do the most damage**, so the design starts from evidence rather than from which alerts to emit: Section 73 measured that no horizon's model clears the gate, and turning those same probabilities into "EXIT NOW" would launder a failed model into an instruction at the moment master has capital at risk. **Every alert carries an `evidence` class and that class decides whether it may be acted on.** `DECLARED` — master's own stop or target — is actionable because reporting a breach is reporting a fact against an instruction he gave, not a forecast. `MEASURED` — drawdown from the best close since entry, unrealised loss, days held against the thesis horizon, concentration, no-stop-recorded, net-short-on-equity — is actionable because it is counting. `MODEL` is actionable **only if that horizon cleared the gate**, and since none do, every model reading comes back with `actionable: false` and the recorded refusal reason attached. It is **neither silently dropped nor silently promoted**: dropping hides that Rāma looked, promoting is the capital-destroying failure. **THE ASYMMETRY IS THE core DECISION: exit and reduce can be justified by arithmetic alone, adding cannot.** A stop breach or a 40% concentration is a fact about risk already taken and acting on it *reduces* exposure, so a false positive costs upside; adding *increases* exposure, so a false positive costs capital. `ADD` is therefore reachable **only** through the `MODEL` class and is currently never actionable — asserted in the tests across every scenario, not just documented. **A stale price disqualifies every alert that compares a price** (this is what Section 74's `priceStale` was built for): the alert is still reported, but non-actionable with the reason, because an exit fired on last week's close carries the authority of a system that looks current; `NO_STOP_SET` deliberately stays actionable through staleness since it compares no price. **Alerts are computed fresh, never stored** — a stored alert is a claim about the present that ages badly, and de-duplicating notifications belongs where the notification is shown. Thirteen kinds with named, justified thresholds (`STOP_PROXIMITY_PCT` 2.0, `DRAWDOWN_PCT` 15.0 because tighter would fire constantly in Indian equities and master would learn to ignore it, `LOSS_REVIEW_PCT` 10.0, `CONCENTRATION_PCT` 40.0, `THESIS_HORIZON_TOLERANCE` 2.0, `TRADING_TO_CALENDAR` 7/5, `MODEL_CONVICTION_FLOOR` 0.20). **`THESIS_EXPIRED` is the alert master did not ask for and probably needs most**: a position opened on a five-trading-day swing thesis and still held four months later is not the trade he decided on, so Rāma converts the horizon's bars to calendar days and says the position is now being held for a reason he has not stated. Drawdown is measured on **closes**, not highs, so it agrees with `ledger.derive`'s mark-to-market and cannot manufacture a fall master was never marked at. Routes `GET /alerts` and `GET /alerts/entitlement`; channels `market:alerts` / `market:alert-entitlement` on **`stockmind.view`, the lowest StockMind gate** — putting capital protection behind a higher tier than the ability to request a signal would be exactly the wrong way round. **TWO REAL DEFECTS FOUND BY THE TESTS.** (a) **`model_entitlement` could have vouched for a model belonging to no horizon at all**: `horizons.get()` returns `None` for an unknown name and `training.load_provenance(None)` reads the **legacy unsuffixed** report, so a mistyped horizon would have been answered from that file and could have returned `entitled: True` — an unknown name now refuses explicitly and states that the legacy record must not answer for it. (b) The stale-price reason **discarded the useful message**: the flag match missed the ledger's own note ("the newest stored bar is 88 days old — sync before trusting P&L") and fell back to generic text, so master lost the one line that told him what to do; the ledger's note is now preferred. **Verified: 1,176 assertions across eleven suites**, `test_alerts.py` contributing 127, written around what must NOT happen — a MODEL alert non-actionable while ungated with `whyNotActionable` **quoting** the gate, the same alert becoming actionable when an entitlement is supplied (so the gate does the work rather than a hardcoded refusal), a gate pass **not** surviving a stale price, no `ADD` with DECLARED or MEASURED evidence in any tested scenario, the stop comparison flipping with the sign, `THESIS_EXPIRED` firing at 40 days on swing but not positional, and the empty-ledger summary distinguishable from the "no horizon has cleared the gate" summary so silence is never read as safety. `node --check` clean, `py_compile` clean, `npm run audit` clean, `vite build` 5.70s. **Honest summary: the protective half works, the predictive half is withheld.** **Still open:** no UI panel calls the bridge methods (API-only, same gap as row 92), and nothing *pushes* an alert — `GET /alerts` must be asked, so a `STOP_BREACHED` on a position master is not looking at will not reach him until something polls; wiring that into the Section 71 scheduler is the follow-up. **Next: task 6** — justification bullets and capital-protection warnings (correlated positions, low delivery %, expiry pinning, event risk, illiquidity, drawdown breach, confidence collapse). |
 | 94 | StockMind — justification, and the difference between an observation and a claim | done | Section 76. **"Justify the prediction" is a dangerous instruction to follow literally when the prediction has not earned trust.** A list of supportive-sounding technical observations printed under an ungated probability is the most harmful artefact this codebase could produce: the observations would all be true, the probability would be worthless, and the juxtaposition would imply the first supports the second — **it makes a coin flip look researched**. So a justification here explains what the number rests on, and when it rests on nothing validated the *first* bullet says so. **EVERY BULLET CARRIES A `basis`, AND THEY ARE NEVER MERGED**: `observation` (a measured fact — "RSI(14) is 72.4"), `convention` (how the market conventionally reads it, explicitly labelled as convention and as *not a measured edge in this data*), `forecast` (a model's output), `gate` (whether that forecast may be believed). `"RSI is 72.4"` is a fact; `"RSI is 72.4 therefore it will fall"` is a claim StockMind has not earned, and bullets of the usual "Overbought — expect a pullback" form are **refused** because they read as analysis while being an untested assertion in analysis's clothes. **The gate bullet is emitted BEFORE the probability it qualifies** — printing the number first and admitting later that it is unvalidated gets the emphasis exactly backwards — and the `caveat` line travels **inside the payload** rather than being left for a UI to add, so bullets cannot be rendered without it. **Evidence classes are reused verbatim from Section 75** (`DECLARED`/`MEASURED`/`MODEL`) rather than a second vocabulary being invented: a reader who learned what `MEASURED` means on an alert must not have to learn a different scale for a bullet. **Every warning master asked for is built on a field checked to exist first, not assumed**: `EXPIRY_PINNING` and `EXPIRY_IMMINENT` from `days_to_expiry`/`max_pain_dist`/`oi_concentration`, `PCR_EXTREME` from `pcr_oi`, `WIDE_STRADDLE` from `straddle_pct`, `BASIS_DISLOCATION` from `fut_basis_pct`, `WEAK_ROLLOVER` from `rollover_pct` (all stored and backtestable from Section 67), `ILLIQUID` and `GAP_RISK` from stored bar volume and opens, `CONFIDENCE_COLLAPSE` from the model's own `uncertainty`/`suppressed`, and `LOW_DELIVERY`/`EVENT_RISK` from live fetches that are **opt-in and reported as skipped when off**, because a justification that silently takes seconds and can fail is worse than one that names the two checks it did not run. **CORRELATION IS MEASURED, NOT ASSUMED FROM A SECTOR TABLE**: rejected hardcoding a symbol→sector map, which would be a guess that rots and would miss the real case — an index and its own heavyweight constituent are correlated by construction, not by sector label. Pairwise Pearson correlation of stored daily returns catches that automatically, is checkable by master against the same bars, and improves as the store deepens with no taxonomy to maintain; peers come from the tracked ledger so "you already hold something that moves with this" is answerable without master listing his book. **A CHECK THAT COULD NOT RUN PRODUCES A WARNING SAYING SO** (`DERIVATIVES_ABSENT`, `DERIVATIVES_STALE`, `LIQUIDITY_UNCHECKED`, `LIVE_CHECKS_SKIPPED`, `CORRELATION_INSUFFICIENT`, each with `checked: false`) — Section 75's rule again: an empty warning list must mean "checked and clear", never "could not look", and `DERIVATIVES_ABSENT` says that in words. Routes `GET /explain/{symbol}` and `GET /explain/{symbol}/correlations`; channels `market:explain` / `market:explain-correlations` on **`stockmind.view`** — understanding *why* must not cost a higher tier than being told *what*. **TWO REAL FINDINGS.** (a) **RSI was silently skipped whenever the window had no down-bars**: the guard was `if loss > 0`, so on a strongly trending instrument — precisely when an overbought reading is worth showing — the indicator and its convention bullet vanished entirely; a window with no losses is RSI 100, not "no RSI", and both ends are now handled explicitly. (b) A property of the measure worth keeping in the record: **two monotonic price series moving in opposite directions still correlate at +0.99 on returns**, because both return series are monotonically decreasing (`3/1003, 3/1006, …` versus `−3/2997, −3/2994, …`) — correlation measures co-movement of returns, not agreement of price direction, and genuine anti-correlation needs a mirrored step sequence. Both cases are now asserted so nobody later "fixes" the correlation code to make opposite-trending symbols report negative. **Verified: 1,277 assertions across twelve suites**, `test_explain.py` contributing 101, written around restraint — the observation bullet not containing the word "overbought", the convention bullet naming itself and disclaiming a measured edge, no bullet anywhere containing "therefore"/"will rise"/"will fall"/"expect a", the `gate` bullet at a lower index than the `forecast` bullet, `caveat` present in the payload, and every unrunnable check carrying `checked: false`. `node --check` clean, `py_compile` clean, `npm run audit` clean, `vite build` 7.73s. **THE SINGLE LARGEST REMAINING GAP, stated plainly: `npm run audit` still reports 89 bridge calls, unchanged across Sections 74, 75 and 76, because no `.jsx` panel calls any of the thirteen new methods.** The ledger, the alerts and the justification are reachable by API only. Also not exercised: `LOW_DELIVERY` and `EVENT_RISK` against the live NSE and RSS endpoints from this machine — the paths are written and their failure modes are tested by forcing exceptions, but no real fetch was run. |
+| 95 | StockMind — trade style joins the position key, and the intraday square-off alert | done | Section 77. Master: *"ledger should also record intraday and swing trades as well"*. **This is an identity change, not an extra label.** Section 74 keyed a position on (symbol, exchange, instrType), which breaks the moment master does something completely ordinary — buys SBIN for delivery and separately scalps SBIN intraday the same week. Under the old key those merge into one weighted-average cost and **both numbers become wrong**: the scalp corrupts the holding's basis, the holding hides the scalp's result, and neither reconciles against the broker, who shows them separately. So `tradeStyle` is now part of the key: `INTRADAY` / `SWING` / `POSITIONAL` / `LONGTERM`, four because a multi-year holding's thesis does not expire on the same clock as a twenty-day position. **The alert this unlocks is worth more than the classification**: `INTRADAY_NOT_SQUARED` fires when an intraday position is still open after its session — a date comparison, `MEASURED` evidence, no model, so **actionable today** under Section 75's rules, and it is the most expensive item in the whole alert list because a broker's auto-square-off executes at whatever price is available, usually with a penalty, and an unsquared intraday short becomes a short-delivery settlement failure. Plus `SWING_OVERHELD` and `STYLE_THESIS_MISMATCH`. **Style is master's declaration, never inferred from holding period** — rejected inferring INTRADAY from a same-day open and close, because that inference only becomes available *after* the position closed, which is exactly too late for the alert that matters; he states the intent and the value is that Rāma can hold him to it. **Style and `thesis.horizon` are different claims and may disagree** (the horizon whose *model* informed the decision versus how long he means to hold); when they conflict the view reports `styleVsThesis` rather than picking a winner, because silently overriding one of master's own two statements is worse than telling him they differ. **Backward compatible without silent relabelling**: a pre-Section-77 record keys as POSITIONAL, which is what the old behaviour actually was, but carries `styleInferred: true` so it is never promoted into a category master did not choose (I11). **An intraday equity short is no longer flagged as an anomaly** — Section 74 flagged every net equity short because delivery short selling is not permitted in India; with a declared style, INTRADAY + short + equity is simply a legal intraday short, and the flag now only fires when the style says the position is meant to be held. The old flag was right given what the record knew; it knows more now. `set_style` records the change in `notes` because the style drives what Rāma will warn about. `portfolio()` gains `byStyle`, since intraday exposure and long-term holdings are different kinds of risk and one total hides which master is carrying. Broker product codes are accepted as aliases (MIS→INTRADAY, CNC→POSITIONAL, BTST→SWING). Route `POST /ledger/style`, `tradeStyle` on `/ledger/open` and as a filter on `/ledger/positions`, channel `market:ledger-style` on `stockmind.config`. **Verified: `test_ledger` 215 assertions (+44)**, including that the holding's average cost stays exactly 600 while the scalp carries 640, that a second intraday fill re-averages across intraday fills only, and that per-style invested values sum to the book total. |
+| 96 | StockMind — the projection cone and the risk ruler | done | Section 78. Master asked for the prediction *"visually displayed in the charts in the form of graph"*. A forecast drawn on a chart is the most persuasive object a trading tool can produce, so the question was what shape is honest. **A CONE, NEVER A PATH** — rejected drawing a predicted price line forward, because a line implies Rāma knows the path, which it does not know even with a good model, and none has cleared the gate; a line would be the chart-shaped version of the failure Section 76 exists to prevent. **THE WIDTH OF THE CONE IS MEASURED, THE TILT OF ITS CENTRE IS THE MODEL'S** — that split is the whole design. Width is realised volatility over stored bars scaled `σ_h = σ_1 √h`, bands at ±1σ and ±2σ, a fact. The centre stays **flat** unless a model is entitled, and a gate-refused model tilts it by **nothing at all** while `tilted: false` and `tiltReason` say so — so on today's data master gets a correct, useful, honest cone with a flat centre, answering "what is a normal move from here over five days?", which StockMind could not previously answer at all. **THE RISK RULER is the part worth more than the cone**: a stop within one bar's ordinary range will be hit by noise rather than by being wrong (`stopBarsOfNoise`), and a target within 1σ of the horizon is a move the instrument makes anyway, so the thesis is not what would produce the profit even if the trade works. Both are arithmetic — `MEASURED`, actionable today, no model needed, the same discipline as Section 75. Reward-to-risk is computed against master's own levels. **Volatility from log returns with ATR reported alongside** rather than one chosen: σ is the right input for √h scaling, ATR is what a trader reads a stop against, and their disagreement is informative. **Sigma is measured on the interval being projected** — scaling a daily sigma to hours by ÷√7 would assume intraday variance is uniform across the session, which is false since the open and close carry most of it. **Forward timestamps come from the observed median bar spacing, not a calendar assumption** — hardcoding "one day" would put a daily cone on Saturdays and an hourly cone in the middle of the night. **Capped at 40 bars** because √h growth makes a 200-bar cone say only "anything can happen", which is true and useless. `engine/projection.py`: `volatility`, `project`, `assess_levels`, `forecast`. Routes `GET /forecast/{symbol}` and `GET /volatility/{symbol}`, channels `market:forecast` / `market:volatility` on `stockmind.view`. **Verified: `test_projection.py`, 77 assertions, passing first run** — sigma recovers a constructed 1% step series to 0.02, sigma at bar 9 is exactly 3× bar 1, a **0.95 probability with no entitlement leaves every centre point equal to the anchor** while the width still measures correctly, the same 0.95 *with* an entitlement does tilt it (so the gate does the work, not a hardcoded refusal), the tilt never exceeds one horizon-sigma, and no daily forward stamp lands on a weekend. |
+| 97 | StockMind — the chart that was actually broken, and the UI the last four sections lacked | done | Section 79. Master: *"the charts... I don't think they are working as expected"*. **He was right and the cause was specific.** `PriceChart.jsx` rendered `viewBox="0 0 900 h"` with **`preserveAspectRatio="none"`** at `width: 100%`, which stretches the entire drawing horizontally to fit the container — so at any width other than exactly 900px, which is every real window, glyphs distorted, `strokeWidth="1"` stopped being one pixel, and candle bodies widened independently of their height. Four faults compounded it: **no zoom or pan** (the 4,649 stored daily bars render at 0.19px per slot, a grey smear, with no way to look closer), rising candles drawn `fill: 'none'` so a 1px hollow body was near-invisible, **one React mouse handler per candle**, and date labels via `slice(2)` which turned an intraday stamp into seventeen overlapping characters. **Replaced with `lightweight-charts@5.2.1`** (pinned exact, Apache-2.0, canvas). **This does not contradict Section 71**: that decision was against *recharts* and still stands, because recharts has no candlestick primitive so using it means writing the custom SVG anyway. That reasoning is about recharts. lightweight-charts is TradingView's charting core — candles, panes, price lines, markers, zoom and crosshair are what it is built from. Section 71 is superseded on its own terms rather than reversed. **Stated plainly: this adds a runtime dependency**, and the licence requires the TradingView attribution notice, which is rendered in the chart footer, not stripped. `recharts` stays declared but unused; removing it is master's call. **What the chart draws now**, in toggleable layers defaulting to legible rather than complete: candles, volume in its own pane, **master's own fills as arrows at the bars they happened on** (the layer that changes how the page feels — "where am I inside this move?" previously required reading the table and the chart separately and doing it in your head), his thesis stop and target as thick labelled price lines (drawn heavier than a signal's suggestion, because Section 75 treats his own declarations as the strongest evidence class), signal levels, and the projection cone. **The cone is drawn dashed and grey while its centre is untilted**, with the caveat in the footer, so visual weight tracks evidence and an unvalidated projection cannot look authoritative; a flat centre gets only a faint dotted line because drawing it boldly would imply a forecast of no change. **Intraday times are converted to UTC epoch seconds, daily stays a date string** — lightweight-charts treats `'YYYY-MM-DD'` as a whole day and would collapse every bar in a session onto one point, the same defect class Section 73 fixed inside the store; the store holds intraday stamps in UTC (03:45:00 is the 09:15 IST open) so this is a parse, not a guess. **Theme colours are resolved from the app's CSS custom properties at mount** via `getComputedStyle`, because passing `var(--green)` to a canvas library silently yields no colour. **One chart instance, reused** — recreating it per render would drop master's zoom on every poll; a `ResizeObserver` handles width. **The UI: tabs, not a seven-card scroll** (CHART / SIGNALS / YOUR BOOK / WHY / ENGINE), which is what "don't cram the UI" required, with one always-visible control bar for symbol, exchange, interval and loading. New `BookPanel.jsx` (positions with trade style as a first-class column, portfolio by style, a record-a-trade form that asks for the thesis, inline restyle and close, and **alerts split by whether they may be acted on** — actionable shown, withheld collapsed behind a count with their reasons, so an unvalidated model reading never sits beside a real stop breach as if they were the same kind of statement) and `WhyPanel.jsx` (bullets grouped by `basis` in the deliberate gate→forecast→observation→convention order, conventions in muted italic, the risk ruler, and unchecked warnings shown because silence must never read as safety). The interval switcher is now a real control rather than a hardcoded `'1d'`. **A footgun fixed**: `const [interval, setInterval]` shadows the global `setInterval` inside the component, so any later timer call would fail as a mystery rather than a name collision — renamed `barInterval`. **A VERIFICATION DEFECT FOUND AND FIXED**: the first version of the panels aliased the bridge (`const bridge = window.rama?.marketIntel`) and the audit passed at 92 calls — because its static check only matches the full `window.rama.<ns>.<fn>` form, **eight real bridge calls were invisible to the very check built to catch the "not a function" bug class** (ledger row 42). The panels now use the full path. **`npm run audit` checks 100 bridge calls, up from the 89 it had been stuck at across Sections 74, 75 and 76** — that number is the real verification that the ledger, alerts, justification and forecast are finally reachable from the UI. `node --check` clean, `py_compile` clean, `vite build` succeeds, **1,421 assertions across thirteen suites**. **NOT VERIFIED, stated rather than implied: the chart has not been rendered on screen.** The shell was not launched here, so "it builds and every bridge call resolves" is not "candles draw correctly". StockMind's route chunk grew 21.6 kB → 234 kB (72.8 kB gzipped), lazy-loaded so the cost is paid only on opening the page. |
 
 ### Resume checklist for a cold session
 
@@ -7757,3 +7760,286 @@ is now the single largest gap in StockMind and the obvious next piece of work.
 `LOW_DELIVERY` and `EVENT_RISK` have not been exercised against the live NSE and RSS endpoints
 in this session — the code paths are written and their failure modes are covered by tests that
 force an exception, but a real fetch has not been run from here. Stated rather than implied.
+
+---
+
+## SECTION 77 — StockMind: trade style, because an intraday scalp is not a holding
+
+Master's instruction: *"ledger should also record intraday and swing trades as well (under
+intraday trades)"*.
+
+### Why this is an identity change, not an extra label
+
+Section 74 keyed a position on **(symbol, exchange, instrType)**. That is wrong the moment
+master does something completely ordinary: buys RELIANCE for delivery, and separately scalps
+RELIANCE intraday the same week. Under the old key those two merge into one position with one
+weighted-average cost — and **both numbers become wrong**. The scalp corrupts the holding's cost
+basis, the holding hides the scalp's result, and neither reconciles against his broker, who
+shows them separately.
+
+So **`tradeStyle` joins the position key**: `(symbol, exchange, instrType, tradeStyle)`.
+
+`INTRADAY` | `SWING` | `POSITIONAL` | `LONGTERM`. Four rather than three because master named
+intraday and swing explicitly, positional already existed as a horizon, and a multi-year holding
+is a genuinely different object from a twenty-day position — its thesis does not expire on the
+same clock.
+
+### The alert this unlocks, which is worth more than the classification
+
+`INTRADAY_NOT_SQUARED`: an `INTRADAY` position still open after its own session date.
+
+This is pure arithmetic — a date comparison, `MEASURED` evidence, no model involved, so it is
+**actionable today** under Section 75's rules. It is also the single most expensive mistake in
+the list, because a broker's auto-square-off is executed at whatever price the market offers,
+usually with a penalty, and an unsquared intraday equity position can become a short-delivery
+settlement failure. Rāma can see this with certainty and could not previously say it.
+
+`SWING` gets a softer version, `SWING_OVERHELD`, using the swing horizon's calendar span from
+Section 75 rather than a fixed number.
+
+### Backward compatibility, without silent relabelling
+
+Records written before this section have no `tradeStyle`. They are keyed as `POSITIONAL`, which
+is what the old behaviour actually was — positions were assumed long-lived — but the derived view
+carries **`styleInferred: true`** and a flag saying the style was never stated. An old record is
+not silently promoted to a category master never chose (I11: additive, with a working fallback).
+
+### Decisions
+
+**The style is master's declaration, not something Rāma guesses from holding period.** Rejected
+inferring `INTRADAY` from a same-day open and close: the inference would only become available
+*after* the position closed, which is exactly too late for the alert that matters. He states the
+intent when he records the trade, and the whole value is that Rāma can then hold him to it.
+
+**Style is not derived from `thesis.horizon`, and the two can disagree.** They are different
+claims: `thesis.horizon` is the horizon whose *model* informed the decision; `tradeStyle` is how
+long he intends to hold. A position opened on a positional read but taken as an intraday trade is
+a real, common combination. When they conflict the view reports `styleVsThesis` rather than
+picking a winner — silently overriding one of master's own two statements would be worse than
+telling him they disagree.
+
+**An intraday equity short stops being flagged as an anomaly.** Section 74 flagged any net short
+on `EQUITY` because delivery short selling is not permitted in India. With `tradeStyle` present,
+`INTRADAY` + short + equity is simply a legal intraday short, and the flag now only fires when
+the style says the position is meant to be held. The old flag was correct given what the record
+knew; it knows more now.
+
+---
+
+## SECTION 78 — StockMind: the projection cone, and the risk ruler
+
+Master asked for the prediction to be *"visually displayed in the charts in the form of graph"*.
+A forecast drawn on a chart is the most persuasive object a trading tool can produce, so the
+question is what shape is honest to draw.
+
+### A cone, never a path
+
+**Rejected drawing a predicted price line forward.** A single line implies Rāma knows the path.
+It does not know the path even when a model is good, and no model here has cleared the gate. A
+line would be the chart-shaped version of the failure Section 76 exists to prevent.
+
+What is drawn instead is a **cone**: the range of outcomes that the instrument's *own measured
+volatility* says is ordinary over the horizon. `σ_h = σ_1 × √h`, bands at ±1σ and ±2σ.
+
+**The width of the cone is measured. The tilt of its centre is the model's.** That split is the
+whole design:
+
+- the width comes from realised volatility over stored bars — a fact, `MEASURED`
+- the centre is flat unless a model is entitled to tilt it; a gate-refused model tilts it by
+  **nothing at all**, and the payload says `tilted: false` with the reason
+
+So on today's data master sees a correct, useful, honest volatility cone with a flat centre. The
+cone is valuable *by itself* — it answers "what is a normal move from here over five days?",
+which is a question StockMind could not previously answer at all.
+
+### The risk ruler — the part worth more than the cone
+
+Once ordinary volatility is measured, two questions become answerable, and both protect capital:
+
+**Is master's stop inside the noise?** A stop placed within one bar's ordinary range will be hit
+by noise rather than by being wrong. `stopBarsOfNoise` reports the distance in units of one-bar
+sigma. Under ~1.0 the stop is inside a single session's normal movement and will very likely be
+taken out for reasons unrelated to the thesis.
+
+**Is master's target inside the noise?** A target within 1σ of the horizon is a move that
+requires no edge whatsoever — it is what the instrument does anyway. That does not make the
+trade bad, but it means the *thesis* is not what would produce the profit, and the reward is
+being counted as if it were.
+
+Both are pure arithmetic over stored bars: `MEASURED`, actionable today, no model needed. This is
+the same discipline as Section 75 — the protective half works without a validated forecast.
+
+### Decisions
+
+**Volatility from log returns, with ATR reported alongside.** Standard deviation of log returns
+is the right input for a √h scaling; ATR is what traders read a stop against. Both are returned
+rather than one being chosen, because they answer different questions and disagreeing with each
+other is informative (ATR much larger than σ means fat intraday ranges closing near the open).
+
+**Sigma is measured over the same interval being projected.** An hourly cone must use hourly
+sigma. Scaling a daily sigma down to hours by dividing by √7 assumes intraday variance is
+uniform across the session, which is false — the open and close carry most of it. Measured
+directly, this is a non-issue.
+
+**Forward timestamps come from the observed bar spacing, not from a calendar assumption.** The
+median gap between the last stored bars is used to place projected points. For daily bars this
+lands on business days; for 60m bars it reproduces the session's own rhythm. Hardcoding "one
+day" would put a daily cone on Saturdays and an hourly cone in the middle of the night.
+
+**The cone is clipped to a maximum horizon.** `√h` growth means a 200-bar cone is so wide it says
+nothing except "anything can happen", which is true and useless. Capped at 40 bars with the cap
+reported.
+
+### API
+
+`projection.volatility(symbol, exchange, interval, lookback)`,
+`projection.project(...)`, `projection.assess_levels(...)`,
+`projection.forecast(symbol, exchange, horizon, ...)` — the composed call the chart uses.
+Route `GET /forecast/{symbol}`, channel `market:forecast` on `stockmind.view`.
+
+---
+
+## SECTION 79 — StockMind: the chart that was actually broken, and what replaced it
+
+Master: *"Look at the charts, I don't think they are working as expected."* He was right, and the
+cause is specific rather than cosmetic.
+
+### What was wrong
+
+`PriceChart.jsx` rendered `<svg viewBox="0 0 900 {height}" preserveAspectRatio="none">` at
+`width: 100%`. **`preserveAspectRatio="none"` on a fixed-width viewBox stretches the entire
+drawing horizontally to fit the container.** At any width other than exactly 900px — which is
+every real window — the result is:
+
+- every glyph horizontally stretched or squashed, so axis labels and level labels distort
+- `strokeWidth="1"` no longer one pixel; wicks and grid lines thicken or vanish unevenly
+- candle bodies widened or narrowed independently of their height
+
+Four more faults compounded it:
+
+1. **No zoom or pan.** With 180 bars in an 890px inner width the slot is ~4.9px; at the 4,649
+   daily bars actually in the store it is 0.19px and `bodyW` clamps to 1, so the chart is a grey
+   smear. There was no way to look closer.
+2. **Rising candles drawn `fill: 'none'`** — a hollow 1px body is close to invisible.
+3. **One React `onMouseEnter` handler per candle**, so a full history mounts thousands of
+   listeners.
+4. **Date labels via `String(b.date).slice(2)`** — fine for `2007-09-17`, but an intraday stamp
+   became `24-08-29 03:45:00`, seventeen characters per tick, overlapping into mush.
+
+### What replaced it, and why this does not contradict Section 71
+
+**`lightweight-charts@5.2.1`** (pinned exact, Apache-2.0, ~45 kB gzipped, canvas).
+
+Section 71 decided against **recharts**, and that decision was correct and still stands: recharts
+has no candlestick primitive, so building one means writing the custom SVG anyway while carrying
+its bundle. **That reasoning is about recharts, not about every library.** lightweight-charts is
+TradingView's own charting core: candlesticks, histogram panes, price lines, markers, zoom, pan
+and crosshair are the primitives it is built from, not things to be recreated in it. The Section
+71 conclusion is superseded on its own terms rather than reversed — the SVG was the right call
+against recharts, and the wrong call against this.
+
+Stated plainly so it is not discovered later: this **adds a runtime dependency**, and
+lightweight-charts' licence requires the TradingView attribution notice to remain visible. It is
+rendered in the chart footer, not stripped.
+
+`recharts` stays declared but still unused; removing it is a separate decision for master.
+
+### What the chart now draws
+
+Layers, each toggleable, defaulting to a minimum that is legible rather than complete:
+
+| Layer | Source | Default |
+|---|---|---|
+| Candles | `/ohlcv` | on |
+| Volume, in its own pane | `/ohlcv` | on |
+| **Master's own fills** — arrows at every BUY and SELL with price | `/ledger/positions` | on when a position exists |
+| His thesis stop and target, as labelled price lines | position `thesis` | on when recorded |
+| Signal levels (entry, SL, T1–T3) | `/predict` | on when a signal is selected |
+| **Projection cone** — ±1σ and ±2σ, drawn forward | `/forecast` | off until asked |
+
+**The fills layer is the one that changes how the page feels.** "Where am I inside this move?" was
+previously answerable only by reading the ledger table and the chart separately and doing it in
+your head.
+
+**The cone is drawn dashed and grey while its centre is untilted**, with the caveat text in the
+footer. A gate-cleared cone would be drawn in the accent colour. The visual weight tracks the
+evidence, so an unvalidated projection cannot look authoritative.
+
+### Decisions
+
+**Intraday times are converted to UTC epoch seconds; daily stays a date string.**
+lightweight-charts treats a `'YYYY-MM-DD'` string as a whole day and would collapse every bar in
+a session onto one point — the same class of defect Section 73 fixed inside the store. The store
+holds intraday stamps in UTC (`03:45:00` is the 09:15 IST open), so the conversion is a parse,
+not a guess.
+
+**Theme colours are resolved from the app's CSS custom properties at mount.** Passing
+`var(--green)` to a canvas library silently yields no colour. `getComputedStyle` on the container
+reads the real values, so the chart follows Rāma's theme instead of hardcoding a palette.
+
+**One chart instance, reused.** Data updates call `setData`; only unmount disposes. Recreating the
+chart per render would drop the user's zoom on every poll.
+
+### Verification for Sections 77–79
+
+**1,421 assertions across thirteen suites.** `test_ledger` 215 (+44 for trade styles),
+`test_alerts` 150 (+23), `test_projection` 77 (new), `test_explain` 101, `test_news` 138,
+`test_outcomes` 134, `test_derivatives` 132, `test_training` 112, `test_horizons` 100,
+`test_defects` 83, `test_backtest` 62, `test_histnews` 60, `test_store` 57.
+
+The assertions that matter most, because they are the ones that would fail silently and
+expensively:
+
+**Trade style (77).** A POSITIONAL holding of SBIN at 600 and an INTRADAY scalp of SBIN at 640
+produce **two positions**, the holding's average cost stays exactly 600, and the scalp carries
+640 — under the old key those merged into one wrong number. A second intraday fill *does* add to
+the intraday position and re-averages across intraday fills only (641.4286). A record with no
+style reads as POSITIONAL **and is marked inferred**, so nothing written before this section is
+silently relabelled. An INTRADAY equity short raises no deliverability flag; a POSITIONAL one
+still does, and names the style it was recorded under. Per-style invested values sum to the book
+total.
+
+**The alert this unlocked.** An INTRADAY position still open a day later is `CRITICAL`, `EXIT`,
+`MEASURED` evidence — and therefore **actionable today**, unlike anything model-derived. Opened
+*today* it is correctly silent. A POSITIONAL position held the same day raises nothing. The
+detail offers both readings: a genuinely open position, or a missing exit record.
+
+**The cone (78).** `sigmaPct` recovers a constructed 1% step series to within 0.02. Sigma at bar
+9 is **exactly 3× bar 1**, which is the √h property that makes it a cone. A probability of **0.95
+with no entitlement moves the centre by nothing** — every centre point equals the anchor price —
+while the width still measures correctly; the same 0.95 *with* an entitlement does tilt it, so the
+gate is doing the work rather than a hardcoded refusal. The tilt never exceeds one horizon-sigma.
+No forward timestamp lands on a weekend for daily bars, and hourly stamps keep their time
+component. A 500-bar request is capped and says so.
+
+**The risk ruler.** A stop 0.4 bar-sigmas away is `insideNoise: true` with a verdict saying it
+will be hit "not because your thesis was wrong". A target inside one horizon-sigma says reaching
+it "needs no edge". Reward-to-risk is computed from master's own levels, and 1:1 is called out as
+needing a high win rate.
+
+**The chart and the UI (79).** `node --check` clean on both `.cjs`, `py_compile` clean on all four
+engine modules, `vite build` succeeds. **`npm run audit` now checks 100 bridge calls, up from 89**
+— and that number is the real verification here. It had been stuck at 89 across Sections 74, 75
+and 76 because no `.jsx` called any of the new methods. Ledger, alerts, justification, forecast
+and trade styles are now all reached from the UI and every call resolves against preload's
+surface.
+
+**A verification defect found while doing this.** The first version of `BookPanel`/`WhyPanel`
+aliased the bridge (`const bridge = window.rama?.marketIntel`) and called `bridge.ledgerOpen(…)`.
+The audit passed — at 92 calls — because its static check only matches the full
+`window.rama.<ns>.<fn>` form, so **eight real bridge calls were invisible to the very check built
+to catch the "not a function" bug class** (ledger row 42). Aliasing the bridge defeats the audit.
+The panels now call the full path and the audit sees all of them. Worth remembering: a passing
+audit only means what it actually inspected.
+
+### What is still not verified
+
+The chart has **not been rendered on screen** in this session. `vite build` compiling and the
+audit resolving every call is not the same as seeing candles draw, and it cannot be — the desktop
+shell was not launched here. What is verified is that the module builds, the bridge calls exist on
+both sides, and the data shapes the chart consumes are the ones the tested engine functions emit.
+Stated rather than implied.
+
+The StockMind bundle grew from 21.6 kB to 234 kB (72.8 kB gzipped) with lightweight-charts
+included. It is a lazy-loaded route chunk, so this cost is paid only when master opens StockMind,
+not at app start.

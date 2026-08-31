@@ -730,6 +730,9 @@ class OpenPositionRequest(BaseModel):
     symbol:    str
     exchange:  str = "NSE"
     instrType: str = "EQUITY"
+    # Part of the position key (Section 77): an intraday scalp in a symbol master also holds for
+    # delivery is a separate position, not an addition to the holding.
+    tradeStyle: Optional[str] = None
     side:      str = "BUY"
     quantity:  float = Field(gt=0)
     price:     float = Field(gt=0)
@@ -779,9 +782,34 @@ class LedgerNoteRequest(BaseModel):
     text:       str
 
 
+class StyleRequest(BaseModel):
+    positionId: str
+    tradeStyle: str
+    interval:   str = "1d"
+
+
+@app.post("/ledger/style")
+def ledger_style(req: StyleRequest):
+    """
+    Correct a mis-recorded trade style. Recorded in the position's notes, not overwritten
+    quietly — the style drives the intraday square-off alert, so changing it changes what Rāma
+    will warn about.
+    """
+    try:
+        from engine import ledger
+        return ledger.set_style(req.positionId, req.tradeStyle, interval=req.interval)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Ledger style error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/ledger/positions")
 def ledger_positions(status: Optional[str] = None, symbol: Optional[str] = None,
-                     interval: str = "1d"):
+                     interval: str = "1d", tradeStyle: Optional[str] = None):
     """
     Every tracked position, marked to market against stored bars.
 
@@ -790,9 +818,11 @@ def ledger_positions(status: Optional[str] = None, symbol: Optional[str] = None,
     """
     try:
         from engine import ledger
-        rows = ledger.positions(status=status, symbol=symbol, interval=interval)
+        rows = ledger.positions(status=status, symbol=symbol, interval=interval,
+                                trade_style=tradeStyle)
         return {"positions": rows, "count": len(rows),
-                "open": sum(1 for r in rows if r["status"] == "open")}
+                "open": sum(1 for r in rows if r["status"] == "open"),
+                "styles": list(ledger.TRADE_STYLES)}
     except Exception as e:
         logger.error(f"Ledger list error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -836,7 +866,8 @@ def ledger_open(req: OpenPositionRequest):
             symbol=req.symbol, exchange=req.exchange, instr_type=req.instrType,
             side=req.side, quantity=req.quantity, price=req.price, date=req.date,
             fees=req.fees, thesis=(req.thesis.model_dump() if req.thesis else None),
-            note=req.note, prediction_id=req.predictionId, interval=req.interval)
+            note=req.note, prediction_id=req.predictionId, interval=req.interval,
+            trade_style=req.tradeStyle)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -1011,6 +1042,45 @@ def explain_correlations(symbol: str, exchange: str = "NSE", against: Optional[s
         return explain.correlations(list({symbol.upper(), *peers}), exchange, lookback)
     except Exception as e:
         logger.error(f"Correlation error for {symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Projection cone and risk ruler (spec Section 78) ──────────────────────────
+
+@app.get("/forecast/{symbol}")
+def forecast_symbol(symbol: str, exchange: str = "NSE", horizon: str = "swing",
+                    probability: Optional[float] = None, stop: Optional[float] = None,
+                    target: Optional[float] = None, entry: Optional[float] = None,
+                    lookback: int = 120):
+    """
+    The forward cone and the risk ruler, for drawing on a chart.
+
+    A CONE, NEVER A PATH: a single predicted line would imply Rāma knows the path. The cone's
+    **width** is this instrument's own measured volatility scaled by √h — a fact. Its **centre**
+    is flat unless that horizon's model cleared the gate, and `cone.tilted` says which.
+
+    `risk` is the ruler: whether master's stop sits inside one bar of ordinary noise (so it will
+    be hit by movement rather than by being wrong), and whether his target sits inside one
+    horizon-sigma (so reaching it needs no edge). Both are arithmetic, so both are usable today.
+    """
+    try:
+        from engine import projection
+        return projection.forecast(symbol, exchange, horizon, probability, stop, target,
+                                   entry, lookback)
+    except Exception as e:
+        logger.error(f"Forecast error for {symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/volatility/{symbol}")
+def volatility_symbol(symbol: str, exchange: str = "NSE", interval: str = "1d",
+                      lookback: int = 120):
+    """Realised volatility and ATR, measured on the interval given — not scaled from daily."""
+    try:
+        from engine import projection
+        return projection.volatility(symbol, exchange, interval, lookback)
+    except Exception as e:
+        logger.error(f"Volatility error for {symbol}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

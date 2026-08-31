@@ -467,6 +467,87 @@ check("every MODEL alert in the book is non-actionable",
            if a["evidence"] == "MODEL"]))
 
 
+# ── Trade style alerts (Section 77) ───────────────────────────────────────────
+print("\n--- an intraday position that was never squared off ---")
+
+yesterday = (_dt.date.today() - _dt.timedelta(days=1)).isoformat()
+intra = view(tradeStyle="INTRADAY", lastFillDate=yesterday, firstFillDate=yesterday,
+             daysHeld=1, thesis={"horizon": "intraday", "stopPrice": 2380.0})
+r = A.evaluate_position(intra)
+a = one(r, "INTRADAY_NOT_SQUARED")
+check("an intraday position open past its session raises INTRADAY_NOT_SQUARED",
+      a is not None, str(kinds(r)))
+check("it is CRITICAL", a and a["severity"] == "critical")
+check("the action is EXIT", a and a["action"] == "EXIT")
+check("its evidence is MEASURED — a date comparison, no model involved",
+      a and a["evidence"] == "MEASURED")
+check("SO IT IS ACTIONABLE TODAY, unlike anything model-derived",
+      a and a["actionable"] is True)
+check("it names the auto-square-off consequence",
+      a and "auto-square-off" in a["detail"], str(a and a["detail"]))
+check("and the delivery-failure consequence for a short",
+      a and "delivery failure" in a["detail"])
+check("it offers the benign explanation too — a missing exit record",
+      a and "exit is missing from the ledger" in a["detail"])
+check("it reports how many days it has been open",
+      a and "days" in str(a["triggeredBy"]["observed"]), str(a and a["triggeredBy"]))
+
+today_intra = view(tradeStyle="INTRADAY", lastFillDate=_dt.date.today().isoformat(),
+                   daysHeld=0)
+check("an intraday position opened TODAY is not yet a problem",
+      one(A.evaluate_position(today_intra), "INTRADAY_NOT_SQUARED") is None,
+      str(kinds(A.evaluate_position(today_intra))))
+check("a POSITIONAL position held a day raises no square-off alert",
+      one(A.evaluate_position(view(tradeStyle="POSITIONAL", lastFillDate=yesterday)),
+          "INTRADAY_NOT_SQUARED") is None)
+check("a closed intraday position raises nothing",
+      A.evaluate_position(intra | {"status": "closed"}) == [])
+
+
+print("\n--- a swing trade held well past its span ---")
+
+r = A.evaluate_position(view(tradeStyle="SWING", daysHeld=40,
+                             thesis={"horizon": "swing", "stopPrice": 2280.0}))
+a = one(r, "SWING_OVERHELD")
+check("a swing trade at 40 days raises SWING_OVERHELD", a is not None, str(kinds(r)))
+check("it is actionable arithmetic", a and a["actionable"] is True
+      and a["evidence"] == "MEASURED")
+check("it says the position is held for an unrecorded reason",
+      a and "reason you have not recorded" in a["detail"])
+check("a swing trade at 5 days does not",
+      one(A.evaluate_position(view(tradeStyle="SWING", daysHeld=5)),
+          "SWING_OVERHELD") is None)
+check("a POSITIONAL trade at 40 days raises no swing alert",
+      one(A.evaluate_position(view(tradeStyle="POSITIONAL", daysHeld=40)),
+          "SWING_OVERHELD") is None)
+
+
+print("\n--- style against thesis ---")
+
+r = A.evaluate_position(view(tradeStyle="INTRADAY",
+                             lastFillDate=_dt.date.today().isoformat(),
+                             styleVsThesis="held as INTRADAY on a positional thesis — the "
+                                           "model that informed this looked at a different span"))
+a = one(r, "STYLE_THESIS_MISMATCH")
+check("a style/thesis mismatch is surfaced", a is not None, str(kinds(r)))
+check("and states that neither was overridden",
+      a and "Neither is overridden" in a["detail"], str(a and a["detail"]))
+check("no mismatch means no alert",
+      one(A.evaluate_position(view(styleVsThesis=None)), "STYLE_THESIS_MISMATCH") is None)
+
+
+print("\n--- through the real ledger ---")
+
+L.open_position("SQUAREME", "NSE", "EQUITY", "BUY", 100, 50.0,
+                (_dt.date.today() - _dt.timedelta(days=2)).isoformat(),
+                trade_style="INTRADAY")
+res = A.evaluate(symbol="SQUAREME")
+check("a real unsquared intraday position is caught end to end",
+      "INTRADAY_NOT_SQUARED" in kinds(res["alerts"]), str(kinds(res["alerts"])))
+check("and it counts as actionable in the summary", res["actionable"] >= 1, str(res["summary"]))
+check("and as critical", res["critical"] >= 1, str(res["critical"]))
+
+
 print(f"\n{'=' * 62}")
 print(f"  {PASS} passed, {FAIL} failed")
 print(f"{'=' * 62}")

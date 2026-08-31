@@ -7,73 +7,72 @@
   "_buildFilesNote": "build.files: do NOT reintroduce '!node_modules/**/*' plus a hand-picked allowlist. That is exactly what shipped an installed app that died on launch with \"Cannot find module 'debug'\" - the allowlist named 18 packages, npm hoists transitive dependencies to top-level node_modules, and the exclusion stripped every one it did not name, leaving 211 of 229 production packages out of the asar. electron-builder resolves the real production tree itself and already omits devDependencies, so the correct configuration is to not fight it. Only renderer-only libraries are excluded, because Vite bundles them into build/ and nothing in electron/ or server/ requires them. Note this key lives here and not inside 'build' because electron-builder validates that object strictly and rejects unknown keys. See RAMA_AGI_MASTER_SPEC.md Section 48.",
   "main": "electron/main.cjs",
   "scripts": {
-    "dev":           "node start.cjs",
-    "dev:renderer":  "vite",
-    "dev:server":    "node server/index.cjs",
-    "dev:electron":  "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "build":         "vite build",
-    "package":       "node scripts/buildInstaller.cjs",
-    "package:win":   "node scripts/buildInstaller.cjs --win",
-    "package:mac":   "node scripts/buildInstaller.cjs --mac",
+    "dev": "node start.cjs",
+    "dev:renderer": "vite",
+    "dev:server": "node server/index.cjs",
+    "dev:electron": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "vite build",
+    "package": "node scripts/buildInstaller.cjs",
+    "package:win": "node scripts/buildInstaller.cjs --win",
+    "package:mac": "node scripts/buildInstaller.cjs --mac",
     "package:linux": "node scripts/buildInstaller.cjs --linux",
     "package:check": "node scripts/buildInstaller.cjs --dry-run",
     "package:readiness": "node scripts/buildInstaller.cjs --readiness",
     "audit:package": "node scripts/auditPackage.cjs",
-    "ship-log":      "node scripts/shipLog.cjs",
-    "build:win":     "vite build && electron-builder --win --x64 && node scripts/auditPackage.cjs",
-    "build:mac":     "vite build && electron-builder --mac",
-    "build:linux":   "vite build && electron-builder --linux",
-    "build:all":     "vite build && electron-builder --win --mac --linux",
-    "icons":         "node scripts/generateIcons.cjs",
-    "audit":         "node scripts/auditRenderer.cjs",
-    "rebuild":       "electron-rebuild",
-    "start":         "electron .",
-    "preview":       "vite preview"
+    "ship-log": "node scripts/shipLog.cjs",
+    "build:win": "vite build && electron-builder --win --x64 && node scripts/auditPackage.cjs",
+    "build:mac": "vite build && electron-builder --mac",
+    "build:linux": "vite build && electron-builder --linux",
+    "build:all": "vite build && electron-builder --win --mac --linux",
+    "icons": "node scripts/generateIcons.cjs",
+    "audit": "node scripts/auditRenderer.cjs",
+    "rebuild": "electron-rebuild",
+    "start": "electron .",
+    "preview": "vite preview"
   },
   "dependencies": {
-    "argon2":             "0.43.0",
-    "axios":              "1.7.9",
-    "chokidar":           "3.6.0",
-    "concurrently":       "9.1.2",
-    "cors":               "2.8.5",
-    "electron-updater":   "6.3.9",
-    "express":            "4.21.2",
+    "argon2": "0.43.0",
+    "axios": "1.7.9",
+    "chokidar": "3.6.0",
+    "concurrently": "9.1.2",
+    "cors": "2.8.5",
+    "electron-updater": "6.3.9",
+    "express": "4.21.2",
     "express-rate-limit": "7.5.0",
-    "helmet":             "8.1.0",
-    "mongodb":            "6.12.0",
-    "node-pty":           "1.0.0",
-    "playwright":         "1.48.2",
-    "vectra":             "0.9.0",
-    "react":              "19.2.0",
-    "react-dom":          "19.2.0",
-    "react-router-dom":   "7.6.0",
-    "recharts":           "2.15.3",
-    "simple-git":         "3.27.0",
-    "systeminformation":  "5.23.5",
-    "uuid":               "10.0.0",
-    "wait-on":            "8.0.1",
-    "zustand":            "5.0.5"
+    "helmet": "8.1.0",
+    "lightweight-charts": "5.2.1",
+    "mongodb": "6.12.0",
+    "node-pty": "1.0.0",
+    "playwright": "1.48.2",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-router-dom": "7.6.0",
+    "recharts": "2.15.3",
+    "simple-git": "3.27.0",
+    "systeminformation": "5.23.5",
+    "uuid": "10.0.0",
+    "vectra": "0.9.0",
+    "wait-on": "8.0.1",
+    "zustand": "5.0.5"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "4.3.4",
-    "electron":             "31.7.7",
-    "electron-builder":     "24.13.3",
-    "electron-rebuild":     "3.2.9",
-    "png-to-ico":           "2.1.8",
-    "png2icons":            "2.0.1",
-    "sharp":                "0.33.5",
-    "vite":                 "6.3.5"
+    "electron": "31.7.7",
+    "electron-builder": "24.13.3",
+    "electron-rebuild": "3.2.9",
+    "png-to-ico": "2.1.8",
+    "png2icons": "2.0.1",
+    "sharp": "0.33.5",
+    "vite": "6.3.5"
   },
   "build": {
-    "appId":       "com.krishnaprasad.rama-agi",
+    "appId": "com.krishnaprasad.rama-agi",
     "productName": "Rama AGI",
-    "copyright":   "© 2026 Krishna Prasad. All rights reserved.",
-
+    "copyright": "© 2026 Krishna Prasad. All rights reserved.",
     "directories": {
-      "output":     "dist-electron",
+      "output": "dist-electron",
       "buildResources": "assets"
     },
-
     "files": [
       "build/**/*",
       "electron/**/*",
@@ -111,88 +110,121 @@
       "!node_modules/**/*.{md,markdown,map}",
       "!node_modules/**/.bin/**"
     ],
-
     "extraResources": [
       {
         "from": "assets/",
-        "to":   "assets/",
-        "filter": ["**/*"]
+        "to": "assets/",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
-
-    "asar":          true,
-    "asarUnpack":    [
+    "asar": true,
+    "asarUnpack": [
       "node_modules/node-pty/**/*",
       "node_modules/argon2/**/*"
     ],
-
     "win": {
       "target": [
-        { "target": "nsis",     "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
-      "icon":              "assets/icon.ico",
+      "icon": "assets/icon.ico",
       "requestedExecutionLevel": "asInvoker",
-      "publisherName":     "Krishna Prasad",
+      "publisherName": "Krishna Prasad",
       "verifyUpdateCodeSignature": false
     },
-
     "nsis": {
-      "oneClick":               false,
+      "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "allowElevation":         true,
-      "installerIcon":          "assets/icon.ico",
-      "uninstallerIcon":        "assets/icon.ico",
-      "installerHeaderIcon":    "assets/icon.ico",
-      "createDesktopShortcut":  true,
-      "createStartMenuShortcut":true,
-      "shortcutName":           "Rāma AGI",
-      "runAfterFinish":         true,
-      "menuCategory":           "Rāma AGI",
+      "allowElevation": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Rāma AGI",
+      "runAfterFinish": true,
+      "menuCategory": "Rāma AGI",
       "deleteAppDataOnUninstall": false,
-      "include":                "assets/installer.nsh"
+      "include": "assets/installer.nsh"
     },
-
     "mac": {
       "target": [
-        { "target": "dmg",   "arch": ["x64", "arm64"] },
-        { "target": "zip",   "arch": ["x64", "arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
-      "icon":              "assets/icon.icns",
-      "hardenedRuntime":   true,
-      "gatekeeperAssess":  false,
-      "entitlements":      "assets/entitlements.mac.plist",
+      "icon": "assets/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "assets/entitlements.mac.plist",
       "entitlementsInherit": "assets/entitlements.mac.plist",
-      "category":          "public.app-category.productivity"
+      "category": "public.app-category.productivity"
     },
-
     "dmg": {
-      "title":    "Rāma AGI ${version}",
+      "title": "Rāma AGI ${version}",
       "contents": [
-        { "x": 130, "y": 220 },
-        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     },
-
     "linux": {
       "target": [
-        { "target": "AppImage", "arch": ["x64"] },
-        { "target": "deb",      "arch": ["x64"] }
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
-      "icon":        "assets/icon.png",
-      "category":    "Utility",
-      "maintainer":  "Krishna Prasad",
+      "icon": "assets/icon.png",
+      "category": "Utility",
+      "maintainer": "Krishna Prasad",
       "description": "Rāma AGI — Supreme Benevolent Desktop AI"
     },
-
     "publish": {
       "provider": "github",
-      "owner":    "krishnaprasads10492",
-      "repo":     "Rama-AGI",
-      "private":  false
+      "owner": "krishnaprasads10492",
+      "repo": "Rama-AGI",
+      "private": false
     },
-
     "beforeBuild": "scripts/beforeBuild.cjs",
-    "afterPack":   "scripts/afterPack.cjs"
+    "afterPack": "scripts/afterPack.cjs"
   }
 }

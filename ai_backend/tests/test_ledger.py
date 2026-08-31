@@ -536,7 +536,138 @@ check("A TORN FINAL LINE IS DISCARDED, not fatal to the whole ledger",
 check("and the surviving positions still price", len(L.positions()) == len(rows))
 
 
+# ── Trade style (Section 77) ──────────────────────────────────────────────────
+print("\n--- trade style is part of the position's identity ---")
+
+check("the four styles exist",
+      set(L.TRADE_STYLES) == {"INTRADAY", "SWING", "POSITIONAL", "LONGTERM"},
+      str(L.TRADE_STYLES))
+check("POSITIONAL is the default", L._style(None) == "POSITIONAL")
+check("intraday normalises", L._style("intraday") == "INTRADAY")
+check("a broker product code maps to a style", L._style("MIS") == "INTRADAY"
+      and L._style("CNC") == "POSITIONAL", f"{L._style('MIS')}/{L._style('CNC')}")
+check("BTST counts as swing", L._style("btst") == "SWING")
+check("delivery maps to positional", L._style("Delivery") == "POSITIONAL")
+check("an unknown style is refused", raises(L._style, "scalp-ish"))
+check("a hyphenated form is accepted", L._style("long-term") == "LONGTERM")
+
+check("INTRADAY is meant to last zero days", L.STYLE_SPAN_DAYS["INTRADAY"] == 0)
+check("LONGTERM has no expiry to breach", L.STYLE_SPAN_DAYS["LONGTERM"] is None)
+
+check("a record with no style reads as POSITIONAL", L.style_of({})[0] == "POSITIONAL")
+check("AND IS MARKED INFERRED, so an old row is not silently relabelled",
+      L.style_of({})[1] is True)
+check("a record with a style is not inferred",
+      L.style_of({"tradeStyle": "SWING"}) == ("SWING", False))
+check("a corrupt stored style falls back to POSITIONAL and says it was inferred",
+      L.style_of({"tradeStyle": "nonsense"}) == ("POSITIONAL", True))
+
+
+print("\n--- THE CASE THE OLD KEY GOT WRONG: a scalp inside a holding ---")
+
+hold = L.open_position("SBIN", "NSE", "EQUITY", "BUY", 100, 600.0, "2026-06-01",
+                       trade_style="POSITIONAL",
+                       thesis={"horizon": "positional", "stopPrice": 560.0})
+scalp = L.open_position("SBIN", "NSE", "EQUITY", "BUY", 500, 640.0, "2026-08-27",
+                        trade_style="INTRADAY")
+check("THE INTRADAY TRADE IS A SEPARATE POSITION, not an addition to the holding",
+      scalp["created"] is True and scalp["addedToExisting"] is False, str(scalp["created"]))
+check("two positions now exist in the same symbol and instrument",
+      len(L.positions(symbol="SBIN")) == 2)
+check("the holding's average cost is untouched by the scalp",
+      near(L.position_detail(hold["position"]["positionId"])["avgCost"], 600.0),
+      str(L.position_detail(hold["position"]["positionId"])["avgCost"]))
+check("and the scalp carries its own cost",
+      near(scalp["position"]["avgCost"], 640.0), str(scalp["position"]["avgCost"]))
+check("the derived view reports the style", scalp["position"]["tradeStyle"] == "INTRADAY")
+check("and that it was stated rather than inferred",
+      scalp["position"]["styleInferred"] is False)
+
+more = L.open_position("SBIN", "NSE", "EQUITY", "BUY", 200, 645.0, "2026-08-27",
+                       trade_style="INTRADAY")
+check("a second intraday fill DOES add to the open intraday position",
+      more["addedToExisting"] is True, str(more))
+check("still two positions in the symbol", len(L.positions(symbol="SBIN")) == 2)
+# (500*640 + 200*645) / 700 = 641.4285...
+check("re-averaged across the intraday fills only",
+      near(more["position"]["avgCost"], 641.4286, 0.001), str(more["position"]["avgCost"]))
+
+check("positions can be filtered by style",
+      len(L.positions(symbol="SBIN", trade_style="INTRADAY")) == 1
+      and len(L.positions(symbol="SBIN", trade_style="POSITIONAL")) == 1)
+check("filtering by an unused style finds nothing",
+      len(L.positions(symbol="SBIN", trade_style="LONGTERM")) == 0)
+check("an invalid filter is refused", raises(L.positions, None, "SBIN", "1d", "bogus"))
+
+
+print("\n--- a legal intraday short is no longer flagged as an anomaly ---")
+
+shorted = L.open_position("IDEA", "NSE", "EQUITY", "SELL", 1000, 12.0, "2026-08-27",
+                          trade_style="INTRADAY")
+check("an INTRADAY equity short raises no deliverability flag",
+      not any("short" in f.lower() for f in shorted["position"]["flags"]),
+      str(shorted["position"]["flags"]))
+held_short = L.open_position("YESBANK", "NSE", "EQUITY", "SELL", 1000, 20.0, "2026-08-27",
+                             trade_style="POSITIONAL")
+check("BUT A POSITIONAL EQUITY SHORT STILL IS — it cannot be delivered",
+      any("short" in f.lower() for f in held_short["position"]["flags"]),
+      str(held_short["position"]["flags"]))
+check("and the flag names the style it was recorded under",
+      any("POSITIONAL" in f for f in held_short["position"]["flags"]),
+      str(held_short["position"]["flags"]))
+
+
+print("\n--- style and thesis horizon may disagree, and that is reported ---")
+
+mix = L.open_position("TATAMOTORS", "NSE", "EQUITY", "BUY", 10, 900.0, "2026-08-27",
+                      trade_style="INTRADAY",
+                      thesis={"horizon": "positional", "stopPrice": 880.0})
+check("a disagreement between style and thesis is reported",
+      bool(mix["position"]["styleVsThesis"]), str(mix["position"]["styleVsThesis"]))
+check("NEITHER IS OVERRIDDEN — the style stays as declared",
+      mix["position"]["tradeStyle"] == "INTRADAY")
+check("and the thesis horizon stays as declared",
+      mix["position"]["thesis"]["horizon"] == "positional")
+agree = L.open_position("WIPRO", "NSE", "EQUITY", "BUY", 10, 500.0, "2026-08-27",
+                        trade_style="SWING", thesis={"horizon": "swing"})
+check("matching style and horizon report no conflict",
+      agree["position"]["styleVsThesis"] is None,
+      str(agree["position"]["styleVsThesis"]))
+
+
+print("\n--- correcting a mis-recorded style ---")
+
+fixed = L.set_style(scalp["position"]["positionId"], "SWING")
+check("the style can be changed", fixed["position"]["tradeStyle"] == "SWING")
+check("THE CHANGE IS RECORDED, because it changes what Rāma will warn about",
+      any(n.get("kind") == "style-changed"
+          for n in L.position_detail(scalp["position"]["positionId"])["notes"]),
+      str(L.position_detail(scalp["position"]["positionId"])["notes"]))
+check("the note names both the old and the new style",
+      any("INTRADAY to SWING" in (n.get("text") or "")
+          for n in L.position_detail(scalp["position"]["positionId"])["notes"]))
+check("an invalid style is refused", raises(L.set_style, scalp["position"]["positionId"], "xx"))
+check("an unknown position is a KeyError", raises(L.set_style, "nosuch", "SWING"))
+L.set_style(scalp["position"]["positionId"], "INTRADAY")
+
+
+print("\n--- the portfolio breaks exposure down by style ---")
+
+p = L.portfolio()
+check("a per-style breakdown is reported", isinstance(p.get("byStyle"), dict), str(p.get("byStyle")))
+check("intraday exposure is separated from held exposure",
+      "INTRADAY" in p["byStyle"] and "POSITIONAL" in p["byStyle"], str(list(p["byStyle"])))
+check("each style carries its own invested value",
+      all("investedValue" in v for v in p["byStyle"].values()))
+check("styles with no positions are omitted rather than shown as zero",
+      all(v["open"] > 0 or v["realisedPnl"] is not None for v in p["byStyle"].values()))
+check("positions whose style had to be inferred are counted",
+      isinstance(p["inferredStyleCount"], int), str(p["inferredStyleCount"]))
+style_sum = sum(v["investedValue"] or 0 for v in p["byStyle"].values())
+check("per-style invested values sum to the book total",
+      near(style_sum, p["investedValue"], 1.0), f"{style_sum} vs {p['investedValue']}")
+
 print(f"\n{'=' * 62}")
-print(f"  {PASS} passed, {FAIL} failed")
+print(f"  {PASS} passed, {FAIL} failed  (including Section 77 trade styles)")
 print(f"{'=' * 62}")
 sys.exit(1 if FAIL else 0)

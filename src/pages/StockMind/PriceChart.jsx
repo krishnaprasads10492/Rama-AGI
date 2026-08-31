@@ -1,247 +1,433 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createChart, CandlestickSeries, HistogramSeries, LineSeries,
+  createSeriesMarkers, CrosshairMode, LineStyle,
+} from 'lightweight-charts';
 
 /**
- * PriceChart — candlesticks with the signal's own levels drawn on them.
+ * PriceChart — candlesticks, master's own fills, his levels, and the projection cone.
  *
- * WHY INLINE SVG AND NOT RECHARTS (spec Section 71). `recharts@2.15.3` is a declared
- * dependency and has never been imported, and the reason to keep it that way is that
- * **recharts has no candlestick chart**. Building one means a custom `<Bar shape>` or a
- * `Customized` component — writing this SVG anyway — while carrying ~500 kB into the bundle
- * and fighting its scale model to place the horizontal level lines. The custom-shape work is
- * identical either way, so the dependency buys nothing here.
+ * WHY THIS REPLACED THE INLINE SVG (spec Section 79). The previous chart rendered
+ * `viewBox="0 0 900 h"` with `preserveAspectRatio="none"` at `width: 100%`, which stretches the
+ * whole drawing horizontally to fit the container. At any width other than exactly 900px — that
+ * is, always — glyphs distorted, `strokeWidth="1"` stopped being one pixel, and candle bodies
+ * widened independently of their height. It also had no zoom or pan, so the 4,649 daily bars in
+ * the store rendered as a smear at 0.19px per slot, and it mounted one React mouse handler per
+ * candle.
  *
- * (The `!node_modules/recharts/**` entry in package.json's `build.files` is NOT a packaging
- * bug, incidentally: it sits alongside `react`, `react-dom` and `zustand`, all of which the
- * renderer obviously uses. Vite bundles the renderer into `build/`, so renderer dependencies
- * are compiled in and never need to exist in node_modules at runtime.)
+ * Section 71's decision was against RECHARTS, and it still holds: recharts has no candlestick
+ * primitive, so using it means writing the custom SVG anyway. That reasoning was about recharts.
+ * `lightweight-charts` is TradingView's charting core — candles, panes, price lines, markers,
+ * zoom and crosshair are what it is made of. Section 71 is superseded on its own terms.
  *
- * Everything drawn here comes from the engine. Nothing is invented in the renderer — a chart
- * that draws a level the engine did not emit is a lie with axes on it.
+ * Everything drawn comes from the engine. A chart that draws a level the engine did not emit is
+ * a lie with axes on it.
  */
 
-const UP = 'var(--green)';
-const DOWN = 'var(--red)';
+// The library's licence requires this notice to stay visible. It is not decoration to strip.
+const ATTRIBUTION_URL = 'https://www.tradingview.com';
 
-const LEVELS = [
-  { key: 'stopLoss', label: 'SL', color: 'var(--red)',   dash: '4 3' },
-  { key: 'entryPrice', label: 'ENTRY', color: 'var(--accent)', dash: null },
-  { key: 't1Price', label: 'T1', color: 'var(--green)', dash: '6 3' },
-  { key: 't2Price', label: 'T2', color: 'var(--green)', dash: '2 4' },
-  { key: 't3Price', label: 'T3', color: 'var(--green)', dash: '1 5' },
+const SIGNAL_LEVELS = [
+  { key: 'stopLoss',   label: 'SL',    varName: '--red',    style: LineStyle.Dashed },
+  { key: 'entryPrice', label: 'ENTRY', varName: '--accent', style: LineStyle.Solid },
+  { key: 't1Price',    label: 'T1',    varName: '--green',  style: LineStyle.Dashed },
+  { key: 't2Price',    label: 'T2',    varName: '--green',  style: LineStyle.Dotted },
+  { key: 't3Price',    label: 'T3',    varName: '--green',  style: LineStyle.Dotted },
 ];
 
-function niceTicks(lo, hi, count = 5) {
-  if (!isFinite(lo) || !isFinite(hi) || hi <= lo) return [];
-  const raw = (hi - lo) / count;
-  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw) || mag * 10;
-  const start = Math.ceil(lo / step) * step;
-  const out = [];
-  for (let v = start; v <= hi + 1e-9; v += step) out.push(v);
-  return out;
+/**
+ * INTRADAY STAMPS BECOME UTC EPOCH SECONDS; DAILY STAYS A DATE STRING.
+ *
+ * lightweight-charts treats a 'YYYY-MM-DD' string as a whole day, so handing it intraday bars as
+ * strings collapses every bar in a session onto one point — the same defect class Section 73
+ * fixed inside the store. The store keeps intraday stamps in UTC (03:45:00 is the 09:15 IST
+ * open), so this is a parse rather than a guess.
+ */
+function toChartTime(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  if (s.length <= 10) return s.slice(0, 10);
+  const iso = s.includes('T') ? s : s.replace(' ', 'T');
+  const ms = Date.parse(iso.endsWith('Z') ? iso : `${iso}Z`);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+}
+
+const finite = (v) => typeof v === 'number' && Number.isFinite(v);
+
+function readTheme(el) {
+  const cs = getComputedStyle(el);
+  const get = (name, fallback) => {
+    const v = cs.getPropertyValue(name).trim();
+    return v || fallback;
+  };
+  return {
+    green:  get('--green', '#26a69a'),
+    red:    get('--red', '#ef5350'),
+    accent: get('--accent', '#4c8dff'),
+    text:   get('--text', '#d1d4dc'),
+    muted:  get('--muted', '#787b86'),
+    border: get('--border', '#2a2e39'),
+    bg:     get('--panel', 'transparent'),
+  };
 }
 
 export default function PriceChart({
   bars = [],
   signal = null,
   symbol = '',
-  height = 340,
+  height = 380,
   showVolume = true,
+  fills = [],
+  thesis = null,
+  cone = null,
+  interval = '1d',
+  onReady = null,
 }) {
-  const [hover, setHover] = useState(null);
+  const holder = useRef(null);
+  const chartRef = useRef(null);
+  const priceRef = useRef(null);
+  const volRef = useRef(null);
+  const coneRefs = useRef({});
+  const markersRef = useRef(null);
+  const linesRef = useRef([]);
+  const [readout, setReadout] = useState(null);
+  const [layers, setLayers] = useState({ fills: true, levels: true, cone: true });
 
-  const W = 900;
-  const padL = 8, padR = 62, padT = 10, padB = 22;
-  const volH = showVolume ? Math.round(height * 0.18) : 0;
-  const priceH = height - padT - padB - volH;
+  const candles = useMemo(() => (bars || [])
+    .map((b) => {
+      const time = toChartTime(b?.date);
+      if (time === null) return null;
+      if (![b.open, b.high, b.low, b.close].every(finite)) return null;
+      return { time, open: b.open, high: b.high, low: b.low, close: b.close };
+    })
+    .filter(Boolean)
+    // The library requires ascending, de-duplicated times.
+    .filter((c, i, a) => i === 0 || String(c.time) !== String(a[i - 1].time)),
+  [bars]);
 
-  const model = useMemo(() => {
-    const clean = (bars || []).filter(
-      b => b && [b.open, b.high, b.low, b.close].every(v => typeof v === 'number' && isFinite(v))
-    );
-    if (clean.length === 0) return null;
+  const volumes = useMemo(() => (bars || [])
+    .map((b) => {
+      const time = toChartTime(b?.date);
+      const v = Number(b?.volume);
+      if (time === null || !Number.isFinite(v) || v <= 0) return null;
+      return { time, value: v, up: b.close >= b.open };
+    })
+    .filter(Boolean)
+    .filter((c, i, a) => i === 0 || String(c.time) !== String(a[i - 1].time)),
+  [bars]);
 
-    // The y-scale must contain the LEVELS too, or a stop below the visible range is silently
-    // clipped and the chart shows a trade that appears to have no risk.
-    let lo = Math.min(...clean.map(b => b.low));
-    let hi = Math.max(...clean.map(b => b.high));
+  // ── Create once. Recreating per render would throw away master's zoom on every poll. ──
+  useEffect(() => {
+    if (!holder.current) return undefined;
+    const theme = readTheme(holder.current);
+    const chart = createChart(holder.current, {
+      height,
+      layout: {
+        background: { color: 'transparent' },
+        textColor: theme.muted,
+        fontSize: 10,
+        attributionLogo: true,
+      },
+      grid: {
+        vertLines: { color: theme.border, style: LineStyle.Dotted },
+        horzLines: { color: theme.border, style: LineStyle.Dotted },
+      },
+      rightPriceScale: { borderColor: theme.border, scaleMargins: { top: 0.08, bottom: 0.26 } },
+      timeScale: {
+        borderColor: theme.border,
+        rightOffset: 6,
+        timeVisible: String(interval || '').match(/m|h/i) !== null,
+        secondsVisible: false,
+      },
+      crosshair: { mode: CrosshairMode.Normal },
+      handleScroll: true,
+      handleScale: true,
+      autoSize: false,
+    });
+
+    const price = chart.addSeries(CandlestickSeries, {
+      upColor: theme.green, downColor: theme.red,
+      borderUpColor: theme.green, borderDownColor: theme.red,
+      wickUpColor: theme.green, wickDownColor: theme.red,
+      priceLineVisible: true, lastValueVisible: true,
+    });
+
+    let vol = null;
+    if (showVolume) {
+      vol = chart.addSeries(HistogramSeries, {
+        priceFormat: { type: 'volume' },
+        priceScaleId: 'vol',
+        lastValueVisible: false, priceLineVisible: false,
+      });
+      chart.priceScale('vol').applyOptions({
+        scaleMargins: { top: 0.82, bottom: 0 }, borderVisible: false,
+      });
+    }
+
+    chartRef.current = chart;
+    priceRef.current = price;
+    volRef.current = vol;
+
+    // A ResizeObserver rather than a fixed width, which is the whole point of the rewrite.
+    const ro = new ResizeObserver((entries) => {
+      const w = Math.floor(entries[0]?.contentRect?.width || 0);
+      if (w > 0) chart.applyOptions({ width: w });
+    });
+    ro.observe(holder.current);
+    chart.applyOptions({ width: holder.current.clientWidth || 600 });
+
+    chart.subscribeCrosshairMove((param) => {
+      if (!param?.time || !param.seriesData) { setReadout(null); return; }
+      const bar = param.seriesData.get(price);
+      if (!bar) { setReadout(null); return; }
+      const v = vol ? param.seriesData.get(vol) : null;
+      setReadout({ ...bar, volume: v?.value ?? null, time: param.time });
+    });
+
+    if (onReady) onReady(chart);
+
+    return () => {
+      ro.disconnect();
+      chart.remove();
+      chartRef.current = null;
+      priceRef.current = null;
+      volRef.current = null;
+      coneRefs.current = {};
+      markersRef.current = null;
+      linesRef.current = [];
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [height, showVolume, interval]);
+
+  // ── Bars ──────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const price = priceRef.current;
+    const chart = chartRef.current;
+    if (!price || !chart) return;
+    price.setData(candles);
+    if (volRef.current) {
+      const theme = holder.current ? readTheme(holder.current) : null;
+      volRef.current.setData(volumes.map((v) => ({
+        time: v.time, value: v.value,
+        color: theme ? `${v.up ? theme.green : theme.red}66` : undefined,
+      })));
+    }
+    if (candles.length) chart.timeScale().fitContent();
+  }, [candles, volumes]);
+
+  // ── Master's own fills, as arrows on the bars they happened on ─────────────
+  useEffect(() => {
+    const price = priceRef.current;
+    if (!price || !holder.current) return;
+    const theme = readTheme(holder.current);
+    const marks = (layers.fills ? (fills || []) : [])
+      .map((f) => {
+        const time = toChartTime(f?.date);
+        if (time === null) return null;
+        const buy = String(f.side).toUpperCase() === 'BUY';
+        return {
+          time,
+          position: buy ? 'belowBar' : 'aboveBar',
+          color: buy ? theme.green : theme.red,
+          shape: buy ? 'arrowUp' : 'arrowDown',
+          text: `${buy ? 'B' : 'S'} ${f.quantity ?? ''}@${f.price ?? ''}`,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => (a.time > b.time ? 1 : a.time < b.time ? -1 : 0));
+
+    if (!markersRef.current) {
+      markersRef.current = createSeriesMarkers(price, marks);
+    } else {
+      markersRef.current.setMarkers(marks);
+    }
+  }, [fills, layers.fills]);
+
+  // ── Levels: the signal's, and master's own thesis ──────────────────────────
+  useEffect(() => {
+    const price = priceRef.current;
+    if (!price || !holder.current) return;
+    for (const l of linesRef.current) {
+      try { price.removePriceLine(l); } catch { /* already gone with the series */ }
+    }
+    linesRef.current = [];
+    if (!layers.levels) return;
+    const theme = readTheme(holder.current);
+
+    const add = (value, title, color, style) => {
+      if (!finite(value)) return;
+      linesRef.current.push(price.createPriceLine({
+        price: value, color, lineWidth: 1, lineStyle: style,
+        axisLabelVisible: true, title,
+      }));
+    };
+
     if (signal) {
-      for (const { key } of LEVELS) {
-        const v = signal[key];
-        if (typeof v === 'number' && isFinite(v)) {
-          lo = Math.min(lo, v);
-          hi = Math.max(hi, v);
-        }
+      for (const { key, label, varName, style } of SIGNAL_LEVELS) {
+        add(signal[key], label, theme[varName.replace('--', '')] || theme.accent, style);
       }
     }
-    const span = hi - lo || Math.max(1e-6, Math.abs(hi) * 0.01);
-    lo -= span * 0.04;
-    hi += span * 0.04;
+    // Master's declared levels are drawn thicker than a signal's suggestion: they are what he
+    // committed to, and Section 75 treats them as the strongest evidence class there is.
+    if (thesis) {
+      if (finite(thesis.stopPrice)) {
+        linesRef.current.push(price.createPriceLine({
+          price: thesis.stopPrice, color: theme.red, lineWidth: 2,
+          lineStyle: LineStyle.Solid, axisLabelVisible: true, title: 'YOUR STOP',
+        }));
+      }
+      if (finite(thesis.targetPrice)) {
+        linesRef.current.push(price.createPriceLine({
+          price: thesis.targetPrice, color: theme.green, lineWidth: 2,
+          lineStyle: LineStyle.Solid, axisLabelVisible: true, title: 'YOUR TARGET',
+        }));
+      }
+    }
+  }, [signal, thesis, layers.levels, candles.length]);
 
-    const innerW = W - padL - padR;
-    const slot = innerW / clean.length;
-    const bodyW = Math.max(1, Math.min(11, slot * 0.62));
-    const y = v => padT + priceH - ((v - lo) / (hi - lo)) * priceH;
-    const x = i => padL + slot * (i + 0.5);
+  // ── The projection cone ───────────────────────────────────────────────────
+  //
+  // DASHED AND GREY WHILE THE CENTRE IS UNTILTED. The visual weight tracks the evidence, so an
+  // unvalidated projection cannot look authoritative. Only a gate-cleared cone gets the accent.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !holder.current) return;
+    for (const s of Object.values(coneRefs.current)) {
+      try { chart.removeSeries(s); } catch { /* already disposed */ }
+    }
+    coneRefs.current = {};
 
-    const maxVol = Math.max(1, ...clean.map(b => Number(b.volume) || 0));
-    const vy = v => padT + priceH + volH - (Math.max(0, v) / maxVol) * volH;
+    const points = cone?.points || [];
+    if (!layers.cone || !cone?.ok || points.length === 0) return;
+    const theme = readTheme(holder.current);
+    const tilted = !!cone.tilted;
+    const bandColor = tilted ? theme.accent : theme.muted;
 
-    return { clean, lo, hi, slot, bodyW, y, x, vy, maxVol, innerW };
-  }, [bars, signal, height, showVolume, priceH, volH]);
+    const anchorTime = toChartTime(cone.anchor?.time);
+    const anchorPrice = cone.anchor?.price;
+    const seed = (finite(anchorPrice) && anchorTime !== null)
+      ? [{ time: anchorTime, value: anchorPrice }] : [];
 
-  if (!model) {
-    return (
-      <div style={{
-        height, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: 'var(--muted)', fontSize: '12px', border: '1px dashed var(--border)',
-        borderRadius: 'var(--radius)',
-      }}>
-        No bars to draw. Fetch price history for {symbol || 'this symbol'} first.
-      </div>
-    );
-  }
+    const build = (field, width, style, color) => {
+      const data = seed.concat(points
+        .map((p) => {
+          const t = toChartTime(p.time);
+          return (t === null || !finite(p[field])) ? null : { time: t, value: p[field] };
+        })
+        .filter(Boolean));
+      if (data.length < 2) return;
+      const s = chart.addSeries(LineSeries, {
+        color, lineWidth: width, lineStyle: style,
+        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      });
+      s.setData(data);
+      coneRefs.current[field] = s;
+    };
 
-  const { clean, lo, hi, slot, bodyW, y, x, vy } = model;
-  const ticks = niceTicks(lo, hi, 5);
-  const dateEvery = Math.max(1, Math.round(clean.length / 6));
+    build('upper2', 1, LineStyle.Dotted, `${bandColor}88`);
+    build('lower2', 1, LineStyle.Dotted, `${bandColor}88`);
+    build('upper1', 1, LineStyle.Dashed, bandColor);
+    build('lower1', 1, LineStyle.Dashed, bandColor);
+    // The centre only earns a visible line when a model was allowed to move it. A flat centre is
+    // just the last price extended, and drawing it boldly would imply a forecast of no change.
+    build('mid', tilted ? 2 : 1, tilted ? LineStyle.Solid : LineStyle.Dotted,
+      tilted ? theme.accent : `${theme.muted}55`);
+  }, [cone, layers.cone, candles.length]);
 
-  // The engine emits `probability` as an integer percent and `entryZoneLow/High` as the band
-  // it is actually willing to enter in. Both are drawn as given.
-  const zoneLow = signal && typeof signal.entryZoneLow === 'number' ? signal.entryZoneLow : null;
-  const zoneHigh = signal && typeof signal.entryZoneHigh === 'number' ? signal.entryZoneHigh : null;
+  const empty = candles.length === 0;
+  const toggle = (k) => setLayers((s) => ({ ...s, [k]: !s[k] }));
+
+  const chipStyle = (on) => ({
+    padding: '2px 8px', fontSize: '10px', borderRadius: '999px', cursor: 'pointer',
+    border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
+    background: on ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent',
+    color: on ? 'var(--accent)' : 'var(--muted)',
+  });
 
   return (
-    <div style={{ position: 'relative' }}>
-      <svg
-        viewBox={`0 0 ${W} ${height}`}
-        preserveAspectRatio="none"
-        style={{ width: '100%', height, display: 'block' }}
-        role="img"
-        aria-label={`Candlestick chart for ${symbol || 'the selected symbol'}, ${clean.length} bars`
-          + (signal ? `, with entry, stop-loss and target levels overlaid` : '')}
-        onMouseLeave={() => setHover(null)}
-      >
-        {/* Horizontal grid + price axis */}
-        {ticks.map(t => (
-          <g key={`t${t}`}>
-            <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)}
-                  stroke="var(--border)" strokeWidth="1" opacity="0.45" />
-            <text x={W - padR + 5} y={y(t) + 3.5} fontSize="9" fill="var(--muted)">
-              {t >= 1000 ? t.toFixed(0) : t.toFixed(2)}
-            </text>
-          </g>
-        ))}
-
-        {/* Entry zone band — the range the engine will actually enter in, not a decoration */}
-        {zoneLow !== null && zoneHigh !== null && (
-          <rect x={padL} width={W - padL - padR}
-                y={Math.min(y(zoneHigh), y(zoneLow))}
-                height={Math.max(1, Math.abs(y(zoneLow) - y(zoneHigh)))}
-                fill="var(--accent)" opacity="0.10" />
+    <div>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap',
+        padding: '0 0 6px', fontSize: '10px', color: 'var(--muted)',
+      }}>
+        <strong style={{ color: 'var(--text)', fontSize: '11px' }}>{symbol}</strong>
+        <span>{interval}</span>
+        <span>{candles.length} bars</span>
+        <span style={{ flex: 1 }} />
+        {(fills || []).length > 0 && (
+          <button type="button" onClick={() => toggle('fills')} style={chipStyle(layers.fills)}
+                  aria-pressed={layers.fills}>
+            your fills ({fills.length})
+          </button>
         )}
-
-        {/* Candles */}
-        {clean.map((b, i) => {
-          const rising = b.close >= b.open;
-          const col = rising ? UP : DOWN;
-          const yO = y(b.open), yC = y(b.close);
-          const top = Math.min(yO, yC);
-          const bodyH = Math.max(1, Math.abs(yC - yO));
-          return (
-            <g key={i}
-               onMouseEnter={() => setHover({ ...b, i })}
-               style={{ cursor: 'crosshair' }}>
-              {/* A transparent full-height hit area, so hovering does not require pixel
-                  accuracy on a 1px wick. */}
-              <rect x={x(i) - slot / 2} y={padT} width={slot} height={priceH + volH}
-                    fill="transparent" />
-              <line x1={x(i)} x2={x(i)} y1={y(b.high)} y2={y(b.low)}
-                    stroke={col} strokeWidth="1" />
-              <rect x={x(i) - bodyW / 2} y={top} width={bodyW} height={bodyH}
-                    fill={rising ? 'none' : col} stroke={col} strokeWidth="1" />
-            </g>
-          );
-        })}
-
-        {/* Volume */}
-        {showVolume && clean.map((b, i) => {
-          const v = Number(b.volume) || 0;
-          if (v <= 0) return null;
-          const top = vy(v);
-          return (
-            <rect key={`v${i}`} x={x(i) - bodyW / 2} y={top}
-                  width={bodyW} height={Math.max(0, padT + priceH + volH - top)}
-                  fill={b.close >= b.open ? UP : DOWN} opacity="0.28" />
-          );
-        })}
-        {showVolume && (
-          <line x1={padL} x2={W - padR} y1={padT + priceH} y2={padT + priceH}
-                stroke="var(--border)" strokeWidth="1" />
+        {(signal || thesis) && (
+          <button type="button" onClick={() => toggle('levels')} style={chipStyle(layers.levels)}
+                  aria-pressed={layers.levels}>
+            levels
+          </button>
         )}
-
-        {/* Signal levels */}
-        {signal && LEVELS.map(({ key, label, color, dash }) => {
-          const v = signal[key];
-          if (typeof v !== 'number' || !isFinite(v)) return null;
-          return (
-            <g key={key}>
-              <line x1={padL} x2={W - padR} y1={y(v)} y2={y(v)}
-                    stroke={color} strokeWidth="1.25"
-                    strokeDasharray={dash || undefined} opacity="0.9" />
-              <text x={padL + 3} y={y(v) - 3} fontSize="9" fill={color} fontWeight="700">
-                {label} {v >= 1000 ? v.toFixed(0) : v.toFixed(2)}
-              </text>
-            </g>
-          );
-        })}
-
-        {/* Date axis */}
-        {clean.map((b, i) => (
-          i % dateEvery === 0 ? (
-            <text key={`d${i}`} x={x(i)} y={height - 6} fontSize="8.5"
-                  fill="var(--muted)" textAnchor="middle">
-              {String(b.date || '').slice(2)}
-            </text>
-          ) : null
-        ))}
-
-        {/* Crosshair */}
-        {hover && (
-          <line x1={x(hover.i)} x2={x(hover.i)} y1={padT} y2={padT + priceH + volH}
-                stroke="var(--text-dim)" strokeWidth="0.75" strokeDasharray="2 3" />
+        {cone?.ok && (
+          <button type="button" onClick={() => toggle('cone')} style={chipStyle(layers.cone)}
+                  aria-pressed={layers.cone}>
+            projection {cone.tilted ? '' : '(flat)'}
+          </button>
         )}
-      </svg>
+      </div>
 
-      {/* Readout. A div rather than an SVG tooltip so it inherits the app's text styling and
-          can be read by a screen reader as live text. */}
+      {empty ? (
+        <div style={{
+          height, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: 'var(--muted)', fontSize: '12px', border: '1px dashed var(--border)',
+          borderRadius: 'var(--radius)', textAlign: 'center', padding: '0 16px',
+        }}>
+          No bars to draw. Fetch price history for {symbol || 'this symbol'} first.
+        </div>
+      ) : (
+        <div ref={holder} style={{ width: '100%', height }}
+             role="img"
+             aria-label={`Candlestick chart for ${symbol || 'the selected symbol'}, `
+               + `${candles.length} ${interval} bars`
+               + (fills?.length ? `, with ${fills.length} of your own fills marked` : '')
+               + (cone?.ok ? ', with a volatility projection drawn forward' : '')} />
+      )}
+
       <div aria-live="polite" style={{
-        display: 'flex', gap: '14px', flexWrap: 'wrap',
-        padding: '6px 10px', fontSize: '10.5px',
-        color: hover ? 'var(--text)' : 'var(--muted)',
+        display: 'flex', gap: '12px', flexWrap: 'wrap', padding: '6px 2px',
+        fontSize: '10.5px', color: readout ? 'var(--text)' : 'var(--muted)',
         borderTop: '1px solid var(--border)',
       }}>
-        {hover ? (
+        {readout ? (
           <>
-            <span style={{ color: 'var(--text-dim)' }}>{hover.date}</span>
-            <span>O {hover.open}</span>
-            <span>H {hover.high}</span>
-            <span>L {hover.low}</span>
-            <span style={{ color: hover.close >= hover.open ? UP : DOWN, fontWeight: 700 }}>
-              C {hover.close}
-            </span>
-            {Number(hover.volume) > 0 && (
-              <span style={{ color: 'var(--muted)' }}>
-                V {Number(hover.volume).toLocaleString()}
-              </span>
-            )}
+            <span>O {readout.open}</span>
+            <span>H {readout.high}</span>
+            <span>L {readout.low}</span>
+            <span style={{
+              color: readout.close >= readout.open ? 'var(--green)' : 'var(--red)',
+              fontWeight: 700,
+            }}>C {readout.close}</span>
+            {finite(readout.volume) && <span>V {readout.volume.toLocaleString()}</span>}
           </>
         ) : (
-          <span>
-            {clean.length} bars, {clean[0].date} → {clean[clean.length - 1].date}
-            {signal ? ' — hover a candle for its values' : ''}
-          </span>
+          <span>Scroll to zoom, drag to pan. Hover a candle for its values.</span>
         )}
+      </div>
+
+      {cone?.ok && layers.cone && (
+        <div style={{
+          fontSize: '10px', color: 'var(--muted)', padding: '4px 2px', lineHeight: 1.5,
+        }}>
+          {cone.summary?.text}{' '}
+          <span style={{ color: cone.tilted ? 'var(--accent)' : 'var(--text-dim)' }}>
+            {cone.tiltReason}
+          </span>
+        </div>
+      )}
+
+      {/* Required by the charting library's licence. */}
+      <div style={{ fontSize: '9px', color: 'var(--muted)', padding: '2px' }}>
+        Charting by{' '}
+        <a href={ATTRIBUTION_URL} target="_blank" rel="noreferrer"
+           style={{ color: 'var(--muted)' }}>TradingView Lightweight Charts</a>
       </div>
     </div>
   );
