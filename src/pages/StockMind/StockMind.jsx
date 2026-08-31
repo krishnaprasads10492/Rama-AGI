@@ -42,7 +42,7 @@ const pct = (v) =>
 function Stat({ label, value, color, title }) {
   return (
     <div title={title} style={{ minWidth: '78px' }}>
-      <div style={{ fontSize: '9px', color: 'var(--muted)', letterSpacing: '0.08em' }}>{label}</div>
+      <div style={{ fontSize: '12.5px', color: 'var(--muted)', letterSpacing: '0.08em' }}>{label}</div>
       <div style={{ fontSize: '12px', color: color || 'var(--text)', fontWeight: 600 }}>{value}</div>
     </div>
   );
@@ -64,37 +64,37 @@ function SignalRow({ signal, selected, onSelect }) {
         cursor: 'pointer',
       }}
     >
-      <td style={{ padding: '7px 9px', fontSize: '11px', color: 'var(--text)' }}>
+      <td style={{ padding: '7px 9px', fontSize: '12.5px', color: 'var(--text)' }}>
         {signal.variant || `#${signal.rank ?? '—'}`}
         {signal.suppressed && (
           <span title={signal.suppressReason || 'Models disagreed'}
-                style={{ marginLeft: '6px', fontSize: '9px', color: 'var(--amber)' }}>
+                style={{ marginLeft: '6px', fontSize: '12.5px', color: 'var(--amber)' }}>
             ⚠ SUPPRESSED
           </span>
         )}
       </td>
       <td style={{ padding: '7px 9px', textAlign: 'center' }}>
-        <span style={{ color: dirColor, fontWeight: 700, fontSize: '10px' }}>{dir || '—'}</span>
+        <span style={{ color: dirColor, fontWeight: 700, fontSize: '12px' }}>{dir || '—'}</span>
       </td>
-      <td style={{ padding: '7px 9px', fontSize: '11px', textAlign: 'right', color: 'var(--text)' }}>
+      <td style={{ padding: '7px 9px', fontSize: '12.5px', textAlign: 'right', color: 'var(--text)' }}>
         {num(signal.entryPrice)}
       </td>
-      <td style={{ padding: '7px 9px', fontSize: '11px', textAlign: 'right', color: 'var(--red)' }}>
+      <td style={{ padding: '7px 9px', fontSize: '12.5px', textAlign: 'right', color: 'var(--red)' }}>
         {num(signal.stopLoss)}
       </td>
-      <td style={{ padding: '7px 9px', fontSize: '11px', textAlign: 'right', color: 'var(--green)' }}>
+      <td style={{ padding: '7px 9px', fontSize: '12.5px', textAlign: 'right', color: 'var(--green)' }}>
         {num(signal.t1Price)}
       </td>
-      <td style={{ padding: '7px 9px', fontSize: '11px', textAlign: 'right', color: 'var(--green)' }}>
+      <td style={{ padding: '7px 9px', fontSize: '12.5px', textAlign: 'right', color: 'var(--green)' }}>
         {num(signal.t2Price)}
       </td>
-      <td style={{ padding: '7px 9px', fontSize: '11px', textAlign: 'right', color: 'var(--green)' }}>
+      <td style={{ padding: '7px 9px', fontSize: '12.5px', textAlign: 'right', color: 'var(--green)' }}>
         {num(signal.t3Price)}
       </td>
-      <td style={{ padding: '7px 9px', fontSize: '11px', textAlign: 'center', color: 'var(--text-dim)' }}>
+      <td style={{ padding: '7px 9px', fontSize: '12.5px', textAlign: 'center', color: 'var(--text-dim)' }}>
         {num(signal.riskRewardRatio, 2)}
       </td>
-      <td style={{ padding: '7px 9px', fontSize: '11px', textAlign: 'center', color: 'var(--text)' }}>
+      <td style={{ padding: '7px 9px', fontSize: '12.5px', textAlign: 'center', color: 'var(--text)' }}>
         {pct(signal.probability)}
       </td>
       <td style={{ padding: '7px 9px', textAlign: 'center' }}>
@@ -293,7 +293,7 @@ export default function StockMind() {
         </span>
         <div style={{ flex: 1 }} />
         {engine && !engine.error && (
-          <span style={{ fontSize: '10px', color: 'var(--muted)' }}
+          <span style={{ fontSize: '12px', color: 'var(--muted)' }}
                 title={engine.note || ''}>
             {engine.registry?.models_trained || 0} trained ·{' '}
             {engine.featureContract?.aligned ? 'contract aligned' : 'CONTRACT MISALIGNED'}
@@ -316,7 +316,7 @@ export default function StockMind() {
           <button key={id} type="button" role="tab" aria-selected={tab === id}
                   onClick={() => setTab(id)}
                   style={{
-                    padding: '8px 14px', fontSize: '10.5px', letterSpacing: '0.08em',
+                    padding: '8px 14px', fontSize: '12.5px', letterSpacing: '0.08em',
                     background: 'none', cursor: 'pointer',
                     border: 'none',
                     borderBottom: `2px solid ${tab === id ? 'var(--magenta)' : 'transparent'}`,
@@ -334,7 +334,7 @@ export default function StockMind() {
         <div style={{
           padding: '14px 18px',
           background: 'rgba(255,170,0,0.06)', border: '1px solid rgba(255,170,0,0.3)',
-          borderRadius: 'var(--radius)', fontSize: '11px', color: 'var(--amber)', lineHeight: '1.7',
+          borderRadius: 'var(--radius)', fontSize: '12.5px', color: 'var(--amber)', lineHeight: '1.7',
         }}>
           ⚠ DISCLAIMER: StockMind provides AI-generated market analysis for informational purposes only.
           Not financial advice. Past performance does not guarantee future results.
@@ -346,11 +346,11 @@ export default function StockMind() {
           <div className="section-label">SIGNAL REQUEST</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
             <div>
-              <div style={{ fontSize: '10px', color: 'var(--muted)', marginBottom: '4px' }}>SYMBOL</div>
+              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>SYMBOL</div>
               <input className="input" value={symbol} onChange={e => setSymbol(e.target.value)} placeholder="NIFTY50" />
             </div>
             <div>
-              <div style={{ fontSize: '10px', color: 'var(--muted)', marginBottom: '4px' }}>EXCHANGE</div>
+              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>EXCHANGE</div>
               <select className="input" value={exchange} onChange={e => setExchange(e.target.value)}>
                 <option value="NSE">NSE</option>
                 <option value="BSE">BSE</option>
@@ -359,7 +359,7 @@ export default function StockMind() {
               </select>
             </div>
             <div>
-              <div style={{ fontSize: '10px', color: 'var(--muted)', marginBottom: '4px' }}>DIRECTION</div>
+              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>DIRECTION</div>
               <select className="input" value={direction} onChange={e => setDirection(e.target.value)}>
                 <option value="both">Both</option>
                 <option value="long">Long</option>
@@ -367,7 +367,7 @@ export default function StockMind() {
               </select>
             </div>
             <div>
-              <div style={{ fontSize: '10px', color: 'var(--muted)', marginBottom: '4px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>
                 BASE PRICE (last stored close)
               </div>
               <input className="input" value={lastClose ?? ''} readOnly
@@ -375,11 +375,11 @@ export default function StockMind() {
                      title="Taken from the last stored bar rather than typed, so a signal cannot be priced off a stale number." />
             </div>
             <div>
-              <div style={{ fontSize: '10px', color: 'var(--muted)', marginBottom: '4px' }}>CAPITAL</div>
+              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>CAPITAL</div>
               <input className="input" type="number" value={capital} onChange={e => setCapital(e.target.value)} />
             </div>
             <div>
-              <div style={{ fontSize: '10px', color: 'var(--muted)', marginBottom: '4px' }}>RISK %</div>
+              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>RISK %</div>
               <input className="input" type="number" step="0.5" min="0.5" max="5" value={riskPct} onChange={e => setRiskPct(e.target.value)} />
             </div>
           </div>
@@ -387,13 +387,13 @@ export default function StockMind() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
             {/* Interval is a real control now, not a hardcoded '1d' (Section 79). 60m is the only
                 intraday depth Yahoo gives — 5m and 15m cap at a month, see horizons.DISPLAY_ONLY. */}
-            <div style={{ fontSize: '10px', color: 'var(--muted)' }}>INTERVAL</div>
+            <div style={{ fontSize: '12px', color: 'var(--muted)' }}>INTERVAL</div>
             <select className="input" style={{ width: '78px' }} value={barInterval}
                     onChange={e => setBarInterval(e.target.value)}>
               <option value="1d">1d</option>
               <option value="60m">60m</option>
             </select>
-            <div style={{ fontSize: '10px', color: 'var(--muted)' }}>BARS</div>
+            <div style={{ fontSize: '12px', color: 'var(--muted)' }}>BARS</div>
             <input className="input" type="number" min="40" max="1200" step="20"
                    style={{ width: '84px' }}
                    value={barCount} onChange={e => setBarCount(e.target.value)} />
@@ -409,7 +409,7 @@ export default function StockMind() {
             </button>
             <div style={{ flex: 1 }} />
             {!canRequest && (
-              <span style={{ fontSize: '11px', color: 'var(--amber)' }}>Requires Operator tier or higher</span>
+              <span style={{ fontSize: '12.5px', color: 'var(--amber)' }}>Requires Operator tier or higher</span>
             )}
             <button
               className="btn btn-primary"
@@ -421,7 +421,7 @@ export default function StockMind() {
           </div>
 
           {barsNote && (
-            <div style={{ fontSize: '10.5px', color: 'var(--amber)' }}>{barsNote}</div>
+            <div style={{ fontSize: '12.5px', color: 'var(--amber)' }}>{barsNote}</div>
           )}
         </div>
 
@@ -431,7 +431,7 @@ export default function StockMind() {
             borderRadius: 'var(--radius)', color: 'var(--red)', fontSize: '12px' }}>
             ✕ {error}
             {String(error).includes('not reachable') && (
-              <div style={{ marginTop: '6px', color: 'var(--text-dim)', fontSize: '11px' }}>
+              <div style={{ marginTop: '6px', color: 'var(--text-dim)', fontSize: '12.5px' }}>
                 The Python backend may still be starting (model ensemble load takes a few seconds). Try again.
               </div>
             )}
@@ -443,23 +443,23 @@ export default function StockMind() {
           <div className="hud-card" style={{ padding: '14px 16px 4px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
               {barsMeta?.stored != null && (
-                <span style={{ fontSize: '10px', color: 'var(--muted)' }}>
+                <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
                   {barsMeta.stored} stored from {barsMeta.storedFirstBar}
                 </span>
               )}
               <div style={{ flex: 1 }} />
               {held && (
-                <span style={{ fontSize: '10px', color: 'var(--green)' }}
+                <span style={{ fontSize: '12px', color: 'var(--green)' }}
                       title="your tracked position in this symbol">
                   you hold {held.netQty} @ {held.avgCost} ({held.tradeStyle})
                 </span>
               )}
               {selected && (
-                <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
+                <span style={{ fontSize: '12px', color: 'var(--text-dim)' }}>
                   overlay: {selected.variant || `#${selected.rank}`} ({String(selected.type || '').toUpperCase()})
                 </span>
               )}
-              <label style={{ fontSize: '10px', color: 'var(--muted)', display: 'flex',
+              <label style={{ fontSize: '12px', color: 'var(--muted)', display: 'flex',
                 gap: '4px', alignItems: 'center' }}
                      title="Draw the range this instrument's own volatility calls ordinary over the horizon">
                 <input type="checkbox" checked={coneOn}
@@ -478,12 +478,12 @@ export default function StockMind() {
               cone={cone}
             />
             {cone?.error && (
-              <div style={{ fontSize: '10px', color: 'var(--amber)', padding: '2px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--amber)', padding: '2px' }}>
                 Projection unavailable: {cone.error}
               </div>
             )}
             {cone && cone.ok === false && (
-              <div style={{ fontSize: '10px', color: 'var(--muted)', padding: '2px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '2px' }}>
                 Projection unavailable: {cone.reason}
               </div>
             )}
@@ -515,7 +515,7 @@ export default function StockMind() {
                 </span>
               )}
               <div style={{ flex: 1 }} />
-              <span style={{ fontSize: '10px', color: 'var(--muted)' }}>{result.modelVersion}</span>
+              <span style={{ fontSize: '12px', color: 'var(--muted)' }}>{result.modelVersion}</span>
             </div>
 
             {signals.length > 0 ? (
@@ -525,7 +525,7 @@ export default function StockMind() {
                     <tr style={{ borderBottom: '1px solid var(--border)' }}>
                       {['SETUP', 'DIR', 'ENTRY', 'SL', 'T1', 'T2', 'T3', 'R:R', 'PROB', 'GRADE'].map((h, i) => (
                         <th key={h} style={{
-                          padding: '7px 9px', fontSize: '9.5px', color: 'var(--muted)',
+                          padding: '7px 9px', fontSize: '12.5px', color: 'var(--muted)',
                           textAlign: i === 0 ? 'left' : i >= 2 && i <= 6 ? 'right' : 'center',
                         }}>{h}</th>
                       ))}
@@ -539,7 +539,7 @@ export default function StockMind() {
                     ))}
                   </tbody>
                 </table>
-                <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '8px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px' }}>
                   Click a row to overlay its levels on the chart. Each row is a different risk
                   geometry over <strong>one</strong> prediction — not {signals.length} independent forecasts.
                 </div>
@@ -567,11 +567,11 @@ export default function StockMind() {
                   <Stat label="MAX RISK" value={selected.maxRisk != null ? String(selected.maxRisk) : '—'} />
                   <Stat label="VALID FOR" value={selected.validityBars != null ? `${selected.validityBars} bars` : '—'} />
                 </div>
-                <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '11px', color: 'var(--text-dim)', lineHeight: '1.8' }}>
+                <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12.5px', color: 'var(--text-dim)', lineHeight: '1.8' }}>
                   {selected.reasons.map((r, i) => <li key={i}>{r}</li>)}
                 </ul>
                 {selected.probabilityBasis && (
-                  <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '8px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px' }}>
                     Probability basis: {selected.probabilityBasis}
                   </div>
                 )}
@@ -587,7 +587,7 @@ export default function StockMind() {
               <div className="section-label">DERIVATIVES — {derivs.symbol}</div>
               <span className="badge badge-green">BACKTESTABLE</span>
               <div style={{ flex: 1 }} />
-              <span style={{ fontSize: '10px', color: 'var(--muted)' }}>
+              <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
                 {derivs.rows} days stored · as of {String(latestDeriv.date || '').slice(0, 10)}
               </span>
             </div>
@@ -632,12 +632,12 @@ export default function StockMind() {
               )}
             </div>
             {news.error ? (
-              <div style={{ fontSize: '11px', color: 'var(--red)' }}>✕ {news.error}</div>
+              <div style={{ fontSize: '12.5px', color: 'var(--red)' }}>✕ {news.error}</div>
             ) : (
               <>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
                   {(news.items || []).map((it, i) => (
-                    <div key={i} style={{ display: 'flex', gap: '9px', alignItems: 'baseline', fontSize: '11px' }}>
+                    <div key={i} style={{ display: 'flex', gap: '9px', alignItems: 'baseline', fontSize: '12.5px' }}>
                       <span style={{
                         width: '38px', flexShrink: 0, textAlign: 'right', fontWeight: 700,
                         color: it.sentiment > 0.05 ? 'var(--green)'
@@ -646,17 +646,17 @@ export default function StockMind() {
                         {it.sentiment > 0 ? '+' : ''}{num(it.sentiment, 2)}
                       </span>
                       {it.event && (
-                        <span className="badge" style={{ fontSize: '8.5px', flexShrink: 0 }}>{it.event}</span>
+                        <span className="badge" style={{ flexShrink: 0 }}>{it.event}</span>
                       )}
                       <span style={{ color: 'var(--text)' }}>{it.title}</span>
-                      <span style={{ color: 'var(--muted)', fontSize: '9.5px', flexShrink: 0, marginLeft: 'auto' }}>
+                      <span style={{ color: 'var(--muted)', fontSize: '12.5px', flexShrink: 0, marginLeft: 'auto' }}>
                         {it.publisher}
                       </span>
                     </div>
                   ))}
                 </div>
                 {news.note && (
-                  <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '10px' }}>{news.note}</div>
+                  <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '10px' }}>{news.note}</div>
                 )}
               </>
             )}
@@ -676,7 +676,7 @@ export default function StockMind() {
                         color={engine.featureContract?.aligned ? 'var(--green)' : 'var(--red)'} />
                   <Stat label="AVAILABLE" value={String(engine.registry?.available?.length ?? '—')} />
                 </div>
-                <div style={{ fontSize: '10.5px', color: 'var(--amber)', marginTop: '12px',
+                <div style={{ fontSize: '12.5px', color: 'var(--amber)', marginTop: '12px',
                   lineHeight: 1.7 }}>
                   No horizon's model currently clears the acceptance gate, measured on live data.
                   Every directional reading in this page is therefore reported but not acted on —
@@ -684,18 +684,18 @@ export default function StockMind() {
                   holding-period warnings do not depend on a model and are live.
                 </div>
                 {engine.note && (
-                  <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '8px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px' }}>
                     {engine.note}
                   </div>
                 )}
               </>
             ) : (
-              <div style={{ fontSize: '11px', color: engine?.error ? 'var(--red)' : 'var(--muted)' }}>
+              <div style={{ fontSize: '12.5px', color: engine?.error ? 'var(--red)' : 'var(--muted)' }}>
                 {engine?.error || 'Engine state not loaded.'}
               </div>
             )}
             {!news && (
-              <div style={{ fontSize: '10.5px', color: 'var(--muted)', marginTop: '10px' }}>
+              <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '10px' }}>
                 Use “Read news” above to pull headlines for {sym}.
               </div>
             )}
@@ -705,3 +705,4 @@ export default function StockMind() {
     </div>
   );
 }
+

@@ -10,10 +10,15 @@
 :root {
   /* ── Backgrounds — logo's deep navy layers ─────────────────────────────── */
   --bg:          #030810;   /* Deepest navy — almost black with blue tint */
-  --surface:     #060f1e;   /* Card surfaces */
-  --elevated:    #0b1a30;   /* Raised panels */
-  --border:      #0d2444;   /* Subtle borders */
-  --border-glow: rgba(0,200,255,0.2);
+  --surface:     #081426;   /* Card surfaces — lifted so cards read as separate from bg */
+  --elevated:    #0f2138;   /* Raised panels */
+  /* MEASURED, NOT GUESSED (spec Section 81). The old #0d2444 gave 1.29:1 against --bg, so every
+     card edge, table rule and input outline was effectively invisible and the eye had to hunt for
+     structure. WCAG 1.4.11 asks 3:1 for the boundary of a UI component. This is ~2.9:1 — a 2.2x
+     improvement that still reads as a thin cyan-navy line rather than a grid. */
+  --border:      #2f5f96;
+  --border-soft: #1b3c63;   /* for dividers inside an already-bordered card */
+  --border-glow: rgba(0,200,255,0.28);
 
   /* ── Primary accent — logo's ice blue ──────────────────────────────────── */
   --accent:      #00c8ff;   /* Ice blue — primary (logo's dominant color) */
@@ -26,7 +31,7 @@
   --gold-dim:    #a07828;   /* Darker gold */
 
   /* ── Secondary colors ───────────────────────────────────────────────────── */
-  --violet:      #5b4fff;   /* Softer violet — AI/brain color */
+  --violet:      #6d61ff;   /* Softer violet — AI/brain color */
   --violet-soft: #8b7fff;
   --green:       #00d68f;   /* Teal-green — success (not matrix green) */
   --red:         #ff4060;   /* Coral red — error (softer than #ff003c) */
@@ -37,9 +42,20 @@
   --amber:       #d4a940;   /* Maps to gold */
 
   /* ── Text — logo's bright white-blue text ───────────────────────────────── */
-  --text:        #e8f4ff;   /* Near white with blue tint */
-  --text-dim:    #6a9bc0;   /* Dimmed text */
-  --muted:       #1e3a5a;   /* Very muted — background labels */
+  /* CONTRAST RATIOS AGAINST --bg, MEASURED (spec Section 81). The old --muted was #1e3a5a at
+     **1.73:1** — far below the 4.5:1 WCAG AA needs for body text — and it carries most of the
+     secondary labelling in this app, which is why reading Rāma was straining. The hues are
+     unchanged; only luminance is raised, so the look survives and the hierarchy stays legible:
+        --text      17.0:1   primary
+        --text-dim  11.1:1   secondary prose
+        --muted      6.4:1   labels, units, timestamps  (was 1.73:1)
+     Three clearly separated steps, all of them above AA. */
+  --text:        #e8f4ff;
+  --text-dim:    #a8c4dd;
+  --muted:       #7794b5;
+  /* For the rare case that genuinely wants to recede — decorative watermarks, disabled hints.
+     Deliberately NOT the default: it is below AA and must be an explicit choice. */
+  --muted-faint: #4a688a;
 
   /* ── Glow shadows — soft layered, not hard neon ─────────────────────────── */
   --glow-cyan:   0 0 16px rgba(0,200,255,0.4), 0 0 40px rgba(0,200,255,0.15), 0 0 80px rgba(0,200,255,0.06);
@@ -57,12 +73,12 @@
      not legible in a monospace face. The floor is raised here; whole-surface
      scaling is handled by the zoom factor (spec section 35), because inline pixel
      values cannot be overridden by any CSS rule. */
-  --font-size:    14px;
-  --text-xs:      11.5px;   /* smallest permitted — labels, badges */
-  --text-sm:      12.5px;
-  --text-base:    14px;
-  --text-lg:      16px;
-  --text-xl:      19px;
+  --font-size:    15px;
+  --text-xs:      12px;     /* smallest permitted — labels, badges */
+  --text-sm:      13px;
+  --text-base:    15px;
+  --text-lg:      17px;
+  --text-xl:      20px;
 
   /* ── Layout ─────────────────────────────────────────────────────────────── */
   --titlebar-h:  38px;
@@ -222,7 +238,7 @@ html, body, #root {
   background:    transparent;
   color:         var(--text-dim);
   font-family:   var(--font);
-  font-size:     12px;
+  font-size:     12.5px;
   cursor:        pointer;
   transition:    all var(--transition);
   user-select:   none;
@@ -276,7 +292,7 @@ html, body, #root {
   box-shadow:  var(--glow-red);
 }
 
-.btn-sm    { padding: 4px 10px; font-size: 11px; }
+.btn-sm    { padding: 5px 11px; font-size: 12px; }
 .btn:disabled { opacity: 0.3; cursor: not-allowed; pointer-events: none; }
 
 /* ── Inputs ──────────────────────────────────────────────────────────────── */
@@ -288,7 +304,7 @@ html, body, #root {
   border-radius: var(--radius);
   color:         var(--text);
   font-family:   var(--font);
-  font-size:     13px;
+  font-size:     13.5px;
   outline:       none;
   transition:    border-color var(--transition), box-shadow var(--transition), background var(--transition);
 }
@@ -306,7 +322,7 @@ textarea.input { resize: vertical; min-height: 80px; }
   align-items:   center;
   padding:       2px 8px;
   border-radius: 3px;
-  font-size:     10px;
+  font-size:     11.5px;
   font-weight:   700;
   letter-spacing:0.06em;
   text-transform:uppercase;
@@ -328,7 +344,7 @@ textarea.input { resize: vertical; min-height: 80px; }
   background:    rgba(6,15,30,0.6);
   border:        1px solid var(--border);
   border-radius: 3px;
-  font-size:     11px;
+  font-size:     11.5px;
   color:         var(--text-dim);
   backdrop-filter: blur(4px);
 }
@@ -336,11 +352,14 @@ textarea.input { resize: vertical; min-height: 80px; }
 /* ── Section label ───────────────────────────────────────────────────────── */
 .section-label {
   font-family:    var(--font-display);
-  font-size:      10px;
+  /* Was 10px at rgba(0,200,255,0.4) — about 2.4:1, on the smallest text in the app. Section
+     labels are how you navigate a dense panel, so they were the worst possible place to hide
+     contrast. Now 12px at ~11:1 (Section 81). */
+  font-size:      12px;
   font-weight:    700;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color:          rgba(0,200,255,0.4);
+  color:          var(--accent-soft);
   padding:        4px 0;
 }
 
@@ -501,3 +520,5 @@ textarea.input { resize: vertical; min-height: 80px; }
 .border          { border: 1px solid var(--border); }
 .no-drag         { -webkit-app-region: no-drag; }
 .drag-region     { -webkit-app-region: drag; }
+
+

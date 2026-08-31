@@ -52,7 +52,7 @@ function ReleasePanel({ repoPath }) {
       </div>
 
       {!canCut ? (
-        <div style={{ fontSize: 11, color: 'var(--muted)' }}>Only master may cut a release.</div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Only master may cut a release.</div>
       ) : (
         <>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -61,13 +61,13 @@ function ReleasePanel({ repoPath }) {
                 padding: '4px 10px', border: `1px solid ${bump === b ? 'var(--amber)' : 'var(--border)'}`,
                 borderRadius: 'var(--radius)', background: bump === b ? 'rgba(212,169,64,0.1)' : 'transparent',
                 color: bump === b ? 'var(--amber)' : 'var(--muted)', cursor: 'pointer',
-                fontFamily: 'var(--font)', fontSize: 10, textTransform: 'uppercase',
+                fontFamily: 'var(--font)', fontSize: 12, textTransform: 'uppercase',
               }}>{b}</button>
             ))}
           </div>
           <textarea className="input" value={notes} onChange={e => setNotes(e.target.value)}
             placeholder="Release notes — what changed, why it matters"
-            style={{ fontSize: 11, minHeight: 60, resize: 'vertical' }} />
+            style={{ fontSize: 12.5, minHeight: 60, resize: 'vertical' }} />
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-sm" disabled={busy} onClick={() => cut(false)}>
               {busy ? '…' : 'Tag Locally'}
@@ -77,14 +77,14 @@ function ReleasePanel({ repoPath }) {
             </button>
           </div>
           {result && (
-            <div style={{ fontSize: 11, color: result.ok ? 'var(--green)' : 'var(--red)', lineHeight: 1.6 }}>
+            <div style={{ fontSize: 12.5, color: result.ok ? 'var(--green)' : 'var(--red)', lineHeight: 1.6 }}>
               {result.ok ? `✓ ${result.tag} — ${result.note}` : `✕ ${result.error}`}
             </div>
           )}
         </>
       )}
 
-      <div style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.6, fontStyle: 'italic' }}>
+      <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6, fontStyle: 'italic' }}>
         Tagging and pushing is the only automated step. Building installers and publishing
         them requires a CI/CD pipeline (a dormant GitHub Actions workflow already exists at
         .github/workflows/release.yml) — enabling it and configuring code signing are
@@ -148,7 +148,7 @@ function LocalUpdatePanel({ repoPath }) {
   return (
     <div className="hud-card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div className="section-label">LOCAL SELF-UPDATE</div>
-      <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+      <div style={{ fontSize: 12.5, color: 'var(--text-dim)', lineHeight: 1.6 }}>
         Pulls the tracked branch on this machine, installs dependencies only if
         package.json changed, rebuilds the renderer only if src/shared changed, and
         respawns the Python engine only if ai_backend changed.
@@ -160,14 +160,14 @@ function LocalUpdatePanel({ repoPath }) {
       {(state?.packaged || result?.packaged
         || (state && state.updatesRunningInstance === false)) && (
         <div style={{
-          padding: '10px 12px', borderRadius: 'var(--radius)', fontSize: 11, lineHeight: 1.7,
+          padding: '10px 12px', borderRadius: 'var(--radius)', fontSize: 12.5, lineHeight: 1.7,
           background: 'rgba(255,170,0,0.06)', border: '1px solid rgba(255,170,0,0.3)',
           color: 'var(--amber)',
         }}>
           {(state?.guidance || result?.guidance)}
           {(state?.packaged || result?.packaged) && (
             <pre style={{
-              margin: '8px 0 0', fontSize: 10, color: 'var(--text-dim)',
+              margin: '8px 0 0', fontSize: 12, color: 'var(--text-dim)',
               whiteSpace: 'pre-wrap',
             }}>{'git pull\nnpm install\nnpm run package:win'}</pre>
           )}
@@ -188,7 +188,7 @@ function LocalUpdatePanel({ repoPath }) {
       </div>
 
       {state?.commits?.length > 0 && (
-        <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>
+        <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
           {state.commits.slice(0, 5).map(c => (
             <div key={c.hash} style={{ padding: '2px 0' }}>
               <span style={{ color: 'var(--accent)' }}>{c.hash}</span> {c.message}
@@ -198,7 +198,7 @@ function LocalUpdatePanel({ repoPath }) {
       )}
 
       {!canUpdate ? (
-        <div style={{ fontSize: 11, color: 'var(--muted)' }}>Only master may trigger a local update.</div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Only master may trigger a local update.</div>
       ) : (
         <>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -214,13 +214,13 @@ function LocalUpdatePanel({ repoPath }) {
           </div>
 
           {log && (
-            <pre style={{ fontSize: 10, color: 'var(--text-dim)', background: 'var(--surface)',
+            <pre style={{ fontSize: 12, color: 'var(--text-dim)', background: 'var(--surface)',
               border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 10,
               maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{log}</pre>
           )}
 
           {result && (
-            <div style={{ fontSize: 11, color: result.ok ? 'var(--green)' : 'var(--red)', lineHeight: 1.6 }}>
+            <div style={{ fontSize: 12.5, color: result.ok ? 'var(--green)' : 'var(--red)', lineHeight: 1.6 }}>
               {result.ok
                 ? (result.changed
                     ? `✓ Updated ${result.fromHead?.slice(0,7)} → ${result.toHead?.slice(0,7)} — domains: ${result.domains.join(', ') || 'none'}`
@@ -230,7 +230,7 @@ function LocalUpdatePanel({ repoPath }) {
           )}
 
           {result?.ok && result.changed && result.outcome && (
-            <div style={{ fontSize: 10.5, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+            <div style={{ fontSize: 12.5, color: 'var(--text-dim)', lineHeight: 1.6 }}>
               {result.outcome}
               {result.pipSkippedReason && ` (${result.pipSkippedReason})`}
             </div>
@@ -251,7 +251,7 @@ function LocalUpdatePanel({ repoPath }) {
             )}
           </div>
           {backendMsg && (
-            <div style={{ fontSize: 10.5, color: backendMsg.ok ? 'var(--green)' : 'var(--red)' }}>
+            <div style={{ fontSize: 12.5, color: backendMsg.ok ? 'var(--green)' : 'var(--red)' }}>
               {backendMsg.ok ? `✓ ${backendMsg.message}` : `✕ ${backendMsg.error}`}
             </div>
           )}
@@ -345,7 +345,7 @@ export default function GitSync() {
       {/* Feedback bar */}
       {feedback && (
         <div style={{ padding: '6px 20px', background: 'rgba(0,255,255,0.05)', borderBottom: '1px solid var(--border)',
-          color: 'var(--accent)', fontSize: '11px', flexShrink: 0 }}>
+          color: 'var(--accent)', fontSize: '12.5px', flexShrink: 0 }}>
           {feedback}
         </div>
       )}
@@ -365,7 +365,7 @@ export default function GitSync() {
                 padding: '9px 18px', border: 'none', background: 'transparent',
                 color: tab === t ? 'var(--amber)' : 'var(--muted)',
                 borderBottom: tab === t ? '2px solid var(--amber)' : '2px solid transparent',
-                cursor: 'pointer', fontFamily: 'var(--font)', fontSize: '11px', textTransform: 'uppercase',
+                cursor: 'pointer', fontFamily: 'var(--font)', fontSize: '12.5px', textTransform: 'uppercase',
               }}>{t}</button>
             ))}
           </div>
@@ -409,14 +409,14 @@ export default function GitSync() {
               <div className="hud-card" style={{ overflow: 'hidden' }}>
                 {log.map((entry, i) => (
                   <div key={i} style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
-                    <span style={{ fontFamily: 'var(--font)', fontSize: '11px', color: 'var(--accent)', flexShrink: 0, minWidth: '64px' }}>
+                    <span style={{ fontFamily: 'var(--font)', fontSize: '12.5px', color: 'var(--accent)', flexShrink: 0, minWidth: '64px' }}>
                       {entry.hash?.slice(0, 7)}
                     </span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: '12px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {entry.message}
                       </div>
-                      <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '2px' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>
                         {entry.author_name} · {new Date(entry.date).toLocaleString()}
                       </div>
                     </div>
@@ -432,7 +432,7 @@ export default function GitSync() {
             {tab === 'diff' && (
               <div className="hud-card" style={{ padding: '0', overflow: 'hidden' }}>
                 {diff ? (
-                  <pre style={{ padding: '16px', fontSize: '11px', lineHeight: '1.7', overflow: 'auto',
+                  <pre style={{ padding: '16px', fontSize: '12.5px', lineHeight: '1.7', overflow: 'auto',
                     color: 'var(--text-dim)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '100%' }}>
                     {diff.split('\n').map((line, i) => (
                       <span key={i} style={{
@@ -458,8 +458,9 @@ function FileRow({ file, type }) {
   const labels = { staged: 'S', modified: 'M', untracked: '?', deleted: 'D' };
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '3px 0' }}>
-      <span style={{ color: colors[type], fontSize: '11px', fontWeight: 700, minWidth: '14px' }}>{labels[type]}</span>
+      <span style={{ color: colors[type], fontSize: '12.5px', fontWeight: 700, minWidth: '14px' }}>{labels[type]}</span>
       <span style={{ fontSize: '12px', color: 'var(--text)', fontFamily: 'var(--font)' }}>{file}</span>
     </div>
   );
 }
+

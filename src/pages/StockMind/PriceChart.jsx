@@ -125,7 +125,7 @@ export default function PriceChart({
       layout: {
         background: { color: 'transparent' },
         textColor: theme.muted,
-        fontSize: 10,
+        fontSize: 12,
         attributionLogo: true,
       },
       grid: {
@@ -338,7 +338,7 @@ export default function PriceChart({
   const toggle = (k) => setLayers((s) => ({ ...s, [k]: !s[k] }));
 
   const chipStyle = (on) => ({
-    padding: '2px 8px', fontSize: '10px', borderRadius: '999px', cursor: 'pointer',
+    padding: '2px 8px', fontSize: '12px', borderRadius: '999px', cursor: 'pointer',
     border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
     background: on ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent',
     color: on ? 'var(--accent)' : 'var(--muted)',
@@ -348,9 +348,9 @@ export default function PriceChart({
     <div>
       <div style={{
         display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap',
-        padding: '0 0 6px', fontSize: '10px', color: 'var(--muted)',
+        padding: '0 0 6px', fontSize: '12px', color: 'var(--muted)',
       }}>
-        <strong style={{ color: 'var(--text)', fontSize: '11px' }}>{symbol}</strong>
+        <strong style={{ color: 'var(--text)', fontSize: '12.5px' }}>{symbol}</strong>
         <span>{interval}</span>
         <span>{candles.length} bars</span>
         <span style={{ flex: 1 }} />
@@ -393,7 +393,7 @@ export default function PriceChart({
 
       <div aria-live="polite" style={{
         display: 'flex', gap: '12px', flexWrap: 'wrap', padding: '6px 2px',
-        fontSize: '10.5px', color: readout ? 'var(--text)' : 'var(--muted)',
+        fontSize: '12.5px', color: readout ? 'var(--text)' : 'var(--muted)',
         borderTop: '1px solid var(--border)',
       }}>
         {readout ? (
@@ -414,7 +414,7 @@ export default function PriceChart({
 
       {cone?.ok && layers.cone && (
         <div style={{
-          fontSize: '10px', color: 'var(--muted)', padding: '4px 2px', lineHeight: 1.5,
+          fontSize: '12px', color: 'var(--muted)', padding: '4px 2px', lineHeight: 1.5,
         }}>
           {cone.summary?.text}{' '}
           <span style={{ color: cone.tilted ? 'var(--accent)' : 'var(--text-dim)' }}>
@@ -424,7 +424,7 @@ export default function PriceChart({
       )}
 
       {/* Required by the charting library's licence. */}
-      <div style={{ fontSize: '9px', color: 'var(--muted)', padding: '2px' }}>
+      <div style={{ fontSize: '12.5px', color: 'var(--muted)', padding: '2px' }}>
         Charting by{' '}
         <a href={ATTRIBUTION_URL} target="_blank" rel="noreferrer"
            style={{ color: 'var(--muted)' }}>TradingView Lightweight Charts</a>
@@ -432,3 +432,4 @@ export default function PriceChart({
     </div>
   );
 }
+

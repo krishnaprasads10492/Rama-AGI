@@ -467,7 +467,13 @@ export default function Resources() {
             <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.7, padding: '10px 14px',
               background: 'var(--elevated)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
               <span style={{ color: 'var(--accent)', fontWeight: 700 }}>Adaptive workers:</span>{' '}
-              When CPU pressure is <span style={{ color: 'var(--green)' }}>optimal</span> → {Math.max(4, (os?.cpus?.()?.length ?? 4) - 1)} workers.{' '}
+              {/* `os.cpus()` used to be called here. `os` is a Node builtin and does not exist in
+                  the renderer, so this threw `ReferenceError: os is not defined` the moment the
+                  first orchestrator:status response arrived — killing the default tab and with it
+                  the page. The worker ceiling is already computed by the orchestrator from the
+                  real CPU count, so read the reported value instead of recomputing it in the
+                  renderer, where the input is not available. See spec Section 81. */}
+              When CPU pressure is <span style={{ color: 'var(--green)' }}>optimal</span> → {s.workers?.max ?? '—'} workers.{' '}
               <span style={{ color: 'var(--amber)' }}>moderate</span> → reduces.{' '}
               <span style={{ color: 'var(--red)' }}>critical</span> → 1 worker (only CRITICAL priority tasks run).
               Under pressure, Rāma auto-routes AI tasks to local Ollama models to save API quota.

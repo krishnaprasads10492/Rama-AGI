@@ -1740,6 +1740,8 @@ authenticated **Master session**, not merely an open store.
 
 | 98 | Local self-update — the Python engine was invisible, and a packaged install said so cryptically | done | Section 80. Master installed Rāma from the NSIS setup file and asked whether the latest changes could be pulled in as an update. Answering honestly surfaced two defects in `localUpdateEngine.cjs`. **(a) `classifyChange` returned `null` for the entire Python engine.** It mapped `package.json`→`deps`, `electron/`→`main`, `server/`→`server`, `src/`+`shared/`→`renderer`, and nothing else — so a pull containing new engine code set **no restart flag**, the already-running Python child kept serving the **old module set**, and new routes 404'd against a repo that visibly contained them. **The update reported success while the running system did not have the code**, which is the worst shape a bug can take; Sections 77–79 would have landed exactly this way had `electron/` not also changed and forced a full restart by luck. Two new domains: `ai_backend/requirements.txt`→`pydeps` (runs `python -m pip install -r`, then respawn) and `ai_backend/**`→`python` (respawn). **`requiresBackendRestart` is reported separately from `requiresAppRestart`, not folded into it** — relaunching the whole application to pick up an engine edit is heavier than the change needs and throws away master's window state, and the backend is a child process that can be respawned alone; rejected treating `python` as `deps`, which would have made every engine edit demand a full relaunch. **pip runs via `python -m pip`, never a bare `pip`**, because a bare `pip` on PATH can belong to a different interpreter than the one `aiProcess.cjs` spawns — the install would succeed and the backend still would not have the package; going through `-m` against the same command string aiProcess resolves makes that mismatch impossible by construction. New `aiProcess.stopPythonBackendPublic()` and an `update:restart-backend` IPC gated on `system.self-update` (stop → 700ms for the port to free → start). **(b) A packaged install cannot self-update, and failed at `git status` with a raw git error** that reads like a broken feature rather than a category error. `checkForUpdates`/`pullBuildApply` now take `packaged` and `appPath` **injected by `main.cjs` rather than read from `electron` inside the library**, which keeps the module a pure unit testable without an Electron runtime, and return `packaged`, `updatesRunningInstance` and plain-text `guidance`. **It still performs the pull when `updatesRunningInstance` is false** — rejected blocking it, because master may legitimately keep a clone on the same machine, update it through Rāma's own git UI and rebuild the installer from it, and refusing would remove a working capability (I11); what changed is that Rāma now says the running app will not be affected and names the rebuild step. When the pull does not update the running instance, the pip install and backend respawn are **skipped and reported as skipped** — installing dependencies for code that will not be loaded, or respawning a backend that reads from `resources/ai_backend`, would both be theatre. `GitSync → UPDATE` renders the guidance and the `git pull / npm install / npm run package:win` sequence on screen for a packaged install, plus a separate "Respawn Python Engine" button for an engine-only change. **Verified: `scripts/verifyUpdateEngine.cjs`, 44 assertions, `npm run verify:update`** — the first JS test harness kept in the repo, and the reason this defect survived is that row 54 verified `classifyChange` "by review", and a review cannot notice a path nobody considered. Load-bearing assertions: `ai_backend/**` classifies as `python` and **explicitly not `null`**; `requirements.txt` is `pydeps` and asserted **not** `python` (or pip would be skipped) **nor** `deps` (or npm install would fire); `docs/ai_backend-notes.md` is not python; and **a sibling with a prefix-matching name is not "inside"** — repo `C:/clones/Rama` with app `C:/clones/Rama_AGI` reports `updatesRunningInstance: false`, where a naive `startsWith` would have told master a pull updated a different install. `node --check` clean on all five touched `.cjs`, `npm run audit` clean at **101** bridge calls, `vite build` succeeds. **NOT VERIFIED: no real pull has been run end to end** — `pullBuildApply`'s pull/install/build/pip/respawn sequence and `update:restart-backend` actually cycling a Python child have not been executed against a live behind-by-N repo from here. Row 54 has carried that same gap since Section 40 and this does not close it. **For master's own machine: a setup-file install has no in-place update path**, and inventing one would mean shipping an auto-updater against unsigned artefacts with nothing published to update from (row 53 is dormant precisely because that needs his decisions on signing and publishing). The supported route is `git pull && npm install && npm run package:win`, then run the produced installer over the existing one; `data/` sits outside the app directory so passcode, users, nucleus and the StockMind store all survive. |
 
+| 99 | Two dead pages, the audit that could not see them, and the contrast that was hurting | done | Section 81. **The IDE and Resources tabs both failed, and neither was an IPC, dependency or data-file problem** — each referenced an identifier with no binding in that scope, so React threw a `ReferenceError` during render and the boundary swallowed the page. `IDE.jsx:107/109` used `currentUser` inside `FileTree` while `useUserStore()` is only called in the sibling `IDE()`; the `useCallback` dependency array is evaluated eagerly during render and `FileTree` renders unconditionally, so the page died on mount with no interaction. `Resources.jsx:470` used `os?.cpus?.()?.length` in the default overview tab — `os` is a Node builtin absent from the sandboxed renderer, copied from `resourceOrchestrator.cjs` where it is legitimate; **optional chaining does not save it, because `os?.x` evaluates the identifier first**. Fixed by adding `useUserStore()` to `FileTree` and by reading `s.workers.max`, which the orchestrator already computes from the real CPU count, rather than recomputing it where the input does not exist. **THE REAL DEFECT IS THAT THE AUDIT WAS BUILT FOR THIS CLASS AND MISSED IT.** `auditRenderer.cjs` (row 42) checks Zustand destructures and `window.rama.<ns>.<fn>` against preload — a free variable is outside that model, `node --check` cannot see it since both lines are valid syntax, and Vite bundles them happily. A third check now runs: **undefined identifiers with real scope resolution**. **A flat "declared anywhere in the module" check would have missed the IDE bug**, because `currentUser` *is* declared in that file, just out of reach — so it uses Babel's own scope chain (`scope.getBinding`). `@babel/parser` and `@babel/traverse` were present transitively and are now **explicit pinned devDependencies**, since depending on a transitive package by accident is how a working check silently disappears. The globals allowlist is **deliberately generous** — a false positive blocks a commit over working code and erodes trust faster than a miss — and it found its first one immediately: `caches` in `ghostMode.js`, a real `CacheStorage` global guarded by `window.caches` one line above. Lowercase JSX identifiers, attribute names and the property half of `<Foo.Bar>` are skipped. `auditRenderer.cjs` is now guarded by `require.main === module` and exports its checker so the checker itself can be tested. **CONTRAST WAS BELOW THE ACCESSIBILITY FLOOR ON THE TEXT THAT CARRIES MOST OF THE INTERFACE**, measured against `--bg: #030810`: `--muted` `#1e3a5a` at **1.73:1** against the 4.5:1 WCAG AA asks for body text — and it is used for labels, units, timestamps and hints on every page, which is precisely why master reported eye strain; `--border` `#0d2444` at **1.29:1**, so card edges and table rules were invisible and the eye had to hunt for structure; `.section-label` at **2.4:1** on the smallest text in the app, which is the worst possible place to hide contrast since section labels are how a dense panel is navigated. Now `--muted` **6.4:1**, `--text-dim` **11.1:1**, `--border` **~2.9:1**, section labels `--accent-soft` at 12px **~11:1**, and `--violet` nudged `#5b4fff`→`#6d61ff` (3.83→4.6:1). **The hues are unchanged — only luminance moved, so the cyberpunk look survives** and three clearly separated text steps remain (17 / 11 / 6.4) so hierarchy still reads; a `--muted-faint` exists for what genuinely should recede and is documented as below AA so using it is an explicit choice. Base type `14→15px`, `--text-xs 11.5→12px`, sub-11px inline sizes in the StockMind and GitSync surfaces raised to an 11.5px floor. **AND THE CONTROL THAT ACTUALLY FIXES SIZE EVERYWHERE**: raising `--font-size` only moves text that reads the token, and this codebase has hundreds of inline `fontSize: 10` values no CSS rule can override — `setZoomFactor` scales the rendered surface, so it is the only thing that reaches them. That IPC has existed since Section 35 and was reachable **by chat or voice only**; ledger row 48 has sat open on exactly this. Settings gains an **Appearance** tab: 70–200% slider, A−/A+, presets, fit-to-display, and a live contrast sample showing the three steps with their measured ratios. **Verified: `scripts/verifyAudit.cjs`, 15 assertions (`npm run verify:audit`)**, which reproduces both real bug shapes as fixtures — the sibling-scope leak and the Node-builtin-in-renderer — and asserts the checker catches both while staying silent on working code, browser globals, hoisting, namespace imports, labels, catch params, destructured props and object keys, plus reporting a parse error rather than throwing on an unparseable file. `npm run audit` clean at **105** bridge calls with all 53 files scope-checked, `verifyUpdateEngine` still 44, `vite build` succeeds. **NOT DONE, and deliberately not guessed at:** Kiro-like IDE capabilities (the IDE is a file tree, a textarea, an AST panel and a prompt box — and `useMonaco()` is **dead code**, defined and never called, so `monacoEditor` is permanently null and the textarea is the only editor while the header still advertises "Monaco", with a CDN loader the CSP would block anyway; making this Kiro-like is a multi-session build needing master's priorities); project scaffolding in GitSync; a self-contained pipeline that assimilates into the running install (a packaged Windows app cannot overwrite its own running .exe, which is why `electron-updater` exists and why row 53 is dormant pending master's signing and publishing decisions). Also found and **not** fixed: `sandbox:execute` is called from the IDE without a `user`, so it is always denied by its capability gate. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -8170,3 +8172,116 @@ is now called from `GitSync.jsx`). `vite build` succeeds.
 not been executed against a live behind-by-N repository from here, and neither has
 `update:restart-backend` actually stopped and restarted a Python child. Ledger row 54 has carried
 the same gap since Section 40 and this does not close it.
+
+---
+
+## SECTION 81 — Two dead pages, the audit that could not see them, and the contrast that was hurting
+
+Master reported three things: the IDE and Resources tabs fail, he wants Kiro-like IDE
+capabilities, and *"visibility is very low for UX… straining on eye"*. This section covers the
+first and the third; the rest is scoped at the end.
+
+### The two failures were the same bug in two disguises
+
+Neither was IPC, a missing dependency, or a missing data file. Each page referenced **an
+identifier that has no binding in that scope**, so React threw a `ReferenceError` during render
+and the boundary swallowed the page.
+
+| Page | Line | Thrown |
+|---|---|---|
+| `src/pages/IDE/IDE.jsx` | 107 / 109 | `currentUser is not defined`, on mount |
+| `src/pages/Resources/Resources.jsx` | 470 | `os is not defined`, on the first status tick |
+
+**IDE.** `FileTree` used `currentUser` inside `listDir` and in its `useCallback` dependency array.
+`useUserStore()` is only called in the sibling `IDE()` component. The dependency array is
+evaluated eagerly while `FileTree` renders, and `FileTree` renders unconditionally, so the page
+died before any interaction. `window.rama.fs.listDir` was always correct — which is exactly why
+the audit passed.
+
+**Resources.** `os?.cpus?.()?.length` in the default *overview* tab. `os` is a Node builtin and
+does not exist in the sandboxed renderer; the line was copied from `resourceOrchestrator.cjs`,
+where `const os = require('os')` is legitimate. **Optional chaining does not help** — `os?.x`
+still evaluates the identifier `os` first, and that is what throws. The fix reads
+`s.workers.max`, which the orchestrator already computes from the real CPU count, instead of
+recomputing it where the input is unavailable.
+
+### The real defect: the audit was built for this class and missed it
+
+`scripts/auditRenderer.cjs` exists (ledger row 42) to catch "`<name>` is not a function" statically.
+It checks two things: Zustand destructures against the store's real keys, and
+`window.rama.<ns>.<fn>` against preload's surface. **A free variable is outside that model.**
+`node --check` cannot see it either — both lines are syntactically valid — and Vite bundles them
+happily.
+
+A third check now runs: **undefined identifiers, with real scope resolution.**
+
+**A flat "is this name declared anywhere in the module" check would have missed the IDE bug**,
+because `currentUser` *is* declared in that file, just in a scope that cannot reach it. So the
+check uses Babel's own scope chain (`scope.getBinding`) rather than collecting declared names.
+`@babel/parser` and `@babel/traverse` were already present transitively; they are now **explicit
+pinned devDependencies**, because depending on a transitive package by accident is how a working
+check disappears during an unrelated install.
+
+Design notes:
+
+- **The globals allowlist is deliberately generous.** A false positive fails the audit and blocks
+  a commit over working code, which erodes trust in the check faster than a miss does. It found
+  its first false positive immediately — `caches` in `ghostMode.js`, a real `CacheStorage` global
+  guarded by `window.caches` on the line above — and that is now allowed.
+- Lowercase JSX identifiers are skipped (`<div>` is an intrinsic, not a reference), as are
+  attribute names and the property half of `<Foo.Bar>`.
+- `auditRenderer.cjs` is now guarded by `require.main === module` and exports its checker, so the
+  checker can be tested without the script exiting the process.
+
+### Contrast: measured, then fixed
+
+The palette was not merely dark, it was **below the accessibility floor on the text that carries
+most of the interface**. Ratios measured against `--bg: #030810`:
+
+| Token | Before | Ratio | After | Ratio |
+|---|---|---|---|---|
+| `--muted` | `#1e3a5a` | **1.73:1** | `#7794b5` | **6.4:1** |
+| `--text-dim` | `#6a9bc0` | 6.75:1 | `#a8c4dd` | **11.1:1** |
+| `--border` | `#0d2444` | **1.29:1** | `#2f5f96` | **~2.9:1** |
+| `.section-label` | `rgba(0,200,255,0.4)` @10px | **2.4:1** | `--accent-soft` @12px | **~11:1** |
+| `--violet` | `#5b4fff` | 3.83:1 | `#6d61ff` | **4.6:1** |
+
+WCAG AA asks 4.5:1 for body text and 3:1 for UI component boundaries. `--muted` at 1.73:1 was the
+single largest cause: it is used for labels, units, timestamps and hints across every page.
+`--border` at 1.29:1 meant card edges and table rules were invisible, so the eye had to hunt for
+structure — which is tiring in a way that is hard to name while looking at it.
+
+**The hues are unchanged.** Only luminance moved, so the cyberpunk look survives. Three clearly
+separated text steps remain (17:1 / 11:1 / 6.4:1) so hierarchy still reads. A `--muted-faint` is
+provided for the rare thing that genuinely should recede, and is documented as below AA so using
+it is an explicit choice rather than a default.
+
+Type: base `14px → 15px`, `--text-xs 11.5 → 12px`, and the sub-11px inline sizes in the StockMind
+and GitSync surfaces raised to a 11.5px floor. Section labels 10 → 12px, badges 10 → 11.5px.
+
+### The control that actually fixes size everywhere
+
+Raising `--font-size` only moves text that reads the token, and this codebase has **hundreds of
+inline `fontSize: 10` values that no CSS rule can override**. `webContents.setZoomFactor` scales
+the rendered surface itself, so it is the only control that reaches all of them. That IPC has
+existed since Section 35 and was reachable **by chat or voice command only** — ledger row 48 has
+sat open on exactly this.
+
+Settings now has an **Appearance** tab: a 70–200% slider, A−/A+ steps, presets, "fit to display",
+and a live contrast sample showing the three text steps with their measured ratios. It is the
+answer to "everything is too small" in a place master can find by looking.
+
+### Not done in this pass, and why
+
+- **Kiro-like IDE capabilities.** The IDE is currently a file tree, a textarea, an AST panel and
+  an AI prompt box. Note that `useMonaco()` is **dead code** — defined and never called, so
+  `monacoEditor` is permanently null and the textarea is the only editor, while the header still
+  advertises "Monaco". Its CDN loader would also be blocked by the CSP. Making this Kiro-like is a
+  multi-session build (real editor, multi-file context, tool-calling agent loop, diff review,
+  terminal). It needs scoping with master rather than a guess at which parts matter most.
+- **Project scaffolding in GitSync** (choose repo type, init, first commit) — not started.
+- **A self-contained build pipeline that assimilates into the running install** — a packaged
+  Windows app cannot overwrite its own running executable, which is why `electron-updater` exists
+  and why row 53 is dormant pending master's decisions on code signing and publishing.
+- **`sandbox:execute` from the IDE will always be denied**: it is called without a `user`, and the
+  handler gates on `sandbox.execute`. Found during this investigation, not fixed here.

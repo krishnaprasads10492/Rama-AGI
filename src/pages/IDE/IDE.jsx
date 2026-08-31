@@ -97,6 +97,14 @@ const AI_MODES = [
 
 // ─── File Tree ─────────────────────────────────────────────────────────────
 function FileTree({ onFileOpen, activeFile }) {
+  // WHY THIS LINE EXISTS: `currentUser` was referenced in `listDir` below and in its dependency
+  // array, but was only ever declared inside the sibling `IDE()` component. It was a free
+  // variable here, so React threw `ReferenceError: currentUser is not defined` while rendering
+  // FileTree — and because FileTree is rendered unconditionally, the whole IDE page died on
+  // mount. `window.rama.fs.listDir` was always correct, which is exactly why the renderer audit
+  // passed: it resolves bridge calls and store destructures, and a free variable is outside that
+  // model. See spec Section 81.
+  const { currentUser } = useUserStore();
   const [cwd,      setCwd]      = useState('');
   const [entries,  setEntries]  = useState([]);
   const [expanded, setExpanded] = useState(new Set());

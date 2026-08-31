@@ -41,6 +41,129 @@ function Toggle({ value, onChange }) {
   );
 }
 
+/**
+ * AppearancePanel — whole-surface text scaling (spec Section 81, ledger row 48).
+ *
+ * WHY ZOOM RATHER THAN A CSS VARIABLE. Raising `--font-size` only moves text that actually reads
+ * the token, and this codebase has hundreds of inline `fontSize: 10` values that no CSS rule can
+ * override. `webContents.setZoomFactor` scales the rendered surface itself, so it is the only
+ * control that reaches all of them. The IPC has existed since Section 35 and was reachable by
+ * chat or voice command only — there was no way to find it by looking.
+ */
+function AppearancePanel() {
+  const [zoom, setZoom] = useState(1);
+  const [info, setInfo] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const live = typeof window !== 'undefined' && !!window.rama?.appearance;
+
+  useEffect(() => {
+    if (!live) return;
+    window.rama.appearance.getZoom().then((r) => {
+      if (typeof r?.factor === 'number') setZoom(r.factor);
+      else if (typeof r?.data === 'number') setZoom(r.data);
+    }).catch(() => {});
+    window.rama.appearance.displayInfo().then((r) => setInfo(r?.data || r)).catch(() => {});
+  }, [live]);
+
+  const apply = async (factor) => {
+    const clamped = Math.round(Math.min(2, Math.max(0.7, factor)) * 100) / 100;
+    setZoom(clamped);
+    if (!live) return;
+    setBusy(true);
+    await window.rama.appearance.setZoom(clamped).catch(() => {});
+    setBusy(false);
+  };
+
+  const reset = async () => {
+    if (!live) return;
+    setBusy(true);
+    const r = await window.rama.appearance.resetZoom().catch(() => null);
+    const f = r?.factor ?? r?.data;
+    if (typeof f === 'number') setZoom(f);
+    setBusy(false);
+  };
+
+  return (
+    <div style={{ maxWidth: 560, display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="hud-card" style={{ padding: '16px 20px' }}>
+        <div className="section-label" style={{ marginBottom: 14 }}>TEXT SIZE</div>
+
+        <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)', lineHeight: 1.7,
+          marginBottom: 14 }}>
+          Scales the whole interface, including the many fixed pixel sizes that a stylesheet
+          cannot reach. If Rāma feels small or straining to read, this is the control that fixes
+          it everywhere at once.
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button className="btn btn-sm" disabled={busy || zoom <= 0.7}
+                  onClick={() => apply(zoom - 0.1)} aria-label="Decrease text size">A−</button>
+          <input
+            type="range" min="0.7" max="2" step="0.05" value={zoom}
+            onChange={(e) => apply(parseFloat(e.target.value))}
+            aria-label="Interface text size"
+            style={{ flex: 1, accentColor: 'var(--accent)' }}
+          />
+          <button className="btn btn-sm" disabled={busy || zoom >= 2}
+                  onClick={() => apply(zoom + 0.1)} aria-label="Increase text size">A+</button>
+          <span style={{ minWidth: 52, textAlign: 'right', fontSize: 'var(--text-sm)',
+            color: 'var(--text)', fontWeight: 700 }}>
+            {Math.round(zoom * 100)}%
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+          {[1, 1.15, 1.3, 1.5].map((f) => (
+            <button key={f} className="btn btn-sm" disabled={busy} onClick={() => apply(f)}>
+              {Math.round(f * 100)}%
+            </button>
+          ))}
+          <button className="btn btn-sm" disabled={busy} onClick={reset}>
+            ↺ Fit to display
+          </button>
+        </div>
+
+        {!live && (
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--gold)', marginTop: 12 }}>
+            Scaling needs the desktop shell — this preview cannot apply it.
+          </div>
+        )}
+        {info && (
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)', marginTop: 12,
+            lineHeight: 1.6 }}>
+            {info.width ? `Display ${info.width}×${info.height}` : 'Display'}
+            {info.scaleFactor ? ` · OS scale ${info.scaleFactor}×` : ''}
+            {info.suggested ? ` · auto fit would choose ${Math.round(info.suggested * 100)}%` : ''}
+          </div>
+        )}
+      </div>
+
+      <div className="hud-card" style={{ padding: '16px 20px' }}>
+        <div className="section-label" style={{ marginBottom: 14 }}>CONTRAST</div>
+        <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-dim)', lineHeight: 1.7 }}>
+          Secondary text was measured at <strong style={{ color: 'var(--text)' }}>1.73:1</strong>
+          {' '}against the background — far below the 4.5:1 that WCAG AA asks for body text, which
+          is why reading Rāma was tiring. The palette now runs three separated steps, all above
+          AA, with the hues unchanged:
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+          {[
+            ['Primary text', 'var(--text)', '17:1'],
+            ['Secondary prose', 'var(--text-dim)', '11:1'],
+            ['Labels and units', 'var(--muted)', '6.4:1'],
+          ].map(([label, colour, ratio]) => (
+            <div key={label} style={{ display: 'flex', alignItems: 'baseline', gap: 10,
+              fontSize: 'var(--text-sm)' }}>
+              <span style={{ color: colour, flex: 1 }}>{label} — the quick brown fox</span>
+              <span style={{ color: 'var(--muted)', fontSize: 'var(--text-xs)' }}>{ratio}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const { provider, model, setProvider, setModel } = useRamaStore();
   const { currentUser, sessionToken, canDo } = useUserStore();
@@ -144,7 +267,7 @@ export default function Settings() {
 
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
-        {['ai', 'system', 'security', 'about'].map(t => (
+        {['ai', 'appearance', 'system', 'security', 'about'].map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '9px 18px', border: 'none', background: 'transparent',
             color: tab === t ? 'var(--accent)' : 'var(--muted)',
@@ -218,6 +341,9 @@ export default function Settings() {
             </div>
           </div>
         )}
+
+        {/* ── Appearance ── */}
+        {tab === 'appearance' && <AppearancePanel />}
 
         {/* ── Security Settings ── */}
         {tab === 'security' && (

@@ -37,7 +37,7 @@ const pnlColor = (v) => (typeof v !== 'number' || !Number.isFinite(v)
 function Field({ label, children }) {
   return (
     <div>
-      <div style={{ fontSize: '9.5px', color: 'var(--muted)', marginBottom: '3px' }}>{label}</div>
+      <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginBottom: '3px' }}>{label}</div>
       {children}
     </div>
   );
@@ -164,15 +164,15 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline',
                   flexWrap: 'wrap' }}>
                   <span style={{
-                    fontSize: '9px', fontWeight: 700, letterSpacing: '0.06em',
+                    fontSize: '12.5px', fontWeight: 700, letterSpacing: '0.06em',
                     color: SEV_COLOR[a.severity] || 'var(--muted)',
                   }}>{a.action}</span>
-                  <span style={{ fontSize: '11.5px', color: 'var(--text)', fontWeight: 600 }}>
+                  <span style={{ fontSize: '12.5px', color: 'var(--text)', fontWeight: 600 }}>
                     {a.headline}
                   </span>
-                  <span style={{ fontSize: '9px', color: 'var(--muted)' }}>{a.evidence}</span>
+                  <span style={{ fontSize: '12.5px', color: 'var(--muted)' }}>{a.evidence}</span>
                 </div>
-                <div style={{ fontSize: '10.5px', color: 'var(--text-dim)', lineHeight: 1.6,
+                <div style={{ fontSize: '12.5px', color: 'var(--text-dim)', lineHeight: 1.6,
                   marginTop: '2px' }}>
                   {a.detail}
                 </div>
@@ -184,7 +184,7 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
 
       {/* Withheld alerts are collapsed, never mixed in with the actionable ones. */}
       {withheld.length > 0 && (
-        <div style={{ fontSize: '10px', color: 'var(--muted)' }}>
+        <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
           <button type="button" onClick={() => setShowWithheld((s) => !s)}
                   style={{ background: 'none', border: 'none', color: 'var(--muted)',
                     cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
@@ -243,7 +243,7 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
             </div>
 
             {portfolio.byStyle && Object.keys(portfolio.byStyle).length > 0 && (
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', fontSize: '10px' }}>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', fontSize: '12px' }}>
                 {Object.entries(portfolio.byStyle).map(([s, v]) => (
                   <span key={s} style={{
                     padding: '2px 8px', borderRadius: '999px',
@@ -263,13 +263,13 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
 
             {/* Never let master read a total as complete when it is not. */}
             {(portfolio.unpricedSymbols || []).length > 0 && (
-              <div style={{ fontSize: '10px', color: 'var(--amber)', marginTop: '8px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--amber)', marginTop: '8px' }}>
                 {portfolio.priceCoverage}. Not priced: {portfolio.unpricedSymbols.join(', ')} —
                 sync those symbols before trusting the totals.
               </div>
             )}
             {portfolio.inferredStyleCount > 0 && (
-              <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '4px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
                 {portfolio.inferredStyleCount} position
                 {portfolio.inferredStyleCount === 1 ? '' : 's'} recorded before trade styles
                 existed, shown as POSITIONAL. Set the real style to get the right alerts.
@@ -278,9 +278,9 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
           </>
         )}
         {portfolio?.error && (
-          <div style={{ fontSize: '11px', color: 'var(--red)' }}>{portfolio.error}</div>
+          <div style={{ fontSize: '12.5px', color: 'var(--red)' }}>{portfolio.error}</div>
         )}
-        {note && <div style={{ fontSize: '11px', color: 'var(--red)', marginTop: '8px' }}>{note}</div>}
+        {note && <div style={{ fontSize: '12.5px', color: 'var(--red)', marginTop: '8px' }}>{note}</div>}
       </div>
 
       {/* ── Record a trade ──────────────────────────────────────────────────── */}
@@ -332,7 +332,7 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
             </Field>
           </div>
 
-          <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '2px' }}>
+          <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>
             The projection you acted on. Without it, "was I right or lucky?" has no answer later,
             and Rāma cannot warn you about a stop you never gave it.
           </div>
@@ -371,13 +371,13 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
           OPEN POSITIONS ({open.length})
         </div>
         {open.length === 0 ? (
-          <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
+          <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
             Nothing tracked yet. Record what you hold and Rāma can watch your stops, your
             holding periods and your concentration for you.
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
               <thead>
                 <tr style={{ color: 'var(--muted)', textAlign: 'left' }}>
                   <th style={{ padding: '4px 6px' }}>SYMBOL</th>
@@ -437,7 +437,7 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
                       <tr>
                         <td colSpan={9} style={{
                           padding: '8px 10px', background: 'var(--surface)',
-                          fontSize: '10px', color: 'var(--text-dim)', lineHeight: 1.7,
+                          fontSize: '12px', color: 'var(--text-dim)', lineHeight: 1.7,
                         }}>
                           {p.thesis?.rationale && <div>“{p.thesis.rationale}”</div>}
                           <div>
@@ -479,7 +479,7 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
           <div className="section-label" style={{ marginBottom: '8px' }}>
             CLOSED ({closed.length})
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '10.5px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12.5px' }}>
             {closed.slice(0, 12).map((p) => (
               <div key={p.positionId} style={{ display: 'flex', gap: '10px' }}>
                 <span style={{ fontWeight: 600, minWidth: '80px' }}>{p.symbol}</span>
@@ -498,4 +498,5 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
     </div>
   );
 }
+
 

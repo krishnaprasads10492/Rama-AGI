@@ -26,6 +26,49 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const SRC  = path.join(ROOT, 'src');
 
+// ─── Globals a renderer module may legitimately reference ─────────────────────
+//
+// Deliberately generous. A false positive here fails the audit and blocks a commit over working
+// code, which is worse than missing one name — the check earns trust by being quiet when the code
+// is fine. Anything genuinely absent from this list AND undeclared is a real bug.
+const GLOBALS = new Set([
+  // ES
+  'globalThis', 'undefined', 'NaN', 'Infinity', 'Object', 'Array', 'String', 'Number', 'Boolean',
+  'Symbol', 'BigInt', 'Math', 'JSON', 'Date', 'RegExp', 'Function', 'Promise', 'Proxy', 'Reflect',
+  'Map', 'Set', 'WeakMap', 'WeakSet', 'Error', 'TypeError', 'RangeError', 'SyntaxError',
+  'ReferenceError', 'EvalError', 'URIError', 'AggregateError', 'Intl', 'parseInt', 'parseFloat',
+  'isNaN', 'isFinite', 'encodeURI', 'decodeURI', 'encodeURIComponent', 'decodeURIComponent',
+  'structuredClone', 'queueMicrotask', 'ArrayBuffer', 'SharedArrayBuffer', 'DataView',
+  'Int8Array', 'Uint8Array', 'Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array',
+  'Uint32Array', 'Float32Array', 'Float64Array', 'BigInt64Array', 'BigUint64Array', 'escape',
+  'unescape', 'eval',
+  // Timers and scheduling
+  'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'setImmediate',
+  'requestAnimationFrame', 'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback',
+  // DOM and BOM
+  'window', 'document', 'navigator', 'location', 'history', 'screen', 'console', 'alert',
+  'confirm', 'prompt', 'localStorage', 'sessionStorage', 'indexedDB', 'getComputedStyle',
+  'matchMedia', 'devicePixelRatio', 'innerWidth', 'innerHeight', 'outerWidth', 'outerHeight',
+  'scrollTo', 'scrollBy', 'self', 'top', 'parent', 'frames', 'closed', 'CSS', 'customElements',
+  'Element', 'HTMLElement', 'Node', 'NodeList', 'Text', 'DocumentFragment', 'Event',
+  'CustomEvent', 'EventTarget', 'KeyboardEvent', 'MouseEvent', 'PointerEvent', 'DragEvent',
+  'ClipboardEvent', 'FocusEvent', 'InputEvent', 'WheelEvent', 'TouchEvent', 'ResizeObserver',
+  'IntersectionObserver', 'MutationObserver', 'PerformanceObserver', 'performance', 'crypto',
+  'atob', 'btoa', 'DOMParser', 'XMLSerializer', 'Image', 'Audio', 'Option', 'FileReader',
+  'Blob', 'File', 'FormData', 'URL', 'URLSearchParams', 'TextEncoder', 'TextDecoder',
+  'AbortController', 'AbortSignal', 'fetch', 'Headers', 'Request', 'Response', 'WebSocket',
+  'XMLHttpRequest', 'Worker', 'SharedWorker', 'MessageChannel', 'MessagePort', 'BroadcastChannel',
+  'Notification', 'ImageData', 'Path2D', 'OffscreenCanvas', 'ReadableStream', 'WritableStream',
+  // CacheStorage — `caches` is a real global, used by ghostMode's wipe and guarded by
+  // `window.caches` at the call site. Flagging it was the checker's first false positive.
+  'caches', 'CacheStorage', 'ServiceWorkerRegistration', 'PushManager',
+  // Media and speech, used by the voice ladder
+  'MediaRecorder', 'MediaStream', 'AudioContext', 'webkitAudioContext', 'speechSynthesis',
+  'SpeechSynthesisUtterance', 'SpeechRecognition', 'webkitSpeechRecognition',
+  // Vite build-time
+  'process',
+]);
+
 const C = {
   reset: '\x1b[0m', red: '\x1b[31m', green: '\x1b[32m',
   yellow: '\x1b[33m', cyan: '\x1b[36m', dim: '\x1b[2m',
@@ -132,24 +175,123 @@ function auditBridge(files) {
   return checked;
 }
 
+// ─── 3. Undefined identifiers ────────────────────────────────────────────────
+//
+// WHY THIS WAS ADDED (spec Section 81). The IDE and Resources pages both failed on mount, and
+// this audit passed the whole time. Two one-line ReferenceErrors:
+//
+//   IDE.jsx        `currentUser` used inside FileTree, declared only in the sibling IDE()
+//   Resources.jsx  `os?.cpus?.()` — `os` is a Node builtin, absent from the renderer
+//
+// Neither is visible to checks 1 and 2: they resolve bridge calls and store destructures, and a
+// free variable is outside that model. `node --check` cannot see it either, because both are
+// syntactically valid, and a Vite build happily bundles them.
+//
+// A FLAT MODULE-LEVEL CHECK WOULD HAVE MISSED THE IDE BUG, because `currentUser` IS declared in
+// the file — just in a scope that cannot see it. That is why this uses Babel's real scope
+// resolution (`scope.getBinding`) rather than collecting every declared name in the module.
+function findUndefinedIdentifiers(code, filename = 'unknown') {
+  const parser = require('@babel/parser');
+  const traverseMod = require('@babel/traverse');
+  const traverse = traverseMod.default || traverseMod;
+
+  let ast;
+  try {
+    ast = parser.parse(code, {
+      sourceType: 'module',
+      plugins: ['jsx', 'classProperties', 'optionalChaining', 'nullishCoalescingOperator',
+        'objectRestSpread', 'dynamicImport', 'topLevelAwait'],
+    });
+  } catch (err) {
+    return [{ name: null, line: err.loc?.line ?? null, parseError: err.message }];
+  }
+
+  const found = [];
+  const seen = new Set();
+
+  const consider = (p) => {
+    const name = p.node.name;
+    if (!name || GLOBALS.has(name)) return;
+    // `getBinding` walks the real scope chain and returns nothing for a global, which is exactly
+    // the distinction wanted: declared-but-out-of-scope resolves to undefined here.
+    if (p.scope.getBinding(name)) return;
+    const line = p.node.loc?.start?.line ?? null;
+    const key = `${name}:${line}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    found.push({ name, line });
+  };
+
+  traverse(ast, {
+    Identifier(p) {
+      if (!p.isReferencedIdentifier()) return;
+      consider(p);
+    },
+    JSXIdentifier(p) {
+      // `<div>` is an intrinsic element, not a reference. Only capitalised names are components
+      // that must resolve, and an attribute name is never a reference.
+      if (!/^[A-Z]/.test(p.node.name)) return;
+      if (p.parentPath?.isJSXAttribute?.()) return;
+      // In `<Foo.Bar>` only `Foo` is the binding; `Bar` is a property.
+      if (p.parentPath?.isJSXMemberExpression?.() && p.parentPath.node.property === p.node) return;
+      if (!p.isReferencedIdentifier()) return;
+      consider(p);
+    },
+  });
+
+  return found;
+}
+
+function auditUndefined(files) {
+  let checked = 0;
+  for (const file of files) {
+    const text = fs.readFileSync(file, 'utf8');
+    let hits;
+    try {
+      hits = findUndefinedIdentifiers(text, file);
+    } catch (err) {
+      report(file, `could not analyse: ${err.message}`);
+      continue;
+    }
+    checked++;
+    for (const h of hits) {
+      if (h.parseError) {
+        report(file, `parse error at line ${h.line}: ${h.parseError}`);
+      } else {
+        report(file, `\`${h.name}\` is not defined in this scope (line ${h.line})`);
+      }
+    }
+  }
+  return checked;
+}
+
 // ─── Run ──────────────────────────────────────────────────────────────────────
-const files = walk(SRC);
+function main() {
+  const files = walk(SRC);
 
-process.stdout.write(`\n${C.cyan}Rāma renderer audit${C.reset} ${C.dim}${files.length} files${C.reset}\n\n`);
+  process.stdout.write(`\n${C.cyan}Rāma renderer audit${C.reset} ${C.dim}${files.length} files${C.reset}\n\n`);
 
-const storeSites  = auditStores(files);
-const bridgeSites = auditBridge(files);
+  const storeSites  = auditStores(files);
+  const bridgeSites = auditBridge(files);
+  const scopeFiles  = auditUndefined(files);
 
-process.stdout.write(`  ${C.dim}store destructures checked${C.reset}  ${storeSites}\n`);
-process.stdout.write(`  ${C.dim}bridge calls checked${C.reset}        ${bridgeSites}\n\n`);
+  process.stdout.write(`  ${C.dim}store destructures checked${C.reset}  ${storeSites}\n`);
+  process.stdout.write(`  ${C.dim}bridge calls checked${C.reset}        ${bridgeSites}\n`);
+  process.stdout.write(`  ${C.dim}files scope-checked${C.reset}         ${scopeFiles}\n\n`);
 
-if (problems.length === 0) {
-  process.stdout.write(`  ${C.green}✓ every store key and bridge call resolves${C.reset}\n\n`);
-  process.exit(0);
+  if (problems.length === 0) {
+    process.stdout.write(`  ${C.green}✓ stores, bridge calls and identifiers all resolve${C.reset}\n\n`);
+    process.exit(0);
+  }
+
+  for (const p of problems) {
+    process.stdout.write(`  ${C.red}✕${C.reset} ${p.file}\n      ${C.dim}${p.msg}${C.reset}\n`);
+  }
+  process.stdout.write(`\n  ${C.yellow}${problems.length} unresolved reference(s)${C.reset}\n\n`);
+  process.exit(1);
 }
 
-for (const p of problems) {
-  process.stdout.write(`  ${C.red}✕${C.reset} ${p.file}\n      ${C.dim}${p.msg}${C.reset}\n`);
-}
-process.stdout.write(`\n  ${C.yellow}${problems.length} unresolved reference(s)${C.reset}\n\n`);
-process.exit(1);
+// Guarded so the checker can be imported and tested without the script exiting the process.
+if (require.main === module) main();
+
+module.exports = { findUndefinedIdentifiers, GLOBALS, walk };
