@@ -102,6 +102,10 @@ function LocalUpdatePanel({ repoPath }) {
   const [result,  setResult]  = useState(null);
   const [log,     setLog]     = useState('');
   const [backendMsg, setBackendMsg] = useState(null);
+  const [building,   setBuilding]   = useState(false);
+  const [buildRes,   setBuildRes]   = useState(null);
+  const [installing, setInstalling] = useState(false);
+  const [installMsg, setInstallMsg] = useState(null);
 
   const canUpdate = canDo('system.self-update');
 
@@ -127,6 +131,33 @@ function LocalUpdatePanel({ repoPath }) {
     setBusy(false);
     setResult(res);
     if (res?.ok) load();
+  };
+
+  const runSelfBuild = async (pull) => {
+    setBuilding(true);
+    setBuildRes(null);
+    setInstallMsg(null);
+    setLog('');
+    const res = await window.rama.update.selfBuild({ user: currentUser, repoPath, pull });
+    setBuilding(false);
+    setBuildRes(res);
+  };
+
+  const applyBuild = async () => {
+    const name = buildRes?.installer?.name;
+    if (!name) return;
+    // eslint-disable-next-line no-alert
+    const sure = window.confirm(
+      `Run ${name} and close Rāma?\n\nWindows cannot replace a running application, so Rāma must `
+      + 'exit for the installer to finish. Your data directory is outside the app and is not '
+      + 'touched. Reopen Rāma when the installer completes.');
+    if (!sure) return;
+    setInstalling(true);
+    const res = await window.rama.update.installBuild({
+      user: currentUser, repoPath, fileName: name,
+    });
+    setInstalling(false);
+    setInstallMsg(res);
   };
 
   const restartBackend = async () => {
@@ -255,6 +286,86 @@ function LocalUpdatePanel({ repoPath }) {
               {backendMsg.ok ? `✓ ${backendMsg.message}` : `✕ ${backendMsg.error}`}
             </div>
           )}
+
+          {/* ── Build the next version (Section 83) ──────────────────────────── */}
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
+            <div className="section-label" style={{ marginBottom: 8 }}>
+              BUILD AND INSTALL THE NEXT VERSION
+            </div>
+            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-dim)', lineHeight: 1.7,
+              marginBottom: 10 }}>
+              Runs the same pipeline as <code>npm run package:win</code> — dependencies, renderer,
+              packaging, then a load check of the artefact — and then hands the installer to
+              Windows. A packaged app cannot overwrite its own running executable, so applying it
+              closes Rāma; your data lives outside the app directory and is untouched.
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button className="btn btn-sm" disabled={building}
+                      onClick={() => runSelfBuild(false)}>
+                {building ? 'Building…' : '⚙ Build from this checkout'}
+              </button>
+              <button className="btn btn-sm" disabled={building}
+                      onClick={() => runSelfBuild(true)}
+                      title="Pull the tracked branch first, then build">
+                ⬇⚙ Pull, then build
+              </button>
+              {building && (
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)' }}>
+                  this takes several minutes — the log above is live
+                </span>
+              )}
+            </div>
+
+            {buildRes && (
+              <div style={{ marginTop: 10, fontSize: 'var(--text-xs)', lineHeight: 1.7 }}>
+                <div style={{ color: buildRes.ok ? 'var(--green)' : 'var(--red)' }}>
+                  {buildRes.ok
+                    ? `✓ Built in ${Math.round((buildRes.durationMs || 0) / 1000)}s`
+                    : `✕ ${buildRes.error}`}
+                </div>
+                {buildRes.note && (
+                  <div style={{ color: 'var(--text-dim)', marginTop: 4 }}>{buildRes.note}</div>
+                )}
+                {(buildRes.fresh || []).length > 0 && (
+                  <div style={{ marginTop: 6, color: 'var(--text-dim)' }}>
+                    {buildRes.fresh.map((a) => (
+                      <div key={a.name}>
+                        <span style={{ color: 'var(--text)' }}>{a.name}</span>
+                        {a.sizeMB != null && (
+                          <span style={{ color: 'var(--muted)' }}> · {a.sizeMB} MB</span>
+                        )}
+                        <span style={{ color: 'var(--muted)' }}> · {a.kind}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Stale output is NAMED rather than hidden: a leftover installer from a failed
+                    run would install an OLDER build and look like it had worked. */}
+                {(buildRes.stale || []).length > 0 && (
+                  <div style={{ marginTop: 6, color: 'var(--muted)' }}>
+                    ignored as left over from an earlier run:{' '}
+                    {buildRes.stale.map((a) => a.name).join(', ')}
+                  </div>
+                )}
+                {buildRes.ok && buildRes.installer && (
+                  <div style={{ marginTop: 10 }}>
+                    <button className="btn btn-sm btn-danger" disabled={installing}
+                            onClick={applyBuild}>
+                      {installing ? 'Starting installer…'
+                        : `⬆ Install ${buildRes.installer.name} and close Rāma`}
+                    </button>
+                  </div>
+                )}
+                {installMsg && (
+                  <div style={{ marginTop: 8,
+                    color: installMsg.ok ? 'var(--gold)' : 'var(--red)' }}>
+                    {installMsg.ok ? installMsg.message : `✕ ${installMsg.error}`}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </>
       )}
     </div>

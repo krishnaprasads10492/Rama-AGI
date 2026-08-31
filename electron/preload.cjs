@@ -313,6 +313,11 @@ const RAMA_API = {
   update: {
     // Respawns only the Python engine — for a pull that changed ai_backend but nothing else.
     restartBackend: (opts)        => ipcRenderer.invoke('update:restart-backend', opts),
+    // Self-build pipeline (Section 83): build the next version, then hand over the installer.
+    // `installBuild` CLOSES the app so Windows can replace the files — it is a separate call from
+    // `selfBuild` on purpose.
+    selfBuild:      (opts)        => ipcRenderer.invoke('update:self-build', opts),
+    installBuild:   (opts)        => ipcRenderer.invoke('update:install-build', opts),
     check:        (repoPath)      => ipcRenderer.invoke('update:check', { repoPath }),
     pullBuild:    (opts)          => ipcRenderer.invoke('update:pull-build', opts),
     reloadWindow: (opts)          => ipcRenderer.invoke('update:reload-window', opts),

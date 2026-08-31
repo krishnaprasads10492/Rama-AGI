@@ -28,7 +28,8 @@
     "audit": "node scripts/auditRenderer.cjs",
     "verify:update": "node scripts/verifyUpdateEngine.cjs",
     "verify:audit": "node scripts/verifyAudit.cjs",
-    "verify": "node scripts/verifyAudit.cjs && node scripts/verifyUpdateEngine.cjs && node scripts/auditRenderer.cjs",
+    "verify:build": "node scripts/verifySelfBuild.cjs",
+    "verify": "node scripts/verifyAudit.cjs && node scripts/verifyUpdateEngine.cjs && node scripts/verifySelfBuild.cjs && node scripts/auditRenderer.cjs",
     "rebuild": "electron-rebuild",
     "start": "electron .",
     "preview": "vite preview"

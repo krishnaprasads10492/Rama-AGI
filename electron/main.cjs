@@ -483,6 +483,41 @@ function registerLocalUpdate(ipcMain) {
     return { ok: true };
   });
 
+  // ── Self-build pipeline (Section 83) ──────────────────────────────────────
+  //
+  // Builds the next version from a source checkout and hands the installer to Windows. Master
+  // installed from a setup file, and a packaged Windows app cannot overwrite its own running
+  // executable — so this is the only honest route to "assimilate into the old build".
+  ipcMain.handle('update:self-build', async (event, { user, repoPath, pull } = {}) => {
+    if (!capability.can(user, 'system.self-update')) {
+      const who = capability.TIER_LABELS[String(user?.tier)] ?? 'This account';
+      return { ok: false, error: `${who} may not build a release (needs "system.self-update")` };
+    }
+    const pipeline = safeRequire('./lib/selfBuildPipeline.cjs', 'Self-build pipeline');
+    if (!pipeline) return { ok: false, error: 'Self-build pipeline unavailable' };
+    return pipeline.build({
+      repoPath, pull: !!pull,
+      onLog: (chunk) => event.sender.send('update:log', chunk),
+    });
+  });
+
+  // DELIBERATELY A SEPARATE CALL. This closes Rāma. Bundling it into the build would mean one
+  // click both compiles for minutes and then quits, with no moment in between for master to read
+  // what was produced or change his mind.
+  ipcMain.handle('update:install-build', async (_e, { user, repoPath, fileName } = {}) => {
+    if (!capability.can(user, 'system.self-update')) {
+      return { ok: false, error: 'Not permitted' };
+    }
+    const pipeline = safeRequire('./lib/selfBuildPipeline.cjs', 'Self-build pipeline');
+    if (!pipeline) return { ok: false, error: 'Self-build pipeline unavailable' };
+    const res = await pipeline.launchInstaller({ repoPath, fileName });
+    if (!res.ok) return res;
+    // Give the installer a moment to actually start before the window disappears, so a failure to
+    // launch is visible rather than looking like Rāma simply closed.
+    setTimeout(() => { app.isQuiting = true; app.quit(); }, 1500);
+    return res;
+  });
+
   // Respawn just the Python engine — needed when only ai_backend changed (Section 80). Kept
   // separate from `update:restart-app` because relaunching the whole application to pick up an
   // engine change is heavier than the change needs and loses master's window state.

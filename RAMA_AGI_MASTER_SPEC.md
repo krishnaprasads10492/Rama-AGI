@@ -1744,6 +1744,8 @@ authenticated **Master session**, not merely an open store.
 
 | 100 | IDE — a real editor, bundled, and a diff master must approve before an AI edit lands | done | Section 82. Master asked for Kiro-like capabilities; the honest starting point was that **the IDE had no editor**. `useMonaco()` was defined and **never called**, so `monacoEditor` was permanently null, a `<textarea>` was the only editor, and the header advertised "Monaco" — and it could not have worked anyway, because it loaded from `cdn.jsdelivr.net` while the packaged app loads the renderer with `loadFile()`, making a remote script exactly the wrong dependency. **`monaco-editor@0.56.0` pinned (MIT), bundled — no CDN, offline, no CSP hole.** **The editor-only build was chosen for a concrete reason**: production runs from a `file://` origin, Chromium treats every `file://` document as an opaque origin and refuses to start a worker from a sibling path, so Monaco's *language* workers (TypeScript/JSON/CSS/HTML) cannot load — and importing the whole package wires them up eagerly then fails at runtime. So: `editor/editor.api.js` (core, including the **diff** editor) + `features/register.all.js` (find/replace, folding, multi-cursor, brackets, suggest) + `basic-languages/monaco.contribution.js` (Monarch grammars for ~90 languages, **no worker**) + `editor/editor.worker.js?worker&inline`. **`?worker&inline` is load-bearing**: Vite would otherwise emit a sibling `.js` worker that a `file://` document may not start, whereas inlined it becomes a blob URL and `worker-src 'self' blob:` already permits it — verified in the build output, no worker chunk emitted and `createObjectURL` present in the bundle. **THREE 0.56 VERSION TRAPS recorded because every tutorial still shows the old shape**: (1) the `exports` map is `{"./*.js": "./esm/vs/*.js"}` so it **already** prefixes `esm/vs/`, and the familiar `monaco-editor/esm/vs/editor/editor.api` resolves to `esm/vs/esm/vs/…` and fails with "Rollup failed to resolve import"; (2) `editor/editor.all.js` **no longer exists**, the contributions barrel moved to `features/register.all.js`; (3) `editor.worker.js` is still the worker entry, `editor.worker.start.js` is not. **Stated rather than implied: no cross-file IntelliSense, type checking or schema validation**, because those are the blocked workers; serving the renderer over a custom privileged protocol would unlock them and is the follow-up, deliberately not done in the same pass as introducing the editor since startup reliability took Sections 26/29/32 to get right and is not worth risking for autocomplete. **CSP tightened as a side effect** — the `cdn.jsdelivr.net` allowance on `script-src`/`style-src`/`font-src`/`connect-src` became dead policy surface and is removed, so `script-src` is back to `'self' 'unsafe-inline'`. **`CodeEditor`: one editor instance, models swapped per file** with a model cache keyed by path and view state saved/restored on each swap — creating an editor per tab would discard cursor, scroll and fold state on every switch, which is the entire point of tabs. `monacoEditor` state and the container ref are gone; `tabs[].content` is now the single source of truth, where previously the editor and the tab array each held a copy and could disagree (which is why `saveFile` had to ask `monacoEditor ? getValue() : content`). **The textarea fallback survives deliberately** — if Monaco fails to start the editor degrades to a textarea and says so on screen, because the IDE was a textarea permanently before this and a blank panel would be a silent regression. **`DiffReview` is the piece that actually matters**: the patch path existed (the AI returned code, `onApplyPatch` wrote it) with **no way to see what would change**, and applying an edit you cannot inspect is the most dangerous thing an assistant can do to a codebase. A patch now opens a Monaco diff (side-by-side or inline, hunk and ±line counts) and **nothing is written until Apply is pressed**; discard is the default with Escape and the backdrop both rejecting; an identical proposal disables Apply and says so; and if the diff view itself fails, **applying blind is not offered**. The diff is computed by the base editor worker, which is exactly why that worker is inlined. **A DEAD CAPABILITY GATE FOUND ON THE WAY**: `sandbox:execute` was invoked from the AI panel with **no `user`**, and the handler runs `capability.deny(user, 'sandbox.execute')` immediately — so every sandbox run master ever triggered was refused, silently, because the result was only consumed when `ok` was present. The panel now passes `currentUser`. **Verified**: `vite build` 24.7s, `npm run audit` clean at 105 bridge calls across 56 files all scope-checked, `verifyAudit` 15, `verifyUpdateEngine` 44, `node --check` clean. **Cost stated plainly: the IDE route chunk is 4.21 MB (1.10 MB gzipped) + 162 kB CSS**, lazy-loaded so it is paid only on opening the IDE and the startup bundle is unchanged. **NOT VERIFIED: the editor has not been rendered on screen** — the build resolving Monaco and the worker being inlined is not the same as seeing highlighting and a working diff. **STILL NOT KIRO**: this is a real editor plus safe review of a single-file change; Kiro-like also needs multi-file edits proposed as a set, a tool-calling loop that can read and search the repo on its own initiative, and terminal integration. Those build on this. |
 
+| 101 | Self-build pipeline — Rāma builds its own next version and hands over the installer | done | Section 83. Master asked for *"its own pipeline built into which will run the build and assimilate into old build"*, having installed from the setup file. **The constraint stated before the design: a packaged Windows app cannot overwrite its own running executable** — Windows locks `Rama AGI.exe` and the loaded `app.asar` for the life of the process. That is not a gap in Rāma, it is why `electron-updater` exists and why every desktop updater ends with "restart to finish". So "assimilate" cannot mean editing the install in place; what it can mean is **build → verify the artefact → hand the installer to Windows → quit so it can replace the files → reopen an updated app**, with the install performed by the NSIS installer `scripts/buildInstaller.cjs` already produces, run over the existing one. Master's data lives outside the app directory and survives. **It does not reimplement the build**: `buildInstaller.cjs` already *is* the pipeline (toolchain, dependency ladder, `vite build`, archiver resolution, `electron-builder`, post-build load check of the artefact — Sections 45/48), and duplicating any of it would create a second definition of "a correct build" that could drift from the one master runs by hand. **Separate from `localUpdateEngine.cjs`**, which updates a source checkout in place; Section 80 established the two cases are genuinely different and this is the other half. **Building and installing are two IPC calls** (`update:self-build`, `update:install-build`) because bundling them would mean one click both compiles for minutes and then closes the app, with no moment to read the result or change one's mind; the install button confirms and says why Rāma must close. **THE LOAD-BEARING RULE: only artefacts produced by THIS run may be installed.** `dist-electron/` accumulates, and a previous run — *including a failed one that salvaged a portable zip* — leaves files behind; if the pipeline offered the newest-looking `.exe` on disk then **a build that actually failed would install an older version and look like it had worked**, the installer would run, the app would start, and nothing downstream could detect it was the previous build. Freshness is therefore decided by mtime against the build start, stale output is named rather than hidden, an entry with no mtime is treated as stale, and a failed build returns `installer: null` outright. **No installer is not treated as success**: where endpoint policy blocks 7-Zip (Section 45, the work machine) only an unpacked tree and portable zip appear, so `canInstallInPlace` is false and the note says why rather than leaving the missing button unexplained. **`launchInstaller` refuses anything but a bare `.exe` filename inside the output directory** — a path, nested path, traversal or non-executable is rejected before anything spawns — and the child is `detached`/`unref`'d, because otherwise quitting Rāma would kill the process meant to replace it. **`node` from PATH, not `process.execPath`**, since inside Electron the latter is Electron's own binary and would hand the build script an Electron runtime instead of Node. **Verified: `scripts/verifySelfBuild.cjs`, 31 assertions (`npm run verify:build`)** against the pure `classifyArtifacts` — a stale `.exe` beside a fresh `.zip` yields `installer: null` (the exact scenario that would install an older build), an artefact stamped exactly at the start counts as fresh, a missing mtime is stale, the newest fresh installer wins, extension classification is correct, `latest.yml`/`builder-effective-config.yaml`/`.icon-ico` are ignored, an unpacked tree alone never becomes installable, and `launchInstaller` rejects `../../evil.exe`, nested paths, `notes.txt`, missing arguments and a nonexistent file. **`npm run verify` now runs all four checks in one command**: 15 + 44 + 31 assertions plus the renderer audit, clean at 107 bridge calls across 56 files. `node --check` clean on all three touched `.cjs`. **NOT VERIFIED: no real build has been driven through this from here** — the selection rule and launch guards are unit-tested, but `build()` has not run `buildInstaller.cjs` end to end this session and `launchInstaller` has not actually started an installer and quit. **Cloud CI/CD remains master's decision rather than a missing feature**: `release.yml` and `releaseChannel.cjs` have been dormant since Section 39 (row 53) pending two answers only he can give — whether to code sign (unsigned means a SmartScreen warning on every install) and whether to publish GitHub Releases publicly. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -8402,3 +8404,104 @@ the shell.
 What exists now is a real editor and safe review of a single-file change. Kiro-like also means
 multi-file edits proposed as a set, a tool-calling loop that can read and search the repo on its
 own initiative, and terminal integration. Those are the next increments, and they build on this.
+
+---
+
+## SECTION 83 — Rāma builds its own next version
+
+Master asked for *"its own pipeline built into which will run the build and assimilate into old
+build"*, and separately noted he installed from the setup file. Those two facts together define
+what is and is not possible.
+
+### The constraint, stated before the design
+
+**A packaged Windows application cannot overwrite its own running executable.** Windows holds a
+lock on `Rama AGI.exe` and on the loaded `app.asar` for as long as the process lives. This is not a
+gap in Rāma — it is why `electron-updater` exists, and why every desktop updater on every platform
+ends with "restart to finish".
+
+So "assimilate into the old build" cannot mean editing the install in place. What it can mean, and
+what this does:
+
+```
+build the next version → verify the artefact → hand the installer to Windows
+→ quit so it can replace the files → master reopens an updated app
+```
+
+The install is performed by the NSIS installer that `scripts/buildInstaller.cjs` already produces,
+run over the top of the existing one. Master's data lives outside the app directory, so it survives.
+
+### Decisions
+
+**It does not reimplement the build.** `scripts/buildInstaller.cjs` *is* the pipeline already:
+toolchain check, dependency ladder, `vite build`, archiver resolution, `electron-builder`, and a
+post-build load check of the artefact itself (Sections 45 and 48). Duplicating any of that here
+would create a second definition of "a correct build" that could drift from the one master runs by
+hand. This module runs it and interprets the result.
+
+**It is separate from `localUpdateEngine.cjs`.** That module updates a *source checkout* in place —
+pull, install, rebuild the renderer, reload — and is the right tool when Rāma runs from a clone.
+This one produces an *installable artefact* for a packaged install. Section 80 established that
+those are genuinely different cases; this is the other half of that answer.
+
+**Building and installing are two separate IPC calls.** `update:self-build` compiles;
+`update:install-build` launches the installer and quits. Bundling them would mean one click both
+compiles for several minutes and then closes Rāma, with no moment in between for master to read
+what was produced or change his mind. The install button additionally confirms, and says why the
+app must close.
+
+**Only artefacts produced by *this* run may be installed — the load-bearing rule.**
+`dist-electron/` accumulates. A previous run, *including a failed one that salvaged a portable
+zip*, leaves files behind. If the pipeline reported "build complete" and then offered the
+newest-looking `.exe` on disk, **a build that had actually failed would install an older version
+and look like it had worked** — the installer would run, the app would start, and it would silently
+be the previous build. Nothing downstream could detect that. So freshness is decided by mtime
+against the moment the build started; anything older is reported as stale and never offered. A
+failed build returns `installer: null` outright.
+
+**No installer is not treated as success.** On a machine where endpoint policy blocks 7-Zip
+(Section 45, master's work machine), `electron-builder` cannot produce an NSIS installer and the
+run salvages an unpacked tree plus a portable zip. `canInstallInPlace` is then `false` and the note
+says so plainly, rather than leaving master to wonder why the install button is absent.
+
+**`launchInstaller` refuses anything but a bare filename inside the output directory.** It spawns
+an executable, so it must not be steerable: a path, a nested path, a traversal, or a
+non-`.exe` is rejected. The child is `detached` and `unref`'d, because otherwise quitting Rāma
+would kill the process meant to replace Rāma.
+
+**`node` from PATH, not `process.execPath`.** Inside Electron, `process.execPath` is Electron's own
+binary; running a build script under it would give the script an Electron runtime rather than Node.
+`node` is what the script expects and what master would use by hand.
+
+### Verification
+
+`scripts/verifySelfBuild.cjs`, **31 assertions**, `npm run verify:build`. `classifyArtifacts` is
+pure — directory entries plus a start timestamp — so this runs without building anything:
+
+- a stale `.exe` alongside a fresh `.zip` classifies the exe as stale **and returns
+  `installer: null`**, which is the exact scenario that would otherwise install an older build
+- an artefact stamped exactly at the start counts as fresh
+- an entry with **no mtime** is treated as stale — the safe direction
+- the newest fresh installer wins among several
+- `.exe` → installer, `.zip`/`.7z` → portable, `*-unpacked` → unpacked; `latest.yml`,
+  `builder-effective-config.yaml` and `.icon-ico` are ignored
+- an unpacked tree alone never becomes installable
+- `launchInstaller` rejects `../../evil.exe`, `sub/dir/Setup.exe`, `notes.txt`, missing arguments,
+  and a file that does not exist — before spawning anything
+
+`npm run verify` now runs all four checks in one command: **15 + 44 + 31 assertions plus the
+renderer audit** (clean at 107 bridge calls across 56 files). `node --check` clean on
+`selfBuildPipeline.cjs`, `main.cjs` and `preload.cjs`.
+
+### Not verified, and the cloud half
+
+**No real build has been run through this from here.** The artefact-selection rule and the launch
+guards are unit-tested, but `build()` has not driven `buildInstaller.cjs` end to end in this
+session, and `launchInstaller` has not actually started an installer and quit. Those need a machine
+willing to run a full package — which on this one is the 7-Zip-blocked case.
+
+**Cloud CI/CD remains master's decision, not a missing feature.** `.github/workflows/release.yml`
+and `releaseChannel.cjs` have existed since Section 39 (ledger row 53) and are dormant on purpose.
+Making them live needs two answers only master can give: whether to **code sign** (unsigned means
+a SmartScreen warning on every install) and whether to **publish GitHub Releases publicly**. Until
+then, building nothing in that direction is the correct behaviour rather than an omission.
