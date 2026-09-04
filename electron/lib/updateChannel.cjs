@@ -54,6 +54,13 @@ const INSTALLER_RE = /\.exe$/i;
 const PORTABLE_RE = /\.(zip|7z)$/i;
 const KEEP_DEFAULT = 3;
 
+// FOUND BY SIMULATION (Section 85). A zero-byte file hashes perfectly well — SHA-256 of nothing is
+// a valid digest — so an empty `.exe` published by a failed copy verified and was offered as
+// installable. Integrity checking cannot catch this: the file IS what the manifest says. Only a
+// plausibility floor can. A real NSIS installer for this app is ~100 MB; anything under a kilobyte
+// is not an installer by any reading.
+const MIN_ARTEFACT_BYTES = 1024;
+
 /**
  * Where the channel lives.
  *
@@ -227,9 +234,50 @@ function status({ dir, currentVersion } = {}) {
     return out;
   }
 
+  // EXACT-CASE DIRECTORY MATCH, not `existsSync` (found by simulation, Section 85). Windows path
+  // resolution is case-insensitive, so a manifest naming `RAMA-AGI-SETUP-2.0.0.EXE` happily opened
+  // `Rama-AGI-Setup-2.0.0.exe` and verified. On Windows that is the same file so it is not an
+  // escape — but the same manifest on a case-sensitive share (a Linux server, a synced Mac) would
+  // fail to find it, and a name that does not match the directory entry byte-for-byte did not come
+  // from `publish()`. Reading the directory makes the behaviour identical on every filesystem.
+  let entries;
+  try {
+    entries = fs.readdirSync(dir);
+  } catch (err) {
+    out.reason = `could not read ${dir}: ${err.message}`;
+    return out;
+  }
+  if (!entries.includes(m.file)) {
+    const ci = entries.find((e) => e.toLowerCase() === m.file.toLowerCase());
+    out.reason = ci
+      ? `${MANIFEST_NAME} names ${m.file} but the folder holds ${ci} — the names differ in case, `
+        + 'so this manifest was not written by a publish and would break on a case-sensitive share'
+      : `${MANIFEST_NAME} names ${m.file} but that file is not in the folder`;
+    return out;
+  }
+
   const artefact = path.join(dir, m.file);
-  if (!fs.existsSync(artefact)) {
-    out.reason = `${MANIFEST_NAME} names ${m.file} but that file is not in the folder`;
+  let stat;
+  try {
+    stat = fs.statSync(artefact);
+  } catch (err) {
+    out.reason = `could not read ${m.file}: ${err.message}`;
+    return out;
+  }
+  if (!stat.isFile()) {
+    out.reason = `${m.file} is not a file`;
+    return out;
+  }
+  if (stat.size < MIN_ARTEFACT_BYTES) {
+    out.reason = `${m.file} is ${stat.size} bytes — too small to be a real build, so it is a `
+      + 'failed or truncated copy rather than a release';
+    return out;
+  }
+  // The manifest is internally inconsistent if it disagrees with the file its own hash matches.
+  // `publish()` writes both from the same file, so a mismatch means something else wrote this.
+  if (m.sizeBytes != null && Number(m.sizeBytes) !== stat.size) {
+    out.reason = `${MANIFEST_NAME} records ${m.sizeBytes} bytes but ${m.file} is ${stat.size} — `
+      + 'the manifest does not describe this file';
     return out;
   }
 
@@ -277,6 +325,24 @@ function publish({ artefactPath, dir, version, notes = null, keep = KEEP_DEFAULT
     return { ok: false, error: `${name} is neither an installer nor an archive` };
   }
   if (!version) return { ok: false, error: 'version is required' };
+
+  // Refuse at the source too, so a broken build never reaches the channel at all rather than being
+  // rejected later by every reader (Section 85).
+  try {
+    const srcStat = fs.statSync(artefactPath);
+    if (!srcStat.isFile()) {
+      return { ok: false, error: `${name} is not a file` };
+    }
+    if (srcStat.size < MIN_ARTEFACT_BYTES) {
+      return {
+        ok: false,
+        error: `${name} is ${srcStat.size} bytes — too small to be a real build. Refusing to `
+          + 'publish it; the build almost certainly failed or was truncated.',
+      };
+    }
+  } catch (err) {
+    return { ok: false, error: `could not inspect ${name}: ${err.message}` };
+  }
 
   try {
     fs.mkdirSync(dir, { recursive: true });

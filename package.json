@@ -30,9 +30,10 @@
     "verify:audit": "node scripts/verifyAudit.cjs",
     "verify:build": "node scripts/verifySelfBuild.cjs",
     "verify:channel": "node scripts/verifyUpdateChannel.cjs",
+    "simulate:channel": "node scripts/simulateUpdateChannel.cjs",
     "publish:channel": "node scripts/publishToChannel.cjs",
     "package:publish": "node scripts/buildInstaller.cjs && node scripts/publishToChannel.cjs",
-    "verify": "node scripts/verifyAudit.cjs && node scripts/verifyUpdateEngine.cjs && node scripts/verifySelfBuild.cjs && node scripts/verifyUpdateChannel.cjs && node scripts/auditRenderer.cjs",
+    "verify": "node scripts/verifyAudit.cjs && node scripts/verifyUpdateEngine.cjs && node scripts/verifySelfBuild.cjs && node scripts/verifyUpdateChannel.cjs && node scripts/simulateUpdateChannel.cjs && node scripts/auditRenderer.cjs",
     "rebuild": "electron-rebuild",
     "start": "electron .",
     "preview": "vite preview"

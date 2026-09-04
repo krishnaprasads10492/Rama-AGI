@@ -1748,6 +1748,8 @@ authenticated **Master session**, not merely an open store.
 
 | 102 | Update folder — a filesystem release channel, one publisher and many installs | done | Section 84. Master asked for a folder a post-build step pushes the latest build into, that an already-installed app reads as an update source. That is a release channel with a filesystem as its transport: no GitHub, no signing decision, no network, and if the folder is on a share or synced drive one build updates every machine. **SECURITY STATED BEFORE THE FEATURES: applying an update runs an executable from that folder.** The SHA-256 gives **integrity** — the artefact is the file the manifest describes and was not truncated — but **not authenticity**, because anyone who can write the installer can rewrite the manifest and its hash too. So: *whoever can write to the channel folder can make Rāma run their executable*, and the **UI says that**, not just this comment. Authenticity needs code signing, a decision master has not made (row 53), and pretending a hash substitutes for a signature would be the dangerous lie in this feature. Nothing is applied automatically, no startup check installs anything, applying is master-only (`system.self-update`) and separate — the same split as Section 83. **NOT DIFFERENTIAL, said plainly**: it publishes the whole installer, not a binary delta; real deltas need electron-builder's `.blockmap` consumed by electron-updater, whose generic provider over `file://` is unreliable and wants a signed build to verify, and copying ~130 MB locally costs about a second whereas a delta mechanism that silently half-works costs a broken install. `latest.json` is the entire protocol (`manifestVersion`, `product`, `version`, `file`, `sha256`, `sizeBytes`, `kind`, `builtAt`, `notes`). Publish via `scripts/publishToChannel.cjs` (`npm run publish:channel`, or `npm run package:publish` to build and publish as one command) or the in-app button; read via `GitSync → UPDATE`. `RAMA_UPDATE_CHANNEL_DIR` overrides a default under `userData`, which is **outside** the app directory so it survives the reinstall it performs and an uninstall does not take the channel with it. **DECISIONS**: the manifest is **untrusted input** and `file` must be a bare filename, so `../../evil.exe` and `sub/dir/Setup.exe` are rejected at validation rather than steering the launcher out of the folder, and a `manifestVersion` newer than this build understands is refused with "update from the installer by hand" instead of being half-interpreted; **the manifest is written last and both files land via a `.part` rename**, so a reader arriving mid-publish sees the old manifest or the new one, never a fresh manifest pointing at a half-copied 130 MB installer; **the hash is re-checked immediately before spawning** rather than trusted from the earlier `status()`, since that gap is exactly where a swap would land; **an older channel build is never offered to a newer install**; **a portable archive is reported but `canApply: false`** with the reason, for the 7-Zip-blocked case (Section 45), instead of an unexplained missing button; **pruning never removes the file the live manifest points at**, however old, since that would leave every reader with a broken update; and **publishing reuses `classifyArtifacts` from Section 83** rather than re-deriving freshness, because `dist-electron/` accumulates and publishing a leftover from a **failed** run would push an older build to every install — one tested rule, one place, with `--allow-stale` for the deliberate case. **A WINDOWS DEFECT THE TEST FOUND**: `fs.renameSync` over an *existing* file threw `EPERM: operation not permitted` on the second publish — it maps to `MoveFileExW` with replace-existing so it ought to overwrite, but a transient handle from an indexer or antivirus on the file just written refuses it. This is the identical class `outcomes.py` documents for `os.replace` (Section 68): a platform difference, not a logic error. `atomicReplace()` retries with a short backoff, unlinking the target to narrow the window. Found by running the test twice, not by review. **Verified: `scripts/verifyUpdateChannel.cjs`, 71 assertions (`npm run verify:channel`), against real files in a temp directory rather than mocks**, because the failure that matters most — a half-copied installer offered as valid — only exists on a filesystem: version ordering including `1.10.0 > 1.9.0` (which a string compare gets wrong) and pre-release ordering, manifest rejection including path traversal and a future manifest version, corrupt-artefact refusal, apply-time re-verification, archive-not-applicable, pruning with protection, and directory-resolution precedence. **EXERCISED END TO END AGAINST THE REAL 130 MB ARTEFACT ON THIS MACHINE**: published with manifest and hash, then read back at three install versions — offered at 0.9.0 with `canApply: false` as an archive, up-to-date at 1.0.0, refused as older at 2.0.0 — and after appending **one byte** the offer was withdrawn with the corruption reason. `npm run verify` now runs five checks: 15 + 44 + 31 + 71 assertions plus the renderer audit, clean at 110 bridge calls across 56 files. `node --check` clean on all touched `.cjs`. **NOT VERIFIED: no NSIS installer has been published or applied from here**, because 7-Zip is blocked on this machine and only a portable archive can be produced; the installer path is the same code up to `canApply` and `apply()` is tested for its refusals, but a real install-and-relaunch has not happened. |
 
+| 103 | Update channel — adversarial simulation, and the two bugs it found | done | Section 85. Master asked for as many simulations as it takes to establish the channel actually works. `verifyUpdateChannel` asserts the contract; `scripts/simulateUpdateChannel.cjs` (`npm run simulate:channel`, **164 checks**) runs whole lifecycles and hostile scenarios against real files, on the rule that **failing closed is a pass** — a channel that refuses a good update is an inconvenience, one that accepts a bad update runs an executable. **TWO REAL BUGS FOUND. (1) A zero-byte installer was offered as installable**: SHA-256 of an empty file is a valid digest, so a 0-byte `.exe` left by a failed copy verified and returned `canApply: true` — **integrity checking cannot catch this**, because the file genuinely *is* what the manifest says, and only a plausibility floor can; `MIN_ARTEFACT_BYTES = 1024` now refuses it at publish (so a broken build never reaches the channel) and again at read (so a hand-written manifest cannot bypass publish). **(2) A case-only filename mismatch passed**: a manifest naming `RAMA-AGI-SETUP-2.0.0.EXE` opened `Rama-AGI-Setup-2.0.0.exe` because Windows resolution is case-insensitive, and the hash then matched — on Windows the same file so not an escape, but the identical manifest on a **case-sensitive share** (Linux server, synced Mac) would fail to find it, and a name not matching the directory entry byte-for-byte **did not come from `publish()`**; `status()` now reads the directory and requires an exact entry, so behaviour is identical on every filesystem. Hardened alongside: `sizeBytes` must match the file its own hash matches (publish writes both from one file, so a mismatch means something else wrote it); a **directory** wearing an installer's name is refused as not-a-file; and the size check runs **before** the hash check because a `stat` is free where hashing 130 MB is not. **Thirteen scenarios**: a five-release lifecycle with pruning that never removes the live artefact; 40 consecutive republishes (the loop that exposed the `EPERM` rename defect); interrupted publishes with leftover `.part`, manifest-without-artefact and artefact-without-manifest; **150 reader/publisher interleavings with no read ever seeing available-but-unverified**; corruption in six shapes; **28 hostile manifests** (traversal both slashes, absolute, UNC, nested, alternate data stream, null byte, `.bat`/`.ps1`/`.cmd` swaps, future `manifestVersion`, malformed hashes, type confusion, prototype pollution, truncated JSON, BOM, empty — none offered, none threw); the **acknowledged limit** that a writer who controls the folder can publish a hostile release correctly and it *is* offered, asserted as expected rather than hidden; Windows device names (`NUL`/`CON`/`PRN`/`AUX`/`COM1`/`LPT1.exe`), a directory named like an installer, a 180-char filename; the zero-byte build; **200 installs at randomised versions with every verdict correct**; seeded manifest fuzzing reproducible via `--seed`; deliberate rollback where behind installs get the older build but **ahead installs are never walked backwards**; and nonexistent/unreachable/null directories. **Run repeatedly rather than once: six seeds at 3000 fuzz iterations each = 18,000 fuzzed manifests, 164/164 every run, zero throws, zero unsafe offers.** **What this does and does not establish**: no corruption, race, malformed manifest, traversal attempt, device name, rollback or version confusion produced an offer that should not have been made — but simulation **cannot** establish safety against someone who can *write* to the folder, which SIM 7 asserts is offered because the hash proves integrity and not authorship (a design property documented in Section 84 and shown in the UI; only code signing changes it). **`npm run verify` now runs six checks in one command, 336 assertions**: verifyAudit 15, verifyUpdateEngine 44, verifySelfBuild 31, verifyUpdateChannel **82** (was 71, +11 for the findings), simulateUpdateChannel 164, plus the renderer audit clean at 110 bridge calls across 56 files. The unit fixtures had been ~25-byte fake installers which the new floor correctly rejects and now use plausible sizes — **that the fixtures had to change is itself evidence the guard is real**. **STILL NOT VERIFIED: no NSIS installer published or applied from here** (7-Zip blocked on this machine, only a portable archive is producible); `apply()` is tested for all refusals, a successful install-and-relaunch has not happened. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -8622,3 +8624,87 @@ clean at 110 bridge calls across 56 files. `node --check` clean on all touched `
 blocked on this machine and only a portable archive can be produced. The installer path is the same
 code as the archive path up to `canApply`, and `apply()` is tested for its refusals — but a real
 install-and-relaunch has not happened.
+
+---
+
+## SECTION 85 — Simulating the update channel, and the two bugs it found
+
+Master asked for as many simulations as it takes to establish the channel actually works.
+`verifyUpdateChannel.cjs` asserts the contract. This is a different instrument: whole lifecycles
+and adversarial scenarios against real files, looking for what a unit test does not reach — a race,
+a leftover, a hostile manifest, an exotic Windows path, a rollback.
+
+**The rule for every scenario: failing closed is a pass.** A channel that refuses a good update is
+an inconvenience; one that accepts a bad update runs an executable.
+
+### Two real bugs found
+
+**1. A zero-byte installer was offered as installable.** SHA-256 of an empty file is a perfectly
+valid digest, so a 0-byte `.exe` left behind by a failed copy verified and came back with
+`canApply: true`. **Integrity checking cannot catch this** — the file genuinely *is* what the
+manifest says it is. Only a plausibility floor can. `MIN_ARTEFACT_BYTES = 1024` now refuses it at
+**publish** (so a broken build never reaches the channel) and again at **read** (so a hand-written
+manifest cannot bypass publish).
+
+**2. A case-only filename mismatch passed.** A manifest naming `RAMA-AGI-SETUP-2.0.0.EXE` happily
+opened `Rama-AGI-Setup-2.0.0.exe`, because Windows path resolution is case-insensitive, and the hash
+then matched. On Windows that is the same file, so it is not an escape — but the identical manifest
+on a **case-sensitive share** (a Linux server, a synced Mac) would fail to find it, and a name that
+does not match the directory entry byte-for-byte **did not come from `publish()`**. `status()` now
+reads the directory and requires an exact entry, so behaviour is identical on every filesystem, and
+the refusal names both the case difference and the portability risk.
+
+Hardened while there: `sizeBytes` must match the file its own hash matches (`publish()` writes both
+from one file, so a mismatch means something else wrote it); a **directory** wearing an installer's
+name is refused as not-a-file; and the size check runs **before** the hash check, because a `stat`
+is free where hashing a 130 MB installer is not.
+
+### The scenarios
+
+`scripts/simulateUpdateChannel.cjs` — `npm run simulate:channel` — 164 checks:
+
+| | Scenario |
+|---|---|
+| 1 | a five-release lifecycle, installing each in turn, pruning to 3, live artefact surviving every prune |
+| 2 | 40 consecutive republishes of the same version — the loop that exposed the `EPERM` rename defect |
+| 3 | interrupted publishes: leftover `.part`, manifest with no artefact, artefact with no manifest |
+| 4 | 150 reader/publisher interleavings — **no read ever saw available-but-unverified** |
+| 5 | corruption in six shapes: appended, bit-flipped, halved, zeroed, swapped build, replaced with text |
+| 6 | **28 hostile manifests** — traversal (both slashes), absolute, UNC, nested, alternate data stream, null byte, `.bat`/`.ps1`/`.cmd` swaps, future `manifestVersion`, malformed hashes, type confusion, prototype pollution, truncated JSON, BOM, empty. None offered, none threw. |
+| 7 | the **acknowledged limit**: a writer who controls the folder publishes a hostile release correctly and it *is* offered — asserted as expected behaviour, not hidden |
+| 8 | Windows device names (`NUL.exe`, `CON.exe`, `PRN.exe`, `AUX.exe`, `COM1.exe`, `LPT1.exe`), a directory named like an installer, a 180-character filename |
+| 9 | a zero-byte build (finding 1) |
+| 10 | one channel read by **200 installs** at randomised versions — every verdict correct |
+| 11 | manifest fuzzing with a seeded PRNG, so any failure is reproducible with `--seed` |
+| 12 | deliberate rollback: behind installs get the older build, **ahead installs are never walked backwards** |
+| 13 | nonexistent, unreachable and null channel directories |
+
+**Run repeatedly rather than once**: six seeds (1, 7, 42, 1337, 99991, 2026) at 3000 fuzz
+iterations each — **18,000 fuzzed manifests** — 164/164 passing every run, zero throws, zero unsafe
+offers.
+
+### What "absolutely works" can and cannot mean here
+
+What is established: no corruption, truncation, race, malformed manifest, path-traversal attempt,
+device name, rollback or version confusion produced an offer that should not have been made, across
+18,000 fuzzed manifests and thirteen structured scenarios.
+
+What is **not** established, and cannot be by simulation: that the channel is safe against someone
+who can **write** to the folder. SIM 7 asserts that case is offered, because the hash proves
+integrity and not authorship. That is a property of the design, documented in Section 84 and shown
+in the UI, and only code signing changes it.
+
+Also still unverified: **no NSIS installer has been published or applied from here**, because 7-Zip
+is blocked on this machine and only a portable archive can be produced. `apply()` is tested for all
+its refusals; a successful install-and-relaunch has not happened.
+
+### Verification
+
+`npm run verify` now runs six checks in one command — **336 assertions**: `verifyAudit` 15,
+`verifyUpdateEngine` 44, `verifySelfBuild` 31, `verifyUpdateChannel` **82** (was 71; +11 for the new
+findings), `simulateUpdateChannel` 164, plus the renderer audit clean at 110 bridge calls across 56
+files.
+
+The unit-test fixtures had been using ~25-byte fake installers, which the new floor correctly
+rejects; they now use plausible sizes. **That the fixtures had to change is itself evidence the
+guard is real** rather than decorative.

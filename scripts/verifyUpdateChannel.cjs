@@ -99,7 +99,7 @@ check('and names the file', /latest\.json/.test(st.reason || ''), st.reason);
 console.log('\n--- publish writes an artefact and a manifest that agree ---');
 
 const src = path.join(TMP, 'Rama-AGI-Setup-1.0.1.exe');
-fs.writeFileSync(src, 'pretend installer payload');
+fs.writeFileSync(src, Buffer.alloc(4096, 7));   // >= MIN_ARTEFACT_BYTES: a 0-byte 'installer' is refused (Section 85)
 
 const pub = ch.publish({ artefactPath: src, dir: DIR, version: '1.0.1', notes: 'test build' });
 check('publish succeeds', pub.ok === true, JSON.stringify(pub));
@@ -136,8 +136,11 @@ check('a file that no longer matches its hash is NOT offered', st.available === 
   JSON.stringify(st));
 check('and is not marked verified', st.verified === false);
 check('and cannot be applied', st.canApply === false);
-check('the reason names corruption or an in-progress copy',
-  /corrupt|being copied|replaced/.test(st.reason || ''), st.reason);
+// Either refusal is correct and both are informative. The SIZE check runs first because a `stat`
+// is free where hashing a 130 MB installer is not, so appended bytes are reported as a size
+// mismatch rather than a hash mismatch (Section 85).
+check('the reason names corruption, an in-progress copy, or a size mismatch',
+  /corrupt|being copied|replaced|does not describe this file/.test(st.reason || ''), st.reason);
 
 const applyCorrupt = ch.apply({ dir: DIR });
 check('APPLY REFUSES a mismatched artefact — the check is repeated at spawn time',
@@ -152,7 +155,7 @@ check('and says the file is absent', /not in the folder/.test(st.reason || ''), 
 console.log('\n--- an archive is visible but Rāma cannot install itself from it ---');
 
 const zip = path.join(TMP, 'Rama-AGI-1.0.2-portable.zip');
-fs.writeFileSync(zip, 'pretend zip');
+fs.writeFileSync(zip, Buffer.alloc(4096, 9));
 ch.publish({ artefactPath: zip, dir: DIR, version: '1.0.2' });
 st = ch.status({ dir: DIR, currentVersion: '1.0.0' });
 check('the archive is offered as available', st.available === true, JSON.stringify(st));
@@ -169,7 +172,7 @@ const pruneDir = path.join(TMP, 'prune');
 fs.mkdirSync(pruneDir, { recursive: true });
 for (const [i, name] of ['a.exe', 'b.exe', 'c.exe', 'd.exe'].entries()) {
   const p = path.join(pruneDir, name);
-  fs.writeFileSync(p, name);
+  fs.writeFileSync(p, Buffer.alloc(2048, 1));
   fs.utimesSync(p, new Date(1000 + i * 1000), new Date(1000 + i * 1000));
 }
 const removed = ch.prune({ dir: pruneDir, keep: 2 });
@@ -180,7 +183,7 @@ const protectDir = path.join(TMP, 'protect');
 fs.mkdirSync(protectDir, { recursive: true });
 for (const [i, name] of ['old.exe', 'new.exe'].entries()) {
   const p = path.join(protectDir, name);
-  fs.writeFileSync(p, name);
+  fs.writeFileSync(p, Buffer.alloc(2048, 1));
   fs.utimesSync(p, new Date(1000 + i * 1000), new Date(1000 + i * 1000));
 }
 const kept = ch.prune({ dir: protectDir, keep: 1, protect: 'old.exe' });
@@ -218,9 +221,84 @@ else process.env.RAMA_UPDATE_CHANNEL_DIR = prev;
 check('no base and no override yields null rather than a guess',
   ch.channelDir({}) === null || typeof ch.channelDir({}) === 'string');
 
+
+// ── The two defects the simulation found (Section 85) ────────────────────────
+console.log('\n--- found by simulation: a zero-byte build, and a case-only name mismatch ---');
+{
+  const D2 = path.join(TMP, 'sim-findings');
+  fs.mkdirSync(D2, { recursive: true });
+
+  // A zero-byte "installer" hashes perfectly well — SHA-256 of nothing is a valid digest — so
+  // integrity checking alone offered it as installable. Only a plausibility floor catches it.
+  const zero = path.join(TMP, 'Empty-Setup-9.0.0.exe');
+  fs.writeFileSync(zero, Buffer.alloc(0));
+  const zr = ch.publish({ artefactPath: zero, dir: D2, version: '9.0.0' });
+  check('PUBLISH REFUSES a zero-byte artefact at the source', zr.ok === false, JSON.stringify(zr));
+  check('and says the build probably failed', /too small to be a real build/.test(zr.error || ''),
+    zr.error);
+
+  const tiny = path.join(TMP, 'Tiny-Setup-9.0.1.exe');
+  fs.writeFileSync(tiny, Buffer.alloc(500, 1));
+  check('an artefact under the 1 KB floor is also refused',
+    ch.publish({ artefactPath: tiny, dir: D2, version: '9.0.1' }).ok === false);
+
+  // Hand-write a manifest pointing at a zero-byte file, bypassing publish entirely.
+  fs.writeFileSync(path.join(D2, 'Hand-Setup-9.0.2.exe'), Buffer.alloc(0));
+  fs.writeFileSync(path.join(D2, ch.MANIFEST_NAME), JSON.stringify({
+    manifestVersion: 1, version: '9.0.2', file: 'Hand-Setup-9.0.2.exe',
+    sha256: ch.sha256(path.join(D2, 'Hand-Setup-9.0.2.exe')),
+  }));
+  let s2 = ch.status({ dir: D2, currentVersion: '1.0.0' });
+  check('READ ALSO REFUSES a zero-byte artefact, even with a correct hash',
+    s2.available === false, JSON.stringify(s2));
+  check('and apply refuses it', ch.apply({ dir: D2 }).ok === false);
+
+  // Case-only mismatch: correct on Windows by luck, broken on a case-sensitive share.
+  const D3 = path.join(TMP, 'case-mismatch');
+  fs.mkdirSync(D3, { recursive: true });
+  const real = path.join(D3, 'Rama-AGI-Setup-3.1.0.exe');
+  fs.writeFileSync(real, Buffer.alloc(4096, 3));
+  fs.writeFileSync(path.join(D3, ch.MANIFEST_NAME), JSON.stringify({
+    manifestVersion: 1, version: '3.1.0', file: 'RAMA-AGI-SETUP-3.1.0.EXE',
+    sha256: ch.sha256(real), sizeBytes: 4096,
+  }));
+  s2 = ch.status({ dir: D3, currentVersion: '1.0.0' });
+  check('A CASE-ONLY NAME MISMATCH IS REFUSED, though Windows would resolve it',
+    s2.available === false, JSON.stringify(s2));
+  check('and the reason explains the case difference and the portability risk',
+    /differ in case/.test(s2.reason || '') && /case-sensitive/.test(s2.reason || ''), s2.reason);
+  check('apply refuses it too', ch.apply({ dir: D3 }).ok === false);
+
+  // sizeBytes disagreeing with the file it claims to describe.
+  const D4 = path.join(TMP, 'size-mismatch');
+  fs.mkdirSync(D4, { recursive: true });
+  const r4 = path.join(D4, 'Rama-AGI-Setup-3.2.0.exe');
+  fs.writeFileSync(r4, Buffer.alloc(4096, 4));
+  fs.writeFileSync(path.join(D4, ch.MANIFEST_NAME), JSON.stringify({
+    manifestVersion: 1, version: '3.2.0', file: 'Rama-AGI-Setup-3.2.0.exe',
+    sha256: ch.sha256(r4), sizeBytes: 999999,
+  }));
+  s2 = ch.status({ dir: D4, currentVersion: '1.0.0' });
+  check('an internally inconsistent manifest (sizeBytes vs file) is refused',
+    s2.available === false, JSON.stringify(s2));
+  check('and says the manifest does not describe the file',
+    /does not describe this file/.test(s2.reason || ''), s2.reason);
+
+  // A directory wearing an installer name.
+  const D5 = path.join(TMP, 'dir-as-exe');
+  fs.mkdirSync(path.join(D5, 'Rama-AGI-Setup-3.3.0.exe'), { recursive: true });
+  fs.writeFileSync(path.join(D5, ch.MANIFEST_NAME), JSON.stringify({
+    manifestVersion: 1, version: '3.3.0', file: 'Rama-AGI-Setup-3.3.0.exe',
+    sha256: 'a'.repeat(64),
+  }));
+  s2 = ch.status({ dir: D5, currentVersion: '1.0.0' });
+  check('a directory named like an installer is refused as not-a-file',
+    s2.available === false, JSON.stringify(s2));
+}
+
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* leave it */ }
 
 console.log(`\n${'='.repeat(62)}`);
-console.log(`  ${pass} passed, ${fail} failed`);
+console.log(`  ${pass} passed, ${fail} failed  (including the simulation findings)`);
 console.log('='.repeat(62));
 process.exit(fail ? 1 : 0);
