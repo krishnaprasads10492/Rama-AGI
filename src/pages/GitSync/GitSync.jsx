@@ -473,6 +473,7 @@ function LocalUpdatePanel({ repoPath }) {
 export default function GitSync() {
   const { currentUser } = useUserStore();
   const [repoPath,  setRepoPath]  = useState('');
+  const [projects,  setProjects]  = useState([]);
   const [status,    setStatus]    = useState(null);
   const [log,       setLog]       = useState([]);
   const [diff,      setDiff]      = useState('');
@@ -495,11 +496,64 @@ export default function GitSync() {
     setLoading(false);
   }, [currentUser]);
 
+  // ── Shared workspace context (Section 86) ───────────────────────────────────
+  //
+  // WHY THIS EXISTS: `repoPath` used to start as `useState('')`, so GitSync opened on an empty
+  // picker every single time and master re-selected the same folder over and over. The registry
+  // remembers, so the page opens on what he last worked on and the picker becomes the exception.
+  const refreshProjects = useCallback(async () => {
+    if (!isElectron) return;
+    const res = await window.rama.workspace.list({ user: currentUser });
+    setProjects(res?.ok === false ? [] : (res.data || []));
+  }, [currentUser]);
+
+  const openProject = useCallback(async (p) => {
+    setRepoPath(p);
+    loadRepo(p);
+    // Recording the open is what makes "most recent" mean anything next time.
+    if (isElectron) {
+      await window.rama.workspace.touch({ user: currentUser, path: p });
+      refreshProjects();
+    }
+  }, [currentUser, loadRepo, refreshProjects]);
+
+  // Open on the most recent REPOSITORY, not merely the most recent folder — a plain folder would
+  // be useless to a git page.
+  useEffect(() => {
+    if (!isElectron) return;
+    let cancelled = false;
+    (async () => {
+      await refreshProjects();
+      const res = await window.rama.workspace.preferred({ user: currentUser, requireGit: true });
+      const pref = res?.ok === false ? null : res.data;
+      if (!cancelled && pref?.path && !repoPath) openProject(pref.path);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const togglePin = async (p, pinned) => {
+    if (!isElectron) return;
+    await window.rama.workspace.pin({ user: currentUser, path: p, pinned });
+    refreshProjects();
+  };
+
+  const forgetProject = async (p) => {
+    if (!isElectron) return;
+    await window.rama.workspace.forget({ user: currentUser, path: p });
+    refreshProjects();
+  };
+
   const pickRepo = async () => {
     const res = await fsClient.selectPath({ directory: true, title: 'Select Git Repository' });
     if (!res.canceled && res.paths[0]) {
+      // Registering here is what means he never has to pick this folder again.
+      if (isElectron) {
+        await window.rama.workspace.register({ user: currentUser, path: res.paths[0] });
+      }
       setRepoPath(res.paths[0]);
       loadRepo(res.paths[0]);
+      refreshProjects();
     }
   };
 
@@ -549,6 +603,15 @@ export default function GitSync() {
         <div style={{ flex: 1 }} />
         <button className="btn btn-sm btn-primary" onClick={pickRepo}>📁 Open Repo</button>
         {repoPath && <button className="btn btn-sm" onClick={() => loadRepo(repoPath)}>↺</button>}
+        {repoPath && (
+          <button className="btn btn-sm"
+                  title={projects.find((p) => p.path === repoPath)?.pinned
+                    ? 'Unpin this project' : 'Pin as a favourite'}
+                  onClick={() => togglePin(repoPath,
+                    !projects.find((p) => p.path === repoPath)?.pinned)}>
+            {projects.find((p) => p.path === repoPath)?.pinned ? '★' : '☆'}
+          </button>
+        )}
       </div>
 
       {/* Feedback bar */}
@@ -562,7 +625,38 @@ export default function GitSync() {
       {!repoPath ? (
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px' }}>
           <span style={{ fontSize: '32px' }}>⎇</span>
-          <div style={{ color: 'var(--muted)', fontSize: '12px' }}>Open a git repository to start syncing</div>
+          <div style={{ color: 'var(--muted)', fontSize: '12px' }}>
+            {projects.length
+              ? 'Pick up where you left off, or open another repository'
+              : 'Open a git repository to start syncing'}
+          </div>
+          {/* Anything Rāma already knows about is one click, not a file dialog (Section 86). */}
+          {projects.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 320,
+              maxHeight: 260, overflowY: 'auto' }}>
+              {projects.slice(0, 12).map((p) => (
+                <button key={p.key} type="button"
+                        onClick={() => !p.missing && openProject(p.path)}
+                        disabled={p.missing}
+                        title={p.missing ? `not found: ${p.path}` : p.path}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
+                          padding: '6px 10px', borderRadius: 'var(--radius)',
+                          border: '1px solid var(--border)', background: 'var(--surface)',
+                          color: p.missing ? 'var(--muted)' : 'var(--text)',
+                          cursor: p.missing ? 'not-allowed' : 'pointer',
+                          fontFamily: 'var(--font)', fontSize: 'var(--text-sm)',
+                        }}>
+                  <span>{p.pinned ? '★' : '·'}</span>
+                  <span style={{ fontWeight: 600 }}>{p.name}</span>
+                  <span style={{ color: 'var(--muted)', fontSize: 'var(--text-xs)' }}>
+                    {p.kind}{p.createdByRama ? ' · made by Rāma' : ''}
+                    {p.missing ? ' · missing' : ''}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
           <button className="btn btn-primary" onClick={pickRepo}>📁 Select Repository</button>
         </div>
       ) : (

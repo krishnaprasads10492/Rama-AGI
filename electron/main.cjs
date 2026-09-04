@@ -439,6 +439,96 @@ function clampZoom(v) {
  * proposals.cjs (I6 governs Rāma authoring its own changes; this is master
  * fetching commits that already exist in their own git history).
  */
+/**
+ * Workspace registry + project scaffolding (spec Section 86).
+ *
+ * The registry is the shared context every page reads instead of asking master to re-select the
+ * same folder. Reads sit on `git.read` (tier 3) because a list of folder paths master already chose
+ * is not privileged; creating a project WRITES FILES, so that needs `os.filesystem-write`.
+ */
+function registerWorkspace(ipcMain) {
+  const capability = require('./lib/capability.cjs');
+  const registry = safeRequire('./lib/workspaceRegistry.cjs', 'Workspace registry');
+  const scaffold = safeRequire('./lib/projectScaffold.cjs', 'Project scaffold');
+  if (!registry) return;
+
+  // Inject the real store once, so the module itself never requires Electron and stays testable.
+  try { registry.useStore(require('./dataStore.cjs')); } catch { /* falls back to lazy require */ }
+
+  const readGate = (user) => capability.deny(user, 'git.read');
+
+  ipcMain.handle('workspace:list', async (_e, { user } = {}) => {
+    const denied = readGate(user);
+    if (denied) return denied;
+    try { return { ok: true, data: registry.list() }; }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+
+  ipcMain.handle('workspace:preferred', async (_e, { user, requireGit } = {}) => {
+    const denied = readGate(user);
+    if (denied) return denied;
+    try { return { ok: true, data: registry.preferred({ requireGit: !!requireGit }) }; }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+
+  ipcMain.handle('workspace:register', async (_e, { user, ...opts } = {}) => {
+    const denied = readGate(user);
+    if (denied) return denied;
+    try { return registry.register(opts); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+
+  ipcMain.handle('workspace:touch', async (_e, { user, path: p } = {}) => {
+    const denied = readGate(user);
+    if (denied) return denied;
+    try { return registry.touch(p); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+
+  ipcMain.handle('workspace:pin', async (_e, { user, path: p, pinned } = {}) => {
+    const denied = readGate(user);
+    if (denied) return denied;
+    try { return registry.pin(p, pinned !== false); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+
+  ipcMain.handle('workspace:forget', async (_e, { user, path: p } = {}) => {
+    const denied = readGate(user);
+    if (denied) return denied;
+    try { return registry.forget(p); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+
+  ipcMain.handle('workspace:detect', async (_e, { user, path: p } = {}) => {
+    const denied = readGate(user);
+    if (denied) return denied;
+    try { return { ok: true, data: registry.detect(p) }; }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+
+  if (!scaffold) return;
+
+  ipcMain.handle('workspace:templates', async (_e, { user } = {}) => {
+    const denied = readGate(user);
+    if (denied) return denied;
+    return { ok: true, data: scaffold.templateList() };
+  });
+
+  // Writes files, so a stricter gate than merely remembering a path.
+  ipcMain.handle('workspace:create', async (event, { user, ...opts } = {}) => {
+    const denied = capability.deny(user, 'os.filesystem-write');
+    if (denied) return denied;
+    try {
+      return scaffold.create({
+        ...opts,
+        onLog: (chunk) => event.sender.send('workspace:log', chunk),
+      });
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+}
+
 function registerLocalUpdate(ipcMain) {
   const capability = require('./lib/capability.cjs');
 
@@ -1230,6 +1320,8 @@ app.whenReady().then(async () => {
     ['Release channel',       () => releaseChannel.register(ipcRec)],
     // local pull → install → build → apply — Section 40
     ['Local self-update',     () => registerLocalUpdate(ipcRec)],
+    // shared workspace context + project scaffolding — Section 86
+    ['Workspace registry',    () => registerWorkspace(ipcRec)],
     // applied self-modify proposals → a new branch, never dev/source directly
     ['Proposal publishing',   () => publishProposal.register(ipcRec)],
     ['Appearance',            () => registerAppearance(ipcRec)],

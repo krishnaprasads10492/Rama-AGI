@@ -1750,6 +1750,8 @@ authenticated **Master session**, not merely an open store.
 
 | 103 | Update channel — adversarial simulation, and the two bugs it found | done | Section 85. Master asked for as many simulations as it takes to establish the channel actually works. `verifyUpdateChannel` asserts the contract; `scripts/simulateUpdateChannel.cjs` (`npm run simulate:channel`, **164 checks**) runs whole lifecycles and hostile scenarios against real files, on the rule that **failing closed is a pass** — a channel that refuses a good update is an inconvenience, one that accepts a bad update runs an executable. **TWO REAL BUGS FOUND. (1) A zero-byte installer was offered as installable**: SHA-256 of an empty file is a valid digest, so a 0-byte `.exe` left by a failed copy verified and returned `canApply: true` — **integrity checking cannot catch this**, because the file genuinely *is* what the manifest says, and only a plausibility floor can; `MIN_ARTEFACT_BYTES = 1024` now refuses it at publish (so a broken build never reaches the channel) and again at read (so a hand-written manifest cannot bypass publish). **(2) A case-only filename mismatch passed**: a manifest naming `RAMA-AGI-SETUP-2.0.0.EXE` opened `Rama-AGI-Setup-2.0.0.exe` because Windows resolution is case-insensitive, and the hash then matched — on Windows the same file so not an escape, but the identical manifest on a **case-sensitive share** (Linux server, synced Mac) would fail to find it, and a name not matching the directory entry byte-for-byte **did not come from `publish()`**; `status()` now reads the directory and requires an exact entry, so behaviour is identical on every filesystem. Hardened alongside: `sizeBytes` must match the file its own hash matches (publish writes both from one file, so a mismatch means something else wrote it); a **directory** wearing an installer's name is refused as not-a-file; and the size check runs **before** the hash check because a `stat` is free where hashing 130 MB is not. **Thirteen scenarios**: a five-release lifecycle with pruning that never removes the live artefact; 40 consecutive republishes (the loop that exposed the `EPERM` rename defect); interrupted publishes with leftover `.part`, manifest-without-artefact and artefact-without-manifest; **150 reader/publisher interleavings with no read ever seeing available-but-unverified**; corruption in six shapes; **28 hostile manifests** (traversal both slashes, absolute, UNC, nested, alternate data stream, null byte, `.bat`/`.ps1`/`.cmd` swaps, future `manifestVersion`, malformed hashes, type confusion, prototype pollution, truncated JSON, BOM, empty — none offered, none threw); the **acknowledged limit** that a writer who controls the folder can publish a hostile release correctly and it *is* offered, asserted as expected rather than hidden; Windows device names (`NUL`/`CON`/`PRN`/`AUX`/`COM1`/`LPT1.exe`), a directory named like an installer, a 180-char filename; the zero-byte build; **200 installs at randomised versions with every verdict correct**; seeded manifest fuzzing reproducible via `--seed`; deliberate rollback where behind installs get the older build but **ahead installs are never walked backwards**; and nonexistent/unreachable/null directories. **Run repeatedly rather than once: six seeds at 3000 fuzz iterations each = 18,000 fuzzed manifests, 164/164 every run, zero throws, zero unsafe offers.** **What this does and does not establish**: no corruption, race, malformed manifest, traversal attempt, device name, rollback or version confusion produced an offer that should not have been made — but simulation **cannot** establish safety against someone who can *write* to the folder, which SIM 7 asserts is offered because the hash proves integrity and not authorship (a design property documented in Section 84 and shown in the UI; only code signing changes it). **`npm run verify` now runs six checks in one command, 336 assertions**: verifyAudit 15, verifyUpdateEngine 44, verifySelfBuild 31, verifyUpdateChannel **82** (was 71, +11 for the findings), simulateUpdateChannel 164, plus the renderer audit clean at 110 bridge calls across 56 files. The unit fixtures had been ~25-byte fake installers which the new floor correctly rejects and now use plausible sizes — **that the fixtures had to change is itself evidence the guard is real**. **STILL NOT VERIFIED: no NSIS installer published or applied from here** (7-Zip blocked on this machine, only a portable archive is producible); `apply()` is tested for all refusals, a successful install-and-relaunch has not happened. |
 
+| 104 | Shared workspace context — one authority for what master works on, and projects that register themselves | done | Section 86. Master: *"git sync is asking to select things again and again… if I create a new project using the IDE, that should automatically be available to Rāma… ASI/AGI means all capable of handling things by itself."* **The complaint was a symptom of a missing abstraction**: every surface held its own path and asked independently — `GitSync` had `repoPath` in `useState('')`, the IDE's `FileTree` its own `cwd`, StockMind its own symbol — so **nothing in Rāma knew what its own workspace was** and every page had no choice but to ask. His instinct of one shared centre with cells attached is exactly the fix. **ON THE NAMING, refused rather than quietly accepted**: the shape is right but "nucleus" is **not available** — Rāma already has one (`nucleusSealer.cjs`, `loyaltyCore.cjs`, I15/I16) holding the sealed loyalty core, the single part of the codebase that must never be confused with anything else, and a later session conflating a list of folder paths with the loyalty envelope is a real hazard. It is also **not called ASI**: it is a registry of paths with self-detection, and Section 36 already declined five poster claims with no engineering referent — naming this after a capability it lacks would be the sixth and would devalue every honest claim in this document. What master actually asked for is real and is what was built: **shared context** and **self-registration**. **`workspaceRegistry.cjs`** on `dataStore`'s encrypted `config` domain (no new storage mechanism), with `dataStore` **injected** so it is testable under plain node like Sections 80 and 84. Decisions: **dedupe on a resolved, case-folded, separator-stripped path**, since Windows treats `C:\Repo`, `c:\repo\` and `C:\Repo\sub\..` as one folder and without this the same project appears three times and "recent" stops meaning anything; **a missing path is marked, not deleted**, because an unmounted share or a folder renamed for an afternoon would otherwise quietly erase a pinned favourite and look like data loss — master forgets things, Rāma only reports; **eviction at 60 entries touches unpinned only**, since a cap that can drop a favourite breaks the feature; **`createdByRama` is sticky** as it records history; **`preferred({requireGit})`** returns the most recent *repository* because the most recent *folder* would be useless to a git page, and this is the call that removes the tedium; and **detection reads the folder** with Electron beating React and React beating plain Node — most specific signal, not first match. **`projectScaffold.cjs`**: five templates (empty, node-cli, node-lib, python, static) each producing something that **runs** rather than a skeleton of placeholders (I12 — the test asserts no scaffolded file contains `TODO`/`FIXME`/`PLACEHOLDER` **and that the scaffolded node-lib test passes when actually executed**), and creation ends with `register({ createdByRama: true, pinned: true })` — **master's actual point: no step where he tells Rāma what Rāma just made**. **THE GUARD THAT MATTERS: it refuses to scaffold inside Rāma's own source tree**, because a template writing `package.json`/`.gitignore`/`README.md` there would overwrite the real ones and the IDE is pointed at arbitrary folders by design; a name is slugified before touching a path and the resolved destination must remain inside the chosen parent so `../../` cannot escape; a non-empty directory needs `force`; and **even with `force` an existing file is never overwritten**, only skipped and reported; `git init` and the first commit are best-effort since the files are the deliverable. **UI**: GitSync opens on the most recent repository, lists remembered projects as one-click entries in its empty state with kind and "made by Rāma", has a ★ pin toggle, and registers anything picked; the IDE's tree opens on the remembered project, registers what is picked, and **✚ New project** lands the result in the tree without navigation. **Verified: `scripts/verifyWorkspace.cjs`, 104 assertions (`npm run verify:workspace`)** with an injected in-memory store so no real settings are touched — a trailing separator, a `..` segment and (on Windows) a case change all resolve to **one** identity; Electron beats React; **a pinned project survives 75 registrations pushing against the cap**; a deleted folder is marked `missing` **yet still listed and still pinned**; `preferred({requireGit})` picks the repo over a more recent plain folder; `forget` removes the record and **leaves the folder on disk**; every template registers itself, marked `createdByRama` and pinned; scaffolding into Rāma's own tree is refused **with the overwrite risk named**; a traversing name cannot escape; a pre-existing `README.md` survives a forced create with the skip reported. **ONE REAL BUG THE TEST FOUND**: `detect()` tested `if (pkg)` — the *parsed* object — to decide "node", so a `package.json` with one stray comma reported as a plain `folder`; the file's **presence** is the signal and parsing only supplies name and dependencies, now tracked separately as `hasPkg`. `npm run verify` runs seven checks, **440 assertions**; renderer audit clean at **122** bridge calls across 57 files. **WHAT THIS DOES NOT DO**: it remembers and detects, it does not yet *decide* — Rāma does not open the project it thinks master needs next, notice a repo has drifted and offer to pull, or link a StockMind symbol to a tracked position unasked. Those are the next honest steps toward "handles things itself", and all of them were blocked by having nowhere that knew the workspace, which is what this removes. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -8708,3 +8710,113 @@ files.
 The unit-test fixtures had been using ~25-byte fake installers, which the new floor correctly
 rejects; they now use plausible sizes. **That the fixtures had to change is itself evidence the
 guard is real** rather than decorative.
+
+---
+
+## SECTION 86 — Shared workspace context: Rāma knowing what it works on
+
+Master: *"git sync is asking to select things again and again, which is tedious… if I create a new
+project using the IDE, then that should automatically be available to Rāma… ASI/AGI means all
+capable of handling things by itself."*
+
+The complaint is a symptom and the diagnosis behind it is right.
+
+### The actual defect
+
+Every surface held its own path and asked independently:
+
+- `GitSync` — `const [repoPath, setRepoPath] = useState('')`
+- `IDE`'s `FileTree` — `const [cwd, setCwd] = useState('')`
+- StockMind — its own symbol
+
+Nothing was shared, and nothing was remembered across a session. **There was no place in Rāma that
+knew what its own workspace was**, so every page had no choice but to ask. Master's instinct — one
+shared centre with everything else attached as cells — is precisely the missing abstraction.
+
+### On the naming, said plainly
+
+Master proposed calling it a nucleus. The *shape* is right; the *word* is not available.
+
+**Rāma already has a nucleus** — `nucleusSealer.cjs`, `loyaltyCore.cjs`, invariants I15 and I16 —
+holding the sealed loyalty core. That is the one part of this codebase that must never be confused
+with anything else, and a later session conflating a list of folder paths with the loyalty envelope
+is a real hazard. The word stays reserved.
+
+It is also **not called ASI**. It is a registry of paths with self-detection. Section 36 declined
+five architecture-poster claims that had no engineering referent; naming this after a capability it
+does not have would be the sixth. What master actually asked for is real and is what was built:
+**shared context** (one authority knows the workspace) and **self-registration** (things record
+themselves instead of being pointed at). Those are engineering properties. "ASI" is not one this
+delivers, and claiming it would devalue every honest claim in this document.
+
+### `workspaceRegistry.cjs`
+
+`dataStore`'s `config` domain, encrypted at rest — no new storage mechanism. `dataStore` is
+**injected**, so the module is testable under plain node, the same pattern as Sections 80 and 84.
+
+| Decision | Why |
+|---|---|
+| Dedupe on a resolved, case-folded, separator-stripped path | Windows treats `C:\Repo`, `c:\repo\` and `C:\Repo\sub\..` as one folder. Without this the same project appears three times and "recent" stops meaning anything. |
+| **A missing path is marked, not deleted** | An unmounted share, a USB stick, a folder renamed for an afternoon. Pruning on absence would quietly erase a pinned favourite and look like data loss. Master forgets things; Rāma only reports. |
+| Eviction at 60 entries touches **unpinned only** | A pin is master's explicit statement that something matters. A cap that can drop it is a cap that breaks the feature. |
+| `createdByRama` is sticky | It records history. A later plain open must not erase the fact that Rāma made it. |
+| `preferred({requireGit})` | GitSync needs the most recent *repository*; the most recent *folder* would be useless to it. This is the call that removes the tedium. |
+| Detection reads the folder | Electron wins over React, React over plain Node — most specific signal, not first match. |
+
+### `projectScaffold.cjs`
+
+Five templates — empty, node-cli, node-lib, python, static — each producing something that **runs**
+rather than a skeleton of placeholders (I12: a scaffold full of TODOs looks like progress and is
+not; the test asserts no file contains `TODO`/`FIXME`/`PLACEHOLDER`, and that the scaffolded
+node-lib test actually passes when executed).
+
+Creation ends with `registry.register({ createdByRama: true, pinned: true })` — **this is master's
+point**. There is no step where he tells Rāma what Rāma just made, and the new project is pinned
+because it is what he is about to work on.
+
+**The guard that matters: it refuses to scaffold inside Rāma's own source tree.** A template writing
+`package.json`, `.gitignore` or `README.md` there would overwrite the real ones. The IDE is pointed
+at arbitrary folders by design, so this is a plausible accident with an expensive outcome, and it is
+checked rather than trusted. Also: a name is slugified before it touches a path and the resolved
+destination must still be inside the chosen parent, so `../../` cannot escape; a non-empty directory
+needs `force`; and **even with `force`, an existing file is never overwritten** — it is skipped and
+reported. `git init` and the first commit are best-effort, because the files are the deliverable and
+a missing git binary is a note rather than a failure.
+
+### What changed in the UI
+
+GitSync opens on the most recent repository, shows remembered projects as one-click entries in its
+empty state (with kind, and "made by Rāma" where true), has a ★ pin toggle, and registers anything
+picked through the dialog. The IDE's file tree opens on the remembered project, registers what is
+picked, and a project created through **✚ New project** lands in the tree without navigation.
+
+### Verification
+
+`scripts/verifyWorkspace.cjs`, **104 assertions**, `npm run verify:workspace`, with an injected
+in-memory store so no real settings are touched.
+
+Load-bearing assertions: a trailing separator, a `..` segment and (on Windows) a case change all
+resolve to **one** identity; Electron beats React in detection; **a pinned project survives 75 other
+registrations** pushing against the cap; a deleted folder is marked `missing` **and still listed,
+still pinned**; `preferred({requireGit})` returns the most recent *repo* rather than the most recent
+folder; `forget` removes the record and **leaves the folder on disk**; every template registers
+itself, is marked `createdByRama` and pinned; scaffolding into Rāma's own tree is **refused with the
+overwrite risk named**; a traversing name cannot escape; and a pre-existing `README.md` survives a
+forced create with the skip reported.
+
+**One real bug the test found.** `detect()` tested `if (pkg)` — the *parsed* object — to decide
+"node". A `package.json` with one stray comma therefore reported as a plain `folder`. The file's
+**presence** is the signal; parsing only supplies the name and dependencies. Now tracked separately
+as `hasPkg`.
+
+`npm run verify` now runs seven checks — **440 assertions**: verifyAudit 15, verifyUpdateEngine 44,
+verifySelfBuild 31, verifyUpdateChannel 82, simulateUpdateChannel 164, verifyWorkspace 104, plus the
+renderer audit clean at **122** bridge calls across 57 files.
+
+### What this does not do
+
+It remembers and detects; it does not *decide*. Rāma does not yet open the project it thinks master
+needs next, notice that a repo has drifted and offer to pull, or connect a StockMind symbol to a
+tracked position without being asked. Those are the next honest steps toward "handles things
+itself", and they are all now possible because there is finally one place that knows the workspace —
+which was the real blocker, and is what this section removes.

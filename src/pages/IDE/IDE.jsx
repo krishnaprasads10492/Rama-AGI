@@ -7,6 +7,7 @@ import { emitActivity }  from '@components/ActivityStream.jsx';
 
 import CodeEditor from './CodeEditor.jsx';
 import DiffReview from './DiffReview.jsx';
+import NewProject from './NewProject.jsx';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -60,7 +61,7 @@ const AI_MODES = [
 ];
 
 // ─── File Tree ─────────────────────────────────────────────────────────────
-function FileTree({ onFileOpen, activeFile }) {
+function FileTree({ onFileOpen, activeFile, openDir = null }) {
   // WHY THIS LINE EXISTS: `currentUser` was referenced in `listDir` below and in its dependency
   // array, but was only ever declared inside the sibling `IDE()` component. It was a free
   // variable here, so React threw `ReferenceError: currentUser is not defined` while rendering
@@ -85,10 +86,33 @@ function FileTree({ onFileOpen, activeFile }) {
     listDir(cwd).then(setEntries);
   }, [cwd, listDir]);
 
+  // OPEN ON THE REMEMBERED PROJECT (Section 86). `cwd` used to start empty, so the tree showed
+  // "Open a folder" on every visit and master re-picked the same directory. The registry knows
+  // what he last worked on.
+  useEffect(() => {
+    if (!isElectron || cwd) return;
+    let cancelled = false;
+    window.rama.workspace.preferred({ user: currentUser }).then((res) => {
+      const pref = res?.ok === false ? null : res?.data;
+      if (!cancelled && pref?.path && !pref.missing) setCwd(pref.path);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // A project created elsewhere in the IDE lands here without master navigating to it.
+  useEffect(() => {
+    if (openDir) setCwd(openDir);
+  }, [openDir]);
+
   const pickFolder = async () => {
     if (!isElectron) return;
     const res = await window.rama.fs.selectPath({ directory: true });
-    if (!res.canceled) setCwd(res.paths[0]);
+    if (!res.canceled) {
+      setCwd(res.paths[0]);
+      // Remembering it here is what stops the next visit asking again.
+      window.rama.workspace.register({ user: currentUser, path: res.paths[0] }).catch(() => {});
+    }
   };
 
   const toggle = async (item) => {
@@ -467,6 +491,8 @@ export default function IDE() {
   const [layout,      setLayout]      = useState('split'); // split|editor|ai
   const [astData,     setAstData]     = useState(null);
   const [astLoading,  setAstLoading]  = useState(false);
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [newProjectDir,  setNewProjectDir]  = useState(null);
   // `monacoEditor` state and a container ref are gone: CodeEditor owns the editor instance and
   // keeps this component's `tabs[].content` in sync through onChange, so there is one source of
   // truth for a file's text instead of two that could disagree (spec Section 82).
@@ -557,6 +583,15 @@ export default function IDE() {
 
   return (
     <div style={{ height:'100%', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+      {/* A created project registers itself and opens in the tree — no second step (Section 86). */}
+      {showNewProject && (
+        <NewProject
+          currentUser={currentUser}
+          onCreated={(p) => setNewProjectDir(p)}
+          onClose={() => setShowNewProject(false)}
+        />
+      )}
+
       {/* Nothing the AI proposes reaches the file until master has seen the diff (Section 82). */}
       {pendingPatch && (
         <DiffReview
@@ -592,7 +627,11 @@ export default function IDE() {
             color: layout===l ? 'var(--violet)' : 'var(--muted)',
           }}>{l}</button>
         ))}
-        {activeTab && <button className="btn btn-sm" onClick={saveFile} style={{ fontSize:10 }}>💾 Save</button>}
+        <button className="btn btn-sm" onClick={() => setShowNewProject(true)}
+                style={{ fontSize:12 }} title="Create a project Rāma will already know about">
+          ✚ New project
+        </button>
+        {activeTab && <button className="btn btn-sm" onClick={saveFile} style={{ fontSize:12 }}>💾 Save</button>}
       </div>
 
       {/* Tab bar */}
@@ -623,7 +662,7 @@ export default function IDE() {
       <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
         {/* File tree */}
         <div style={{ width:200, flexShrink:0, overflow:'hidden' }}>
-          <FileTree onFileOpen={openFile} activeFile={activeTab?.file} />
+          <FileTree onFileOpen={openFile} activeFile={activeTab?.file} openDir={newProjectDir} />
         </div>
 
         {/* Editor */}

@@ -222,6 +222,25 @@ const RAMA_API = {
     ledgerSetStyle:   (opts) => ipcRenderer.invoke('market:ledger-style', opts),
   },
 
+  // ── Workspace (Section 86) ────────────────────────────────────────────────
+  // The shared context every page reads instead of asking master to re-select a folder.
+  workspace: {
+    list:      (opts) => ipcRenderer.invoke('workspace:list', opts),
+    preferred: (opts) => ipcRenderer.invoke('workspace:preferred', opts),
+    register:  (opts) => ipcRenderer.invoke('workspace:register', opts),
+    touch:     (opts) => ipcRenderer.invoke('workspace:touch', opts),
+    pin:       (opts) => ipcRenderer.invoke('workspace:pin', opts),
+    forget:    (opts) => ipcRenderer.invoke('workspace:forget', opts),
+    detect:    (opts) => ipcRenderer.invoke('workspace:detect', opts),
+    templates: (opts) => ipcRenderer.invoke('workspace:templates', opts),
+    create:    (opts) => ipcRenderer.invoke('workspace:create', opts),
+    onLog:     (cb) => {
+      const handler = (_e, chunk) => cb(chunk);
+      ipcRenderer.on('workspace:log', handler);
+      return () => ipcRenderer.removeListener('workspace:log', handler);
+    },
+  },
+
   // ── Updater ───────────────────────────────────────────────────────────────
   updater: {
     installNow: () => ipcRenderer.send('updater:install-now'),
