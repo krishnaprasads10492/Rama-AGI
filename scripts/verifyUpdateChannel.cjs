@@ -296,9 +296,66 @@ console.log('\n--- found by simulation: a zero-byte build, and a case-only name 
     s2.available === false, JSON.stringify(s2));
 }
 
+
+// ── Retention: a new version replaces the old (Section 87) ───────────────────
+//
+// Master's instruction: the old version goes when a new one arrives. The load-bearing consequence
+// to prove is that this does NOT strand an install still running something much older — which holds
+// only because these are FULL installers, so any version can jump straight to the newest.
+console.log('\n--- one artefact retained, and an old install can still upgrade to it ---');
+{
+  const D = path.join(TMP, 'retention');
+  fs.mkdirSync(D, { recursive: true });
+  const src = path.join(TMP, 'retention-src');
+  fs.mkdirSync(src, { recursive: true });
+
+  check('the default retention is one', ch.MANIFEST_VERSION >= 1 && (() => {
+    const mod = require('../electron/lib/updateChannel.cjs');
+    // publish() with no `keep` must leave exactly one artefact behind.
+    for (const v of ['1.0.0', '1.1.0', '1.2.0']) {
+      const a = path.join(src, `Rama-AGI-Setup-${v}.exe`);
+      fs.writeFileSync(a, Buffer.alloc(4096, v.length));
+      mod.publish({ artefactPath: a, dir: D, version: v });
+    }
+    const kept = fs.readdirSync(D).filter((f) => f.endsWith('.exe'));
+    return kept.length === 1 && kept[0] === 'Rama-AGI-Setup-1.2.0.exe';
+  })(), JSON.stringify(fs.readdirSync(D)));
+
+  check('the manifest points at the surviving artefact',
+    fs.existsSync(path.join(D, ch.readManifest(D).manifest.file)));
+
+  // The whole point of master's note: an install three versions behind must still be able to jump.
+  for (const old of ['1.0.0', '1.0.9', '1.1.0']) {
+    const s = ch.status({ dir: D, currentVersion: old });
+    check(`AN INSTALL ON ${old} IS STILL OFFERED 1.2.0 after pruning`,
+      s.available === true && s.verified === true && s.manifest.version === '1.2.0',
+      `${old}: ${s.reason}`);
+  }
+  check('and an install already on 1.2.0 is told it is current',
+    ch.status({ dir: D, currentVersion: '1.2.0' }).upToDate === true);
+
+  // prune() called directly must never remove what the live manifest names.
+  const removed = ch.prune({ dir: D, keep: 1 });
+  check('a direct prune leaves the live artefact alone',
+    fs.existsSync(path.join(D, 'Rama-AGI-Setup-1.2.0.exe')), JSON.stringify(removed));
+  check('AND THE CHANNEL STILL WORKS AFTERWARDS — pruning cannot break the offer',
+    ch.status({ dir: D, currentVersion: '1.0.0' }).available === true);
+
+  // Stale .part debris is swept once it cannot be an in-flight copy.
+  const stale = path.join(D, 'Rama-AGI-Setup-9.9.9.exe.part');
+  fs.writeFileSync(stale, Buffer.alloc(128));
+  fs.utimesSync(stale, new Date(Date.now() - 7200_000), new Date(Date.now() - 7200_000));
+  const fresh = path.join(D, 'Rama-AGI-Setup-8.8.8.exe.part');
+  fs.writeFileSync(fresh, Buffer.alloc(128));
+  const swept = ch.prune({ dir: D, keep: 1 });
+  check('an hour-old .part is swept', !fs.existsSync(stale), JSON.stringify(swept));
+  check('A FRESH .part IS LEFT ALONE — it may be an in-flight copy right now',
+    fs.existsSync(fresh));
+}
+
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* leave it */ }
 
 console.log(`\n${'='.repeat(62)}`);
-console.log(`  ${pass} passed, ${fail} failed  (including the simulation findings)`);
+console.log(`  ${pass} passed, ${fail} failed  (including retention)`);
 console.log('='.repeat(62));
 process.exit(fail ? 1 : 0);

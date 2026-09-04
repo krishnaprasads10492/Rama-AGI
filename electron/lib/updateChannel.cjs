@@ -52,7 +52,22 @@ const MANIFEST_VERSION = 1;
 const DEFAULT_SUBDIR = 'update-channel';
 const INSTALLER_RE = /\.exe$/i;
 const PORTABLE_RE = /\.(zip|7z)$/i;
-const KEEP_DEFAULT = 3;
+/**
+ * How many artefacts to retain. ONE, by master's instruction: a new version replaces the old.
+ *
+ * WHY THAT IS SAFE HERE, AND WOULD NOT BE IN A DELTA CHANNEL. This publishes WHOLE installers
+ * (Section 84), so any install at any version can jump straight to the newest one — there is no
+ * chain of patches to walk, so keeping intermediate versions buys nothing. An install still running
+ * 1.0.0 upgrades to 1.4.0 directly from the single artefact present.
+ *
+ * If this ever became differential, retention would have to grow to cover every version an install
+ * might be upgrading FROM, and pruning to one would silently strand older installs. Recorded so
+ * that change is not made without noticing this.
+ *
+ * The cost, stated: rolling back needs the older version rebuilt or republished with
+ * `--allow-stale`, because it is no longer sitting in the folder.
+ */
+const KEEP_DEFAULT = 1;
 
 // FOUND BY SIMULATION (Section 85). A zero-byte file hashes perfectly well — SHA-256 of nothing is
 // a valid digest — so an empty `.exe` published by a failed copy verified and was offered as
@@ -377,15 +392,41 @@ function publish({ artefactPath, dir, version, notes = null, keep = KEEP_DEFAULT
 /**
  * Keep the channel from growing without limit.
  *
- * The file the current manifest points at is never removed, however old it looks — pruning the
- * artefact out from under a live manifest would leave every reader with a broken update.
+ * THE FILE THE CURRENT MANIFEST POINTS AT IS NEVER REMOVED, however old it looks. Pruning the
+ * artefact out from under a live manifest would leave every reader with a manifest naming a file
+ * that is gone — which `status()` reports honestly, but which means nobody can update until the
+ * next publish. It is protected two ways: explicitly via `protect`, and by reading the live
+ * manifest here so a direct `prune()` call cannot break the channel either.
+ *
+ * Stale `.part` files are swept once they are older than an hour. A crashed publish leaves one
+ * behind, and while `status()` correctly ignores them, they otherwise accumulate forever.
  */
 function prune({ dir, keep = KEEP_DEFAULT, protect = null } = {}) {
   const removed = [];
   if (!dir || !fs.existsSync(dir)) return removed;
+
+  // Whatever the live manifest names is off-limits regardless of what the caller passed.
+  let live = null;
+  try {
+    const m = readManifest(dir);
+    if (m.ok) live = m.manifest.file;
+  } catch { /* no readable manifest — nothing to protect */ }
+
   const files = [];
+  const now = Date.now();
   for (const name of fs.readdirSync(dir)) {
-    if (name === MANIFEST_NAME || name.endsWith('.part')) continue;
+    if (name === MANIFEST_NAME) continue;
+    if (name.endsWith('.part')) {
+      // Debris from an interrupted publish. Only sweep it once it cannot be an in-flight copy.
+      try {
+        const st = fs.statSync(path.join(dir, name));
+        if (now - st.mtimeMs > 3600_000) {
+          fs.unlinkSync(path.join(dir, name));
+          removed.push(name);
+        }
+      } catch { /* leave it */ }
+      continue;
+    }
     if (!INSTALLER_RE.test(name) && !PORTABLE_RE.test(name)) continue;
     try {
       files.push({ name, mtimeMs: fs.statSync(path.join(dir, name)).mtimeMs });
@@ -395,6 +436,7 @@ function prune({ dir, keep = KEEP_DEFAULT, protect = null } = {}) {
   const limit = Math.max(1, Number(keep) || KEEP_DEFAULT);
   for (const f of files.slice(limit)) {
     if (protect && f.name === protect) continue;
+    if (live && f.name === live) continue;
     try {
       fs.unlinkSync(path.join(dir, f.name));
       removed.push(f.name);

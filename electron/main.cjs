@@ -663,6 +663,22 @@ function registerLocalUpdate(ipcMain) {
     });
   });
 
+  // ONE ACTION: bump → pull → build → verify → publish → prune (Section 87). The steps existed
+  // separately; composing them here rather than in the renderer keeps the ordering and the failure
+  // handling somewhere testable.
+  ipcMain.handle('update:release', async (event, { user, ...opts } = {}) => {
+    if (!capability.can(user, 'system.self-update')) {
+      const who = capability.TIER_LABELS[String(user?.tier)] ?? 'This account';
+      return { ok: false, error: `${who} may not cut a release (needs "system.self-update")` };
+    }
+    const pipeline = safeRequire('./lib/selfBuildPipeline.cjs', 'Self-build pipeline');
+    if (!pipeline) return { ok: false, error: 'Self-build pipeline unavailable' };
+    return pipeline.release({
+      ...opts,
+      onLog: (chunk) => event.sender.send('update:log', chunk),
+    });
+  });
+
   // DELIBERATELY A SEPARATE CALL. This closes Rāma. Bundling it into the build would mean one
   // click both compiles for minutes and then quits, with no moment in between for master to read
   // what was produced or change his mind.

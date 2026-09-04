@@ -1752,6 +1752,8 @@ authenticated **Master session**, not merely an open store.
 
 | 104 | Shared workspace context — one authority for what master works on, and projects that register themselves | done | Section 86. Master: *"git sync is asking to select things again and again… if I create a new project using the IDE, that should automatically be available to Rāma… ASI/AGI means all capable of handling things by itself."* **The complaint was a symptom of a missing abstraction**: every surface held its own path and asked independently — `GitSync` had `repoPath` in `useState('')`, the IDE's `FileTree` its own `cwd`, StockMind its own symbol — so **nothing in Rāma knew what its own workspace was** and every page had no choice but to ask. His instinct of one shared centre with cells attached is exactly the fix. **ON THE NAMING, refused rather than quietly accepted**: the shape is right but "nucleus" is **not available** — Rāma already has one (`nucleusSealer.cjs`, `loyaltyCore.cjs`, I15/I16) holding the sealed loyalty core, the single part of the codebase that must never be confused with anything else, and a later session conflating a list of folder paths with the loyalty envelope is a real hazard. It is also **not called ASI**: it is a registry of paths with self-detection, and Section 36 already declined five poster claims with no engineering referent — naming this after a capability it lacks would be the sixth and would devalue every honest claim in this document. What master actually asked for is real and is what was built: **shared context** and **self-registration**. **`workspaceRegistry.cjs`** on `dataStore`'s encrypted `config` domain (no new storage mechanism), with `dataStore` **injected** so it is testable under plain node like Sections 80 and 84. Decisions: **dedupe on a resolved, case-folded, separator-stripped path**, since Windows treats `C:\Repo`, `c:\repo\` and `C:\Repo\sub\..` as one folder and without this the same project appears three times and "recent" stops meaning anything; **a missing path is marked, not deleted**, because an unmounted share or a folder renamed for an afternoon would otherwise quietly erase a pinned favourite and look like data loss — master forgets things, Rāma only reports; **eviction at 60 entries touches unpinned only**, since a cap that can drop a favourite breaks the feature; **`createdByRama` is sticky** as it records history; **`preferred({requireGit})`** returns the most recent *repository* because the most recent *folder* would be useless to a git page, and this is the call that removes the tedium; and **detection reads the folder** with Electron beating React and React beating plain Node — most specific signal, not first match. **`projectScaffold.cjs`**: five templates (empty, node-cli, node-lib, python, static) each producing something that **runs** rather than a skeleton of placeholders (I12 — the test asserts no scaffolded file contains `TODO`/`FIXME`/`PLACEHOLDER` **and that the scaffolded node-lib test passes when actually executed**), and creation ends with `register({ createdByRama: true, pinned: true })` — **master's actual point: no step where he tells Rāma what Rāma just made**. **THE GUARD THAT MATTERS: it refuses to scaffold inside Rāma's own source tree**, because a template writing `package.json`/`.gitignore`/`README.md` there would overwrite the real ones and the IDE is pointed at arbitrary folders by design; a name is slugified before touching a path and the resolved destination must remain inside the chosen parent so `../../` cannot escape; a non-empty directory needs `force`; and **even with `force` an existing file is never overwritten**, only skipped and reported; `git init` and the first commit are best-effort since the files are the deliverable. **UI**: GitSync opens on the most recent repository, lists remembered projects as one-click entries in its empty state with kind and "made by Rāma", has a ★ pin toggle, and registers anything picked; the IDE's tree opens on the remembered project, registers what is picked, and **✚ New project** lands the result in the tree without navigation. **Verified: `scripts/verifyWorkspace.cjs`, 104 assertions (`npm run verify:workspace`)** with an injected in-memory store so no real settings are touched — a trailing separator, a `..` segment and (on Windows) a case change all resolve to **one** identity; Electron beats React; **a pinned project survives 75 registrations pushing against the cap**; a deleted folder is marked `missing` **yet still listed and still pinned**; `preferred({requireGit})` picks the repo over a more recent plain folder; `forget` removes the record and **leaves the folder on disk**; every template registers itself, marked `createdByRama` and pinned; scaffolding into Rāma's own tree is refused **with the overwrite risk named**; a traversing name cannot escape; a pre-existing `README.md` survives a forced create with the skip reported. **ONE REAL BUG THE TEST FOUND**: `detect()` tested `if (pkg)` — the *parsed* object — to decide "node", so a `package.json` with one stray comma reported as a plain `folder`; the file's **presence** is the signal and parsing only supplies name and dependencies, now tracked separately as `hasPkg`. `npm run verify` runs seven checks, **440 assertions**; renderer audit clean at **122** bridge calls across 57 files. **WHAT THIS DOES NOT DO**: it remembers and detects, it does not yet *decide* — Rāma does not open the project it thinks master needs next, notice a repo has drifted and offer to pull, or link a StockMind symbol to a tracked position unasked. Those are the next honest steps toward "handles things itself", and all of them were blocked by having nowhere that knew the workspace, which is what this removes. |
 
+| 105 | One release button, and a channel that holds only the newest build | done | Section 87. Master: *"include the commands to update into single update button which will do everything. new version comes in old version should be removed from update folder. even current old installed app will have a chance to upgrade."* **`selfBuildPipeline.release()`** composes the whole sequence in the main process: **bump → pull → build → verify → publish → prune**. Stitching it in the renderer would have put the ordering *and* the failure handling somewhere untestable, so the UI makes one call and gets one result with a per-step trace. **THE ORDER IS NOT ARBITRARY**: pull first so the build includes what was pushed from elsewhere; **bump after the pull**, or a locally-bumped `package.json` conflicts with the pull; build, which is also the verification since `buildInstaller.cjs` load-checks the artefact; **publish only on a clean build** so a failure never reaches the channel; **prune last**, once the new release is live, so a reader is never momentarily left with nothing. Every step reports rather than throwing, so a failure at publish still shows that bump/pull/build succeeded and the artefact is on disk. **THE FOOTGUN A ONE-CLICK BUTTON INVITES, and why versioning had to move inside it**: publishing without a bump produces a version equal to what is already installed everywhere, `status()` correctly reports every install as up to date, and **the build succeeds, the publish succeeds, and nothing is offered to anybody** — a silent no-op that looks like a working release. So `release()` owns the bump (patch default, minor/major/none available), writes `package.json` with npm's own two-space-plus-newline formatting so the diff is one line, and commits `chore(release): vX.Y.Z`; a failed commit is **not fatal** — the bump is on disk and the build will use it, and master is told rather than left to discover an uncommitted file. **It refuses a dirty tree**: a release built from uncommitted work is a version that exists nowhere in git, so it could never be reproduced or rolled back to, and the refusal lists the offending paths. **RETENTION IS NOW ONE ARTEFACT** (`KEEP_DEFAULT` 3→1) by master's instruction, and **the reasoning that makes it safe is recorded because a later change could invalidate it**: this publishes WHOLE installers, so an install on 1.0.0 jumps straight to 1.4.0 from the single artefact present — there is no chain of patches to walk. Were it ever made differential, retention would have to cover every version an install might upgrade *from*, and pruning to one would silently strand older installs. The cost, stated: rollback needs the old version rebuilt or republished with `--allow-stale`. **`prune()` hardened twice over**: it now reads the live manifest itself, so even a direct call cannot delete the artefact the channel is currently offering (previously only the caller-supplied `protect` guarded it), and it sweeps `.part` debris from crashed publishes **once older than an hour** — a fresh `.part` may be an in-flight copy and is left alone. **UI**: a single `🚀 Release` in GitSync → UPDATE with a bump selector and an optional notes field, showing each step as it completes and offering "Install here and close Rāma" when an installer resulted; selecting "no bump" warns up front that nothing will be offered. **Verified: 460 assertions across seven checks.** `verifySelfBuild` 41 (+10) covers the bump: `1.9.9`→patch→`1.9.10` and →minor→`1.10.0` (not a single-digit assumption), minor and major resetting the parts below, `v` prefixes and pre-release suffixes dropped, short versions padded, rubbish becoming `0.0.1` rather than throwing, and **a property check that every bump of every kind produces a version `compareVersions` ranks as newer**. `verifyUpdateChannel` 92 (+10) proves the retention claim end to end: three sequential publishes leave **exactly one** `.exe`, and installs on **1.0.0, 1.0.9 and 1.1.0 are each still offered 1.2.0 and verify** — which is master's "old installed app will have a chance to upgrade", asserted rather than assumed — plus a direct `prune()` leaving the live artefact and the channel still working afterwards, a stale `.part` swept and a fresh one kept. Renderer audit clean at 123 bridge calls. **NOT VERIFIED: `release()` has not been run end to end from here** — 7-Zip is blocked on this machine so the packaging stage cannot produce an installer, which is also why no real install-and-relaunch has happened. The composition, ordering, guards and bump arithmetic are unit-tested; the one full pass needs master's own machine. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -8820,3 +8822,89 @@ needs next, notice that a repo has drifted and offer to pull, or connect a Stock
 tracked position without being asked. Those are the next honest steps toward "handles things
 itself", and they are all now possible because there is finally one place that knows the workspace —
 which was the real blocker, and is what this section removes.
+
+---
+
+## SECTION 87 — One release button, and a channel that holds only the newest build
+
+Master: *"include the commands to update into single update button which will do everything. new
+version comes in old version should be removed from update folder. even current old installed app
+will have a chance to upgrade."*
+
+### One action
+
+`selfBuildPipeline.release()` composes the whole sequence in the main process:
+
+```
+bump → pull → build → verify → publish → prune
+```
+
+Stitching those together in the renderer would have put the ordering *and* the failure handling
+somewhere untestable. The UI makes one call and receives one result carrying a per-step trace.
+
+**The order is not arbitrary.** Pull first, so the build includes whatever was pushed from
+elsewhere. Bump *after* the pull, or a locally-bumped `package.json` conflicts with it. Build, which
+is also the verification step, since `buildInstaller.cjs` load-checks the artefact it produced
+(Sections 45/48). Publish **only** on a clean build, so a failure never reaches the channel. Prune
+**last**, once the new release is live, so a reader is never momentarily left with nothing.
+
+Each step reports rather than throwing, so a failure at publish still tells master that the bump,
+pull and build succeeded and where the artefact is.
+
+### The footgun a one-click button invites
+
+Publishing without a version bump produces an artefact whose version equals what is already
+installed everywhere. `updateChannel.status()` then correctly reports every install as up to date.
+**The build succeeds, the publish succeeds, and nothing is offered to anybody** — a silent no-op
+that looks like a working release.
+
+So `release()` owns versioning rather than assuming master remembered: patch by default, with
+minor/major/none available. It writes `package.json` using npm's own two-space-plus-newline
+formatting so the diff is one line rather than the whole file reformatted, then commits
+`chore(release): vX.Y.Z`. A failed commit is **not fatal** — the bump is on disk and the build will
+use it — but it is reported, rather than leaving master to discover an uncommitted file later.
+
+**It refuses a dirty tree.** A release built from uncommitted work is a version that exists nowhere
+in git, so it could never be reproduced or rolled back to. The refusal lists the offending paths.
+
+### Retention: one artefact
+
+`KEEP_DEFAULT` 3 → 1, as asked.
+
+**Why that is safe here, recorded because a later change could invalidate it.** This publishes
+*whole* installers (Section 84), so an install on 1.0.0 jumps straight to 1.4.0 from the single
+artefact present — there is no chain of patches to walk, so intermediate versions buy nothing. If
+this ever became differential, retention would have to cover every version an install might be
+upgrading *from*, and pruning to one would silently strand older installs.
+
+The cost, stated: rolling back now needs the old version rebuilt, or republished with
+`--allow-stale`.
+
+`prune()` is hardened twice over. It now **reads the live manifest itself**, so even a direct call
+cannot delete the artefact the channel is currently offering — previously only the caller-supplied
+`protect` argument guarded that. And it sweeps `.part` debris from crashed publishes once older than
+an hour; a **fresh** `.part` is left alone, because it may be an in-flight copy right now.
+
+### Verification — 460 assertions across seven checks
+
+`verifySelfBuild` 41 (+10) on the bump arithmetic: `1.9.9`→patch→`1.9.10` and →minor→`1.10.0`, which
+is not a single-digit assumption; minor and major reset the parts below them; a `v` prefix and a
+pre-release suffix are dropped; short versions are padded; rubbish becomes `0.0.1` rather than
+throwing; and a **property check that every bump of every kind produces a version `compareVersions`
+ranks as strictly newer**.
+
+`verifyUpdateChannel` 92 (+10) proves the retention claim end to end: three sequential publishes
+leave **exactly one** `.exe`, and installs on **1.0.0, 1.0.9 and 1.1.0 are each still offered 1.2.0
+and verify** — which is master's "old installed app will have a chance to upgrade", asserted rather
+than assumed. Plus: a direct `prune()` leaves the live artefact and the channel still works
+afterwards; a stale `.part` is swept and a fresh one is kept.
+
+Renderer audit clean at 123 bridge calls across 57 files; `node --check` clean on all four touched
+`.cjs`; `vite build` succeeds.
+
+### Not verified
+
+**`release()` has not been run end to end from here.** 7-Zip is blocked on this machine, so the
+packaging stage cannot produce an installer — which is also why no real install-and-relaunch has
+happened. The composition, ordering, guards and bump arithmetic are unit-tested; the one full pass
+needs master's own machine, which can produce installers.

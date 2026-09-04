@@ -335,6 +335,8 @@ const RAMA_API = {
     // Self-build pipeline (Section 83): build the next version, then hand over the installer.
     // `installBuild` CLOSES the app so Windows can replace the files — it is a separate call from
     // `selfBuild` on purpose.
+    // One action: bump, pull, build, verify, publish, prune (Section 87).
+    release:        (opts)        => ipcRenderer.invoke('update:release', opts),
     selfBuild:      (opts)        => ipcRenderer.invoke('update:self-build', opts),
     installBuild:   (opts)        => ipcRenderer.invoke('update:install-build', opts),
     // Update channel (Section 84): a folder a build publishes into and installs read from.

@@ -109,6 +109,10 @@ function LocalUpdatePanel({ repoPath }) {
   const [channel,    setChannel]    = useState(null);
   const [channelDir, setChannelDir] = useState('');
   const [channelMsg, setChannelMsg] = useState(null);
+  const [bump,        setBump]        = useState('patch');
+  const [releaseNotes, setReleaseNotes] = useState('');
+  const [releasing,   setReleasing]   = useState(false);
+  const [releaseRes,  setReleaseRes]  = useState(null);
 
   const canUpdate = canDo('system.self-update');
 
@@ -134,6 +138,21 @@ function LocalUpdatePanel({ repoPath }) {
     setBusy(false);
     setResult(res);
     if (res?.ok) load();
+  };
+
+  const runRelease = async () => {
+    setReleasing(true);
+    setReleaseRes(null);
+    setLog('');
+    const res = await window.rama.update.release({
+      user: currentUser, repoPath, bump,
+      notes: releaseNotes || null,
+      dir: channelDir || null,
+      channelDir: channelDir || null,
+    });
+    setReleasing(false);
+    setReleaseRes(res);
+    loadChannel();
   };
 
   const loadChannel = useCallback(async () => {
@@ -318,6 +337,82 @@ function LocalUpdatePanel({ repoPath }) {
               {backendMsg.ok ? `✓ ${backendMsg.message}` : `✕ ${backendMsg.error}`}
             </div>
           )}
+
+          {/* ── ONE BUTTON (Section 87) ──────────────────────────────────────── */}
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
+            <div className="section-label" style={{ marginBottom: 8 }}>RELEASE — ONE ACTION</div>
+            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-dim)', lineHeight: 1.7,
+              marginBottom: 10 }}>
+              Bumps the version, pulls, installs dependencies, builds the renderer, packages the
+              installer, load-checks it, publishes it to the update folder and removes the
+              superseded build. One action, in that order — a failed build never reaches the folder.
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <select className="input" style={{ width: 'auto' }} value={bump}
+                      onChange={(e) => setBump(e.target.value)} disabled={releasing}>
+                <option value="patch">patch</option>
+                <option value="minor">minor</option>
+                <option value="major">major</option>
+                <option value="none">no bump</option>
+              </select>
+              <input className="input" style={{ flex: 1, minWidth: 180 }} value={releaseNotes}
+                     placeholder="what changed (optional)" disabled={releasing}
+                     onChange={(e) => setReleaseNotes(e.target.value)} />
+              <button className="btn btn-sm btn-primary" disabled={releasing}
+                      onClick={runRelease}>
+                {releasing ? 'Releasing…' : '🚀 Release'}
+              </button>
+            </div>
+
+            {bump === 'none' && (
+              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--gold)', marginTop: 6 }}>
+                Without a bump the published version matches what is already installed, so no
+                install will be offered anything.
+              </div>
+            )}
+
+            {releasing && (
+              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)', marginTop: 6 }}>
+                Several minutes. The log above is live.
+              </div>
+            )}
+
+            {releaseRes && (
+              <div style={{ marginTop: 10, fontSize: 'var(--text-xs)', lineHeight: 1.8 }}>
+                {(releaseRes.steps || []).map((s, i) => (
+                  <div key={i} style={{ color: s.ok ? 'var(--green)' : 'var(--red)' }}>
+                    {s.ok ? '✓' : '✕'} {s.name}
+                    {s.detail && (
+                      <span style={{ color: 'var(--muted)' }}> — {s.detail}</span>
+                    )}
+                  </div>
+                ))}
+                <div style={{ marginTop: 6,
+                  color: releaseRes.ok ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>
+                  {releaseRes.ok
+                    ? `✓ ${releaseRes.fromVersion} → ${releaseRes.version} in `
+                      + `${Math.round((releaseRes.durationMs || 0) / 1000)}s`
+                    : `✕ ${releaseRes.error}`}
+                </div>
+                {(releaseRes.dirty || []).length > 0 && (
+                  <div style={{ color: 'var(--gold)' }}>
+                    uncommitted: {releaseRes.dirty.join(', ')}
+                  </div>
+                )}
+                {releaseRes.note && (
+                  <div style={{ color: 'var(--text-dim)', marginTop: 4 }}>{releaseRes.note}</div>
+                )}
+                {releaseRes.ok && releaseRes.canInstall && (
+                  <div style={{ marginTop: 8 }}>
+                    <button className="btn btn-sm btn-danger" onClick={applyChannel}>
+                      ⬆ Install {releaseRes.version} here and close Rāma
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* ── Update channel (Section 84) ──────────────────────────────────── */}
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
