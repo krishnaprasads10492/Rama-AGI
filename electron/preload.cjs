@@ -318,6 +318,11 @@ const RAMA_API = {
     // `selfBuild` on purpose.
     selfBuild:      (opts)        => ipcRenderer.invoke('update:self-build', opts),
     installBuild:   (opts)        => ipcRenderer.invoke('update:install-build', opts),
+    // Update channel (Section 84): a folder a build publishes into and installs read from.
+    // `channelApply` CLOSES the app so Windows can replace the files.
+    channelStatus:  (opts)        => ipcRenderer.invoke('update:channel-status', opts),
+    channelPublish: (opts)        => ipcRenderer.invoke('update:channel-publish', opts),
+    channelApply:   (opts)        => ipcRenderer.invoke('update:channel-apply', opts),
     check:        (repoPath)      => ipcRenderer.invoke('update:check', { repoPath }),
     pullBuild:    (opts)          => ipcRenderer.invoke('update:pull-build', opts),
     reloadWindow: (opts)          => ipcRenderer.invoke('update:reload-window', opts),

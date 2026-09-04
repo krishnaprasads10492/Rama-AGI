@@ -1746,6 +1746,8 @@ authenticated **Master session**, not merely an open store.
 
 | 101 | Self-build pipeline — Rāma builds its own next version and hands over the installer | done | Section 83. Master asked for *"its own pipeline built into which will run the build and assimilate into old build"*, having installed from the setup file. **The constraint stated before the design: a packaged Windows app cannot overwrite its own running executable** — Windows locks `Rama AGI.exe` and the loaded `app.asar` for the life of the process. That is not a gap in Rāma, it is why `electron-updater` exists and why every desktop updater ends with "restart to finish". So "assimilate" cannot mean editing the install in place; what it can mean is **build → verify the artefact → hand the installer to Windows → quit so it can replace the files → reopen an updated app**, with the install performed by the NSIS installer `scripts/buildInstaller.cjs` already produces, run over the existing one. Master's data lives outside the app directory and survives. **It does not reimplement the build**: `buildInstaller.cjs` already *is* the pipeline (toolchain, dependency ladder, `vite build`, archiver resolution, `electron-builder`, post-build load check of the artefact — Sections 45/48), and duplicating any of it would create a second definition of "a correct build" that could drift from the one master runs by hand. **Separate from `localUpdateEngine.cjs`**, which updates a source checkout in place; Section 80 established the two cases are genuinely different and this is the other half. **Building and installing are two IPC calls** (`update:self-build`, `update:install-build`) because bundling them would mean one click both compiles for minutes and then closes the app, with no moment to read the result or change one's mind; the install button confirms and says why Rāma must close. **THE LOAD-BEARING RULE: only artefacts produced by THIS run may be installed.** `dist-electron/` accumulates, and a previous run — *including a failed one that salvaged a portable zip* — leaves files behind; if the pipeline offered the newest-looking `.exe` on disk then **a build that actually failed would install an older version and look like it had worked**, the installer would run, the app would start, and nothing downstream could detect it was the previous build. Freshness is therefore decided by mtime against the build start, stale output is named rather than hidden, an entry with no mtime is treated as stale, and a failed build returns `installer: null` outright. **No installer is not treated as success**: where endpoint policy blocks 7-Zip (Section 45, the work machine) only an unpacked tree and portable zip appear, so `canInstallInPlace` is false and the note says why rather than leaving the missing button unexplained. **`launchInstaller` refuses anything but a bare `.exe` filename inside the output directory** — a path, nested path, traversal or non-executable is rejected before anything spawns — and the child is `detached`/`unref`'d, because otherwise quitting Rāma would kill the process meant to replace it. **`node` from PATH, not `process.execPath`**, since inside Electron the latter is Electron's own binary and would hand the build script an Electron runtime instead of Node. **Verified: `scripts/verifySelfBuild.cjs`, 31 assertions (`npm run verify:build`)** against the pure `classifyArtifacts` — a stale `.exe` beside a fresh `.zip` yields `installer: null` (the exact scenario that would install an older build), an artefact stamped exactly at the start counts as fresh, a missing mtime is stale, the newest fresh installer wins, extension classification is correct, `latest.yml`/`builder-effective-config.yaml`/`.icon-ico` are ignored, an unpacked tree alone never becomes installable, and `launchInstaller` rejects `../../evil.exe`, nested paths, `notes.txt`, missing arguments and a nonexistent file. **`npm run verify` now runs all four checks in one command**: 15 + 44 + 31 assertions plus the renderer audit, clean at 107 bridge calls across 56 files. `node --check` clean on all three touched `.cjs`. **NOT VERIFIED: no real build has been driven through this from here** — the selection rule and launch guards are unit-tested, but `build()` has not run `buildInstaller.cjs` end to end this session and `launchInstaller` has not actually started an installer and quit. **Cloud CI/CD remains master's decision rather than a missing feature**: `release.yml` and `releaseChannel.cjs` have been dormant since Section 39 (row 53) pending two answers only he can give — whether to code sign (unsigned means a SmartScreen warning on every install) and whether to publish GitHub Releases publicly. |
 
+| 102 | Update folder — a filesystem release channel, one publisher and many installs | done | Section 84. Master asked for a folder a post-build step pushes the latest build into, that an already-installed app reads as an update source. That is a release channel with a filesystem as its transport: no GitHub, no signing decision, no network, and if the folder is on a share or synced drive one build updates every machine. **SECURITY STATED BEFORE THE FEATURES: applying an update runs an executable from that folder.** The SHA-256 gives **integrity** — the artefact is the file the manifest describes and was not truncated — but **not authenticity**, because anyone who can write the installer can rewrite the manifest and its hash too. So: *whoever can write to the channel folder can make Rāma run their executable*, and the **UI says that**, not just this comment. Authenticity needs code signing, a decision master has not made (row 53), and pretending a hash substitutes for a signature would be the dangerous lie in this feature. Nothing is applied automatically, no startup check installs anything, applying is master-only (`system.self-update`) and separate — the same split as Section 83. **NOT DIFFERENTIAL, said plainly**: it publishes the whole installer, not a binary delta; real deltas need electron-builder's `.blockmap` consumed by electron-updater, whose generic provider over `file://` is unreliable and wants a signed build to verify, and copying ~130 MB locally costs about a second whereas a delta mechanism that silently half-works costs a broken install. `latest.json` is the entire protocol (`manifestVersion`, `product`, `version`, `file`, `sha256`, `sizeBytes`, `kind`, `builtAt`, `notes`). Publish via `scripts/publishToChannel.cjs` (`npm run publish:channel`, or `npm run package:publish` to build and publish as one command) or the in-app button; read via `GitSync → UPDATE`. `RAMA_UPDATE_CHANNEL_DIR` overrides a default under `userData`, which is **outside** the app directory so it survives the reinstall it performs and an uninstall does not take the channel with it. **DECISIONS**: the manifest is **untrusted input** and `file` must be a bare filename, so `../../evil.exe` and `sub/dir/Setup.exe` are rejected at validation rather than steering the launcher out of the folder, and a `manifestVersion` newer than this build understands is refused with "update from the installer by hand" instead of being half-interpreted; **the manifest is written last and both files land via a `.part` rename**, so a reader arriving mid-publish sees the old manifest or the new one, never a fresh manifest pointing at a half-copied 130 MB installer; **the hash is re-checked immediately before spawning** rather than trusted from the earlier `status()`, since that gap is exactly where a swap would land; **an older channel build is never offered to a newer install**; **a portable archive is reported but `canApply: false`** with the reason, for the 7-Zip-blocked case (Section 45), instead of an unexplained missing button; **pruning never removes the file the live manifest points at**, however old, since that would leave every reader with a broken update; and **publishing reuses `classifyArtifacts` from Section 83** rather than re-deriving freshness, because `dist-electron/` accumulates and publishing a leftover from a **failed** run would push an older build to every install — one tested rule, one place, with `--allow-stale` for the deliberate case. **A WINDOWS DEFECT THE TEST FOUND**: `fs.renameSync` over an *existing* file threw `EPERM: operation not permitted` on the second publish — it maps to `MoveFileExW` with replace-existing so it ought to overwrite, but a transient handle from an indexer or antivirus on the file just written refuses it. This is the identical class `outcomes.py` documents for `os.replace` (Section 68): a platform difference, not a logic error. `atomicReplace()` retries with a short backoff, unlinking the target to narrow the window. Found by running the test twice, not by review. **Verified: `scripts/verifyUpdateChannel.cjs`, 71 assertions (`npm run verify:channel`), against real files in a temp directory rather than mocks**, because the failure that matters most — a half-copied installer offered as valid — only exists on a filesystem: version ordering including `1.10.0 > 1.9.0` (which a string compare gets wrong) and pre-release ordering, manifest rejection including path traversal and a future manifest version, corrupt-artefact refusal, apply-time re-verification, archive-not-applicable, pruning with protection, and directory-resolution precedence. **EXERCISED END TO END AGAINST THE REAL 130 MB ARTEFACT ON THIS MACHINE**: published with manifest and hash, then read back at three install versions — offered at 0.9.0 with `canApply: false` as an archive, up-to-date at 1.0.0, refused as older at 2.0.0 — and after appending **one byte** the offer was withdrawn with the corruption reason. `npm run verify` now runs five checks: 15 + 44 + 31 + 71 assertions plus the renderer audit, clean at 110 bridge calls across 56 files. `node --check` clean on all touched `.cjs`. **NOT VERIFIED: no NSIS installer has been published or applied from here**, because 7-Zip is blocked on this machine and only a portable archive can be produced; the installer path is the same code up to `canApply` and `apply()` is tested for its refusals, but a real install-and-relaunch has not happened. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -8505,3 +8507,118 @@ and `releaseChannel.cjs` have existed since Section 39 (ledger row 53) and are d
 Making them live needs two answers only master can give: whether to **code sign** (unsigned means
 a SmartScreen warning on every install) and whether to **publish GitHub Releases publicly**. Until
 then, building nothing in that direction is the correct behaviour rather than an omission.
+
+---
+
+## SECTION 84 — An update folder: one publisher, many installs
+
+Master's request: a folder that a post-build step pushes the latest build into, which an already
+installed app can read as an update source.
+
+That is a release channel with a filesystem as its transport. It needs no GitHub, no code-signing
+decision and no network, and if the folder sits on a share or a synced drive then one build updates
+every machine. It is the right shape for exactly where Rāma is now.
+
+### Security, stated before the features
+
+**Applying an update from this channel runs an executable from that folder.** The SHA-256 in the
+manifest gives **integrity** — it proves the artefact is the file the manifest describes and was not
+truncated or corrupted. It does **not** give **authenticity**: anyone who can write the installer
+can also rewrite the manifest, hash included. So the honest sentence, which the UI shows rather than
+burying here:
+
+> Whoever can write to the channel folder can make Rāma run their executable.
+
+Point it only at a folder master controls. Authenticity requires code signing, which is a decision
+he has not made (ledger row 53), and pretending a hash substitutes for a signature would be the
+dangerous lie in this feature. Nothing is ever applied automatically, no startup check installs
+anything, and applying is a separate master-only action — the same split as Section 83.
+
+### It is not differential, and says so
+
+Master asked for "latest/diff build". This publishes the **whole** installer, not a binary delta.
+Real differential updates need electron-builder's `.blockmap` consumed by electron-updater, whose
+generic provider over a `file://` URL is unreliable and additionally wants a signed build to
+verify. Copying ~130 MB locally costs about a second; a delta mechanism that silently half-works
+costs a broken install. The word "channel" should not be allowed to imply deltas.
+
+### Shape
+
+`latest.json` is the whole protocol:
+
+```json
+{ "manifestVersion": 1, "product": "Rama AGI", "version": "1.0.1",
+  "file": "Rama-AGI-Setup-1.0.1.exe", "sha256": "…", "sizeBytes": 0,
+  "kind": "installer", "builtAt": "…", "notes": null }
+```
+
+Publish side: `scripts/publishToChannel.cjs` (`npm run publish:channel`, or
+`npm run package:publish` to build and publish in one command) and an in-app button. Read side:
+`updateChannel.status()` behind `GitSync → UPDATE`.
+
+`RAMA_UPDATE_CHANNEL_DIR` wins over the default so the folder can live on a share. The default is
+under `userData`, which is **outside** the app directory — so it survives the reinstall it performs,
+and an uninstall does not take the channel with it (`nsis.deleteAppDataOnUninstall` is already
+false).
+
+### Decisions
+
+**The manifest is untrusted input, and `file` must be a bare filename.** A manifest is hand-editable
+and may be half-written by a crashed copy. Allowing a path would let it steer the installer launcher
+outside the folder, so `../../evil.exe` and `sub/dir/Setup.exe` are rejected at validation. A
+`manifestVersion` newer than this build understands is refused with "update from the installer by
+hand" rather than half-interpreted.
+
+**The manifest is written last, and both files land via a temporary name.** A reader arriving
+mid-publish must see either the old manifest or the new one, never a fresh manifest pointing at a
+half-copied 130 MB installer.
+
+**The hash is re-checked immediately before spawning**, not trusted from the earlier `status()`
+call, because the gap between checking and running is exactly where a swap would land.
+
+**An older channel build is never offered to a newer install.** Verified: an install at 2.0.0 facing
+a 1.0.0 channel is told which is which, rather than being walked backwards.
+
+**A portable archive is reported but not applied.** On a machine where 7-Zip is blocked (Section 45)
+only an unpacked tree and a zip exist. `canApply` is false and the reason says to extract it by
+hand, instead of an absent button with no explanation.
+
+**Pruning never removes the file the live manifest points at**, however old it looks — that would
+leave every reader with a broken update.
+
+**Publishing reuses `classifyArtifacts` from Section 83** rather than re-deriving freshness.
+`dist-electron/` accumulates, and publishing a leftover artefact from a **failed** run would push an
+older build to every install. One tested rule, one place. `--allow-stale` exists for the deliberate
+case and announces itself.
+
+### A Windows defect the test found
+
+`fs.renameSync` over an **existing** file threw `EPERM: operation not permitted` on the second
+publish. It maps to `MoveFileExW` with replace-existing so it ought to overwrite, but a transient
+handle from an indexer or antivirus on the file just written is enough to refuse it. This is the
+identical failure class `outcomes.py` documents for `os.replace` (Section 68) — a platform
+difference, not a logic error. `atomicReplace()` now retries with a short backoff, unlinking the
+target to narrow the window. Found by running the test twice, not by review.
+
+### Verification
+
+`scripts/verifyUpdateChannel.cjs`, **71 assertions**, `npm run verify:channel`, against real files
+in a temp directory rather than mocks — because the failure that matters most, a half-copied
+installer offered as valid, only exists on a filesystem. Version ordering (including `1.10.0 >
+1.9.0`, which a string compare gets wrong, and pre-release ordering), manifest rejection including
+path traversal and a future manifest version, corrupt-artefact refusal, apply-time re-verification,
+archive-not-applicable, pruning with protection, and directory resolution precedence.
+
+**Exercised end to end against the real 130 MB artefact on this machine**: published (manifest
+written, hash computed), then read back at three install versions — offered at 0.9.0 with
+`canApply: false` because it is an archive, up-to-date at 1.0.0, refused as older at 2.0.0 — and
+after appending a single byte to the artefact the offer was withdrawn with the corruption reason.
+That is the whole contract, on real files.
+
+`npm run verify` now runs five checks: **15 + 44 + 31 + 71 assertions plus the renderer audit**,
+clean at 110 bridge calls across 56 files. `node --check` clean on all touched `.cjs`.
+
+**Not verified:** no NSIS installer has been published or applied from here, because 7-Zip is
+blocked on this machine and only a portable archive can be produced. The installer path is the same
+code as the archive path up to `canApply`, and `apply()` is tested for its refusals — but a real
+install-and-relaunch has not happened.

@@ -483,6 +483,78 @@ function registerLocalUpdate(ipcMain) {
     return { ok: true };
   });
 
+  // ── Update channel: a folder installs can update themselves from (Section 84) ──
+  //
+  // `userDataPath` is injected here rather than read inside the module, so `updateChannel.cjs`
+  // stays testable under plain node — the same reason Section 80 injects `packaged`/`appPath`.
+  const channelCtx = (override) => {
+    const uc = safeRequire('./lib/updateChannel.cjs', 'Update channel');
+    if (!uc) return { uc: null, dir: null };
+    let userDataPath = null;
+    try { userDataPath = app.getPath('userData'); } catch { /* very early */ }
+    return { uc, dir: uc.channelDir({ userDataPath, override: override || null }) };
+  };
+
+  ipcMain.handle('update:channel-status', async (_e, { user, dir } = {}) => {
+    if (!capability.can(user, 'stockmind.view') && !capability.can(user, 'system.self-update')) {
+      // Reading whether an update exists is not privileged; writing or applying one is.
+      return { ok: false, error: 'Not permitted' };
+    }
+    const { uc, dir: resolved } = channelCtx(dir);
+    if (!uc) return { ok: false, error: 'Update channel unavailable' };
+    let version = null;
+    try { version = app.getVersion(); } catch { /* unknown */ }
+    return { ok: true, data: uc.status({ dir: resolved, currentVersion: version }) };
+  });
+
+  ipcMain.handle('update:channel-publish', async (_e, { user, dir, repoPath, notes } = {}) => {
+    if (!capability.can(user, 'system.self-update')) return { ok: false, error: 'Not permitted' };
+    const { uc, dir: resolved } = channelCtx(dir);
+    const pipeline = safeRequire('./lib/selfBuildPipeline.cjs', 'Self-build pipeline');
+    if (!uc || !pipeline) return { ok: false, error: 'Update channel unavailable' };
+    if (!repoPath) return { ok: false, error: 'repoPath is required to find the built artefact' };
+    try {
+      const fsx = require('fs');
+      const pathx = require('path');
+      const outDir = pathx.join(repoPath, pipeline.OUTPUT_DIR);
+      if (!fsx.existsSync(outDir)) {
+        return { ok: false, error: `${pipeline.OUTPUT_DIR}/ does not exist — build first` };
+      }
+      const entries = fsx.readdirSync(outDir).map((name) => {
+        const st = fsx.statSync(pathx.join(outDir, name));
+        return { name, size: st.size, mtimeMs: st.mtimeMs, isDirectory: st.isDirectory() };
+      });
+      // Same freshness rule as Section 83, with a grace window so "build then publish" works as
+      // one action. Publishing a leftover artefact would push an OLDER build to every install.
+      const scan = pipeline.classifyArtifacts(entries, Date.now() - 30 * 60 * 1000);
+      const chosen = scan.installer || scan.portable;
+      if (!chosen) {
+        return { ok: false, error: 'no installer or archive from the last 30 minutes to publish' };
+      }
+      const pkg = JSON.parse(fsx.readFileSync(pathx.join(repoPath, 'package.json'), 'utf8'));
+      return uc.publish({
+        artefactPath: pathx.join(outDir, chosen.name),
+        dir: resolved,
+        version: pkg.version,
+        product: pkg.build?.productName || pkg.name,
+        notes: notes || null,
+      });
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // Runs an executable from the channel folder and closes Rāma. Master-only, never automatic.
+  ipcMain.handle('update:channel-apply', async (_e, { user, dir } = {}) => {
+    if (!capability.can(user, 'system.self-update')) return { ok: false, error: 'Not permitted' };
+    const { uc, dir: resolved } = channelCtx(dir);
+    if (!uc) return { ok: false, error: 'Update channel unavailable' };
+    const res = uc.apply({ dir: resolved });
+    if (!res.ok) return res;
+    setTimeout(() => { app.isQuiting = true; app.quit(); }, 1500);
+    return res;
+  });
+
   // ── Self-build pipeline (Section 83) ──────────────────────────────────────
   //
   // Builds the next version from a source checkout and hands the installer to Windows. Master

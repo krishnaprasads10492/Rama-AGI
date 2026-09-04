@@ -106,6 +106,9 @@ function LocalUpdatePanel({ repoPath }) {
   const [buildRes,   setBuildRes]   = useState(null);
   const [installing, setInstalling] = useState(false);
   const [installMsg, setInstallMsg] = useState(null);
+  const [channel,    setChannel]    = useState(null);
+  const [channelDir, setChannelDir] = useState('');
+  const [channelMsg, setChannelMsg] = useState(null);
 
   const canUpdate = canDo('system.self-update');
 
@@ -131,6 +134,35 @@ function LocalUpdatePanel({ repoPath }) {
     setBusy(false);
     setResult(res);
     if (res?.ok) load();
+  };
+
+  const loadChannel = useCallback(async () => {
+    if (!isElectron) return;
+    const res = await window.rama.update.channelStatus({ user: currentUser, dir: channelDir || null });
+    setChannel(res?.ok === false ? { error: res.error } : (res.data || null));
+  }, [currentUser, channelDir]);
+
+  useEffect(() => { loadChannel(); }, [loadChannel]);
+
+  const publishToChannel = async () => {
+    setChannelMsg(null);
+    const res = await window.rama.update.channelPublish({
+      user: currentUser, repoPath, dir: channelDir || null,
+    });
+    setChannelMsg(res);
+    loadChannel();
+  };
+
+  const applyChannel = async () => {
+    // eslint-disable-next-line no-alert
+    const sure = window.confirm(
+      `Install ${channel?.manifest?.version} from the update folder and close Rāma?\n\n`
+      + 'Windows cannot replace a running application, so Rāma must exit for the installer to '
+      + 'finish. Your data is outside the app directory and is not touched.');
+    if (!sure) return;
+    setChannelMsg(null);
+    const res = await window.rama.update.channelApply({ user: currentUser, dir: channelDir || null });
+    setChannelMsg(res);
   };
 
   const runSelfBuild = async (pull) => {
@@ -286,6 +318,72 @@ function LocalUpdatePanel({ repoPath }) {
               {backendMsg.ok ? `✓ ${backendMsg.message}` : `✕ ${backendMsg.error}`}
             </div>
           )}
+
+          {/* ── Update channel (Section 84) ──────────────────────────────────── */}
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
+            <div className="section-label" style={{ marginBottom: 8 }}>UPDATE FOLDER</div>
+            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-dim)', lineHeight: 1.7,
+              marginBottom: 10 }}>
+              A folder a build publishes into, and an installed Rāma reads from. Put it on a synced
+              or shared drive and one build updates every machine. Set
+              {' '}<code>RAMA_UPDATE_CHANNEL_DIR</code> to change the default.
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+              marginBottom: 8 }}>
+              <input className="input" style={{ flex: 1, minWidth: 220 }}
+                     placeholder={channel?.dir || 'default: userData/update-channel'}
+                     value={channelDir} onChange={(e) => setChannelDir(e.target.value)} />
+              <button className="btn btn-sm" onClick={loadChannel}>↺ check</button>
+            </div>
+
+            {channel && !channel.error && (
+              <div style={{ fontSize: 'var(--text-xs)', lineHeight: 1.7 }}>
+                <div style={{ color: 'var(--muted)' }}>{channel.dir}</div>
+                <div style={{
+                  color: channel.available ? 'var(--green)'
+                    : channel.upToDate ? 'var(--text-dim)' : 'var(--muted)',
+                  marginTop: 2,
+                }}>
+                  {channel.available
+                    ? `✓ ${channel.manifest.version} available (installed ${channel.currentVersion})`
+                    : channel.reason}
+                </div>
+                {channel.manifest?.notes && (
+                  <div style={{ color: 'var(--text-dim)', marginTop: 2 }}>
+                    “{channel.manifest.notes}”
+                  </div>
+                )}
+                {channel.available && channel.canApply && (
+                  <div style={{ marginTop: 8 }}>
+                    <button className="btn btn-sm btn-danger" onClick={applyChannel}>
+                      ⬆ Install {channel.manifest.version} and close Rāma
+                    </button>
+                  </div>
+                )}
+                {/* The honest limit of a hash: integrity, not authorship. */}
+                <div style={{ color: 'var(--gold)', marginTop: 8 }}>{channel.warning}</div>
+              </div>
+            )}
+            {channel?.error && (
+              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--red)' }}>{channel.error}</div>
+            )}
+
+            <div style={{ marginTop: 10 }}>
+              <button className="btn btn-sm" onClick={publishToChannel} disabled={building}>
+                ⇧ Publish this checkout's build to the folder
+              </button>
+            </div>
+            {channelMsg && (
+              <div style={{ marginTop: 8, fontSize: 'var(--text-xs)',
+                color: channelMsg.ok ? 'var(--green)' : 'var(--red)' }}>
+                {channelMsg.ok
+                  ? (channelMsg.message
+                    || `✓ published ${channelMsg.manifest?.version} — ${channelMsg.manifest?.file}`)
+                  : `✕ ${channelMsg.error}`}
+              </div>
+            )}
+          </div>
 
           {/* ── Build the next version (Section 83) ──────────────────────────── */}
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
