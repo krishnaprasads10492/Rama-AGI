@@ -3,8 +3,17 @@
 ;
 ; Extends the electron-builder generated installer with:
 ;   - the rama:// protocol handler
-;   - registry entries used for update detection
+;   - registry entries recording the installed version and path
 ;   - matching cleanup on uninstall
+;
+; NOTE ON THOSE REGISTRY ENTRIES: nothing in Rama reads them. They were
+; described here as "used for update detection", which was never true - the
+; update channel compares app.getVersion() against the channel manifest, and
+; electron-updater uses its own feed. They are kept because they are genuinely
+; useful when inspecting a machine by hand, and because upgrade detection is
+; done by electron-builder's own uninstall key under the GUID derived from
+; appId - not by anything written here. Do not build update logic on them
+; without wiring a reader first.
 ;
 ; TWO CONSTRAINTS THIS FILE MUST RESPECT, both learned the hard way:
 ;
