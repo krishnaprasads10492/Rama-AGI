@@ -621,13 +621,30 @@ function auditForReadiness() {
  * Note also that the BUILD machine's Python is not the INSTALL machine's Python. This measures where
  * it runs, which is why installing the requirements here is deliberately not attempted.
  */
+/**
+ * Import names, not distribution names — `scikit-learn` installs as `sklearn`, and checking the
+ * distribution name would report a working install as broken. These are the modules the engine's
+ * own files import (Section 39), so this list is the honest precondition for `main.py` starting.
+ */
+const ENGINE_MODULES = [
+  'fastapi', 'uvicorn', 'pydantic', 'numpy', 'pandas', 'scipy',
+  'sklearn', 'lightgbm', 'xgboost', 'statsmodels', 'ta', 'httpx', 'joblib',
+];
+
 function probePythonRuntime() {
   const notes = [];
-  const exe = process.platform === 'win32' ? 'python' : 'python3';
+
+  // MUST resolve the interpreter exactly as `aiProcess.cjs` does, or the two disagree: master sets
+  // RAMA_PYTHON to a working venv, the app is satisfied, and readiness still complains about
+  // whatever `python` happens to be on PATH. A diagnostic that contradicts the runtime is worse
+  // than none, because it sends master to fix something that is not broken.
+  const configured = (process.env.RAMA_PYTHON || '').trim();
+  const exe = configured || (process.platform === 'win32' ? 'python' : 'python3');
+  const via = configured ? ' (via RAMA_PYTHON)' : '';
 
   const ver = spawnSync(exe, ['--version'], { encoding: 'utf8', timeout: 15_000 });
   if (ver.error || ver.status !== 0) {
-    warn(`StockMind runtime: "${exe}" is not on PATH — the market engine cannot start`);
+    warn(`StockMind runtime${via}: "${exe}" is not usable — the market engine cannot start`);
     plain('      Packaging is unaffected; the produced app will report StockMind unavailable.');
     plain('      Fix on the machine that RUNS Rāma: install Python 3.11 or 3.12, then');
     plain('        python -m pip install -r ai_backend\\requirements.txt');
@@ -650,7 +667,7 @@ function probePythonRuntime() {
     const tooNew = major > 3 || (major === 3 && minor > 12);
     const tooOld = major < 3 || (major === 3 && minor < 10);
     if (tooNew || tooOld) {
-      warn(`StockMind runtime: ${version} is outside the range the pinned requirements support`);
+      warn(`StockMind runtime${via}: ${version} is outside the range the pinned requirements support`);
       plain('      numpy==1.26.4 publishes no wheel above CPython 3.12, so pip would try to');
       plain('      compile it from source and fail in a C compiler — which looks like a broken');
       plain('      machine rather than the wrong interpreter.');
@@ -660,35 +677,71 @@ function probePythonRuntime() {
       plain('      Then point Rāma at it, since the app otherwise spawns bare "python" from PATH:');
       plain('        setx RAMA_PYTHON "<full path>\\.venv-stockmind\\Scripts\\python.exe"');
       notes.push(`Python ${major}.${minor} is outside the supported 3.10–3.12 range for the engine`);
-      return notes;
+      // Deliberately does NOT return. The version is the root cause, but whether the packages are
+      // present there is still true and still useful — "wrong Python, and nothing installed in it
+      // either" is a different job from "wrong Python, but otherwise ready". Returning here also
+      // left the import probe unreachable on any machine whose only Python is out of range, which
+      // is the machine this was written on.
     }
   }
 
-  // The four that every engine module pulls in. A partial install is the common real case — a
-  // single failed wheel (lightgbm and scipy are the usual ones) leaves the rest importable, so
-  // checking one module would report success on a backend that cannot actually start.
-  const probe = spawnSync(
-    exe,
-    ['-c', 'import fastapi, uvicorn, pandas, numpy, sklearn, lightgbm, xgboost, statsmodels, ta, httpx'],
-    { encoding: 'utf8', timeout: 90_000 },
-  );
+  // EVERY module is tried SEPARATELY, and this is the whole point of the loop.
+  //
+  // The first version ran `import fastapi, uvicorn, pandas, ...` as one statement. Python aborts
+  // that at the FIRST failure, so it reported "missing fastapi" on a machine where nothing at all
+  // was installed — master fixes fastapi, re-runs, is told uvicorn is missing, and so on for ten
+  // rounds. Master hit exactly that. The cost is identical (each module is imported once either
+  // way); the difference is that the report is complete.
+  //
+  // A real import rather than `importlib.util.find_spec`: find_spec answers "is it installed",
+  // and the question that matters is "will main.py start". A wheel that installed but whose native
+  // binary is broken — the usual scipy/lightgbm failure — passes find_spec and fails on import.
+  const py = [
+    'import importlib',
+    `mods = [${ENGINE_MODULES.map(m => `"${m}"`).join(',')}]`,
+    'bad = []',
+    'for m in mods:',
+    '    try:',
+    '        importlib.import_module(m)',
+    '    except Exception:',
+    '        bad.append(m)',
+    'print("RAMA_MISSING:" + ",".join(bad))',
+  ].join('\n');
 
-  if (probe.status === 0) {
-    ok(`StockMind runtime: ${version} with all required packages importable`);
+  const probe = spawnSync(exe, ['-c', py], { encoding: 'utf8', timeout: 300_000 });
+
+  const line = String(probe.stdout || '').split(/\r?\n/).find(l => l.startsWith('RAMA_MISSING:'));
+  if (!line) {
+    // The probe itself could not run — report that rather than inventing a package list.
+    warn(`StockMind runtime${via}: ${version} found, but the import probe did not complete`);
+    plain(`      ${String(probe.stderr || probe.error?.message || 'no output').trim().split('\n')[0]}`);
+    notes.push('Python present but the engine import probe failed to run');
     return notes;
   }
 
-  const missing = String(probe.stderr || '').match(/No module named '([^']+)'/g);
-  const named = missing
-    ? missing.map(m => m.replace(/No module named '|'/g, '')).join(', ')
-    : 'one or more packages';
+  const missing = line.slice('RAMA_MISSING:'.length).split(',').filter(Boolean);
+  if (missing.length === 0) {
+    ok(`StockMind runtime${via}: ${version}, all ${ENGINE_MODULES.length} engine packages importable`);
+    return notes;
+  }
 
-  warn(`StockMind runtime: ${version} found, but imports fail — missing ${named}`);
+  // All-missing and some-missing are different situations and deserve different words. Listing ten
+  // names when the answer is "nothing is installed" buries the actual instruction.
+  const all = missing.length === ENGINE_MODULES.length;
+  if (all) {
+    warn(`StockMind runtime${via}: ${version} found, but NONE of the engine packages are installed in it`);
+  } else {
+    warn(`StockMind runtime${via}: ${version} found, ${missing.length} of ${ENGINE_MODULES.length} `
+      + `engine packages missing — ${missing.join(', ')}`);
+  }
   plain('      Packaging is unaffected. Without these the engine starts and immediately exits,');
-  plain('      which surfaces only as an ImportError in the log rather than a clear message.');
+  plain('      surfacing only as an ImportError in the log rather than a clear message.');
   plain('      Fix on the machine that RUNS Rāma:');
   plain('        python -m pip install -r ai_backend\\requirements.txt');
-  notes.push(`Python packages missing (${named}) — StockMind will not start in the produced app`);
+  plain('      Or set RAMA_PYTHON to a venv python.exe if PATH must keep another version.');
+  notes.push(all
+    ? 'No engine packages installed in the Python on PATH — StockMind will not start'
+    : `Python packages missing (${missing.join(', ')}) — StockMind will not start`);
   return notes;
 }
 
