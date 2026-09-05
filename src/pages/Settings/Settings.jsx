@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useRamaStore } from '@store/ramaStore.js';
 import { useUserStore } from '@store/userStore.js';
 import { getFingerprint } from '@services/authClient.js';
+import SelfPanel from './SelfPanel.jsx';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -267,7 +268,7 @@ export default function Settings() {
 
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
-        {['ai', 'appearance', 'system', 'security', 'about'].map(t => (
+        {['ai', 'appearance', 'system', 'security', 'self', 'about'].map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '9px 18px', border: 'none', background: 'transparent',
             color: tab === t ? 'var(--accent)' : 'var(--muted)',
@@ -395,6 +396,9 @@ export default function Settings() {
             )}
           </div>
         )}
+
+        {/* ── Self (Section 88) ── everything here is measured on open, About is static ── */}
+        {tab === 'self' && <SelfPanel />}
 
         {/* ── About ── */}
         {tab === 'about' && (

@@ -159,17 +159,7 @@ function register(ipcMain) {
   });
 
   // ── Detect what credentials are available ─────────────────────────────────
-  ipcMain.handle('models:check-credentials', async () => {
-    const status = {};
-    for (const [id, info] of Object.entries(MODEL_REGISTRY)) {
-      if (!info.credKey) {
-        status[id] = 'local';
-      } else {
-        status[id] = getCredential(info.credKey) ? 'available' : 'missing-key';
-      }
-    }
-    return { ok: true, data: status };
-  });
+  ipcMain.handle('models:check-credentials', async () => ({ ok: true, data: credentialStatus() }));
 
   // ── Custom OpenAI-compatible providers ────────────────────────────────────
   // Master-only (models.add-key, tier 1 — same gate as adding any provider's
@@ -441,4 +431,39 @@ async function httpGet(url) {
   throw new Error(res.error || `HTTP ${res.status}`);
 }
 
-module.exports = { register, selectModel, chatCompletion, checkAvailable, MODEL_REGISTRY };
+/**
+ * Which models are USABLE right now: `available` | `not-installed` | `missing-key` per id.
+ *
+ * Extracted from the `models:check-credentials` handler (Section 88) so the main process can ask
+ * the same question the renderer asks. A second copy of this loop would be a second definition of
+ * "a usable model" free to drift from this one — the same reason `selfBuildPipeline` refuses to
+ * reimplement the build.
+ *
+ * ─── WHY THE VOCABULARY CHANGED ──────────────────────────────────────────────
+ *
+ * This previously reported `'local'` for every Ollama entry, meaning "needs no credential". That
+ * conflated *requires no key* with *is usable*, and it broke two callers in OPPOSITE directions:
+ *
+ *   cognition.js  tested `s === 'available'` for the local tier, which `'local'` never equals — so
+ *                 TIER 1 COULD NEVER REPORT AS AVAILABLE, and Rāma told master "no local model
+ *                 detected" with Ollama running and models pulled.
+ *   Models.jsx    treated `'local'` as available, so every Ollama model in the registry rendered as
+ *                 ready even on a machine with no Ollama at all.
+ *
+ * So the value now reflects `checkAvailable()`, which for local models tests the models actually
+ * detected by the `localhost:11434` probe. Nothing is removed: `'available'` and `'missing-key'`
+ * keep their meanings, `'local'` simply stops being produced, and both callers become correct.
+ */
+function credentialStatus() {
+  const status = {};
+  for (const [id, info] of Object.entries(MODEL_REGISTRY)) {
+    if (checkAvailable(id)) status[id] = 'available';
+    else if (info.type === 'local') status[id] = 'not-installed';
+    else status[id] = 'missing-key';
+  }
+  return status;
+}
+
+module.exports = {
+  register, selectModel, chatCompletion, checkAvailable, credentialStatus, MODEL_REGISTRY,
+};

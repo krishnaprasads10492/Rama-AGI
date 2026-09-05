@@ -222,6 +222,14 @@ const RAMA_API = {
     ledgerSetStyle:   (opts) => ipcRenderer.invoke('market:ledger-style', opts),
   },
 
+  // ── Self-model (Section 88) ───────────────────────────────────────────────
+  // Who Rāma is, what it can actually do, and — the half that gives the rest meaning — what it
+  // cannot do and why. `reflexSkills` and `voiceLevel` are passed in because only the renderer
+  // knows them; omitting them yields unmeasured fields rather than zeros.
+  self: {
+    describe: (opts) => ipcRenderer.invoke('self:describe', opts),
+  },
+
   // ── Workspace (Section 86) ────────────────────────────────────────────────
   // The shared context every page reads instead of asking master to re-select a folder.
   workspace: {

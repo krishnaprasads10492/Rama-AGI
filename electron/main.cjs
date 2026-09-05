@@ -446,6 +446,111 @@ function clampZoom(v) {
  * same folder. Reads sit on `git.read` (tier 3) because a list of folder paths master already chose
  * is not privileged; creating a project WRITES FILES, so that needs `os.filesystem-write`.
  */
+/**
+ * `self:describe` — the subject Rāma's capabilities belong to (Section 88).
+ *
+ * Master: *"without any 'self' how would all capabilities get a meaning"*. Self-knowledge sat in
+ * five modules that never composed; this composes them, from real probes, and reports its own
+ * LIMITS alongside its abilities.
+ *
+ * GATE: `git.read` (tier 3 — any signed-in account). Describing what Rāma can and cannot do is not
+ * privileged, and gating it higher would be the wrong shape: a user who cannot see the limits will
+ * instead assume capability that is not there. Nothing here mutates anything.
+ *
+ * Every probe is wrapped so an absent or broken subsystem becomes an unmeasured field rather than
+ * a failed call — the whole point is that this answers even on a degraded install.
+ */
+function registerSelfModel(ipcMain) {
+  const capability = require('./lib/capability.cjs');
+  const selfModel = safeRequire('./lib/selfModel.cjs', 'Self-model');
+  if (!selfModel) return;
+
+  // `reflexSkills` and `voiceLevel` are supplied by the caller because they are genuinely only
+  // known in the renderer — the tier-0 skill registry lives in `src/services/cognition.js` and the
+  // voice ladder in `src/services/voiceEngine.js`. Absent, they report as unmeasured rather than 0.
+  ipcMain.handle('self:describe', async (_e, { user, reflexSkills, voiceLevel } = {}) => {
+    const denied = capability.deny(user, 'git.read');
+    if (denied) return denied;
+
+    const probes = {
+      app: () => ({
+        name: app.getName(),
+        version: app.getVersion(),
+        packaged: app.isPackaged,
+      }),
+
+      // ATTESTATION ONLY. `isSealed()` is a boolean; the loyalty matrix is never touched (I16).
+      nucleus: () => (nucleusSealer
+        ? { sealed: !!nucleusSealer.isSealed(), verified: !!nucleusSealer.isSealed() }
+        : undefined),
+
+      // The one sanctioned identity field — a display name, not the matrix (Section 56).
+      serves: () => require('./lib/loyaltyCore.cjs').displayIdentity(),
+
+      // `role` stays null deliberately: a role is a lens over the genome and is recorded per
+      // SPAWNED instance, not for the host process. Reporting 'prime' here would be a guess.
+      instance: () => ({
+        role: null,
+        genesExpressed: null,
+        totalGenes: require('./genome.cjs').GENES.length,
+      }),
+
+      // Measured, not assumed: 'available' for an ollama id means :11434 actually reported it.
+      tiers: () => {
+        const router = require('./ipc/modelRouter.cjs');
+        const status = router.credentialStatus();
+        const entries = Object.entries(status);
+        const localUp = entries.some(([id, s]) => id.startsWith('ollama/') && s === 'available');
+        const cloudUp = entries.some(([id, s]) => !id.startsWith('ollama/') && s === 'available');
+        return {
+          reflex: {
+            available: true,
+            skills: Number.isInteger(reflexSkills) ? reflexSkills : null,
+          },
+          local: localUp
+            ? { available: true }
+            : { available: false, reason: 'no local model detected on localhost:11434' },
+          cloud: cloudUp
+            ? { available: true }
+            : { available: false, reason: 'no provider key available' },
+          highest: cloudUp ? 2 : (localUp ? 1 : 0),
+        };
+      },
+
+      capabilities: () => {
+        const names = Object.keys(capability.MATRIX || {});
+        if (!names.length) return undefined;
+        return {
+          total: names.length,
+          forUser: user ? names.filter(n => capability.can(user, n)).length : null,
+        };
+      },
+
+      engines: () => ({
+        python: require('./ipc/aiProcess.cjs').getRunningStatus().python,
+        voiceLevel: Number.isInteger(voiceLevel) ? voiceLevel : null,
+        // `archiverBlocked` is deliberately ABSENT rather than false. Only
+        // `scripts/buildInstaller.cjs` resolves the archiver, and only at build time, so the
+        // running app knows neither answer — and `false` would assert "not blocked", which on this
+        // machine happens to be untrue. An omitted field derives no limit and claims nothing.
+      }),
+
+      workspace: () => {
+        const rows = require('./lib/workspaceRegistry.cjs').list();
+        return { known: rows.length, pinned: rows.filter(r => r.pinned).length };
+      },
+
+      experience: () => require('./ipc/metaCognition.cjs').experienceSummary(),
+    };
+
+    try {
+      return { ok: true, data: await selfModel.describe(probes) };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+}
+
 function registerWorkspace(ipcMain) {
   const capability = require('./lib/capability.cjs');
   const registry = safeRequire('./lib/workspaceRegistry.cjs', 'Workspace registry');
@@ -1338,6 +1443,8 @@ app.whenReady().then(async () => {
     ['Local self-update',     () => registerLocalUpdate(ipcRec)],
     // shared workspace context + project scaffolding — Section 86
     ['Workspace registry',    () => registerWorkspace(ipcRec)],
+    // the subject all those capabilities belong to — Section 88
+    ['Self-model',            () => registerSelfModel(ipcRec)],
     // applied self-modify proposals → a new branch, never dev/source directly
     ['Proposal publishing',   () => publishProposal.register(ipcRec)],
     ['Appearance',            () => registerAppearance(ipcRec)],

@@ -228,7 +228,9 @@ export async function capabilities() {
   if (!api?.models) return out;
 
   try {
-    // `models:check-credentials` returns { [modelId]: 'available' | 'missing-key' }
+    // `models:check-credentials` returns { [modelId]: 'available' | 'not-installed' | 'missing-key' }
+    // where 'available' for an ollama id means the model was actually detected on :11434, not
+    // merely that it needs no key — see credentialStatus() in modelRouter.cjs (Section 88).
     const res = await api.models.checkCredentials();
     const status = res?.ok ? res.data : null;
     if (status) {

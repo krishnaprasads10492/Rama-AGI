@@ -1754,6 +1754,8 @@ authenticated **Master session**, not merely an open store.
 
 | 105 | One release button, and a channel that holds only the newest build | done | Section 87. Master: *"include the commands to update into single update button which will do everything. new version comes in old version should be removed from update folder. even current old installed app will have a chance to upgrade."* **`selfBuildPipeline.release()`** composes the whole sequence in the main process: **bump → pull → build → verify → publish → prune**. Stitching it in the renderer would have put the ordering *and* the failure handling somewhere untestable, so the UI makes one call and gets one result with a per-step trace. **THE ORDER IS NOT ARBITRARY**: pull first so the build includes what was pushed from elsewhere; **bump after the pull**, or a locally-bumped `package.json` conflicts with the pull; build, which is also the verification since `buildInstaller.cjs` load-checks the artefact; **publish only on a clean build** so a failure never reaches the channel; **prune last**, once the new release is live, so a reader is never momentarily left with nothing. Every step reports rather than throwing, so a failure at publish still shows that bump/pull/build succeeded and the artefact is on disk. **THE FOOTGUN A ONE-CLICK BUTTON INVITES, and why versioning had to move inside it**: publishing without a bump produces a version equal to what is already installed everywhere, `status()` correctly reports every install as up to date, and **the build succeeds, the publish succeeds, and nothing is offered to anybody** — a silent no-op that looks like a working release. So `release()` owns the bump (patch default, minor/major/none available), writes `package.json` with npm's own two-space-plus-newline formatting so the diff is one line, and commits `chore(release): vX.Y.Z`; a failed commit is **not fatal** — the bump is on disk and the build will use it, and master is told rather than left to discover an uncommitted file. **It refuses a dirty tree**: a release built from uncommitted work is a version that exists nowhere in git, so it could never be reproduced or rolled back to, and the refusal lists the offending paths. **RETENTION IS NOW ONE ARTEFACT** (`KEEP_DEFAULT` 3→1) by master's instruction, and **the reasoning that makes it safe is recorded because a later change could invalidate it**: this publishes WHOLE installers, so an install on 1.0.0 jumps straight to 1.4.0 from the single artefact present — there is no chain of patches to walk. Were it ever made differential, retention would have to cover every version an install might upgrade *from*, and pruning to one would silently strand older installs. The cost, stated: rollback needs the old version rebuilt or republished with `--allow-stale`. **`prune()` hardened twice over**: it now reads the live manifest itself, so even a direct call cannot delete the artefact the channel is currently offering (previously only the caller-supplied `protect` guarded it), and it sweeps `.part` debris from crashed publishes **once older than an hour** — a fresh `.part` may be an in-flight copy and is left alone. **UI**: a single `🚀 Release` in GitSync → UPDATE with a bump selector and an optional notes field, showing each step as it completes and offering "Install here and close Rāma" when an installer resulted; selecting "no bump" warns up front that nothing will be offered. **Verified: 460 assertions across seven checks.** `verifySelfBuild` 41 (+10) covers the bump: `1.9.9`→patch→`1.9.10` and →minor→`1.10.0` (not a single-digit assumption), minor and major resetting the parts below, `v` prefixes and pre-release suffixes dropped, short versions padded, rubbish becoming `0.0.1` rather than throwing, and **a property check that every bump of every kind produces a version `compareVersions` ranks as newer**. `verifyUpdateChannel` 92 (+10) proves the retention claim end to end: three sequential publishes leave **exactly one** `.exe`, and installs on **1.0.0, 1.0.9 and 1.1.0 are each still offered 1.2.0 and verify** — which is master's "old installed app will have a chance to upgrade", asserted rather than assumed — plus a direct `prune()` leaving the live artefact and the channel still working afterwards, a stale `.part` swept and a fresh one kept. Renderer audit clean at 123 bridge calls. **NOT VERIFIED: `release()` has not been run end to end from here** — 7-Zip is blocked on this machine so the packaging stage cannot produce an installer, which is also why no real install-and-relaunch has happened. The composition, ordering, guards and bump arithmetic are unit-tested; the one full pass needs master's own machine. |
 
+| 106 | The self — what all those capabilities are capabilities *of* | done | Section 88. Master: *"Is there basic modal of RAMA, which will grow exponentially utilising the other model capabilities → ASI"*, then ***"without any 'self' how would all capabilities get a meaning"***. **The second question is a correct architectural finding.** Rāma's self-knowledge sat in five places that never composed — `cognition.capabilities()` knew which tiers can answer but no capability names, history or limits; `registry.allCapabilities()` knew names and required tiers but not whether any could actually run; `metaCognition` knew what was done but not what Rāma *is*; `genome`/`instanceManager` knew role and expressed genes; `loyaltyCore` knew who Rāma is for and is deliberately blind to the rest (I15/I16). Each true, none a self. **A capability list with no subject is a menu; the same list with a subject that also knows its own limits is an account of ability.** `electron/lib/selfModel.cjs` is that subject. **It is a self-MODEL, not selfhood** — a sourced description, claiming nothing it cannot show, because Section 36 declined five poster claims with no engineering referent and Section 51 needed a three-column audit to separate real from asserted. **Design rule: every field carries `{value, source, measured}` and anything unmeasurable is `null` with a `why` rather than estimated** — a self-description is exactly the artefact that rots into marketing, so no field is filled from a constant someone will forget to update. **DECISION: limits are DERIVED, not listed.** A hardcoded "known limitations" array is stale the day after it is written and then actively lies; every limit is inferred from what is absent *right now* — no local model, locked vault, stopped Python engine, no gate-passing forecaster, blocked 7-Zip, unsealed nucleus — so it removes itself when the situation changes, and each carries `what`/`why`/`source`/`fixable`. This is what makes the module useful rather than decorative: Rāma can answer *"what can't you do and why"*, the half of self-knowledge every capability inventory in this project had omitted. **DECISION: loyalty is attested, never read** — identity reports only "sealed and verified", never the matrix (I16); a live risk precisely because a "describe yourself" call is the most natural place for someone to later append "…and here is what I am loyal to". **KEY FINDING answering master's first question: tier 3 cannot function, and it is a data-shape defect not missing code.** `cognition.js` documents tier 3 as turning a repeatedly-escalated phrasing into a tier-0 reflex, but `record()` sends only `{action, ok, ms, tool, error}` and `metaCognition.recordOutcome()` persists those plus a shallow context bag — **the request text is never stored**, so `findReflexCandidates()` groups by `tool` (`cloud:gpt-4o`) and can report "200 escalations" while being structurally unable to identify *which phrasing* to convert. Row 47 says "not started"; it is worse — the data collected is the wrong shape for the stated purpose, so the loop is architecturally present and functionally hollow. Now surfaced as a derived limit so it is visible in the product, not buried in a ledger row. **The honest version of "grows exponentially" is distillation into its own capability**: a strong model solves something once, Rāma keeps it as a reflex and never pays again — cheaper, private, offline, working while the vault is locked; the metric already exists and is already computed (`reflexRate`, share of turns answered with no model), and today it cannot move because nothing feeds it. **A SECOND DEFECT, found by wiring the probes: tier 1 could never report as available.** Extracting the credential loop into `modelRouter.credentialStatus()` exposed that `'local'` was returned for every Ollama entry meaning "needs no credential" — and two callers read it in **opposite directions**: `cognition.js` tested `s === 'available'`, which `'local'` never equals, so **tier 1 could never report available** and Rāma said "no local model detected" with Ollama running and models pulled; `Models.jsx` treated `'local'` as available, so **every Ollama model rendered as ready on machines with no Ollama at all**. One string conflating *requires no key* with *is usable*, understating in the ladder and overstating in the UI. Now derived from `checkAvailable()`, which tests the models actually returned by the `localhost:11434` probe: `available` | `not-installed` | `missing-key`. Nothing removed — `'available'`/`'missing-key'` keep their meanings, `'local'` stops being produced; `Models.jsx` drops the stale branch and gains a **"not pulled"** hint since the corrected state greys the row and a local model has no key to add. **This is the exact failure mode the section exists to prevent: a capability present, reported absent, with nothing able to notice the disagreement.** **SURFACED at Settings → Self**, which measures on open, prints the source under every row, and **puts "what I cannot do" ABOVE "what I can do"** — a list of only strengths tells master nothing about where his own judgement is still required; unmeasured renders as italic "not measured", never a blank or a zero. **VERIFIED: `scripts/verifySelfModel.cjs`, 73 assertions (`npm run verify:self`), mostly NEGATIVE** — the dangerous failure for a "describe yourself" call is not a crash but quietly reporting capability that is not there, because a crash is visible and a flattering lie is not. Asserts: absent probe → `null` + `measured:false` + `why`; probes that throw / return `undefined` / are not functions all degrade; only probes that answered are cited; **a healthy install invents no limits**; **a limit disappears once its cause goes away** (the property that makes derivation better than a list); partial values degrade rather than fabricate (`{reflex:{skills:null}}` must not read as a measured zero; genome shows `30 genes` not `? of 30`); and **a probe handing over a fake loyalty matrix must not leak it** — the whole serialised output is searched and `matrix`/`loyaltyText` must not survive as field names, which is what stops a future change turning this into the accessor I16 forbids. `npm run verify` now **8 suites / 533 assertions**; `node --check` clean on 5 touched `.cjs`; `vite build` succeeds, Settings 19.55 kB. **NOT TAKEN, needs master's decision:** closing the tier-3 loop requires recording request text, so the experiential dataset would begin holding what master actually typed — a privacy consequence master must accept explicitly. No code assumes it, and `experienceSummary()` reports `promptTextRecorded` by **measuring** whether any record carries text, so accepting it makes the limit vanish on its own. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -8908,3 +8910,159 @@ Renderer audit clean at 123 bridge calls across 57 files; `node --check` clean o
 packaging stage cannot produce an installer — which is also why no real install-and-relaunch has
 happened. The composition, ordering, guards and bump arithmetic are unit-tested; the one full pass
 needs master's own machine, which can produce installers.
+---
+
+## SECTION 88 — The self: what all those capabilities are capabilities *of*
+
+Master: *"Is there basic modal of RAMA, which will grow exponentially utilising the other model
+capabilities to get the work done → ASI"*, then the sharper follow-up: ***"without any 'self' how
+would all capabilities get a meaning"***.
+
+The second question is an architectural finding, not a philosophical aside, and it is correct.
+
+### The gap, stated precisely
+
+Rāma's self-knowledge existed in five places that never composed:
+
+| Where | What it knows | Blind to |
+|---|---|---|
+| `cognition.capabilities()` | which tiers can answer right now | capability names, history, limits |
+| `registry.allCapabilities()` | the names and required tiers | whether any of them can actually run |
+| `metaCognition` | what was done and how it went | what Rāma *is* |
+| `genome` / `instanceManager` | which genes are expressed, which role | everything above |
+| `loyaltyCore` | who Rāma is for | deliberately everything else (I15/I16) |
+
+Each is true. None is a self. **A capability list with no subject is a menu**; the same list with a
+subject that also knows its own limits is an account of ability. `electron/lib/selfModel.cjs` is
+that subject, and it is the referent that gives the other 100+ capabilities something to be
+capabilities *of*.
+
+### What this is not
+
+**A self-model, not selfhood.** It is a sourced description of what Rāma can and cannot do. It does
+not make Rāma aware of anything. Section 36 declined five poster claims that had no engineering
+referent, and Section 51 had to build a three-column audit separating what was real from what was
+asserted; the entire value of this module is that it can be trusted, so it claims nothing it cannot
+show.
+
+### The design rule that keeps it honest
+
+**Every field carries its source, and anything unmeasurable is absent rather than estimated.**
+Shape is `{ value, source, measured }` throughout, with `null` and a `why` where nothing was read.
+A self-description is *exactly* the artefact that rots into marketing, so no field is ever filled
+from a constant someone will forget to update.
+
+### Decision: limits are DERIVED, not listed
+
+The most valuable part is `limits`, and it is computed from present absence rather than from a
+hand-maintained array. **A hardcoded "known limitations" list is stale the day after it is written
+and then actively lies.** Every limit is inferred from something missing *right now* — no local
+model, a locked vault, a stopped Python engine, no gate-passing forecaster, a blocked archiver — so
+it disappears by itself when the situation changes. Each limit carries `what`, `why`, `source` and,
+where one exists, `fixable`: the specific thing that would remove it.
+
+This is what makes the module useful rather than decorative: it lets Rāma answer *"what can't you
+do, and why"* truthfully, which is the half of self-knowledge that every capability inventory in
+this project has so far omitted.
+
+### Decision: loyalty is attested, never read
+
+I16 says no accessor returns the loyalty matrix. So identity reports only whether the core is
+**sealed and verified** — an attestation, not a disclosure. **The self-model must never become the
+accessor that invariant forbids**, and that is a live risk precisely because a "describe yourself"
+call is the most natural place for someone to later add "…and here is what I am loyal to".
+
+### The finding that answers master's first question
+
+Master asked whether Rāma has a core that **grows exponentially by using other models' work**. The
+honest answer is that the mechanism designed for it cannot currently function, and the reason is a
+data-shape defect rather than missing code:
+
+`cognition.js` documents tier 3 as *"turns a repeatedly-escalated phrasing into a tier-0 reflex"*.
+But `record()` sends only `{action, ok, ms, tool, error}`, and `metaCognition.recordOutcome()`
+persists those plus a shallow context bag. **The text of the request is never stored anywhere.** So
+`findReflexCandidates()` groups escalations by `tool` — `cloud:gpt-4o`, `local:llama3` — and can
+report "you escalated 200 times" while being structurally unable to say *which phrasing* to convert
+into a permanent free skill.
+
+Ledger row 47 records tier 3 as "not started". It is worse than not started: **the data being
+collected is the wrong shape for the stated purpose**, so the loop is architecturally present and
+functionally hollow. This is now surfaced as a first-class derived limit, so it is visible in the
+product rather than buried in a ledger row.
+
+### A second defect, found by wiring the probes: tier 1 could never report as available
+
+Building the tier probe meant asking the same question the renderer asks, so the credential loop
+was extracted out of the `models:check-credentials` handler into `credentialStatus()`. That exposed
+a real bug in the vocabulary. The old code returned **`'local'`** for every Ollama entry, meaning
+*"needs no credential"* — and two callers read it in **opposite** directions:
+
+| Caller | Test | Consequence |
+|---|---|---|
+| `cognition.js` | `s === 'available'` for the local tier | `'local'` never equals it, so **tier 1 could never report as available**. Rāma told master "no local model detected" with Ollama running and models pulled. |
+| `Models.jsx` | `status === 'available' \|\| status === 'local'` | every Ollama model in the registry rendered as **ready on machines with no Ollama at all**. |
+
+One string conflating *requires no key* with *is usable*, producing an understatement in the
+cognition ladder and an overstatement in the Models page. `credentialStatus()` now derives the value
+from `checkAvailable()`, which for local models tests the models actually returned by the
+`localhost:11434` probe: **`available` | `not-installed` | `missing-key`**. Nothing was removed —
+`'available'` and `'missing-key'` keep their meanings and `'local'` simply stops being produced.
+`Models.jsx` drops the stale `'local'` branch and gains a **"not pulled"** hint, because the
+corrected state greys the row out and a local model has no key to add, so otherwise the dot would
+have no explanation.
+
+This is worth recording because **it is the exact failure mode this section exists to prevent**: a
+capability that was present, reported as absent, with nothing in the system able to notice the
+disagreement. The self-model is the thing that now asks that question in one place.
+
+### The honest version of "grows exponentially"
+
+Not a larger model. **Distillation into its own capability**: a strong model solves something hard
+once, Rāma keeps the result as a reflex, and never pays for it again — cheaper, private, offline,
+and working while the vault is locked. The metric already exists and is already computed:
+**`reflexRate`**, the share of turns answered with no model at all. Today that number cannot move
+because nothing feeds it.
+
+Closing the loop requires recording the request text, which has a **privacy consequence master must
+accept explicitly before it is built** — the experiential dataset would begin holding what master
+actually typed. That decision is deliberately not taken here, and no code was written that assumes
+it. It is recorded as the concrete next step for row 106.
+
+### Where it surfaces
+
+**Settings → Self.** The About tab beside it is a static card of build facts; this panel measures
+everything on open, prints the source under every row, and **puts "what I cannot do" above "what I
+can do"** — because a capability list that shows only strengths tells master nothing about where his
+own judgement is still required. Unmeasured fields render as *"not measured"* in italics, never as a
+blank or a zero. `reflexSkills` and the voice level are passed down from the renderer because that
+is genuinely the only place they are known.
+
+### Verified
+
+`scripts/verifySelfModel.cjs`, **73 assertions** (`npm run verify:self`), and they are mostly
+NEGATIVE assertions — the dangerous failure for a "describe yourself" call is not a crash but
+quietly reporting capability that is not there, since a crash is visible and a flattering lie is
+not. Asserted: an absent probe yields `null` with `measured:false` and a `why`; a probe that throws,
+returns `undefined`, or is not a function degrades instead of propagating; only probes that answered
+are cited as sources; **a healthy install invents no limits**; every limit carries `what`/`why`/
+`source` and most carry `fixable`; **a limit disappears once its cause goes away** (the property
+that makes derivation better than a list); partially-known values degrade rather than fabricate —
+`{reflex:{skills:null}}` must not read as a measured zero, and the genome shows `30 genes` rather
+than `? of 30`.
+
+And the invariant assertion: a probe that hands over a **fake loyalty matrix** must not leak it.
+The whole serialised output is searched for the payload, and `matrix` and `loyaltyText` must not
+survive as field names. That is what stops a future well-meaning change from turning "describe
+yourself" into the accessor I16 forbids.
+
+`npm run verify` is now **8 suites / 533 assertions** (audit 15, update 44, self-build 41, channel
+92, simulation 164, workspace 104, **self-model 73**, renderer audit at 124 bridge calls across 58
+files). `node --check` clean on all five touched `.cjs`. `vite build` succeeds; Settings 19.55 kB.
+
+### Not done, and why
+
+**The tier-3 loop is still open.** Closing it needs the request text recorded, and that is master's
+decision to make, not mine to assume. `metaCognition.experienceSummary()` reports
+`promptTextRecorded` by **measuring** whether any record actually carries the text — so if master
+accepts it, the derived limit disappears on its own rather than needing anyone to remember to delete
+a constant.

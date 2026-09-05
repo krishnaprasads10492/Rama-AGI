@@ -24,7 +24,10 @@ const PROVIDER_LINKS = {
 };
 
 function ModelRow({ model, status, primary, onSetPrimary, onAddKey }) {
-  const isAvailable = status === 'available' || status === 'local';
+  // 'available' for a local model means Ollama actually reported it. This used to also accept
+  // 'local', which meant only "needs no API key" — so every Ollama model in the registry rendered
+  // as ready on machines with no Ollama installed (Section 88).
+  const isAvailable = status === 'available';
   const color       = PROVIDER_COLORS[model.provider] || 'var(--accent)';
 
   return (
@@ -56,7 +59,11 @@ function ModelRow({ model, status, primary, onSetPrimary, onAddKey }) {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+      <div style={{ display: 'flex', gap: '6px', flexShrink: 0, alignItems: 'center' }}>
+        {/* A local model has no key to add, so without this the grey dot has no explanation. */}
+        {status === 'not-installed' && (
+          <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>not pulled</span>
+        )}
         {!isAvailable && model.credKey && (
           <button className="btn btn-sm" onClick={() => onAddKey(model.credKey)}
             style={{ borderColor: 'var(--amber)', color: 'var(--amber)', fontSize: '10px' }}>

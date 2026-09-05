@@ -371,6 +371,38 @@ function register(ipcMain) {
   });
 }
 
+/**
+ * What Rāma's experience adds up to (Section 88).
+ *
+ * The reflex/escalation split was previously computed only in the renderer, inside
+ * `cognition.findReflexCandidates()`. The self-model runs in the main process, where the outcomes
+ * actually live, so the arithmetic belongs here too. Nothing is removed — the renderer path still
+ * works exactly as before.
+ *
+ * `promptTextRecorded` is MEASURED, not asserted. Today no caller records the request text, so it
+ * reports false and the self-model derives a limit from that. If master ever accepts recording it,
+ * this flips on its own rather than needing someone to remember to update a constant — the same
+ * rule the derived limits follow.
+ */
+function experienceSummary() {
+  const escalated = outcomes.filter(o => o.tool && !String(o.tool).startsWith('reflex:'));
+  const reflexServed = outcomes.length - escalated.length;
+
+  const byTool = {};
+  for (const o of escalated) byTool[o.tool] = (byTool[o.tool] ?? 0) + 1;
+
+  return {
+    recorded: outcomes.length,
+    reflexServed,
+    escalated: escalated.length,
+    reflexRate: outcomes.length ? Math.round((reflexServed / outcomes.length) * 100) : null,
+    failures: outcomes.filter(o => !o.ok).length,
+    byTool,
+    // Is the text of what was asked present on ANY record? That is the precondition for tier 3.
+    promptTextRecorded: outcomes.some(o => typeof o.request === 'string' && o.request.length > 0),
+  };
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 /** Keep only primitive top-level fields — prevents unbounded context growth. */
 function shallow(obj) {
@@ -398,7 +430,7 @@ function stop() {
 
 module.exports = {
   register, stop,
-  recordOutcome, selfAudit,
+  recordOutcome, selfAudit, experienceSummary,
   optimizationVectors, profileFor, allProfiles,
   restore, persist,
 };
