@@ -53,6 +53,9 @@ const recheck      = has('--recheck-archiver');
 // data/system/readiness.json, and build nothing. The build then reads that
 // verdict and adapts rather than rediscovering the same facts.
 const readinessOnly = has('--readiness');
+// Do not create or populate the StockMind engine venv. For a build machine that is deliberately not
+// the machine Rāma will run on, where installing ~500 MB of wheels would be pure waste.
+const skipPython    = has('--skip-python');
 // Package even when readiness says the result would be unusable.
 const force         = has('--force');
 // On any failure the transcript is shipped to the build-logs branch so it can be
@@ -597,7 +600,17 @@ function auditForReadiness() {
     }
   }
 
-  notes.push(...probePythonRuntime());
+  // Readiness MEASURES and changes nothing — that contract is the reason master can run it safely,
+  // so it never creates the venv. It does say what the build would do about it.
+  const pyNotes = probePythonRuntime();
+  notes.push(...pyNotes);
+  if (pyNotes.length > 0 && !skipPython) {
+    if (findInRangePython()) {
+      info('A build would create the engine environment and install these automatically.');
+    } else {
+      info('A build could NOT fix this: no Python 3.10–3.12 is present to build the environment from.');
+    }
+  }
 
   // Missing-but-installable is not a blocker for readiness: the build installs it.
   return { ok: true, degraded: notes, pendingInstall: audit.required.length };
@@ -631,6 +644,200 @@ const ENGINE_MODULES = [
   'sklearn', 'lightgbm', 'xgboost', 'statsmodels', 'ta', 'httpx', 'joblib',
 ];
 
+/** Python 3.10–3.12: the window the exact pins actually support. See `probePythonRuntime`. */
+const PY_MIN_MINOR = 10;
+const PY_MAX_MINOR = 12;
+
+/** `python.exe` inside a venv directory, per platform. */
+function venvPython(dir) {
+  return process.platform === 'win32'
+    ? path.join(dir, 'Scripts', 'python.exe')
+    : path.join(dir, 'bin', 'python');
+}
+
+/**
+ * Where the engine's virtual environment lives, resolved IDENTICALLY here and in `aiProcess.cjs`.
+ *
+ * `<userData>/python-env`, i.e. `%APPDATA%\Rama AGI\python-env` on Windows. Under userData because
+ * that is the one location an INSTALLED app can also find, and because it sits outside the app
+ * directory so it survives the reinstall an update performs — the same argument that put the update
+ * channel there (Section 84). `productName` is read from `package.json` rather than written out
+ * twice, since Electron derives `app.getPath('userData')` from exactly that value.
+ */
+function engineVenvDir() {
+  let productName = 'Rama AGI';
+  try {
+    productName = require(path.join(ROOT, 'package.json')).build?.productName || productName;
+  } catch { /* the default is the value in package.json today */ }
+
+  const base = process.platform === 'win32'
+    ? (process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'))
+    : process.platform === 'darwin'
+      ? path.join(os.homedir(), 'Library', 'Application Support')
+      : (process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'));
+
+  return path.join(base, productName, 'python-env');
+}
+
+/** Is this interpreter inside the window the pins support? */
+function pythonInRange(exe) {
+  const r = spawnSync(exe, ['--version'], { encoding: 'utf8', timeout: 15_000 });
+  if (r.error || r.status !== 0) return null;
+  const version = String(r.stdout || r.stderr).trim();
+  const m = version.match(/(\d+)\.(\d+)/);
+  if (!m) return null;
+  const major = Number(m[1]);
+  const minor = Number(m[2]);
+  const inRange = major === 3 && minor >= PY_MIN_MINOR && minor <= PY_MAX_MINOR;
+  return { version, major, minor, inRange };
+}
+
+/**
+ * Find an interpreter the requirements can actually install into.
+ *
+ * Tries the Windows launcher for each supported minor, newest first, then PATH if it happens to be
+ * in range. Creating the venv from whatever `python` means would reproduce the exact failure this
+ * section warns about: a 3.13+ venv where `numpy==1.26.4` has no wheel and pip dies in a compiler.
+ */
+function findInRangePython() {
+  const candidates = [];
+  if (process.platform === 'win32') {
+    for (let minor = PY_MAX_MINOR; minor >= PY_MIN_MINOR; minor -= 1) {
+      candidates.push({ cmd: 'py', args: [`-3.${minor}`] });
+    }
+  } else {
+    for (let minor = PY_MAX_MINOR; minor >= PY_MIN_MINOR; minor -= 1) {
+      candidates.push({ cmd: `python3.${minor}`, args: [] });
+    }
+  }
+  candidates.push({ cmd: process.platform === 'win32' ? 'python' : 'python3', args: [] });
+
+  for (const c of candidates) {
+    const r = spawnSync(c.cmd, [...c.args, '--version'], { encoding: 'utf8', timeout: 15_000 });
+    if (r.error || r.status !== 0) continue;
+    const version = String(r.stdout || r.stderr).trim();
+    const m = version.match(/(\d+)\.(\d+)/);
+    if (!m) continue;
+    const minor = Number(m[2]);
+    if (Number(m[1]) !== 3 || minor < PY_MIN_MINOR || minor > PY_MAX_MINOR) continue;
+    return { cmd: c.cmd, args: c.args, version };
+  }
+  return null;
+}
+
+/**
+ * Which of the engine's modules cannot be imported by this interpreter?
+ *
+ * Each module SEPARATELY, because `import a, b, c` aborts at the first failure and would report one
+ * name on a machine where nothing is installed — master hit exactly that. A real import rather than
+ * `importlib.util.find_spec`, because find_spec answers "is it installed" and the question is "will
+ * `main.py` start": a wheel that installed with a broken native binary, the usual scipy/lightgbm
+ * failure, passes find_spec and fails on import.
+ *
+ * @returns {string[]|null} missing module names, or null when the probe itself could not run
+ */
+function missingEngineModules(exe) {
+  const py = [
+    'import importlib',
+    `mods = [${ENGINE_MODULES.map(m => `"${m}"`).join(',')}]`,
+    'bad = []',
+    'for m in mods:',
+    '    try:',
+    '        importlib.import_module(m)',
+    '    except Exception:',
+    '        bad.append(m)',
+    'print("RAMA_MISSING:" + ",".join(bad))',
+  ].join('\n');
+
+  const probe = spawnSync(exe, ['-c', py], { encoding: 'utf8', timeout: 300_000 });
+  const line = String(probe.stdout || '').split(/\r?\n/).find(l => l.startsWith('RAMA_MISSING:'));
+  if (!line) return null;
+  return line.slice('RAMA_MISSING:'.length).split(',').filter(Boolean);
+}
+
+/**
+ * Create the engine venv and install the pinned requirements into it (Section 91 follow-up).
+ *
+ * Master: *"installs whatever is missing implies whatever is missing needs to be installed
+ * automatically"* — and `Rama.bat` option 3 does say "installs what is missing". It kept that promise
+ * for Node and broke it for Python.
+ *
+ * WHY A VENV AND NOT THE SYSTEM PYTHON. The pins are exact (I12), so `pip install -r` against the
+ * interpreter on PATH can break other Python work on the machine. A venv is isolated, needs no
+ * administrator rights, and cannot conflict with anything.
+ *
+ * NEVER FATAL: packaging does not run Python, so a failure here is a reported limit and the installer
+ * is still produced. NEVER during `--readiness`, whose contract is that it changes nothing.
+ *
+ * @returns {{ok:boolean, note?:string, exe?:string}}
+ */
+function ensureEngineVenv() {
+  const dir = engineVenvDir();
+  const exe = venvPython(dir);
+
+  // Idempotent: an existing venv that can import everything is left alone.
+  if (fs.existsSync(exe)) {
+    const missing = missingEngineModules(exe);
+    if (missing && missing.length === 0) {
+      ok(`StockMind engine venv already complete — ${path.relative(os.homedir(), dir)}`);
+      return { ok: true, exe };
+    }
+  }
+
+  const found = findInRangePython();
+  if (!found) {
+    warn(`No Python ${PY_MIN_MINOR === 10 ? '3.10' : PY_MIN_MINOR}–3.${PY_MAX_MINOR} found, so the `
+      + 'engine environment cannot be created');
+    plain('      The pins need that window: numpy==1.26.4 publishes no wheel above CPython 3.12,');
+    plain('      so a venv built from anything newer cannot hold the requirements. Creating one');
+    plain('      anyway would look like progress and fail in a C compiler.');
+    plain('      Install Python 3.12 from python.org, then re-run this build.');
+    plain('      Packaging is unaffected — the installer is still produced, without StockMind.');
+    return { ok: false, note: `no Python 3.${PY_MIN_MINOR}–3.${PY_MAX_MINOR} to build the engine environment` };
+  }
+
+  if (!fs.existsSync(exe)) {
+    info(`Creating the StockMind engine environment with ${found.version}`);
+    plain(`      ${dir}`);
+    const mk = spawnSync(found.cmd, [...found.args, '-m', 'venv', dir], {
+      encoding: 'utf8', timeout: 300_000,
+    });
+    if (mk.status !== 0 || !fs.existsSync(exe)) {
+      warn(`Could not create the engine environment: ${String(mk.stderr || mk.error?.message || 'unknown').trim().split('\n')[0]}`);
+      return { ok: false, note: 'engine environment could not be created' };
+    }
+    ok('Engine environment created');
+  }
+
+  const req = path.join(ROOT, 'ai_backend', 'requirements.txt');
+  if (!fs.existsSync(req)) {
+    warn('ai_backend/requirements.txt is missing — cannot install the engine packages');
+    return { ok: false, note: 'requirements.txt missing' };
+  }
+
+  info('Installing the pinned engine packages — several minutes on a first run');
+  const pip = spawnSync(exe, ['-m', 'pip', 'install', '--disable-pip-version-check', '-r', req], {
+    encoding: 'utf8',
+    timeout: 3_600_000,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  const after = missingEngineModules(exe);
+  if (after && after.length === 0) {
+    ok(`StockMind engine ready — all ${ENGINE_MODULES.length} packages importable`);
+    return { ok: true, exe };
+  }
+
+  // Re-checked rather than trusting pip's exit code: a wheel can install and still fail to import,
+  // which is the whole reason the probe does a real import.
+  const tail = String(pip.stderr || pip.stdout || '').trim().split('\n').slice(-4);
+  warn(`Engine packages did not all install${after ? ` — still missing ${after.join(', ')}` : ''}`);
+  for (const l of tail) if (l.trim()) plain(`      ${l.trim()}`);
+  plain('      Packaging is unaffected. Retry by hand to see the full output:');
+  plain(`        "${exe}" -m pip install -r ai_backend\\requirements.txt`);
+  return { ok: false, note: `engine packages incomplete${after ? ` (${after.join(', ')})` : ''}` };
+}
+
 function probePythonRuntime() {
   const notes = [];
 
@@ -639,8 +846,13 @@ function probePythonRuntime() {
   // whatever `python` happens to be on PATH. A diagnostic that contradicts the runtime is worse
   // than none, because it sends master to fix something that is not broken.
   const configured = (process.env.RAMA_PYTHON || '').trim();
-  const exe = configured || (process.platform === 'win32' ? 'python' : 'python3');
-  const via = configured ? ' (via RAMA_PYTHON)' : '';
+  const managed = venvPython(engineVenvDir());
+  const exe = configured || (fs.existsSync(managed)
+    ? managed
+    : (process.platform === 'win32' ? 'python' : 'python3'));
+  const via = configured
+    ? ' (via RAMA_PYTHON)'
+    : (exe === managed ? ' (managed venv)' : '');
 
   const ver = spawnSync(exe, ['--version'], { encoding: 'utf8', timeout: 15_000 });
   if (ver.error || ver.status !== 0) {
@@ -685,41 +897,14 @@ function probePythonRuntime() {
     }
   }
 
-  // EVERY module is tried SEPARATELY, and this is the whole point of the loop.
-  //
-  // The first version ran `import fastapi, uvicorn, pandas, ...` as one statement. Python aborts
-  // that at the FIRST failure, so it reported "missing fastapi" on a machine where nothing at all
-  // was installed — master fixes fastapi, re-runs, is told uvicorn is missing, and so on for ten
-  // rounds. Master hit exactly that. The cost is identical (each module is imported once either
-  // way); the difference is that the report is complete.
-  //
-  // A real import rather than `importlib.util.find_spec`: find_spec answers "is it installed",
-  // and the question that matters is "will main.py start". A wheel that installed but whose native
-  // binary is broken — the usual scipy/lightgbm failure — passes find_spec and fails on import.
-  const py = [
-    'import importlib',
-    `mods = [${ENGINE_MODULES.map(m => `"${m}"`).join(',')}]`,
-    'bad = []',
-    'for m in mods:',
-    '    try:',
-    '        importlib.import_module(m)',
-    '    except Exception:',
-    '        bad.append(m)',
-    'print("RAMA_MISSING:" + ",".join(bad))',
-  ].join('\n');
-
-  const probe = spawnSync(exe, ['-c', py], { encoding: 'utf8', timeout: 300_000 });
-
-  const line = String(probe.stdout || '').split(/\r?\n/).find(l => l.startsWith('RAMA_MISSING:'));
-  if (!line) {
+  const missing = missingEngineModules(exe);
+  if (!missing) {
     // The probe itself could not run — report that rather than inventing a package list.
     warn(`StockMind runtime${via}: ${version} found, but the import probe did not complete`);
-    plain(`      ${String(probe.stderr || probe.error?.message || 'no output').trim().split('\n')[0]}`);
     notes.push('Python present but the engine import probe failed to run');
     return notes;
   }
 
-  const missing = line.slice('RAMA_MISSING:'.length).split(',').filter(Boolean);
   if (missing.length === 0) {
     ok(`StockMind runtime${via}: ${version}, all ${ENGINE_MODULES.length} engine packages importable`);
     return notes;
@@ -817,9 +1002,21 @@ async function ensureDependencies() {
     ok(`${name} native binary present — ${binary}`);
   }
 
-  // Reported here too, so a build that never ran readiness still says it. Never installs and never
-  // blocks: packaging does not run Python, and the build machine's Python is not the install
-  // machine's Python anyway (Section 91).
+  // KEEPING THE PROMISE THE MENU MAKES. `Rama.bat` option 3 says "installs what is missing", and it
+  // kept that for Node while only reporting Python. This is the build path, so it installs — into an
+  // isolated venv under userData, never into the system Python (Section 91 follow-up).
+  //
+  // Never fatal. Packaging does not run Python, so a failure is a reported limit and the installer
+  // is still produced.
+  if (skipPython) {
+    info('Skipping the StockMind engine environment (--skip-python)');
+    notes.push('engine environment skipped by --skip-python');
+  } else {
+    const eng = ensureEngineVenv();
+    if (!eng.ok && eng.note) notes.push(eng.note);
+  }
+
+  // Report the resulting state either way, so the summary reflects what a run would actually find.
   notes.push(...probePythonRuntime());
 
   return { ok: true, degraded: notes };
@@ -1668,14 +1865,38 @@ ${C.bold}If a security policy blocks 7-Zip${C.reset}
 ${C.bold}What it does${C.reset}
 
   Stage 0  Toolchain      Node, npm, project root, free disk
-  Stage 1  Dependencies   audit against package.json; install if anything is missing
+  Stage 1  Dependencies   audit against package.json; install if anything is missing.
+                          Also prepares the StockMind Python environment — see below.
   Stage 2  Renderer       vite build, always
   Stage 3  Archiver       find a 7-Zip that actually runs, or decide it cannot
   Stage 4  Package        electron-builder with the targets stage 3 allows
   Stage 5  Report         what landed in dist-electron/, and what did not
 
-  Nothing outside this project directory is modified. Requires only source +
-  Node.js + internet for the first install.
+${C.bold}The one thing written outside this project${C.reset}
+
+  The StockMind engine needs Python packages, and nothing used to install them.
+  Stage 1 now creates a virtual environment and installs the pinned
+  requirements into it:
+
+    ${engineVenvDir()}
+
+  It is OUTSIDE this project on purpose: an installed Rāma has no repo to look
+  in, and a venv is not relocatable so it cannot be shipped inside the app.
+  Under userData it also survives the reinstall an update performs.
+
+  A VENV rather than your system Python, because the pins are exact and
+  installing them globally could break other Python work on this machine.
+
+  It needs Python 3.10-3.12. numpy==1.26.4 publishes no wheel above CPython
+  3.12, so a newer interpreter cannot hold these requirements; if none is
+  found, nothing is attempted and the report says so. Packaging never runs
+  Python, so any failure here is reported and the installer is still produced.
+
+  Pass --skip-python to leave it alone, for a build machine that is not the
+  machine Rāma will run on.
+
+  Apart from that venv, nothing outside this project directory is modified.
+  Requires only source + Node.js + internet for the first install.
 `);
 }
 

@@ -58,17 +58,39 @@ async function startPythonBackend() {
     return { ok: false, error: `main.py not found at ${mainScript}` };
   }
 
-  // `RAMA_PYTHON` lets master point the engine at a specific interpreter (Section 91).
+  // Which interpreter runs the engine, in order (Section 91):
   //
-  // WHY THIS IS NEEDED. The pinned requirements are bounded above by `numpy==1.26.4`, which
-  // publishes no wheel past CPython 3.12, so the engine often has to live in a 3.11/3.12 venv while
-  // a newer Python owns `python` on PATH. Without an override the only way to satisfy the engine is
-  // to change what `python` means system-wide, which is an unreasonable thing to ask of a machine
-  // that has other Python work on it.
+  //   1. RAMA_PYTHON            an explicit choice always wins
+  //   2. <userData>/python-env  the venv `scripts/buildInstaller.cjs` creates and populates
+  //   3. <repo>/.venv-stockmind a convenience when running from a source checkout
+  //   4. python on PATH         the original behaviour, kept as the last resort
   //
-  // Falls back to exactly the previous behaviour when unset, so nothing that works today changes.
+  // WHY THE LADDER EXISTS. The pinned requirements are bounded above by `numpy==1.26.4`, which
+  // publishes no wheel past CPython 3.12, so the engine usually has to live in a 3.10–3.12 venv
+  // while a newer Python owns `python` on PATH. Step 2 means a machine prepared by the build works
+  // with NO environment variable to set — the manual `setx RAMA_PYTHON` this used to require was a
+  // step master should never have needed. Every rung is additive and step 4 is unchanged, so an
+  // install that works today keeps working.
   const configured = (process.env.RAMA_PYTHON || '').trim();
-  const python = configured || (process.platform === 'win32' ? 'python' : 'python3');
+  const venvExe = (dir) => (process.platform === 'win32'
+    ? path.join(dir, 'Scripts', 'python.exe')
+    : path.join(dir, 'bin', 'python'));
+
+  let managed = null;
+  try {
+    const candidate = venvExe(path.join(app.getPath('userData'), 'python-env'));
+    if (fs.existsSync(candidate)) managed = candidate;
+  } catch { /* getPath can throw before the app is ready; fall through to the next rung */ }
+
+  if (!managed) {
+    // Running from a checkout: `backendPath` is `<repo>/ai_backend`, so its parent is the repo.
+    const local = venvExe(path.join(path.dirname(backendPath), '.venv-stockmind'));
+    if (fs.existsSync(local)) managed = local;
+  }
+
+  const python = configured
+    || managed
+    || (process.platform === 'win32' ? 'python' : 'python3');
 
   const child = spawn(python, ['-u', mainScript], {
     cwd:   backendPath,
@@ -89,9 +111,9 @@ async function startPythonBackend() {
     const hint = /ENOENT/.test(err.message)
       ? (configured
         ? `RAMA_PYTHON is set to "${configured}" but that interpreter could not be started.`
-        : 'Python was not found on PATH (tried "' + python + '"). Install Python 3.11 or 3.12, '
-          + 'run: python -m pip install -r ai_backend/requirements.txt, then reopen Rāma. '
-          + 'To use a venv instead, set RAMA_PYTHON to its python.exe.')
+        : 'No Python found (tried "' + python + '"). Run Rama.bat option 3, which creates the '
+          + 'engine environment and installs its packages. To do it by hand: install Python 3.10 '
+          + 'to 3.12, then python -m pip install -r ai_backend/requirements.txt.')
       : err.message;
     console.error(`[ai_backend] could not start: ${hint}`);
     try {

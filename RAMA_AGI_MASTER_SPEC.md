@@ -1762,6 +1762,7 @@ authenticated **Master session**, not merely an open store.
 
 | 109 | Python was never a dependency anyone installed | done | Section 91. Master: *"are all dependencies install in the bat file"* — **Node yes, Python not at all.** `Rama.bat` installs nothing itself; it delegates to `buildInstaller.cjs`, whose stage 1 is a four-rung ladder (`npm ci` when a lockfile exists and `node_modules` does not, then `npm install`, `--legacy-peer-deps`, `--ignore-scripts`) and which **re-audits after installing**, since a half-installed tree otherwise packages "successfully" and fails on master's machine instead. Two properties worth not breaking: it **requires only Node builtins**, so it runs on a checkout with no `node_modules` — one package import at the top would make the dependency installer need its dependencies installed first. **THE GAP: nothing had ever touched `ai_backend/requirements.txt`.** The packaged app spawns bare `python` from PATH and runs `main.py` directly — no venv, no requirements check. Section 64 fixed the *missing interpreter* case, but **Python present with requirements missing** exits on an `ImportError` inside a log stream, the shape of failure nobody diagnoses. **DECISION: probe, report, never install, never block.** `probePythonRuntime()` runs in stage 1 on both readiness and build paths. Never blocks — packaging does not run Python, `electron-builder` copies `ai_backend/` in as files, so a machine with no Python still produces a good installer. Never installs — the build machine's Python is not the install machine's Python, so installing here satisfies the wrong computer. It imports the **full** set (`fastapi, uvicorn, pandas, numpy, sklearn, lightgbm, xgboost, statsmodels, ta, httpx`) rather than one module, because **a partial install is the common real case**: one failed wheel (scipy, lightgbm) leaves the rest importable, so a single-module probe would report success on a backend that cannot start. **THE FINDING ON FIRST RUN: Python 3.14.4 is on PATH and `numpy==1.26.4` publishes no wheel above CPython 3.12**, so `pip install -r requirements.txt` would not fail cleanly — it compiles numpy from source and dies in a C compiler, reading as a broken machine rather than the wrong interpreter. **This also corrected advice already in the codebase**: `aiProcess.cjs` said *"Install Python 3.11+"* with no upper bound, which sends master straight at that failure; the pins define a window of roughly 3.10–3.12 and the guidance now says so. **DECISION: `RAMA_PYTHON`,** because the venv advice was otherwise useless — telling master to build a 3.12 venv is worthless if the app spawns bare `python` and never looks at it, and changing what `python` means system-wide is unreasonable on a machine with other Python work. `aiProcess.cjs` honours an explicit interpreter path, falling back to exactly the previous behaviour when unset; its ENOENT message now distinguishes a configured-but-unstartable interpreter from a genuinely absent one. **VERIFIED:** `node --check` clean on both files; `npm run verify` 8 suites / 562 assertions unchanged; probe run three times, reporting missing `fastapi` and then — once the version check was added — the more useful root cause. **No behavioural test added**, deliberately: the probe emits diagnostic text and its branch inputs are a live interpreter's version string and import result, which a fixture would have to fake wholesale; the value is in what it reports and that was verified by running it. |
 | 110 | The Python probe under-reported, and master hit it | done | Section 91 follow-up. Master on his own machine: *"when checked for readiness, seeing limits python packages missing-fastapi."* That is the **in-range** branch, so his interpreter is fine — but the probe was wrong in a way that would have cost him ten round trips. **`import a, b, c` as one statement aborts at the FIRST failure**, so on a machine with nothing installed it named only `fastapi`; master installs it, re-runs, is told `uvicorn`, and so on through the list. Fixed three ways: (1) **each module imported separately** with every failure collected — identical cost, complete report; (2) **all-missing and some-missing get different words**, since listing thirteen names when the answer is "nothing is installed here" buries the instruction; (3) **a real import, not `importlib.util.find_spec`** — find_spec answers *is it installed*, the question is *will `main.py` start*, and a wheel that installed with a broken native binary (the usual scipy/lightgbm failure) passes find_spec and fails on import. The list also moved to **import names, not distribution names** (`scikit-learn` imports as `sklearn`, so checking the distribution name would report a working install as broken) and now covers all thirteen the engine files import rather than the ten first written. **TWO FURTHER DEFECTS FOUND WHILE TESTING:** (a) **the probe ignored `RAMA_PYTHON`** while `aiProcess.cjs` honours it — so master could point Rāma at a working venv, have the app satisfied, and still be told his packages were missing; **a diagnostic that contradicts the runtime is worse than none** because it sends master to fix something that is not broken. Both now resolve identically and the output says `(via RAMA_PYTHON)` when an override is in force. (b) **the version check returned early**, so on an out-of-range interpreter master learned nothing about the packages; it now reports and **continues**, since "wrong Python, and nothing installed in it either" is a different job from "wrong Python, otherwise ready" — and that short-circuit had made the loop unreachable on any machine whose only Python is out of range, which is this one. **VERIFIED for real, both branches:** all-missing → `Python 3.14.4 found, but NONE of the engine packages are installed in it`; partial → a throwaway venv with only `fastapi`/`httpx` reported `10 of 13 engine packages missing — uvicorn, numpy, pandas, scipy, sklearn, lightgbm, xgboost, statsmodels, ta, joblib`, where the old code would have said `uvicorn` and stopped. Configured-but-unstartable exercised by pointing `RAMA_PYTHON` at a deleted venv. Throwaway venv removed. `npm run verify` 8 suites / 562 assertions unchanged. |
+| 111 | Keeping the promise the menu makes — the build now installs Python too | done | Section 91 second follow-up. Master: *"step-2: installs what ever is missing implies what ever is missing needs to installed automatically."* Correct, and **the inconsistency was in the code not the wording**: `Rama.bat` option 3 says *"installs what is missing"* and kept that for Node while only reporting Python. Section 91's "probe, report, never install" was half sound (the build machine's Python need not be the install machine's, and packaging never runs Python so it must not block) and half excuse (**master builds on the machine he then runs**, so refusing because the general case is ambiguous left the common case broken behind a menu that claimed otherwise). **DECISION: install into a venv under userData, never the system Python.** The pins are exact (I12) — `numpy==1.26.4`, `scipy==1.14.1` — so a global `pip install -r` can break other Python work; a venv is isolated, needs no admin, and cannot conflict. **Location `<userData>/python-env`** because (a) an installed app can find it, whereas a repo venv is invisible to it and venvs are not relocatable so one cannot be shipped inside the app; (b) it is outside the app directory so it survives the reinstall an update performs (the Section 84 argument); (c) both sides derive it from `productName` in `package.json`, exactly what Electron uses for `app.getPath('userData')`, so there is one source rather than two spellings that can drift. **DECISION: the interpreter is chosen, not assumed** — `py -3.12/-3.11/-3.10` then PATH if in range, because building the venv from whatever `python` means would reproduce the failure warned about two sections earlier: a 3.13+ venv where `numpy==1.26.4` has no wheel and pip dies in a C compiler. **If no in-range interpreter exists, nothing is attempted** and the report says which versions are acceptable — guessing would produce a venv that cannot hold the requirements, worse than none because it looks like progress. **Never during `--readiness`** (its contract is that it changes nothing, and quietly installing ~500 MB would break the reason master can run it safely), **never fatal**, **skippable via `--skip-python`**, **idempotent**, and it **re-probes by real import rather than trusting pip's exit code** since a wheel can install and still fail to import. **`aiProcess.cjs` resolution order is now `RAMA_PYTHON` → `<userData>/python-env` → repo `.venv-stockmind` → PATH** — every rung additive, PATH unchanged as last resort, so an install that works today keeps working while a machine prepared by the build needs **no environment variable at all**; the manual `setx RAMA_PYTHON` of the previous section was a step master should never have needed. **AN HONESTY FIX THIS FORCED:** the help text said *"Nothing outside this project directory is modified"*, which creating a venv under `%APPDATA%` makes false — a build script that quietly writes outside where it claims erodes trust in every other statement it makes, so the help now names the directory, explains why it is outside the project, and documents `--skip-python`. **VERIFIED:** readiness creates nothing (asserted — venv absent before and after) and correctly reports that a build *could not* fix it here; `engineVenvDir()` resolves to `%APPDATA%\Rama AGI\python-env`, confirmed via `--help`; venv/pip plumbing exercised for real earlier in the session. `npm run verify` 8 suites / 562 assertions unchanged. **NOT VERIFIED and cannot be from here: the successful install path.** This machine has only Python 3.14, so the no-in-range branch is taken every time and create-and-install has never run. Master's machine is its first execution. |
 
 ### Resume checklist for a cold session
 
@@ -9400,3 +9401,102 @@ xgboost, statsmodels, ta, joblib`. The configured-but-unstartable path was exerc
 `RAMA_PYTHON` at a venv that no longer existed. Throwaway venv deleted.
 
 `node --check` clean; `npm run verify` **8 suites / 562 assertions** unchanged.
+
+### Section 91 second follow-up — keeping the promise the menu makes
+
+Master: *"step-2: installs what ever is missing implies what ever is missing needs to installed
+automatically."*
+
+He is right, and the inconsistency is in the code rather than the wording. `Rama.bat` option 3 says
+**"Build installer from source (installs what is missing)"**. It kept that promise for Node and broke
+it for Python: Section 91 chose "probe, report, never install". That reasoning was half sound and half
+an excuse.
+
+**Sound:** the build machine's Python is not necessarily the install machine's Python, and packaging
+never runs Python, so it must not block.
+
+**Excuse:** master builds on the machine he then runs. Refusing to install because the general case is
+ambiguous left the common case broken, with a menu that claimed otherwise.
+
+### Decision: install into a venv under userData, never into the system Python
+
+`pip install -r requirements.txt` against the interpreter on PATH mutates a shared resource. The pins
+are exact (I12) — `numpy==1.26.4`, `scipy==1.14.1` — so installing them globally can break other
+Python work on the machine. A **virtual environment is isolated, needs no administrator rights, and
+cannot conflict with anything**, so that is what gets created.
+
+**Location: `<userData>/python-env`**, i.e. `%APPDATA%\Rama AGI\python-env` on Windows. Reasons:
+
+- The **installed** app can find it. A venv in the repo is invisible to an installed build, and
+  venvs are not relocatable, so shipping one inside the app is not an option either.
+- It is **outside the app directory**, so it survives the reinstall that an update performs — the same
+  argument that put the update channel under userData (Section 84).
+- Both sides derive it from **`productName` in `package.json`**, which is exactly what Electron uses
+  for `app.getPath('userData')`, so there is one source for the path rather than two spellings that
+  can drift.
+
+### Decision: the interpreter is chosen, not assumed
+
+The venv is created from a **3.10–3.12** interpreter, found by trying `py -3.12`, `py -3.11`,
+`py -3.10`, then PATH if it happens to be in range. Creating it from whatever `python` means would
+reproduce the exact failure master was warned about two sections ago: a 3.13+ venv where
+`numpy==1.26.4` has no wheel and pip dies in a C compiler.
+
+**If no in-range interpreter exists, nothing is attempted** and the report says which versions are
+acceptable and where to get one. Guessing would produce a venv that cannot hold the requirements,
+which is worse than none because it looks like progress.
+
+### What it will and will not do
+
+- **Never in `--readiness` mode.** Readiness measures and changes nothing; that contract is the whole
+  reason master can run it safely, and quietly installing 500 MB of wheels would break it.
+- **Never fatal.** Packaging does not need Python. A failed install is a reported limit, exactly as a
+  missing install was before, so the installer still gets produced.
+- **Skippable** with `--skip-python`, for a build machine that is deliberately not the run machine.
+- **Idempotent.** An existing venv with everything importable is left alone and reported as such;
+  only the missing packages cause work.
+
+### `aiProcess.cjs` resolution order
+
+`RAMA_PYTHON` → `<userData>/python-env` → repo `.venv-stockmind` (a convenience for running from
+source) → `python` on PATH. Each step is a fallback, nothing is removed, and the previously-working
+PATH case is still the last resort — so an existing working setup is unaffected, while a machine that
+has been prepared by the build now works with **no environment variable to set**. That matters
+because the manual `setx RAMA_PYTHON` step from the last section was a step master should never have
+needed.
+
+### What this changed, and the honesty fix it forced
+
+`Rama.bat` option 3 now installs the Python side as well as the Node side. Concretely, stage 1:
+
+1. Leaves an existing complete venv alone (idempotent — only missing packages cause work).
+2. Finds a 3.10–3.12 interpreter, newest first, via `py -3.12/-3.11/-3.10` then PATH if in range.
+3. Creates `<userData>/python-env` and installs the pinned requirements into it.
+4. **Re-probes by real import rather than trusting pip's exit code**, because a wheel can install and
+   still fail to import — the same reason the probe never used `find_spec`.
+
+**The help text had to be corrected, and this is worth recording.** It said *"Nothing outside this
+project directory is modified."* Creating a venv under `%APPDATA%` makes that false, and a build
+script that quietly writes outside where it claims is exactly the kind of thing that erodes trust in
+every other statement it makes. The help now names the directory, explains why it is outside the
+project, and documents `--skip-python`.
+
+`aiProcess.cjs`'s ENOENT message also changed: rather than instructing master to run pip by hand, it
+now points at the thing that does it for him.
+
+### Verified
+
+- **Readiness still changes nothing** — asserted directly: the venv did not exist before or after a
+  `--readiness` run. It additionally reports whether a build *could* fix the situation, and on this
+  machine correctly says it could not: *"no Python 3.10–3.12 is present to build the environment
+  from."*
+- `engineVenvDir()` resolves to `C:\Users\<user>\AppData\Roaming\Rama AGI\python-env`, which is what
+  Electron derives from `productName` — confirmed by printing it through `--help`.
+- The venv-creation and pip plumbing (`spawnSync` shapes, timeouts) was exercised for real earlier in
+  this session when a throwaway venv was created and packages installed into it.
+- `node --check` clean on both files; `npm run verify` **8 suites / 562 assertions** unchanged.
+
+**NOT verified, and it cannot be from here: the successful install path.** This machine has only
+Python 3.14, so `ensureEngineVenv()` takes the no-in-range-interpreter branch every time and the
+create-and-install branch has never run. Master's machine, with a 3.10–3.12 present, is the first
+execution of that path.
