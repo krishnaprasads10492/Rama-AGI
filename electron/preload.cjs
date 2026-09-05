@@ -251,6 +251,9 @@ const RAMA_API = {
 
   // ── Updater ───────────────────────────────────────────────────────────────
   updater: {
+    // `check` returns a verdict the UI can render; `installNow` is fire-and-forget because it ends
+    // with the app quitting, so there is nothing left to resolve a promise (Section 90).
+    check:      () => ipcRenderer.invoke('updater:check'),
     installNow: () => ipcRenderer.send('updater:install-now'),
     // Plain notices from the updater — including "no releases published yet", which
     // is the expected state until master tags one (Section 60).

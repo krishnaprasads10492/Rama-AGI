@@ -1758,6 +1758,8 @@ authenticated **Master session**, not merely an open store.
 
 | 107 | The self-model as a capability of its own | done | Section 89. Master: *"what about self model capabilities?"* — which exposed that **the module built to give Rāma's capabilities a subject was not itself a capability**. Five gaps, each verified against code: (1) **no `self.*` in `shared/capabilities.json`**, so the module that counts capabilities does not count itself; (2) **no gene** for the `self:` channel while every other engine has one, so it sits outside `hashGenome()` and `verify()` and no role expresses it, in a design whose whole claim is that the genome is whole in every instance; (3) **the gate was borrowed and semantically wrong** — `git.read`, when reading Rāma's own abilities is not reading a git repo and the existing convention for Rāma's own mind is `mind.view`; (4) **two answers to the same question** — `cognition.js`'s `self.capabilities`/`self.cognition` reflexes answer from the old partial sources and never call `selfModel`, so chat and Settings→Self can drift, the exact hazard Section 88 existed to end; (5) **`mind.view` is enforced nowhere** — `metaCognition.cjs` contains **no reference to a user at all**, so every `meta:*` handler is ungated and the experiential dataset, declared master-only tier 0 on `g.metacognition`, is readable by any renderer code today (same class as row 74). Gap 5 is pre-existing and worst; it also meant `self:describe` at `git.read` was *stricter than the data it summarises* — declared and enforced policy had drifted with nothing positioned to notice. **DECISION: `self.describe` = 3, with `experience` gated separately on `mind.view` = 0.** Gating the whole thing on `mind.view` is wrong: a non-master would see nothing about what Rāma can and cannot do, and **the limits are what an ordinary user needs most** — they say where the tool will not help, so hiding them produces exactly the false confidence Section 88 was written against. **The experience section is OMITTED, not zeroed**, for an account without `mind.view`: zeros would be a measured-looking claim that Rāma has done nothing, a worse lie than absence, so it reports `unmeasured` with reason "requires mind.view". **DECISION: `mind.view` gets enforced additively** on the `meta:*` READ paths; `meta:record` stays open because it is a write of Rāma's own telemetry called from every renderer service on every turn and gating it would silently stop the dataset being collected at all. **Fallback so this is additive not a removal:** a call with no `user` is treated as an internal main-process caller and permitted, since `selfAudit()` and the audit timer legitimately run with no session — only calls carrying a user are checked, which closes the renderer path that is the actual exposure. **DECISION: one answer, not two** — `self.capabilities` is rewritten to speak from `self:describe`, falling back to its old local computation when the IPC is unavailable (vault locked, web build, degraded install), staying tier 0 since it still calls no model, and now saying the limits out loud rather than only the strengths. **THE STRICT GATE, AND WHAT IT COST.** An earlier draft permitted `meta:*` calls carrying no user, reasoning that in-process callers have no session — **that makes the gate theatre**, since a renderer can simply omit the user and walk through. It is also unnecessary: an `ipcMain.handle` callback only ever runs for a renderer message, and in-process callers (`selfAudit()` from the audit timer, `experienceSummary()` from `selfModel`) call the **exports** directly and never reach a handler. So the gate is strict and **a missing user is a denial**. The cost was updating every renderer read, which surfaced that **`Introspect.jsx` had no user in scope at all** — same shape as the Section 81 defect, so `useUserStore()` was added to the component that uses it rather than a sibling; its loader now also **reports a denial instead of swallowing it**, since four `Promise.all` reads returning `ok:false` would render four empty panels reading as *"Rāma has done nothing"* rather than *"this account may not look"*. `findReflexCandidates()` gained a `user` param; it has **no callers** — exported and never invoked, consistent with row 47 being open. **VERIFIED: 93 assertions (+20).** A **withheld** experience section is distinct from an empty one — `recorded`/`reflexRate`/`failures` are `null` not `0`, all `measured:false`, the reason names `mind.view`, a policy withholding is **not** reported as a broken subsystem, and the underlying counts appear nowhere in the output. The **structural** tier-3 limit is still derived when counts are withheld. **No "cannot say whether it is improving" limit is invented from a denial** — that would manufacture a finding out of a permission. `self.describe` is in the matrix at 3, `mind.view` remains 0, `g.self-model` exists, owns `self:`, declares `self.describe`, is `core`, requires `g.metacognition`, and **`genome.verify()` resolves its engine**. Plus an invariant never previously asserted: **every gene declaring a capability uses one that exists in the matrix** — passes today, so no other gene carries a dangling cap. `npm run verify` **8 suites / 553 assertions**; audit clean at 124 bridge calls / 58 files; `vite build` succeeds (Settings 19.86 kB, Introspect 9.53 kB). **NOT VERIFIED BY EYE** — no shell launched, so the Self panel and the Introspect denial path rest on the suite, the audit and the build, not observation. |
 
+| 108 | The update button that did nothing, and the audit that could not see it | done | Section 90. Master, just before building: *"if I generate a build and run installer, will it have update option?"* Checking rather than inferring found **a dead button in a shipped surface**. `Settings.jsx` called `window.ipcRenderer?.invoke('updater:install-now')`, wrong **twice**: (1) that channel is registered with `ipcMain.on`, and Electron rejects an `invoke` against a `send`-only channel with "No handler registered" — with no `.catch` at the call site, so **clicking did nothing whatsoever, silently**; (2) it was **mislabelled** — the channel calls `quitAndInstall()`, installing an already-downloaded update, and never checked for one, so even wired correctly the label described an action the code does not perform. **Nothing in the toolchain could see it**: `node --check` passes since both lines are valid, the bridge check only asks whether the preload *exposes* the function, the scope check only resolves identifiers — the mismatch lives between two files and two different Electron APIs (same family as rows 99/100). **FIX:** `runUpdateCheck()` is now the single implementation and **returns a structured verdict** (`dev`/`unavailable`/`up-to-date`/`none-published`/`available`/`failed`) while still notifying; the tray item and the new `updater:check` handler both call it, so **they cannot drift into two different answers**. Correctness detail: `checkForUpdates()` resolves with the CURRENT version when nothing is newer, so a truthy `updateInfo` is not by itself an available update — the version is compared against `app.getVersion()`. Settings → About renders the verdict inline instead of relying on an OS notification, offers **Install and Restart** only in the `available` state, and points at the update channel when nothing is published, because that is the mechanism that actually works today. **DECISION: the audit learns the whole class** rather than taking a one-line fix that would leave the next mismatch equally invisible. `auditRenderer.cjs` gains a fourth check — every invoked channel needs an `ipcMain.handle`, every sent channel needs an `ipcMain.on`, both directions, since a `send` to a `handle`-only channel is silently dropped. **TWO FALSE-POSITIVE TRAPS, both hit during development:** (a) **dynamic registration** — `marketIntel.cjs` registers from a map in a loop so the channel is an OBJECT KEY never adjacent to `.handle(`, and the first version reported **26 channels as missing handlers, every one a false positive in working shipped code**; a file that registers dynamically now has every channel-shaped literal treated as registered, keeping the check conservative on the rule that a false positive erodes trust faster than a miss; (b) **apostrophes shift naive quote pairing** — scanning for `/'([^']+)'/` pairs quotes sequentially, so one apostrophe in a comment (`Rāma's`, `master's`, ubiquitous here) shifts every later pair and real literals are swallowed: measured on `marketIntel.cjs`, **126 "literals" found, ZERO channel-shaped, in a file that plainly contains `'market:forecast'`**. Fixed by anchoring both quotes and the content shape in one self-contained pattern. **VERIFIED:** `findIpcMismatches()` exported and pure per the row-99 precedent so the checker is tested, not merely run; `verifyAudit.cjs` **24 assertions (+9)** with **FIXTURE D** reproducing the real bug shape — caught and classified, message names the fix, mirror `send`-to-`handle` caught, channel registered nowhere caught, correct wiring silent, dynamic registration not falsely reported, apostrophe does not hide a registered channel. Live run **339 IPC channels matched, no mismatches**, so no other channel carries this defect. `npm run verify` **8 suites / 562 assertions**; `vite build` succeeds. **ANSWER TO MASTER:** yes there is an update option and it will now tell the truth, but it will say *"No releases published yet"* — `build.publish` points at GitHub Releases and none is tagged. The working path today is the update channel. Still unobserved end to end: 7-Zip is blocked here so no installer can be built. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -9179,3 +9181,91 @@ exported and never invoked, consistent with ledger row 47 being open.
 
 **Not verified by eye.** No shell was launched this session, so the Self panel and the Introspect
 denial path are covered by the suite, the renderer audit and the build — not by observation.
+
+---
+
+## SECTION 90 — "If I build and run the installer, will it have an update option?"
+
+Master's question, asked just before building. The answer had to be checked rather than inferred from
+config, and checking found a **dead button in a shipped surface**.
+
+### What an installed build actually offers
+
+| Surface | State | What master gets |
+|---|---|---|
+| Tray → 🔄 Check for Updates | worked | An honest verdict, including "No releases published yet" until a release is tagged. |
+| Settings → About → ↺ Check Updates | **BROKEN** | Nothing at all. Silently. |
+| GitSync → update channel | works | A real update, but only once a folder has been published into. Nothing is published on a fresh install. |
+
+### The defect
+
+`Settings.jsx` called `window.ipcRenderer?.invoke('updater:install-now')`. That is wrong twice:
+
+1. **`updater:install-now` is registered with `ipcMain.on`, not `ipcMain.handle`.** Electron rejects
+   an `invoke` against a `send`-only channel with *"No handler registered"*. The call site had no
+   `.catch`, so the rejection went nowhere and **clicking the button did nothing whatsoever**.
+2. **It was mislabelled.** The channel it targeted calls `quitAndInstall()` — it installs an
+   already-downloaded update. It never checked for one. So even had it been wired correctly, the
+   label described an action the code does not perform.
+
+Nothing in the toolchain could see this. `node --check` passes because both lines are valid. The
+renderer audit's bridge check only asks whether the preload *exposes* the function. The scope check
+only resolves identifiers. **The mismatch lives between two files and two different Electron APIs**,
+which is precisely the gap that keeps producing this class of defect (rows 99, 100).
+
+### The fix
+
+`runUpdateCheck()` becomes the single implementation and **returns a structured verdict** —
+`dev | unavailable | up-to-date | none-published | available | failed` — while still notifying. The
+tray item and the new `updater:check` handler both call it, so **they cannot drift into two different
+answers about the same question**. One correctness detail: `checkForUpdates()` resolves with the
+current version when nothing is newer, so a truthy `updateInfo` is not by itself an available
+update; the version is compared against `app.getVersion()`.
+
+Settings → About now renders the verdict inline rather than relying only on an OS notification, and
+offers **Install and Restart** only in the `available` state. When nothing is published it points at
+the update channel as the local alternative, because that is the mechanism that actually works today.
+
+### Decision: the audit learns this whole class
+
+A one-line fix would leave the next `invoke`/`on` mismatch equally invisible. `auditRenderer.cjs`
+gains a fourth check: **every channel the preload invokes must have an `ipcMain.handle`, and every
+channel it sends must have an `ipcMain.on`.** Both directions, because a `send` to a `handle`-only
+channel is silently dropped — the same confusion mirrored.
+
+**Two false-positive traps, both hit during development and both worth recording:**
+
+**1. Dynamic registration.** `marketIntel.cjs` builds a map and registers it in a loop, so the
+channel name is an **object key** and never sits beside `.handle(`. The first version of the check
+reported **26 channels as missing handlers — every one a false positive in working shipped code**. A
+file that registers dynamically now has every channel-shaped literal in it treated as registered.
+The check stays deliberately conservative, on the rule the globals allowlist already follows: a false
+positive blocks a commit over correct code and erodes trust faster than a miss.
+
+**2. Apostrophes shift naive quote pairing.** The obvious implementation — find every `'...'` and
+test its shape — pairs quotes sequentially, so one apostrophe in a comment (`Rāma's`, `master's`,
+`doesn't`, ubiquitous here) shifts every pair after it and real literals get swallowed by a span
+starting at the wrong quote. Measured on `marketIntel.cjs`: **126 "literals" found, zero of them
+channel-shaped, in a file that plainly contains `'market:forecast'`.** Fixed by anchoring both quotes
+and the content shape in one pattern, making each match self-contained.
+
+### Verified
+
+`findIpcMismatches()` is exported and pure, following the row-99 precedent, so the checker is tested
+rather than only run. `verifyAudit.cjs` **24 assertions (+9)** with **FIXTURE D** reproducing the real
+bug shape: the `invoke`-against-`on` case is caught and classified, the message names the fix, the
+mirror `send`-to-`handle` case is caught, a channel registered nowhere is caught, correct wiring stays
+silent, **dynamically registered channels are not falsely reported**, and **an apostrophe in a comment
+does not hide a registered channel**.
+
+Live run: **339 IPC channels matched, no mismatches**, so no other channel in the app has this defect.
+`npm run verify` **8 suites / 562 assertions**; `vite build` succeeds (Settings 21.03 kB).
+
+### The honest answer to the question
+
+**Yes, but it will not fetch you a new version yet.** Tray and Settings both give a truthful verdict,
+and that verdict will be *"No releases published yet"* — because `build.publish` points at GitHub
+Releases and none has been tagged. The mechanism that works today is the **update channel**: publish
+into the folder, and any install reads it, verifies the hash, and applies. And none of this has been
+observed end to end from here, because 7-Zip is blocked on this machine and no installer can be
+built.

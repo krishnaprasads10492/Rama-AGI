@@ -265,6 +265,118 @@ function auditUndefined(files) {
   return checked;
 }
 
+/**
+ * Does every channel the preload INVOKES have a `handle`, and every channel it SENDS have an `on`?
+ *
+ * THE BUG THIS EXISTS FOR (Section 90). Settings → About called
+ * `ipcRenderer.invoke('updater:install-now')`, but that channel is registered with `ipcMain.on`.
+ * Electron rejects an `invoke` against a `send`-only channel with "No handler registered", and the
+ * call site had no `.catch` — so the button did nothing at all, silently, in a shipped build.
+ *
+ * Nothing could see it. `node --check` passes, both lines are valid, the bridge check only asks
+ * whether the preload EXPOSES the function, and the scope check only resolves identifiers. The
+ * mismatch is between two files and two different Electron APIs.
+ *
+ * Only single-quoted literal channel names are considered; a templated channel is skipped rather
+ * than guessed at, on the same rule the globals allowlist follows — a false positive here would
+ * block a commit over working code.
+ */
+function findIpcMismatches(preloadCode, mainCodes = []) {
+  // Registered sets. The `ipcMain` object is often a parameter of a register(ipcMain) function, and
+  // sometimes a recorder wrapper, so match on the method rather than the receiver name.
+  const handled = new Set();
+  const listened = new Set();
+
+  // A quoted, channel-shaped literal, e.g. 'market:ohlcv'.
+  //
+  // NOTE ON WHY THIS IS ONE TIGHT PATTERN rather than "find every quoted string, then test its
+  // shape": scanning for /'([^']+)'/ pairs off the quotes sequentially, and a single apostrophe in
+  // a comment — "Rāma's", "master's", "doesn't", all over this codebase — shifts every pair after
+  // it by one, so real literals are swallowed by a span that starts at the wrong quote. Measured on
+  // marketIntel.cjs: 126 "literals" found, ZERO of them channel-shaped, while the file plainly
+  // contains 'market:forecast'. Anchoring both quotes and the content shape in one pattern makes
+  // the match self-contained and immune to that drift.
+  const CHANNEL_LITERAL = /'([a-z][\w-]*:[\w-]+)'/gi;
+
+  for (const code of mainCodes) {
+    for (const m of code.matchAll(/\.handle\(\s*'([^']+)'/g)) handled.add(m[1]);
+    for (const m of code.matchAll(/\.handleOnce\(\s*'([^']+)'/g)) handled.add(m[1]);
+    for (const m of code.matchAll(/\.on\(\s*'([^']+)'/g)) listened.add(m[1]);
+
+    // DYNAMIC REGISTRATION. `marketIntel.cjs` builds a map and registers it in a loop:
+    //   for (const [channel, fn] of Object.entries(readOnly)) ipcMain.handle(channel, ...)
+    // so the channel name is an OBJECT KEY and never sits next to `.handle(`. The first version of
+    // this check reported 26 of those as missing handlers — all false positives, in working
+    // shipped code. Since a false positive blocks a commit over correct code and erodes trust
+    // faster than a miss (the rule the globals allowlist already follows), a file that registers
+    // dynamically has every channel-shaped literal in it treated as registered.
+    //
+    // The check therefore stays conservative and still catches what it was built for: a channel
+    // registered with `.on` but invoked, and a channel registered nowhere at all.
+    if (/\.handle\(\s*[A-Za-z_$]/.test(code)) {
+      for (const m of code.matchAll(CHANNEL_LITERAL)) handled.add(m[1]);
+    }
+    if (/\.on\(\s*[A-Za-z_$]/.test(code)) {
+      for (const m of code.matchAll(CHANNEL_LITERAL)) listened.add(m[1]);
+    }
+  }
+
+  const problemsFound = [];
+  let checked = 0;
+
+  for (const m of preloadCode.matchAll(/ipcRenderer\.invoke\(\s*'([^']+)'/g)) {
+    checked += 1;
+    const ch = m[1];
+    if (handled.has(ch)) continue;
+    problemsFound.push({
+      channel: ch,
+      kind: listened.has(ch) ? 'invoke-on-listener' : 'invoke-unregistered',
+      msg: listened.has(ch)
+        ? `invoke without a handler: channel "${ch}" is registered with ipcMain.on, so invoke() `
+          + 'will be rejected — use ipcRenderer.send, or register it with ipcMain.handle'
+        : `invoke without a handler: channel "${ch}" has no ipcMain.handle anywhere in electron/`,
+    });
+  }
+
+  for (const m of preloadCode.matchAll(/ipcRenderer\.send\(\s*'([^']+)'/g)) {
+    checked += 1;
+    const ch = m[1];
+    // A `handle`-only channel still receives a `send`, but nothing ever replies and the caller
+    // cannot tell — worth reporting, since it is the same confusion in the other direction.
+    if (listened.has(ch)) continue;
+    problemsFound.push({
+      channel: ch,
+      kind: handled.has(ch) ? 'send-on-handler' : 'send-unregistered',
+      msg: handled.has(ch)
+        ? `send without a listener: channel "${ch}" is registered with ipcMain.handle only, so `
+          + 'send() is silently dropped — use ipcRenderer.invoke'
+        : `send without a listener: channel "${ch}" has no ipcMain.on anywhere in electron/`,
+    });
+  }
+
+  return { checked, problems: problemsFound };
+}
+
+/** Read the real files and report. The pure checker above is what the test drives. */
+function auditIpcParity() {
+  const ELECTRON = path.join(ROOT, 'electron');
+  const preloadPath = path.join(ELECTRON, 'preload.cjs');
+  if (!fs.existsSync(preloadPath)) return 0;
+
+  const codes = [];
+  (function collect(dir) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { if (e.name !== 'node_modules') collect(p); }
+      else if (e.name.endsWith('.cjs')) codes.push(fs.readFileSync(p, 'utf8'));
+    }
+  })(ELECTRON);
+
+  const res = findIpcMismatches(fs.readFileSync(preloadPath, 'utf8'), codes);
+  for (const p of res.problems) report(preloadPath, p.msg);
+  return res.checked;
+}
+
 // ─── Run ──────────────────────────────────────────────────────────────────────
 function main() {
   const files = walk(SRC);
@@ -274,13 +386,15 @@ function main() {
   const storeSites  = auditStores(files);
   const bridgeSites = auditBridge(files);
   const scopeFiles  = auditUndefined(files);
+  const ipcChannels = auditIpcParity();
 
   process.stdout.write(`  ${C.dim}store destructures checked${C.reset}  ${storeSites}\n`);
   process.stdout.write(`  ${C.dim}bridge calls checked${C.reset}        ${bridgeSites}\n`);
-  process.stdout.write(`  ${C.dim}files scope-checked${C.reset}         ${scopeFiles}\n\n`);
+  process.stdout.write(`  ${C.dim}files scope-checked${C.reset}         ${scopeFiles}\n`);
+  process.stdout.write(`  ${C.dim}ipc channels matched${C.reset}        ${ipcChannels}\n\n`);
 
   if (problems.length === 0) {
-    process.stdout.write(`  ${C.green}✓ stores, bridge calls and identifiers all resolve${C.reset}\n\n`);
+    process.stdout.write(`  ${C.green}✓ stores, bridge calls, identifiers and IPC channels all resolve${C.reset}\n\n`);
     process.exit(0);
   }
 
@@ -294,4 +408,4 @@ function main() {
 // Guarded so the checker can be imported and tested without the script exiting the process.
 if (require.main === module) main();
 
-module.exports = { findUndefinedIdentifiers, GLOBALS, walk };
+module.exports = { findUndefinedIdentifiers, findIpcMismatches, GLOBALS, walk };

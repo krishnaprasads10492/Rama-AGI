@@ -17,7 +17,7 @@
  * Run: node scripts/verifyAudit.cjs   (or npm run verify:audit)
  */
 
-const { findUndefinedIdentifiers } = require('./auditRenderer.cjs');
+const { findUndefinedIdentifiers, findIpcMismatches } = require('./auditRenderer.cjs');
 
 let pass = 0;
 let fail = 0;
@@ -184,6 +184,83 @@ const badParse = 'export default function ( { return <div>;';
 const parseRes = findUndefinedIdentifiers(badParse);
 check('an unparseable file reports a parse error rather than throwing',
   parseRes.length === 1 && !!parseRes[0].parseError, JSON.stringify(parseRes));
+
+// ─── FIXTURE D: invoke against a send-only channel (Section 90) ───────────────
+//
+// The real bug: Settings → About called `ipcRenderer.invoke('updater:install-now')`, a channel
+// registered with `ipcMain.on`. Electron rejects that with "No handler registered", the call site
+// had no `.catch`, so a shipped button did nothing at all and did so silently. `node --check`
+// passes, both lines are valid, and the bridge check only asks whether the preload exposes the
+// function — the mismatch lives between two files and two different Electron APIs.
+console.log('\n--- FIXTURE D: invoke/send against the wrong registration ---');
+{
+  const realBugPreload = `
+    updater: {
+      installNow: () => ipcRenderer.invoke('updater:install-now'),
+    },
+  `;
+  const realBugMain = `
+    ipcMain.on('updater:install-now', () => { updater.quitAndInstall(); });
+  `;
+  const r = findIpcMismatches(realBugPreload, [realBugMain]);
+
+  check('the real bug shape IS caught', r.problems.length === 1, JSON.stringify(r.problems));
+  check('it is identified as invoke-against-a-listener',
+    r.problems[0]?.kind === 'invoke-on-listener', r.problems[0]?.kind);
+  check('the message names the fix',
+    /ipcMain\.handle/.test(r.problems[0]?.msg || ''), r.problems[0]?.msg);
+
+  // The mirror image: send() to a handle-only channel is silently dropped.
+  const mirror = findIpcMismatches(
+    "check: () => ipcRenderer.send('updater:check'),",
+    ["ipcMain.handle('updater:check', async () => runUpdateCheck());"],
+  );
+  check('send() to a handle-only channel is caught',
+    mirror.problems.length === 1 && mirror.problems[0].kind === 'send-on-handler',
+    JSON.stringify(mirror.problems));
+
+  // Correct wiring must stay silent, both directions.
+  const good = findIpcMismatches(
+    "a: () => ipcRenderer.invoke('x:one'), b: () => ipcRenderer.send('x:two'),",
+    ["ipcMain.handle('x:one', () => {}); ipcMain.on('x:two', () => {});"],
+  );
+  check('correct wiring is not reported', good.problems.length === 0, JSON.stringify(good.problems));
+  check('both directions are counted as checked', good.checked === 2, String(good.checked));
+
+  // A channel registered nowhere is a different, also-real finding.
+  const missing = findIpcMismatches("a: () => ipcRenderer.invoke('x:ghost'),", ['']);
+  check('a channel registered nowhere is caught',
+    missing.problems.length === 1 && missing.problems[0].kind === 'invoke-unregistered',
+    JSON.stringify(missing.problems));
+
+  // DYNAMIC REGISTRATION must not be reported. marketIntel.cjs registers from a map in a loop, so
+  // the channel is an object key and never sits beside `.handle(`. The first version of this check
+  // reported 26 such channels as missing handlers — all false positives in working shipped code.
+  const dynamicMain = `
+    const readOnly = { 'market:ohlcv': ohlcv, 'market:forecast': forecast };
+    for (const [channel, fn] of Object.entries(readOnly)) {
+      ipcMain.handle(channel, async (_e, a) => fn(a));
+    }
+  `;
+  const dyn = findIpcMismatches(
+    "ohlcv: () => ipcRenderer.invoke('market:ohlcv'), f: () => ipcRenderer.invoke('market:forecast'),",
+    [dynamicMain],
+  );
+  check('dynamically registered channels are NOT falsely reported',
+    dyn.problems.length === 0, JSON.stringify(dyn.problems));
+
+  // And the reason the shape-anchored pattern exists: an apostrophe in a comment shifts every
+  // naive quote pair after it, which is why scanning for /'([^']+)'/ found 126 "literals" in
+  // marketIntel.cjs and zero channel-shaped ones while the file plainly contains 'market:forecast'.
+  const withApostrophe = `
+    // Rāma's own routes — master's list, doesn't include writes
+    const readOnly = { 'market:ohlcv': ohlcv };
+    for (const [channel, fn] of Object.entries(readOnly)) ipcMain.handle(channel, fn);
+  `;
+  const apos = findIpcMismatches("o: () => ipcRenderer.invoke('market:ohlcv'),", [withApostrophe]);
+  check('an apostrophe in a comment does not hide a registered channel',
+    apos.problems.length === 0, JSON.stringify(apos.problems));
+}
 
 console.log(`\n${'='.repeat(62)}`);
 console.log(`  ${pass} passed, ${fail} failed`);

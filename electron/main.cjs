@@ -146,30 +146,90 @@ function notifyUpdater(title, body) {
  * is "there is no newer version yet", which per master's release policy (Section 60)
  * is the expected state and not a fault.
  */
-function checkForUpdatesOnDemand() {
+/**
+ * The one implementation of "is there a newer version". Returns a structured answer AND notifies,
+ * so the tray item and the Settings button cannot drift into two different verdicts (Section 90).
+ *
+ * @returns {Promise<{ok:boolean, state:string, title:string, body:string, version?:string}>}
+ *   `state` is one of: `dev` | `unavailable` | `up-to-date` | `none-published` | `available` |
+ *   `failed`. The caller decides how to present it; this decides what is true.
+ */
+async function runUpdateCheck() {
   if (isDev) {
-    notifyUpdater('Not available in development', 'Updates apply to an installed build.');
-    return;
+    const r = {
+      ok: true, state: 'dev',
+      title: 'Not available in development',
+      body: 'Updates apply to an installed build.',
+    };
+    notifyUpdater(r.title, r.body);
+    return r;
   }
   if (!updater) {
-    notifyUpdater('Updater unavailable', 'Rāma could not load its update component in this run.');
-    return;
+    const r = {
+      ok: false, state: 'unavailable',
+      title: 'Updater unavailable',
+      body: 'Rāma could not load its update component in this run.',
+    };
+    notifyUpdater(r.title, r.body);
+    return r;
   }
-  Promise.resolve()
-    .then(() => updater.checkForUpdates())
-    .then((res) => {
-      if (!res?.updateInfo) notifyUpdater('Rāma is up to date', 'No newer version has been published.');
-    })
-    .catch((err) => {
-      const msg = String(err?.message ?? err);
-      if (/no published versions/i.test(msg)) {
-        console.warn('[Updater] no release published yet — expected until master tags one');
-        notifyUpdater('No releases published yet', 'This build is the current one. Nothing to update to.');
-        return;
-      }
-      console.error(`[Updater] check failed: ${msg}`);
-      notifyUpdater('Update check failed', msg);
-    });
+
+  try {
+    const res = await updater.checkForUpdates();
+    const version = res?.updateInfo?.version ?? null;
+
+    // `checkForUpdates` resolves with the CURRENT version when nothing is newer, so a truthy
+    // updateInfo is not by itself an available update — comparing against our own version is what
+    // distinguishes "found a release" from "found the release we already are".
+    if (version && version !== app.getVersion()) {
+      const r = {
+        ok: true, state: 'available', version,
+        title: `Version ${version} is available`,
+        body: 'It downloads in the background. You will be told when it is ready to install.',
+      };
+      notifyUpdater(r.title, r.body);
+      return r;
+    }
+
+    const r = {
+      ok: true, state: 'up-to-date',
+      title: 'Rāma is up to date',
+      body: `This build (${app.getVersion()}) is the newest published.`,
+    };
+    notifyUpdater(r.title, r.body);
+    return r;
+  } catch (err) {
+    const msg = String(err?.message ?? err);
+
+    // Expected until master tags a release (Section 60). Reporting it as an error would train
+    // master to ignore updater messages, so it is stated as information.
+    if (/no published versions/i.test(msg)) {
+      console.warn('[Updater] no release published yet — expected until master tags one');
+      const r = {
+        ok: true, state: 'none-published',
+        title: 'No releases published yet',
+        body: 'This build is the current one. Nothing to update to.',
+      };
+      notifyUpdater(r.title, r.body);
+      return r;
+    }
+
+    console.error(`[Updater] check failed: ${msg}`);
+    const r = { ok: false, state: 'failed', title: 'Update check failed', body: msg };
+    notifyUpdater(r.title, r.body);
+    return r;
+  }
+}
+
+/**
+ * Master asking for an update check by hand, from the tray.
+ *
+ * Kept separate from `setupAutoUpdater`'s automatic check because the answers differ:
+ * an automatic check that finds nothing should stay quiet, whereas master clicking
+ * the item deserves a reply either way.
+ */
+function checkForUpdatesOnDemand() {
+  runUpdateCheck().catch(() => { /* runUpdateCheck already reported */ });
 }
 
 function setupAutoUpdater() {
@@ -1271,6 +1331,17 @@ function createTray() {
 }
 
 // ─── IPC: Updater controls ───────────────────────────────────────────────────
+/**
+ * A real check that RETURNS its verdict (Section 90).
+ *
+ * Settings → About previously called `ipcRenderer.invoke('updater:install-now')`, which was wrong
+ * twice: `updater:install-now` is registered with `ipcMain.on`, and `invoke` against a `send`-only
+ * channel is rejected by Electron with "No handler registered" — with no `.catch` on the call, so
+ * the button did nothing at all, silently. And the label said "Check Updates" while the channel it
+ * targeted installs an already-downloaded update rather than checking for one.
+ */
+ipcMain.handle('updater:check', async () => runUpdateCheck());
+
 ipcMain.on('updater:install-now', () => {
   if (!updater) {
     // Previously this threw a ReferenceError, which crashGuard turns into a fatal

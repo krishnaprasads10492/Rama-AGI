@@ -179,6 +179,8 @@ export default function Settings() {
   const [passMsg,      setPassMsg]      = useState('');
   const [appVersion,   setAppVersion]   = useState('1.0.0');
   const [isPackaged,   setIsPackaged]   = useState(false);
+  const [updBusy,      setUpdBusy]      = useState(false);
+  const [updResult,    setUpdResult]    = useState(null);
 
   useEffect(() => {
     if (!isElectron) return;
@@ -198,6 +200,33 @@ export default function Settings() {
     const v = window.rama.appControl?.getVersion?.() || '1.0.0';
     setAppVersion(v);
     setIsPackaged(window.rama.appControl?.isPackaged?.() ?? false);
+  }, []);
+
+  /**
+   * Ask whether a newer version exists and SHOW the answer.
+   *
+   * The old handler was `window.ipcRenderer?.invoke('updater:install-now')` — `invoke` against a
+   * channel registered with `ipcMain.on`, which Electron rejects, with no `.catch`, so clicking did
+   * nothing at all and the button looked broken (Section 90).
+   */
+  const checkForUpdates = useCallback(async () => {
+    if (!isElectron || !window.rama.updater?.check) {
+      setUpdResult({
+        ok: false, state: 'unavailable',
+        title: 'Updates need the desktop app',
+        body: 'This build has no updater attached.',
+      });
+      return;
+    }
+    setUpdBusy(true);
+    try {
+      const res = await window.rama.updater.check();
+      setUpdResult(res || { ok: false, state: 'failed', title: 'No response', body: 'The updater did not reply.' });
+    } catch (err) {
+      setUpdResult({ ok: false, state: 'failed', title: 'Update check failed', body: err.message });
+    } finally {
+      setUpdBusy(false);
+    }
   }, []);
 
   const toggleAutoStart = async (val) => {
@@ -436,10 +465,40 @@ export default function Settings() {
                 ⎇ GitHub
               </button>
               <button className="btn btn-sm" style={{ flex: 1, justifyContent: 'center' }}
-                onClick={() => isElectron && window.ipcRenderer?.invoke('updater:install-now')}>
-                ↺ Check Updates
+                disabled={updBusy}
+                onClick={checkForUpdates}>
+                {updBusy ? 'Checking…' : '↺ Check for Updates'}
               </button>
             </div>
+
+            {/* The verdict is shown here rather than only as an OS notification. This button used
+                to call invoke() on a send-only channel, so it failed silently and looked broken. */}
+            {updResult && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                <div style={{
+                  fontSize: 12, fontWeight: 600,
+                  color: updResult.state === 'available' ? 'var(--green)'
+                    : updResult.ok ? 'var(--text)' : 'var(--amber)',
+                }}>
+                  {updResult.title}
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 3, lineHeight: 1.6 }}>
+                  {updResult.body}
+                </div>
+                {updResult.state === 'available' && (
+                  <button className="btn btn-sm" style={{ marginTop: 10 }}
+                    onClick={() => isElectron && window.rama.updater.installNow()}>
+                    ⇩ Install and Restart
+                  </button>
+                )}
+                {updResult.state === 'none-published' && (
+                  <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 6, lineHeight: 1.6 }}>
+                    This checks GitHub Releases. To update from a local folder instead, use the
+                    update channel in GitSync.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
