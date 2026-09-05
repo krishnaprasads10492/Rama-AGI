@@ -1756,6 +1756,8 @@ authenticated **Master session**, not merely an open store.
 
 | 106 | The self — what all those capabilities are capabilities *of* | done | Section 88. Master: *"Is there basic modal of RAMA, which will grow exponentially utilising the other model capabilities → ASI"*, then ***"without any 'self' how would all capabilities get a meaning"***. **The second question is a correct architectural finding.** Rāma's self-knowledge sat in five places that never composed — `cognition.capabilities()` knew which tiers can answer but no capability names, history or limits; `registry.allCapabilities()` knew names and required tiers but not whether any could actually run; `metaCognition` knew what was done but not what Rāma *is*; `genome`/`instanceManager` knew role and expressed genes; `loyaltyCore` knew who Rāma is for and is deliberately blind to the rest (I15/I16). Each true, none a self. **A capability list with no subject is a menu; the same list with a subject that also knows its own limits is an account of ability.** `electron/lib/selfModel.cjs` is that subject. **It is a self-MODEL, not selfhood** — a sourced description, claiming nothing it cannot show, because Section 36 declined five poster claims with no engineering referent and Section 51 needed a three-column audit to separate real from asserted. **Design rule: every field carries `{value, source, measured}` and anything unmeasurable is `null` with a `why` rather than estimated** — a self-description is exactly the artefact that rots into marketing, so no field is filled from a constant someone will forget to update. **DECISION: limits are DERIVED, not listed.** A hardcoded "known limitations" array is stale the day after it is written and then actively lies; every limit is inferred from what is absent *right now* — no local model, locked vault, stopped Python engine, no gate-passing forecaster, blocked 7-Zip, unsealed nucleus — so it removes itself when the situation changes, and each carries `what`/`why`/`source`/`fixable`. This is what makes the module useful rather than decorative: Rāma can answer *"what can't you do and why"*, the half of self-knowledge every capability inventory in this project had omitted. **DECISION: loyalty is attested, never read** — identity reports only "sealed and verified", never the matrix (I16); a live risk precisely because a "describe yourself" call is the most natural place for someone to later append "…and here is what I am loyal to". **KEY FINDING answering master's first question: tier 3 cannot function, and it is a data-shape defect not missing code.** `cognition.js` documents tier 3 as turning a repeatedly-escalated phrasing into a tier-0 reflex, but `record()` sends only `{action, ok, ms, tool, error}` and `metaCognition.recordOutcome()` persists those plus a shallow context bag — **the request text is never stored**, so `findReflexCandidates()` groups by `tool` (`cloud:gpt-4o`) and can report "200 escalations" while being structurally unable to identify *which phrasing* to convert. Row 47 says "not started"; it is worse — the data collected is the wrong shape for the stated purpose, so the loop is architecturally present and functionally hollow. Now surfaced as a derived limit so it is visible in the product, not buried in a ledger row. **The honest version of "grows exponentially" is distillation into its own capability**: a strong model solves something once, Rāma keeps it as a reflex and never pays again — cheaper, private, offline, working while the vault is locked; the metric already exists and is already computed (`reflexRate`, share of turns answered with no model), and today it cannot move because nothing feeds it. **A SECOND DEFECT, found by wiring the probes: tier 1 could never report as available.** Extracting the credential loop into `modelRouter.credentialStatus()` exposed that `'local'` was returned for every Ollama entry meaning "needs no credential" — and two callers read it in **opposite directions**: `cognition.js` tested `s === 'available'`, which `'local'` never equals, so **tier 1 could never report available** and Rāma said "no local model detected" with Ollama running and models pulled; `Models.jsx` treated `'local'` as available, so **every Ollama model rendered as ready on machines with no Ollama at all**. One string conflating *requires no key* with *is usable*, understating in the ladder and overstating in the UI. Now derived from `checkAvailable()`, which tests the models actually returned by the `localhost:11434` probe: `available` | `not-installed` | `missing-key`. Nothing removed — `'available'`/`'missing-key'` keep their meanings, `'local'` stops being produced; `Models.jsx` drops the stale branch and gains a **"not pulled"** hint since the corrected state greys the row and a local model has no key to add. **This is the exact failure mode the section exists to prevent: a capability present, reported absent, with nothing able to notice the disagreement.** **SURFACED at Settings → Self**, which measures on open, prints the source under every row, and **puts "what I cannot do" ABOVE "what I can do"** — a list of only strengths tells master nothing about where his own judgement is still required; unmeasured renders as italic "not measured", never a blank or a zero. **VERIFIED: `scripts/verifySelfModel.cjs`, 73 assertions (`npm run verify:self`), mostly NEGATIVE** — the dangerous failure for a "describe yourself" call is not a crash but quietly reporting capability that is not there, because a crash is visible and a flattering lie is not. Asserts: absent probe → `null` + `measured:false` + `why`; probes that throw / return `undefined` / are not functions all degrade; only probes that answered are cited; **a healthy install invents no limits**; **a limit disappears once its cause goes away** (the property that makes derivation better than a list); partial values degrade rather than fabricate (`{reflex:{skills:null}}` must not read as a measured zero; genome shows `30 genes` not `? of 30`); and **a probe handing over a fake loyalty matrix must not leak it** — the whole serialised output is searched and `matrix`/`loyaltyText` must not survive as field names, which is what stops a future change turning this into the accessor I16 forbids. `npm run verify` now **8 suites / 533 assertions**; `node --check` clean on 5 touched `.cjs`; `vite build` succeeds, Settings 19.55 kB. **NOT TAKEN, needs master's decision:** closing the tier-3 loop requires recording request text, so the experiential dataset would begin holding what master actually typed — a privacy consequence master must accept explicitly. No code assumes it, and `experienceSummary()` reports `promptTextRecorded` by **measuring** whether any record carries text, so accepting it makes the limit vanish on its own. |
 
+| 107 | The self-model as a capability of its own | done | Section 89. Master: *"what about self model capabilities?"* — which exposed that **the module built to give Rāma's capabilities a subject was not itself a capability**. Five gaps, each verified against code: (1) **no `self.*` in `shared/capabilities.json`**, so the module that counts capabilities does not count itself; (2) **no gene** for the `self:` channel while every other engine has one, so it sits outside `hashGenome()` and `verify()` and no role expresses it, in a design whose whole claim is that the genome is whole in every instance; (3) **the gate was borrowed and semantically wrong** — `git.read`, when reading Rāma's own abilities is not reading a git repo and the existing convention for Rāma's own mind is `mind.view`; (4) **two answers to the same question** — `cognition.js`'s `self.capabilities`/`self.cognition` reflexes answer from the old partial sources and never call `selfModel`, so chat and Settings→Self can drift, the exact hazard Section 88 existed to end; (5) **`mind.view` is enforced nowhere** — `metaCognition.cjs` contains **no reference to a user at all**, so every `meta:*` handler is ungated and the experiential dataset, declared master-only tier 0 on `g.metacognition`, is readable by any renderer code today (same class as row 74). Gap 5 is pre-existing and worst; it also meant `self:describe` at `git.read` was *stricter than the data it summarises* — declared and enforced policy had drifted with nothing positioned to notice. **DECISION: `self.describe` = 3, with `experience` gated separately on `mind.view` = 0.** Gating the whole thing on `mind.view` is wrong: a non-master would see nothing about what Rāma can and cannot do, and **the limits are what an ordinary user needs most** — they say where the tool will not help, so hiding them produces exactly the false confidence Section 88 was written against. **The experience section is OMITTED, not zeroed**, for an account without `mind.view`: zeros would be a measured-looking claim that Rāma has done nothing, a worse lie than absence, so it reports `unmeasured` with reason "requires mind.view". **DECISION: `mind.view` gets enforced additively** on the `meta:*` READ paths; `meta:record` stays open because it is a write of Rāma's own telemetry called from every renderer service on every turn and gating it would silently stop the dataset being collected at all. **Fallback so this is additive not a removal:** a call with no `user` is treated as an internal main-process caller and permitted, since `selfAudit()` and the audit timer legitimately run with no session — only calls carrying a user are checked, which closes the renderer path that is the actual exposure. **DECISION: one answer, not two** — `self.capabilities` is rewritten to speak from `self:describe`, falling back to its old local computation when the IPC is unavailable (vault locked, web build, degraded install), staying tier 0 since it still calls no model, and now saying the limits out loud rather than only the strengths. **THE STRICT GATE, AND WHAT IT COST.** An earlier draft permitted `meta:*` calls carrying no user, reasoning that in-process callers have no session — **that makes the gate theatre**, since a renderer can simply omit the user and walk through. It is also unnecessary: an `ipcMain.handle` callback only ever runs for a renderer message, and in-process callers (`selfAudit()` from the audit timer, `experienceSummary()` from `selfModel`) call the **exports** directly and never reach a handler. So the gate is strict and **a missing user is a denial**. The cost was updating every renderer read, which surfaced that **`Introspect.jsx` had no user in scope at all** — same shape as the Section 81 defect, so `useUserStore()` was added to the component that uses it rather than a sibling; its loader now also **reports a denial instead of swallowing it**, since four `Promise.all` reads returning `ok:false` would render four empty panels reading as *"Rāma has done nothing"* rather than *"this account may not look"*. `findReflexCandidates()` gained a `user` param; it has **no callers** — exported and never invoked, consistent with row 47 being open. **VERIFIED: 93 assertions (+20).** A **withheld** experience section is distinct from an empty one — `recorded`/`reflexRate`/`failures` are `null` not `0`, all `measured:false`, the reason names `mind.view`, a policy withholding is **not** reported as a broken subsystem, and the underlying counts appear nowhere in the output. The **structural** tier-3 limit is still derived when counts are withheld. **No "cannot say whether it is improving" limit is invented from a denial** — that would manufacture a finding out of a permission. `self.describe` is in the matrix at 3, `mind.view` remains 0, `g.self-model` exists, owns `self:`, declares `self.describe`, is `core`, requires `g.metacognition`, and **`genome.verify()` resolves its engine**. Plus an invariant never previously asserted: **every gene declaring a capability uses one that exists in the matrix** — passes today, so no other gene carries a dangling cap. `npm run verify` **8 suites / 553 assertions**; audit clean at 124 bridge calls / 58 files; `vite build` succeeds (Settings 19.86 kB, Introspect 9.53 kB). **NOT VERIFIED BY EYE** — no shell launched, so the Self panel and the Introspect denial path rest on the suite, the audit and the build, not observation. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -9066,3 +9068,114 @@ decision to make, not mine to assume. `metaCognition.experienceSummary()` report
 `promptTextRecorded` by **measuring** whether any record actually carries the text — so if master
 accepts it, the derived limit disappears on its own rather than needing anyone to remember to delete
 a constant.
+
+---
+
+## SECTION 89 — The self-model as a capability of its own
+
+Master, immediately after Section 88: *"what about self model capabilities?"*
+
+The question exposes an inconsistency in what Section 88 shipped. **The module built to give Rāma's
+capabilities a subject was not itself a capability.** Five gaps, each verified against the code
+rather than inferred:
+
+| # | Gap | Evidence | Consequence |
+|---|---|---|---|
+| 1 | No `self.*` entry in `shared/capabilities.json` | no match for `self.` in `shared/*.json` | The module that **counts** capabilities does not count itself. `gatedCapabilities` under-reports by one. |
+| 2 | No gene in the genome | no `g.self*` for the `self:` channel; every other engine has one (`g.metacognition`→`meta:`, `g.git`→`git:`) | `self:` is outside `hashGenome()` and outside `verify()`, and no role expresses it. The genome is supposed to be **whole in every instance**; this sits outside it. |
+| 3 | The gate is borrowed and semantically wrong | `self:describe` used `git.read` | Reading Rāma's own abilities is not reading a git repository. The existing convention for Rāma's own mind is `mind.view`. |
+| 4 | Two answers to the same question | `cognition.js` skills `self.capabilities` and `self.cognition` answer from the old partial sources and never call `selfModel` | Chat and voice give one answer, Settings→Self gives another, **free to drift** — the exact hazard Section 88 existed to end. |
+| 5 | `mind.view` is enforced nowhere | `metaCognition.cjs` contains **no reference to a user at all**; every `meta:*` handler is ungated | The experiential dataset is declared **master-only (tier 0)** on `g.metacognition` and is readable by any renderer code today. Same class as ledger row 74. |
+
+Gap 5 is pre-existing and the most serious. It also means `self:describe` at `git.read` was *stricter
+than the data it summarises* — the declared policy and the enforced policy had drifted apart, and
+nothing in the system was positioned to notice.
+
+### Decision: a new `self.describe` at tier 3, and `experience` gated separately
+
+The obvious fix — gate everything on `mind.view` — is wrong. `mind.view` is tier 0, so a non-master
+account would see **nothing** about what Rāma can and cannot do, and the limits are precisely what an
+ordinary user needs most: they say where the tool will not help and where the user's own judgement is
+still required. Hiding those produces exactly the false confidence Section 88 was written against.
+
+So the self-description is split by sensitivity, because it was never one thing:
+
+- **`self.describe` = 3** (any signed-in account) — identity, ability, limits, summary. What this
+  program is and what it will not do for you.
+- **`experience` requires `mind.view` = 0** (master) — the recorded action counts, failure counts and
+  reflex rate ARE the experiential dataset, and existing policy makes that master-only.
+
+**The section is OMITTED, not zeroed**, for an account without `mind.view`. Returning zeros would be
+a measured-looking claim that Rāma has done nothing, which is a lie of a worse kind than absence —
+and the honesty rule already says unmeasurable means absent. The self-model therefore reports it as
+`unmeasured` with the reason *"requires mind.view"*, which is both true and legible.
+
+### Decision: `mind.view` gets enforced, additively
+
+`metaCognition`'s handlers begin accepting and checking a user for the READ paths
+(`meta:summary`, `meta:outcomes`, `meta:vectors`, `meta:profiles`, `meta:profile`, `meta:audits`,
+`meta:regressions`). `meta:record` stays open: it is a write of Rāma's own telemetry called from
+every renderer service on every turn, and gating it would silently stop the dataset from being
+collected at all — a far worse outcome than an over-permissive write of data the caller itself
+generated.
+
+**Fallback, so this is additive rather than a capability removal (project convention):** a call with
+no `user` is treated as an internal main-process caller and permitted, because `selfAudit()` and the
+audit timer legitimately run with no session. Only calls that DO carry a user are checked against
+`mind.view`. This closes the renderer path — which is the actual exposure — without breaking the
+in-process callers.
+
+### Decision: one answer, not two
+
+`cognition.js`'s `self.capabilities` reflex is rewritten to call `self:describe` and speak from the
+composed model, falling back to its old local computation when the IPC is unavailable (vault locked,
+web build, degraded install). It stays **tier 0** — it still calls no model — but it now reads from
+the single source, and it says the limits out loud rather than only the strengths.
+
+This is the point of the whole exercise. Master asked how capabilities get meaning without a self;
+the answer is incomplete for as long as asking Rāma out loud produces a different account than
+looking at the panel.
+
+### What the strict gate cost, and why it is still right
+
+An earlier draft of the `meta:*` gate permitted calls carrying no user, on the reasoning that
+in-process callers have no session. **That makes the gate theatre** — a renderer can simply omit the
+user and walk through. It is also unnecessary: an `ipcMain.handle` callback only ever runs for a
+renderer message, and the in-process callers (`selfAudit()` from the audit timer,
+`experienceSummary()` from `selfModel`) call the **exports** directly and never reach a handler. So
+the gate is strict and **a missing user is a denial**.
+
+The cost is that every renderer read had to be updated, which surfaced that **`Introspect.jsx` had no
+user in scope at all** — the same shape as the Section 81 defect, so `useUserStore()` was added to
+the component that actually uses it rather than a sibling. Its loader now also **reports a denial
+instead of swallowing it**: four `Promise.all` reads returning `ok:false` would otherwise render four
+empty panels, which reads as *"Rāma has done nothing"* rather than *"this account may not look"*.
+
+`findReflexCandidates()` gained a `user` parameter for the same reason. It has **no callers** — it is
+exported and never invoked, consistent with ledger row 47 being open.
+
+### Verified
+
+`verifySelfModel.cjs` **93 assertions** (+20). The new ones cover the two decisions above:
+
+- A **withheld** experience section is distinct from an empty one: `recorded`, `reflexRate` and
+  `failures` are `null` rather than `0`, every field is `measured:false`, the reason names
+  `mind.view`, and a policy withholding is **not** reported as a broken subsystem. The underlying
+  counts must not appear anywhere in the withheld output.
+- The **structural** tier-3 limit is still derived when the counts are withheld, because whether the
+  request text is stored is a property of the code, not of master's activity.
+- **No "cannot say whether it is improving" limit is invented from a denial** — claiming nothing has
+  been recorded on the strength of not being allowed to look would manufacture a finding out of a
+  permission.
+- `self.describe` is in the matrix at **3**, `mind.view` remains **0**, `g.self-model` exists, owns
+  `self:`, declares `self.describe`, is `core`, requires `g.metacognition`, and
+  **`genome.verify()` resolves its engine on this machine**.
+- And a general invariant that had never been asserted: **every gene declaring a capability uses one
+  that exists in the matrix.** It passes today, so no other gene carries a dangling cap.
+
+`npm run verify` **8 suites / 553 assertions**; audit clean at 124 bridge calls across 58 files;
+`node --check` clean on all touched `.cjs`; `vite build` succeeds (Settings 19.86 kB, Introspect
+9.53 kB).
+
+**Not verified by eye.** No shell was launched this session, so the Self panel and the Introspect
+denial path are covered by the suite, the renderer audit and the build — not by observation.

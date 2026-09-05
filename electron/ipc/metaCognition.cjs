@@ -337,15 +337,63 @@ function register(ipcMain) {
     if (auditTimer.unref) auditTimer.unref();
   }
 
+  /**
+   * `mind.view` on the READ paths (Section 89).
+   *
+   * The genome has declared `cap: 'mind.view'` on `g.metacognition` and `g.experience` since the
+   * holonic layer was built, and NOTHING ENFORCED IT — this module had no notion of a user at all,
+   * so the experiential dataset, declared master-only at tier 0, was readable by any renderer code.
+   * Declared policy and enforced policy had drifted apart with nothing positioned to notice.
+   *
+   * THE GATE IS STRICT, AND A MISSING USER IS A DENIAL. An earlier draft permitted calls with no
+   * user, reasoning that in-process callers have no session — but that makes the gate theatre,
+   * because a renderer can simply omit the user and walk through. It is also unnecessary: an
+   * `ipcMain.handle` callback only ever runs for a renderer message. In-process callers
+   * (`selfAudit()` from the audit timer, `experienceSummary()` from `selfModel`) call the EXPORTS
+   * directly and never touch these handlers, so nothing legitimate is broken by requiring a user.
+   *
+   * This restores the policy the genome has declared since the holonic layer was built. It is not a
+   * capability removal — for master, tier 0, nothing changes.
+   */
+  const readGate = (arg) => {
+    const user = arg && typeof arg === 'object' ? arg.user : null;
+    const capability = require('../lib/capability.cjs');
+    if (!user) return { ok: false, error: 'Access denied: "mind.view" required' };
+    return capability.deny(user, 'mind.view');
+  };
+
+  // `meta:record` stays OPEN deliberately. It is a write of Rāma's own telemetry, called from every
+  // renderer service on every turn; gating it would silently stop the dataset from being collected
+  // at all, which is far worse than an over-permissive write of data the caller itself generated.
   ipcMain.handle('meta:record',   async (_e, rec)   => ({ ok: true, data: recordOutcome(rec || {}) }));
-  ipcMain.handle('meta:audit',    async ()          => ({ ok: true, data: selfAudit() }));
-  ipcMain.handle('meta:audits',   async (_e, limit) => ({ ok: true, data: audits.slice(0, limit || 20) }));
-  ipcMain.handle('meta:vectors',  async ()          => ({ ok: true, data: optimizationVectors() }));
-  ipcMain.handle('meta:profiles', async ()          => ({ ok: true, data: allProfiles() }));
-  ipcMain.handle('meta:profile',  async (_e, action)=> ({ ok: true, data: profileFor(action) }));
-  ipcMain.handle('meta:regressions', async (_e, limit) => ({ ok: true, data: regressions.slice(0, limit || 50) }));
+
+  ipcMain.handle('meta:audit',    async (_e, opts)  => {
+    const denied = readGate(opts); if (denied) return denied;
+    return { ok: true, data: selfAudit() };
+  });
+  ipcMain.handle('meta:audits',   async (_e, limit, opts) => {
+    const denied = readGate(opts); if (denied) return denied;
+    return { ok: true, data: audits.slice(0, limit || 20) };
+  });
+  ipcMain.handle('meta:vectors',  async (_e, opts)  => {
+    const denied = readGate(opts); if (denied) return denied;
+    return { ok: true, data: optimizationVectors() };
+  });
+  ipcMain.handle('meta:profiles', async (_e, opts)  => {
+    const denied = readGate(opts); if (denied) return denied;
+    return { ok: true, data: allProfiles() };
+  });
+  ipcMain.handle('meta:profile',  async (_e, action, opts) => {
+    const denied = readGate(opts); if (denied) return denied;
+    return { ok: true, data: profileFor(action) };
+  });
+  ipcMain.handle('meta:regressions', async (_e, limit, opts) => {
+    const denied = readGate(opts); if (denied) return denied;
+    return { ok: true, data: regressions.slice(0, limit || 50) };
+  });
 
   ipcMain.handle('meta:outcomes', async (_e, filter) => {
+    const denied = readGate(filter); if (denied) return denied;
     const { action = null, limit = 100, onlyFailures = false } = filter || {};
     const data = outcomes
       .filter(o => (!action || o.action === action) && (!onlyFailures || !o.ok))
@@ -353,19 +401,25 @@ function register(ipcMain) {
     return { ok: true, data };
   });
 
-  ipcMain.handle('meta:summary', async () => ({
-    ok: true,
-    data: {
-      recorded:    outcomes.length,
-      actions:     profiles.size,
-      audits:      audits.length,
-      regressions: regressions.length,
-      lastAudit:   audits[0] ?? null,
-      topVectors:  optimizationVectors().slice(0, 3),
-    },
-  }));
+  ipcMain.handle('meta:summary', async (_e, opts) => {
+    const denied = readGate(opts); if (denied) return denied;
+    return {
+      ok: true,
+      data: {
+        recorded:    outcomes.length,
+        actions:     profiles.size,
+        audits:      audits.length,
+        regressions: regressions.length,
+        lastAudit:   audits[0] ?? null,
+        topVectors:  optimizationVectors().slice(0, 3),
+      },
+    };
+  });
 
-  ipcMain.handle('meta:reset-baseline', async () => {
+  // A write of Rāma's own baseline, master-only: it changes what every later regression is measured
+  // against, so an unprivileged caller could hide a regression by resetting the yardstick.
+  ipcMain.handle('meta:reset-baseline', async (_e, opts) => {
+    const denied = readGate(opts); if (denied) return denied;
     baseline = snapshotProfiles();
     return { ok: true, actions: Object.keys(baseline).length };
   });

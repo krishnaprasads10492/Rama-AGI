@@ -105,6 +105,8 @@
     "mind.edit": 0,
     "mind.proactive": 0,
 
+    "self.describe": 3,
+
     "apps.view": 2,
     "apps.execute-safe": 2,
     "apps.execute-all": 0,

@@ -232,6 +232,46 @@ const hasLimit = (m, frag) => m.limits.some(l => l.what.includes(frag) || l.why.
       !hasLimit(m, 'installer'), whats(m));
   }
 
+  // ── 4c. A withheld section is not an empty one (Section 89) ────────────────
+  // `experience` summarises the experiential dataset, which policy makes master-only. An account
+  // without `mind.view` must see it OMITTED, never zeroed — zeros are a measured-looking claim that
+  // Rāma has done nothing, which is a worse falsehood than absence.
+  console.log('\n  a withheld section is distinct from an empty one');
+  {
+    const probes = healthyProbes();
+    probes.experience = () => ({
+      restricted: true,
+      reason: 'requires "mind.view" — the activity record is master-only',
+      promptTextRecorded: false,
+    });
+    const m = await selfModel.describe(probes);
+
+    check('the experience section is flagged restricted', m.experience.restricted === true);
+    check('recorded is null, not 0', m.experience.recorded.value === null,
+      JSON.stringify(m.experience.recorded));
+    check('reflexRate is null, not 0', m.experience.reflexRate.value === null);
+    check('failures is null, not 0', m.experience.failures.value === null);
+    check('every withheld field is measured:false',
+      Object.values(m.experience)
+        .filter(v => v && typeof v === 'object')
+        .every(v => v.measured === false));
+    check('the reason names the capability required',
+      /mind\.view/.test(m.experience.recorded.why || ''), m.experience.recorded.why);
+    check('a policy withholding is NOT reported as a broken subsystem',
+      !/could not be read|unavailable/i.test(m.experience.recorded.why || ''),
+      m.experience.recorded.why);
+
+    // The counts are master's activity; whether the text is recorded is a property of the CODE.
+    check('the structural tier-3 limit is still derived when counts are withheld',
+      hasLimit(m, 'permanent free skill'), whats(m));
+    // Claiming "nothing has been recorded" on the strength of not being allowed to look would be
+    // inventing a finding out of a permission.
+    check('no "cannot say whether it is improving" limit is invented from a denial',
+      !hasLimit(m, 'whether it is improving'), whats(m));
+    check('the withheld state does not leak the underlying counts',
+      !JSON.stringify(m.experience).includes('400'));
+  }
+
   // ── 5. Limits are DERIVED — they must disappear on their own ───────────────
   console.log('\n  a limit removes itself when the cause goes away');
   {
@@ -311,6 +351,45 @@ const hasLimit = (m, frag) => m.limits.some(l => l.what.includes(frag) || l.why.
       typeof JSON.parse(JSON.stringify(m)) === 'object');
     check('fact() marks a value measured', selfModel.fact(1, 's').measured === true);
     check('unmeasured() never carries a value', selfModel.unmeasured('s').value === null);
+  }
+
+  // ── 8. The self-model is itself a registered capability (Section 89) ───────
+  // Master's question: "what about self model capabilities?" The module that counts capabilities
+  // was not one, so it did not count itself and sat outside the genome entirely.
+  console.log('\n  the self-model is a capability and a gene');
+  {
+    const caps = require('../shared/capabilities.json');
+    const matrix = caps.capabilities || caps.MATRIX || caps;
+
+    check('self.describe exists in the capability matrix',
+      Object.prototype.hasOwnProperty.call(matrix, 'self.describe'));
+    check('self.describe is tier 3 — any signed-in account, so limits are never hidden',
+      matrix['self.describe'] === 3, String(matrix['self.describe']));
+    check('mind.view remains tier 0 — the activity record stays master-only',
+      matrix['mind.view'] === 0, String(matrix['mind.view']));
+
+    const genome = require('../electron/genome.cjs');
+    const gene = genome.GENES.find(g => g.id === 'g.self-model');
+
+    check('a gene exists for the self-model', !!gene);
+    check('the gene owns the self: channel',
+      !!gene && gene.channels.includes('self:'), JSON.stringify(gene?.channels));
+    check('the gene declares self.describe as its capability',
+      !!gene && gene.cap === 'self.describe', gene?.cap);
+    check('the gene is core — an instance that cannot describe itself cannot report degradation',
+      !!gene && gene.core === true);
+    check('the gene depends on metacognition, which supplies the experience summary',
+      !!gene && gene.requires.includes('g.metacognition'), JSON.stringify(gene?.requires));
+
+    // verify() resolves each gene's engine on this machine — the manifest is a claim, this measures.
+    const v = genome.verify();
+    const row = v.genes ? v.genes.find(g => g.id === 'g.self-model') : null;
+    check('genome.verify() resolves the self-model engine',
+      !!row && row.live === true, JSON.stringify(row));
+    check('every gene declaring a cap uses one that exists in the matrix',
+      genome.GENES.every(g => !g.cap || Object.prototype.hasOwnProperty.call(matrix, g.cap)),
+      genome.GENES.filter(g => g.cap && !Object.prototype.hasOwnProperty.call(matrix, g.cap))
+        .map(g => `${g.id}→${g.cap}`).join(', '));
   }
 
   console.log(`\n  ${pass} passed, ${fail} failed\n`);

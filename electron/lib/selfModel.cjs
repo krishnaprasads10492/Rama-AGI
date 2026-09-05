@@ -172,7 +172,16 @@ async function describe(probes = DEFAULT_PROBES) {
   const exp = await settle(p.experience);   // { recorded, reflexServed, escalated, reflexRate, failures }
   if (exp) note('experiential dataset');
 
-  const experience = exp
+  // A probe may answer `{restricted:true, reason}` — that is a DIFFERENT state from being
+  // unavailable, and conflating them would misreport a policy decision as a broken subsystem
+  // (Section 89). Either way the section is OMITTED rather than zeroed: zeros would be a
+  // measured-looking claim that Rāma has done nothing, which is a worse lie than absence.
+  const withheld = exp && exp.restricted === true;
+  const expReason = withheld
+    ? (exp.reason || 'restricted')
+    : 'the experiential dataset could not be read';
+
+  const experience = (exp && !withheld)
     ? {
       recorded: fact(exp.recorded ?? 0, 'experiential dataset'),
       answeredWithoutAModel: fact(exp.reflexServed ?? 0, 'experiential dataset'),
@@ -181,10 +190,15 @@ async function describe(probes = DEFAULT_PROBES) {
       reflexRate: fact(exp.reflexRate ?? null, 'experiential dataset',
         exp.reflexRate != null),
       failures: fact(exp.failures ?? null, 'experiential dataset', exp.failures != null),
+      restricted: false,
     }
     : {
-      recorded: unmeasured('experiential dataset', 'metaCognition unavailable'),
-      reflexRate: unmeasured('experiential dataset', 'metaCognition unavailable'),
+      recorded: unmeasured('experiential dataset', expReason),
+      answeredWithoutAModel: unmeasured('experiential dataset', expReason),
+      escalatedToAModel: unmeasured('experiential dataset', expReason),
+      reflexRate: unmeasured('experiential dataset', expReason),
+      failures: unmeasured('experiential dataset', expReason),
+      restricted: !!withheld,
     };
 
   // ── Limits, DERIVED ───────────────────────────────────────────────────────
@@ -218,6 +232,11 @@ async function describe(probes = DEFAULT_PROBES) {
       'exogenous data is the untested lever — news tone and derivatives, not another model type');
   }
   // THE LIMIT THAT ANSWERS MASTER'S EARLIER QUESTION ABOUT GROWTH.
+  //
+  // Derived even when the experience SECTION is withheld: whether the request text is recorded is a
+  // structural property of the code, not a fact about master's activity. Withholding the counts
+  // protects master's record; withholding this would just hide a product limitation from the person
+  // most affected by it.
   if (exp && exp.promptTextRecorded === false) {
     limit('cannot turn a repeated request into a permanent free skill',
       'the experiential dataset records which TOOL answered but never what was ASKED, so tier 3 '
@@ -237,7 +256,10 @@ async function describe(probes = DEFAULT_PROBES) {
       'identity and loyalty are not sealed, so nothing below depends on a verified core',
       'nucleus sealer');
   }
-  if (!exp || exp.recorded === 0) {
+  // Only when the record was actually READ and was empty. A withheld section says nothing about
+  // whether a baseline exists, and claiming "nothing has been recorded" on the strength of not
+  // being allowed to look would be inventing a finding out of a permission.
+  if (!withheld && (!exp || exp.recorded === 0)) {
     limit('cannot say whether it is improving',
       'nothing has been recorded yet, so there is no baseline to compare against',
       'experiential dataset',

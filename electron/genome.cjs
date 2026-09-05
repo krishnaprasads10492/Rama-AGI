@@ -100,6 +100,11 @@ const GENES = [
   // ── Self-evolution ────────────────────────────────────────────────────────
   { id: 'g.self-care',      domain: DOMAINS.SELF_EVOLUTION, label: 'Health & Auto-Heal',    engine: 'ipc/selfCare.cjs',         channels: ['selfcare:'],  cap: 'os.metrics-read',      core: true,  requires: [] },
   { id: 'g.evolution',      domain: DOMAINS.SELF_EVOLUTION, label: 'Public-Repo Evolution', engine: 'ipc/evolutionEngine.cjs',  channels: ['evolution:'], cap: 'self-modify.apply',    core: false, requires: ['g.approval', 'g.browser'] },
+  // Section 89: the self-description had no gene, so the `self:` channel sat outside hashGenome()
+  // and verify() in an architecture whose central claim is that the genome is whole in every
+  // instance. `core: true` because knowing what you are and are not able to do is not a role
+  // speciality — an instance that cannot answer it cannot report its own degradation either.
+  { id: 'g.self-model',     domain: DOMAINS.SELF_EVOLUTION, label: 'Self-Model',            engine: 'lib/selfModel.cjs',        channels: ['self:'],      cap: 'self.describe',        core: true,  requires: ['g.metacognition'] },
 ];
 
 // ─── Instance role → expressed genes ──────────────────────────────────────────

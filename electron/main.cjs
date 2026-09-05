@@ -453,9 +453,17 @@ function clampZoom(v) {
  * five modules that never composed; this composes them, from real probes, and reports its own
  * LIMITS alongside its abilities.
  *
- * GATE: `git.read` (tier 3 — any signed-in account). Describing what Rāma can and cannot do is not
- * privileged, and gating it higher would be the wrong shape: a user who cannot see the limits will
- * instead assume capability that is not there. Nothing here mutates anything.
+ * GATE: `self.describe` (tier 3 — any signed-in account) for identity, ability and limits, plus a
+ * SEPARATE `mind.view` (tier 0 — master) check for the experience section (Section 89).
+ *
+ * Why not gate the whole thing on `mind.view`: a non-master would then see nothing about what Rāma
+ * can and cannot do, and THE LIMITS ARE WHAT AN ORDINARY USER NEEDS MOST — they say where the tool
+ * will not help and where the user's own judgement is still required. Hiding them produces exactly
+ * the false confidence this whole feature was written against.
+ *
+ * Why the experience section is separate: the recorded counts, failures and reflex rate ARE the
+ * experiential dataset, which existing policy makes master-only. It is OMITTED rather than zeroed —
+ * zeros would be a measured-looking claim that Rāma has done nothing.
  *
  * Every probe is wrapped so an absent or broken subsystem becomes an unmeasured field rather than
  * a failed call — the whole point is that this answers even on a degraded install.
@@ -469,7 +477,7 @@ function registerSelfModel(ipcMain) {
   // known in the renderer — the tier-0 skill registry lives in `src/services/cognition.js` and the
   // voice ladder in `src/services/voiceEngine.js`. Absent, they report as unmeasured rather than 0.
   ipcMain.handle('self:describe', async (_e, { user, reflexSkills, voiceLevel } = {}) => {
-    const denied = capability.deny(user, 'git.read');
+    const denied = capability.deny(user, 'self.describe');
     if (denied) return denied;
 
     const probes = {
@@ -540,7 +548,18 @@ function registerSelfModel(ipcMain) {
         return { known: rows.length, pinned: rows.filter(r => r.pinned).length };
       },
 
-      experience: () => require('./ipc/metaCognition.cjs').experienceSummary(),
+      // The counts are master's own activity record (`mind.view`, tier 0). `promptTextRecorded` is
+      // handed over regardless, because whether the request text is stored is a property of the
+      // CODE rather than of master's activity — and it is the one limitation every user should see.
+      experience: () => {
+        const summary = require('./ipc/metaCognition.cjs').experienceSummary();
+        if (capability.can(user, 'mind.view')) return summary;
+        return {
+          restricted: true,
+          reason: 'requires "mind.view" — the activity record is master-only',
+          promptTextRecorded: summary.promptTextRecorded,
+        };
+      },
     };
 
     try {

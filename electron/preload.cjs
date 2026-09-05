@@ -579,16 +579,20 @@ const RAMA_API = {
 
   // ── Meta-cognition (self-audit nexus + experiential dataset) ───────────────
   meta: {
-    record:      (rec)    => ipcRenderer.invoke('meta:record',      rec),
-    audit:       ()       => ipcRenderer.invoke('meta:audit'),
-    audits:      (limit)  => ipcRenderer.invoke('meta:audits',      limit),
-    vectors:     ()       => ipcRenderer.invoke('meta:vectors'),
-    profiles:    ()       => ipcRenderer.invoke('meta:profiles'),
-    profile:     (action) => ipcRenderer.invoke('meta:profile',     action),
-    regressions: (limit)  => ipcRenderer.invoke('meta:regressions', limit),
-    outcomes:    (filter) => ipcRenderer.invoke('meta:outcomes',    filter),
-    summary:     ()       => ipcRenderer.invoke('meta:summary'),
-    resetBaseline: ()     => ipcRenderer.invoke('meta:reset-baseline'),
+    // `record` is the one open channel: it is a write of Rāma's own telemetry from every service on
+    // every turn, and gating it would silently stop the dataset from being collected (Section 89).
+    // Every READ now carries a user and requires `mind.view` — the genome declared that cap on
+    // `g.metacognition` from the start and nothing had ever enforced it.
+    record:      (rec)         => ipcRenderer.invoke('meta:record',      rec),
+    audit:       (opts)        => ipcRenderer.invoke('meta:audit',       opts),
+    audits:      (limit, opts) => ipcRenderer.invoke('meta:audits',      limit, opts),
+    vectors:     (opts)        => ipcRenderer.invoke('meta:vectors',     opts),
+    profiles:    (opts)        => ipcRenderer.invoke('meta:profiles',    opts),
+    profile:     (action, opts)=> ipcRenderer.invoke('meta:profile',     action, opts),
+    regressions: (limit, opts) => ipcRenderer.invoke('meta:regressions', limit, opts),
+    outcomes:    (filter)      => ipcRenderer.invoke('meta:outcomes',    filter),
+    summary:     (opts)        => ipcRenderer.invoke('meta:summary',     opts),
+    resetBaseline: (opts)      => ipcRenderer.invoke('meta:reset-baseline', opts),
     onAudit: (cb) => {
       const h = (_e, d) => cb(d);
       ipcRenderer.on('meta:audit', h);

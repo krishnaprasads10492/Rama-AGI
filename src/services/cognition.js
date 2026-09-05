@@ -175,16 +175,52 @@ export const SKILLS = [
     domain: 'meta',
     describe: 'what can you do',
     match: (t) => any(t, 'what can you do', 'your capabilities', 'what are you able', 'list your abilities', 'help'),
+    /**
+     * Speaks from the SELF-MODEL (Section 89), not from a second computation.
+     *
+     * This skill used to answer from `visiblePages` + `allCapabilities` + `SKILLS.length`, which is
+     * a different derivation than the one Settings → Self shows — so asking out loud and looking at
+     * the panel could give different accounts of the same thing, with nothing to reconcile them.
+     * That drift is precisely what the self-model was built to end.
+     *
+     * It also now says the LIMITS out loud. Answering "what can you do" with strengths only is how
+     * a user ends up trusting a capability that is not there.
+     *
+     * Still tier 0: `self:describe` reaches no model and no network. The old local computation is
+     * kept as the fallback for when the IPC is absent — a web build, or a degraded install.
+     */
     run: async (ctx) => {
-      const pages  = visiblePages(ctx?.user).map(p => p.label);
-      const caps   = allCapabilities().length;
-      const skills = SKILLS.length;
-      return {
-        say: `I reach ${pages.length} modules on this account (${pages.slice(0, 6).join(', ')}`
+      const local = () => {
+        const pages  = visiblePages(ctx?.user).map(p => p.label);
+        const caps   = allCapabilities().length;
+        const skills = SKILLS.length;
+        return `I reach ${pages.length} modules on this account (${pages.slice(0, 6).join(', ')}`
            + `${pages.length > 6 ? `, +${pages.length - 6} more` : ''}), covering ${caps} capabilities. `
            + `${skills} things I handle instantly without any model — appearance, navigation, `
-           + `system readings, voice. Anything harder I route to a local model first, then the cloud.`,
+           + `system readings, voice. Anything harder I route to a local model first, then the cloud.`;
       };
+
+      const api = ipc();
+      if (!api?.self?.describe) return { say: local() };
+
+      try {
+        const res = await api.self.describe({ user: ctx?.user, reflexSkills: SKILLS.length });
+        if (!res?.ok) return { say: local() };
+
+        const m = res.data;
+        const limits = Array.isArray(m.limits) ? m.limits : [];
+        let say = m.summary?.text || local();
+
+        if (limits.length) {
+          const top = limits.slice(0, 3).map(l => l.what);
+          say += ` Specifically I cannot ${top.join('; nor ')}`;
+          say += limits.length > 3 ? `, and ${limits.length - 3} more.` : '.';
+          say += ' Settings → Self lists why, and what would change each one.';
+        }
+        return { say };
+      } catch {
+        return { say: local() };
+      }
     },
   },
   {
@@ -337,11 +373,13 @@ function record(entry) {
  * source, which must go through the proposal ledger and the master's approval
  * (invariant I6).
  */
-export async function findReflexCandidates() {
+export async function findReflexCandidates(user = null) {
   const api = ipc();
   if (!api?.meta) return { ok: false, error: 'Experiential dataset unavailable' };
 
-  const res = await api.meta.outcomes({ action: 'cognition', limit: 500 });
+  // The experiential dataset is `mind.view`, master-only (Section 89). Reading it without a session
+  // is refused, so the caller must pass one rather than getting a silent empty result.
+  const res = await api.meta.outcomes({ action: 'cognition', limit: 500, user });
   if (!res?.ok) return { ok: false, error: res?.error ?? 'No history' };
 
   const escalated = res.data.filter(o => o.tool && !o.tool.startsWith('reflex:'));

@@ -195,17 +195,28 @@ export default function SelfPanel() {
       </Group>
 
       {/* ── Experience ───────────────────────────────────────────────────── */}
+      {/* Withheld is a DIFFERENT state from empty. Rendering zeros here would read as "Rāma has
+          done nothing", which is a worse falsehood than saying the record is not yours to see. */}
       <Group title="WHAT I HAVE DONE">
-        <Fact label="Actions recorded"        fact={experience.recorded} />
-        <Fact label="Answered with no model"  fact={experience.answeredWithoutAModel} />
-        <Fact label="Escalated to a model"    fact={experience.escalatedToAModel} />
-        <Fact label="Reflex rate"             fact={experience.reflexRate} />
-        <Fact label="Failures"                fact={experience.failures} />
-        <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 10, lineHeight: 1.6 }}>
-          Reflex rate is the share of turns answered without any model. It is the one number that
-          would show Rāma getting cheaper and more capable over time — and it cannot rise until the
-          tier-3 loop above is closed.
-        </div>
+        {experience.restricted ? (
+          <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
+            Withheld on this account — {experience.recorded?.why || 'requires "mind.view"'}. The
+            activity record is master-only, so it is omitted rather than shown as zero.
+          </div>
+        ) : (
+          <>
+            <Fact label="Actions recorded"        fact={experience.recorded} />
+            <Fact label="Answered with no model"  fact={experience.answeredWithoutAModel} />
+            <Fact label="Escalated to a model"    fact={experience.escalatedToAModel} />
+            <Fact label="Reflex rate"             fact={experience.reflexRate} />
+            <Fact label="Failures"                fact={experience.failures} />
+            <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 10, lineHeight: 1.6 }}>
+              Reflex rate is the share of turns answered without any model. It is the one number
+              that would show Rāma getting cheaper and more capable over time — and it cannot rise
+              until the tier-3 loop above is closed.
+            </div>
+          </>
+        )}
       </Group>
 
       {/* ── The rule this panel is bound by ──────────────────────────────── */}

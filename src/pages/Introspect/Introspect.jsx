@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useUserStore } from '@store/userStore.js';
 
 /**
  * Introspect — Meta-Cognitive Self-Audit Nexus + Timeline Flashbacks.
@@ -49,6 +50,9 @@ function Empty({ children }) {
 
 export default function Introspect() {
   const ipc = typeof window !== 'undefined' ? window.rama : null;
+  // The `meta:*` reads now require `mind.view` (Section 89). Declared on the genome from the start,
+  // enforced from here on — so every read below must carry the session.
+  const currentUser = useUserStore(s => s.currentUser);
 
   const [summary,     setSummary]     = useState(null);
   const [profiles,    setProfiles]    = useState([]);
@@ -62,16 +66,22 @@ export default function Introspect() {
   const load = useCallback(async () => {
     if (!ipc?.meta) { setError('Introspection needs the desktop app (Electron IPC unavailable).'); return; }
     try {
+      const who = { user: currentUser };
       const [s, p, v, r] = await Promise.all([
-        ipc.meta.summary(),
-        ipc.meta.profiles(),
-        ipc.meta.vectors(),
-        ipc.meta.regressions(20),
+        ipc.meta.summary(who),
+        ipc.meta.profiles(who),
+        ipc.meta.vectors(who),
+        ipc.meta.regressions(20, who),
       ]);
       if (s?.ok) setSummary(s.data);
       if (p?.ok) setProfiles(p.data);
       if (v?.ok) setVectors(v.data);
       if (r?.ok) setRegressions(r.data);
+
+      // A denial is reported, not swallowed. Silently rendering empty panels would look like
+      // "Rāma has done nothing" rather than "this account may not read that".
+      const refused = [s, p, v, r].find(x => x?.ok === false);
+      if (refused) { setError(refused.error); return; }
 
       if (ipc.timeline) {
         const t = await ipc.timeline.get({ limit: 40 });
@@ -82,7 +92,7 @@ export default function Introspect() {
     } catch (err) {
       setError(err.message);
     }
-  }, [ipc]);
+  }, [ipc, currentUser]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -95,13 +105,13 @@ export default function Introspect() {
   const runAudit = useCallback(async () => {
     setBusy(true);
     try {
-      const res = await ipc.meta.audit();
+      const res = await ipc.meta.audit({ user: currentUser });
       if (res?.ok === false) setError(res.error);
       await load();
     } finally {
       setBusy(false);
     }
-  }, [ipc, load]);
+  }, [ipc, load, currentUser]);
 
   const openFlashback = useCallback(async (hash) => {
     setBusy(true);
