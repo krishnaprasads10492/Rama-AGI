@@ -1760,6 +1760,8 @@ authenticated **Master session**, not merely an open store.
 
 | 108 | The update button that did nothing, and the audit that could not see it | done | Section 90. Master, just before building: *"if I generate a build and run installer, will it have update option?"* Checking rather than inferring found **a dead button in a shipped surface**. `Settings.jsx` called `window.ipcRenderer?.invoke('updater:install-now')`, wrong **twice**: (1) that channel is registered with `ipcMain.on`, and Electron rejects an `invoke` against a `send`-only channel with "No handler registered" — with no `.catch` at the call site, so **clicking did nothing whatsoever, silently**; (2) it was **mislabelled** — the channel calls `quitAndInstall()`, installing an already-downloaded update, and never checked for one, so even wired correctly the label described an action the code does not perform. **Nothing in the toolchain could see it**: `node --check` passes since both lines are valid, the bridge check only asks whether the preload *exposes* the function, the scope check only resolves identifiers — the mismatch lives between two files and two different Electron APIs (same family as rows 99/100). **FIX:** `runUpdateCheck()` is now the single implementation and **returns a structured verdict** (`dev`/`unavailable`/`up-to-date`/`none-published`/`available`/`failed`) while still notifying; the tray item and the new `updater:check` handler both call it, so **they cannot drift into two different answers**. Correctness detail: `checkForUpdates()` resolves with the CURRENT version when nothing is newer, so a truthy `updateInfo` is not by itself an available update — the version is compared against `app.getVersion()`. Settings → About renders the verdict inline instead of relying on an OS notification, offers **Install and Restart** only in the `available` state, and points at the update channel when nothing is published, because that is the mechanism that actually works today. **DECISION: the audit learns the whole class** rather than taking a one-line fix that would leave the next mismatch equally invisible. `auditRenderer.cjs` gains a fourth check — every invoked channel needs an `ipcMain.handle`, every sent channel needs an `ipcMain.on`, both directions, since a `send` to a `handle`-only channel is silently dropped. **TWO FALSE-POSITIVE TRAPS, both hit during development:** (a) **dynamic registration** — `marketIntel.cjs` registers from a map in a loop so the channel is an OBJECT KEY never adjacent to `.handle(`, and the first version reported **26 channels as missing handlers, every one a false positive in working shipped code**; a file that registers dynamically now has every channel-shaped literal treated as registered, keeping the check conservative on the rule that a false positive erodes trust faster than a miss; (b) **apostrophes shift naive quote pairing** — scanning for `/'([^']+)'/` pairs quotes sequentially, so one apostrophe in a comment (`Rāma's`, `master's`, ubiquitous here) shifts every later pair and real literals are swallowed: measured on `marketIntel.cjs`, **126 "literals" found, ZERO channel-shaped, in a file that plainly contains `'market:forecast'`**. Fixed by anchoring both quotes and the content shape in one self-contained pattern. **VERIFIED:** `findIpcMismatches()` exported and pure per the row-99 precedent so the checker is tested, not merely run; `verifyAudit.cjs` **24 assertions (+9)** with **FIXTURE D** reproducing the real bug shape — caught and classified, message names the fix, mirror `send`-to-`handle` caught, channel registered nowhere caught, correct wiring silent, dynamic registration not falsely reported, apostrophe does not hide a registered channel. Live run **339 IPC channels matched, no mismatches**, so no other channel carries this defect. `npm run verify` **8 suites / 562 assertions**; `vite build` succeeds. **ANSWER TO MASTER:** yes there is an update option and it will now tell the truth, but it will say *"No releases published yet"* — `build.publish` points at GitHub Releases and none is tagged. The working path today is the update channel. Still unobserved end to end: 7-Zip is blocked here so no installer can be built. |
 
+| 109 | Python was never a dependency anyone installed | done | Section 91. Master: *"are all dependencies install in the bat file"* — **Node yes, Python not at all.** `Rama.bat` installs nothing itself; it delegates to `buildInstaller.cjs`, whose stage 1 is a four-rung ladder (`npm ci` when a lockfile exists and `node_modules` does not, then `npm install`, `--legacy-peer-deps`, `--ignore-scripts`) and which **re-audits after installing**, since a half-installed tree otherwise packages "successfully" and fails on master's machine instead. Two properties worth not breaking: it **requires only Node builtins**, so it runs on a checkout with no `node_modules` — one package import at the top would make the dependency installer need its dependencies installed first. **THE GAP: nothing had ever touched `ai_backend/requirements.txt`.** The packaged app spawns bare `python` from PATH and runs `main.py` directly — no venv, no requirements check. Section 64 fixed the *missing interpreter* case, but **Python present with requirements missing** exits on an `ImportError` inside a log stream, the shape of failure nobody diagnoses. **DECISION: probe, report, never install, never block.** `probePythonRuntime()` runs in stage 1 on both readiness and build paths. Never blocks — packaging does not run Python, `electron-builder` copies `ai_backend/` in as files, so a machine with no Python still produces a good installer. Never installs — the build machine's Python is not the install machine's Python, so installing here satisfies the wrong computer. It imports the **full** set (`fastapi, uvicorn, pandas, numpy, sklearn, lightgbm, xgboost, statsmodels, ta, httpx`) rather than one module, because **a partial install is the common real case**: one failed wheel (scipy, lightgbm) leaves the rest importable, so a single-module probe would report success on a backend that cannot start. **THE FINDING ON FIRST RUN: Python 3.14.4 is on PATH and `numpy==1.26.4` publishes no wheel above CPython 3.12**, so `pip install -r requirements.txt` would not fail cleanly — it compiles numpy from source and dies in a C compiler, reading as a broken machine rather than the wrong interpreter. **This also corrected advice already in the codebase**: `aiProcess.cjs` said *"Install Python 3.11+"* with no upper bound, which sends master straight at that failure; the pins define a window of roughly 3.10–3.12 and the guidance now says so. **DECISION: `RAMA_PYTHON`,** because the venv advice was otherwise useless — telling master to build a 3.12 venv is worthless if the app spawns bare `python` and never looks at it, and changing what `python` means system-wide is unreasonable on a machine with other Python work. `aiProcess.cjs` honours an explicit interpreter path, falling back to exactly the previous behaviour when unset; its ENOENT message now distinguishes a configured-but-unstartable interpreter from a genuinely absent one. **VERIFIED:** `node --check` clean on both files; `npm run verify` 8 suites / 562 assertions unchanged; probe run three times, reporting missing `fastapi` and then — once the version check was added — the more useful root cause. **No behavioural test added**, deliberately: the probe emits diagnostic text and its branch inputs are a live interpreter's version string and import result, which a fixture would have to fake wholesale; the value is in what it reports and that was verified by running it. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -9269,3 +9271,82 @@ Releases and none has been tagged. The mechanism that works today is the **updat
 into the folder, and any install reads it, verifies the hash, and applies. And none of this has been
 observed end to end from here, because 7-Zip is blocked on this machine and no installer can be
 built.
+
+---
+
+## SECTION 91 — "Are all dependencies installed in the bat file?"
+
+Master, before building. The answer is **Node yes, Python not at all**, and asking exposed a silent
+failure that would have surfaced only after he built, installed, and found StockMind empty.
+
+### What was already covered
+
+`Rama.bat` installs nothing itself; it delegates to `scripts/buildInstaller.cjs`. Two properties of
+that script are worth stating because they are easy to break later:
+
+- **It requires only Node builtins** — `child_process`, `fs`, `os`, `path`. So it can run on a
+  checkout with no `node_modules` at all. A single package import at the top would turn the
+  dependency installer into something that needs its dependencies installed first.
+- **Stage 1 is a four-rung ladder**: `npm ci` when a lockfile exists and `node_modules` does not, then
+  `npm install`, then `--legacy-peer-deps`, then `--ignore-scripts` — and it **re-audits after
+  installing**, because a half-installed tree otherwise packages "successfully" and fails on master's
+  machine instead of here.
+
+### The gap
+
+**Nothing has ever touched `ai_backend/requirements.txt`** — not the bat file, not the build script.
+The packaged app spawns bare `python` from PATH and runs `main.py` directly: no venv, no requirements
+check. Section 64 fixed the *missing interpreter* case, so a machine without Python reports rather
+than dying. But **Python present with the requirements missing** just exits on an `ImportError`
+inside a log stream, which is exactly the shape of failure nobody diagnoses.
+
+### Decision: probe it, report it, never install it, never block on it
+
+`probePythonRuntime()` runs in stage 1 on both the readiness and build paths.
+
+**It never blocks**, because packaging does not run Python — `electron-builder` copies `ai_backend/`
+in as files, so a machine with no Python can still produce a perfectly good installer. **It never
+installs**, because the build machine's Python is not the install machine's Python, so installing
+here would satisfy the wrong computer.
+
+It imports the full set the engine needs — `fastapi, uvicorn, pandas, numpy, sklearn, lightgbm,
+xgboost, statsmodels, ta, httpx` — rather than one representative module. **A partial install is the
+common real case**: one failed wheel (scipy and lightgbm are the usual culprits) leaves everything
+else importable, so probing a single module would report success on a backend that cannot start.
+
+### The finding, on the first run
+
+```
+! StockMind runtime: Python 3.14.4 is outside the range the pinned requirements support
+```
+
+Python 3.14.4 is on PATH here. **`numpy==1.26.4` publishes no wheel above CPython 3.12.** So
+`pip install -r requirements.txt` would not fail cleanly — it falls back to compiling numpy from
+source and dies in a C compiler, which reads as a broken machine rather than the wrong interpreter.
+
+This also corrects advice that was already in the codebase. `aiProcess.cjs` told master to *"Install
+Python 3.11+"*, with no upper bound — **which would send him straight at the failure above.** The
+pins define a window, roughly 3.10–3.12, and the guidance now says so.
+
+### Decision: `RAMA_PYTHON`, because the venv advice was otherwise useless
+
+Telling master to build a 3.12 venv is worthless if the app spawns bare `python` from PATH and never
+looks at it. The alternative — changing what `python` means system-wide — is an unreasonable thing to
+ask of a machine that has other Python work on it.
+
+So `aiProcess.cjs` honours **`RAMA_PYTHON`** as an explicit interpreter path, falling back to exactly
+the previous behaviour when unset, so nothing that works today changes. Its ENOENT message now
+distinguishes the two cases: a configured interpreter that will not start says so by name, rather
+than reporting that Python is missing from a PATH it was never asked to search.
+
+### Verified
+
+`node --check` clean on both touched files. `npm run verify` **8 suites / 562 assertions**, unchanged.
+The probe was run three times against this machine and reported, in order: missing `fastapi`, then —
+once the version check was added — the more useful root cause, that the interpreter itself is out of
+range. Readiness verdict on this machine remains **READY-WITH-LIMITS / portable zip only**, since
+7-Zip is still blocked.
+
+No behavioural test was added: the probe's output is diagnostic text and its only branch inputs are a
+live interpreter's version string and import result, which a fixture would have to fake wholesale.
+The value is in what it reports, and that was verified by running it.

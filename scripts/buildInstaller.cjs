@@ -597,8 +597,99 @@ function auditForReadiness() {
     }
   }
 
+  notes.push(...probePythonRuntime());
+
   // Missing-but-installable is not a blocker for readiness: the build installs it.
   return { ok: true, degraded: notes, pendingInstall: audit.required.length };
+}
+
+/**
+ * Is the Python side of StockMind actually usable on this machine? (Section 91)
+ *
+ * WHY THIS IS A NOTE AND NEVER A BLOCKER. Packaging does not run Python — `electron-builder` copies
+ * `ai_backend/` in as files. So a machine with no Python can still produce a perfectly good
+ * installer, and failing the build over it would be wrong.
+ *
+ * WHY IT IS REPORTED AT ALL. `npm` covers Node, and NOTHING covers Python: neither `Rama.bat` nor
+ * this script has ever touched `ai_backend/requirements.txt`. The packaged app spawns bare `python`
+ * from PATH and runs `main.py` directly — no venv, no requirements check. A missing interpreter is
+ * handled (Section 64 added the `child.on('error')` listener so it reports instead of killing the
+ * app), but **Python present with the requirements missing** just dies on an ImportError inside a
+ * log stream. That is the silent case this probe exists to make loud, BEFORE master builds and
+ * installs and then wonders why StockMind is empty.
+ *
+ * Note also that the BUILD machine's Python is not the INSTALL machine's Python. This measures where
+ * it runs, which is why installing the requirements here is deliberately not attempted.
+ */
+function probePythonRuntime() {
+  const notes = [];
+  const exe = process.platform === 'win32' ? 'python' : 'python3';
+
+  const ver = spawnSync(exe, ['--version'], { encoding: 'utf8', timeout: 15_000 });
+  if (ver.error || ver.status !== 0) {
+    warn(`StockMind runtime: "${exe}" is not on PATH — the market engine cannot start`);
+    plain('      Packaging is unaffected; the produced app will report StockMind unavailable.');
+    plain('      Fix on the machine that RUNS Rāma: install Python 3.11 or 3.12, then');
+    plain('        python -m pip install -r ai_backend\\requirements.txt');
+    plain('      Or set RAMA_PYTHON to a venv python.exe if PATH must keep another version.');
+    notes.push('Python not on PATH (StockMind will not start in the produced app)');
+    return notes;
+  }
+
+  const version = String(ver.stdout || ver.stderr).trim();
+
+  // THE PINS DEFINE A WINDOW, AND SAYING "install Python 3.11+" WITHOUT AN UPPER BOUND IS WRONG.
+  // The binding constraint is `numpy==1.26.4`, which publishes no wheel above CPython 3.12; scipy
+  // 1.14.1 and pandas 2.2.3 stop at 3.13. On a newer interpreter `pip install -r requirements.txt`
+  // does not fail cleanly — it falls back to building numpy from source and dies in a compiler,
+  // which reads as a broken machine rather than a wrong Python. Measured here: 3.14.4 on PATH.
+  const m = version.match(/(\d+)\.(\d+)/);
+  if (m) {
+    const major = Number(m[1]);
+    const minor = Number(m[2]);
+    const tooNew = major > 3 || (major === 3 && minor > 12);
+    const tooOld = major < 3 || (major === 3 && minor < 10);
+    if (tooNew || tooOld) {
+      warn(`StockMind runtime: ${version} is outside the range the pinned requirements support`);
+      plain('      numpy==1.26.4 publishes no wheel above CPython 3.12, so pip would try to');
+      plain('      compile it from source and fail in a C compiler — which looks like a broken');
+      plain('      machine rather than the wrong interpreter.');
+      plain('      Use Python 3.11 or 3.12 for the engine. A dedicated venv keeps it off PATH:');
+      plain('        py -3.12 -m venv .venv-stockmind');
+      plain('        .venv-stockmind\\Scripts\\python -m pip install -r ai_backend\\requirements.txt');
+      plain('      Then point Rāma at it, since the app otherwise spawns bare "python" from PATH:');
+      plain('        setx RAMA_PYTHON "<full path>\\.venv-stockmind\\Scripts\\python.exe"');
+      notes.push(`Python ${major}.${minor} is outside the supported 3.10–3.12 range for the engine`);
+      return notes;
+    }
+  }
+
+  // The four that every engine module pulls in. A partial install is the common real case — a
+  // single failed wheel (lightgbm and scipy are the usual ones) leaves the rest importable, so
+  // checking one module would report success on a backend that cannot actually start.
+  const probe = spawnSync(
+    exe,
+    ['-c', 'import fastapi, uvicorn, pandas, numpy, sklearn, lightgbm, xgboost, statsmodels, ta, httpx'],
+    { encoding: 'utf8', timeout: 90_000 },
+  );
+
+  if (probe.status === 0) {
+    ok(`StockMind runtime: ${version} with all required packages importable`);
+    return notes;
+  }
+
+  const missing = String(probe.stderr || '').match(/No module named '([^']+)'/g);
+  const named = missing
+    ? missing.map(m => m.replace(/No module named '|'/g, '')).join(', ')
+    : 'one or more packages';
+
+  warn(`StockMind runtime: ${version} found, but imports fail — missing ${named}`);
+  plain('      Packaging is unaffected. Without these the engine starts and immediately exits,');
+  plain('      which surfaces only as an ImportError in the log rather than a clear message.');
+  plain('      Fix on the machine that RUNS Rāma:');
+  plain('        python -m pip install -r ai_backend\\requirements.txt');
+  notes.push(`Python packages missing (${named}) — StockMind will not start in the produced app`);
+  return notes;
 }
 
 /** @returns {Promise<{ok:boolean, degraded:string[]}>} */
@@ -672,6 +763,11 @@ async function ensureDependencies() {
     }
     ok(`${name} native binary present — ${binary}`);
   }
+
+  // Reported here too, so a build that never ran readiness still says it. Never installs and never
+  // blocks: packaging does not run Python, and the build machine's Python is not the install
+  // machine's Python anyway (Section 91).
+  notes.push(...probePythonRuntime());
 
   return { ok: true, degraded: notes };
 }
