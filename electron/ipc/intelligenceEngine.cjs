@@ -314,15 +314,28 @@ async function fetchDDGAPI(query, profile) {
   return results;
 }
 
+/**
+ * A marker that every live search failed. NOT a source (Section 94).
+ *
+ * WHAT THIS USED TO DO, AND WHY IT WAS THE WORST DEFECT IN THIS FILE. It returned a result with
+ * `domain:'internal'` and `content` equal to the query echoed back — and `getSourceCredibility()`
+ * scored `internal` at **0.60**, comfortably above `vetSources()`'s 0.40 floor. So a total search
+ * failure passed vetting as a legitimate source and flowed into "truth extraction with weighted
+ * consensus and confidence scoring".
+ *
+ * The result was not an error but a **fabrication**: a confident-looking, source-attributed answer
+ * whose only input was the question. It carried `fallback: true` and nothing anywhere read that flag.
+ *
+ * It is kept as a marker so callers can still distinguish "searched and found nothing" from "never
+ * searched", but `vetSources()` now drops it, so it can never be weighed as evidence again.
+ */
 function buildFallbackResults(query) {
-  // Build structured search intent without actual HTTP call
-  // Used when all live searches fail
   return [{
-    domain:  'internal',
-    url:     null,
-    title:   `Analysis: ${query}`,
-    content: `Query processed internally: ${query}`,
-    source:  'internal-analysis',
+    domain:   'internal',
+    url:      null,
+    title:    `No sources found for: ${query}`,
+    content:  '',
+    source:   'search-failed',
     fallback: true,
   }];
 }
@@ -330,6 +343,12 @@ function buildFallbackResults(query) {
 // ─── Source vetting ───────────────────────────────────────────────────────────
 function vetSources(sources) {
   return sources
+    // A search-failure marker is not evidence. Dropped HERE rather than only at the call site, so a
+    // future caller cannot reintroduce the fabrication by passing one in (Section 94).
+    .filter(s => !s.fallback)
+    // Nor is an empty document: a source with no content cannot support or contradict anything, and
+    // weighting one lets a credible DOMAIN stand in for actual information.
+    .filter(s => typeof s.content === 'string' && s.content.trim().length > 0)
     .map(s => ({ ...s, credibility: getSourceCredibility(s.domain) }))
     .filter(s => s.credibility.score >= 0.40)   // Drop very low credibility
     .sort((a, b) => b.credibility.score - a.credibility.score);
@@ -511,4 +530,7 @@ function humanDelay(minMs, maxMs) {
 // getSourceCredibility exported so other engines (e.g. the agent orchestrator's
 // refinement loop, spec section 37) reuse this one scoring table instead of
 // each maintaining their own opinion of what's credible.
-module.exports = { register, getSourceCredibility };
+// `vetSources` and `buildFallbackResults` are exported so the Section 94 fix is TESTED rather than
+// merely asserted in a comment — the fabrication it prevents was invisible precisely because nothing
+// exercised it.
+module.exports = { register, getSourceCredibility, vetSources, buildFallbackResults };

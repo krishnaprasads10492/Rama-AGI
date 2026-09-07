@@ -814,6 +814,9 @@ const RAMA_API = {
 
   // ── Browser Engine ────────────────────────────────────────────────────────
   browser: {
+    // Which browser Rāma can actually drive, and the remedy when none. Surfaced so "search does not
+    // work" is diagnosable rather than guessed at (Section 94).
+    runtime:     ()                  => ipcRenderer.invoke('browser:runtime'),
     launch:      (opts)              => ipcRenderer.invoke('browser:launch', opts),
     close:       ()                  => ipcRenderer.invoke('browser:close'),
     openPage:    (url)               => ipcRenderer.invoke('browser:open-page', url),

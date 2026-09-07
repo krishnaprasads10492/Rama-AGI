@@ -9812,3 +9812,77 @@ the decision to record now.
 
 Both are deferred with their designs stated, so a later session extends this rather than reinventing
 it.
+
+---
+
+## SECTION 94 — Web search that actually works: assimilate the installed browser, and stop fabricating sources
+
+Master, after the audit: *"how about 1 and 2 with ability to assimilate existing browsers and their
+capabilities into RAMA."*
+
+Measured on this machine before writing anything:
+
+| Probe | Result |
+|---|---|
+| `playwright` module | present, pinned 1.48.2 |
+| bundled Chromium binary | **MISSING** — `npm install playwright` does not download browsers, and nothing in `package.json`, `Rama.bat` or `buildInstaller.cjs` ever runs `playwright install` |
+| installed Edge / Chrome | **both present** |
+| `chromium.launch({channel:'msedge'})` | **LAUNCHED** |
+| `chromium.launch({channel:'chrome'})` | **LAUNCHED** |
+| DuckDuckGo via a real browser | **empty shell, 305 bytes, ZERO results** |
+| Bing via a real browser | **10 results**, matching the `.b_algo` selector already in the code |
+| plain HTTPS fetch | works, 200 |
+
+### Decision: assimilate the installed browser rather than download one
+
+Master's binding constraint is disk, and Playwright's Chromium is ~150 MB. Edge ships with Windows
+and Chrome is already here, and **both drive correctly through Playwright's `channel` option** — so
+downloading a third Chromium would spend master's scarcest resource to obtain a capability he already
+owns.
+
+`electron/lib/browserRuntime.cjs` discovers what can actually be driven and ranks it. Discovery is
+pure with the existence check injected, so it is testable without a browser.
+
+**Ranking, and why this order:** bundled Chromium first *when present* (Playwright pins the pair, so
+it is the least surprising), then Edge, then Chrome, then Brave. Edge before Chrome deliberately —
+it is present on every Windows machine, so preferring it makes behaviour consistent across installs
+rather than dependent on what master happens to have.
+
+**A discovered browser is reported with how it was found**, the same rule as Section 92's model
+classification: `bundled`, `channel` or `path`. A capability Rāma claims must be traceable to the
+evidence for it.
+
+### Decision: the default search engine changes to Bing, because DuckDuckGo does not work
+
+`browser:search` defaulted to DuckDuckGo and would have returned **zero results even with a working
+browser** — DDG serves an empty shell to an automated request. Bing returns ten, through a selector
+already written in the file. **This was never a missing-browser problem alone**: fixing only the
+browser would have produced a search that launches, succeeds, and finds nothing.
+
+DuckDuckGo remains selectable, because a blocked engine today may work tomorrow and removing it would
+be a capability regression. It is simply no longer the default.
+
+### Decision: a failed search must not manufacture a credible source
+
+The serious defect. `intelligenceEngine.buildFallbackResults()` synthesised a result on total search
+failure — `domain:'internal'`, content equal to the query echoed back — and
+`getSourceCredibility()` scored `internal` at **0.60**, above the 0.40 vetting floor. So it passed
+vetting as a legitimate source. It carried `fallback: true`, and **nothing downstream ever read that
+flag**: the string appears where it is set and nowhere else.
+
+The consequence was not a crash but a **fabrication**: "truth extraction with weighted consensus and
+confidence scoring" running over a source whose entire content is the question, producing an answer
+that looks researched and is built on nothing.
+
+Three changes, all in the direction of admitting absence:
+
+1. **The synthesised placeholder is no longer a source.** It is not vetted and not weighted.
+2. **`vetSources()` drops `fallback` entries**, so a future caller cannot reintroduce the same hole by
+   passing one in.
+3. **Zero real sources reports zero confidence and says why** — `sources: 0`, an explicit
+   `noSources` reason — rather than a consensus over nothing. This is Section 88's rule applied to
+   research: unmeasured must be absent, not estimated.
+
+Master asked for the intelligence engine to research model ratings. **That is only worth building on
+top of a pipeline that admits when it found nothing**, which is why this ordering was chosen over
+adding the rating feature first.

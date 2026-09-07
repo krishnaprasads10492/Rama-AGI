@@ -604,6 +604,7 @@ function auditForReadiness() {
   // so it never creates the venv. It does say what the build would do about it.
   const pyNotes = probePythonRuntime();
   notes.push(...pyNotes);
+  notes.push(...probeBrowserRuntime());
   if (pyNotes.length > 0 && !skipPython) {
     if (findInRangePython()) {
       info('A build would create the engine environment and install these automatically.');
@@ -1018,8 +1019,52 @@ async function ensureDependencies() {
 
   // Report the resulting state either way, so the summary reflects what a run would actually find.
   notes.push(...probePythonRuntime());
+  notes.push(...probeBrowserRuntime());
 
   return { ok: true, degraded: notes };
+}
+
+/**
+ * Can Rāma actually drive a browser? (Section 94)
+ *
+ * `playwright` present at the pinned version is NOT the capability — `npm install playwright` does
+ * not download browsers, and nothing in this project ever ran `playwright install`. This machine had
+ * the module and no Chromium, so every `browser:*` channel was dead while the dependency audit
+ * reported it healthy. Exactly the shape of the Python gap in Section 91.
+ *
+ * Never installs and never blocks: an installed Edge or Chrome is assimilated at runtime, so the
+ * usual answer is that nothing needs downloading at all.
+ */
+function probeBrowserRuntime() {
+  const notes = [];
+  let pw = null;
+  try { pw = require('playwright'); } catch { /* reported below */ }
+
+  if (!pw) {
+    warn('Web research: playwright is not installed — browser automation is unavailable');
+    notes.push('playwright missing (no browser automation)');
+    return notes;
+  }
+
+  const found = require(path.join(ROOT, 'electron', 'lib', 'browserRuntime.cjs')).discover({
+    exists: (p) => { try { return fs.existsSync(p); } catch { return false; } },
+    playwright: pw,
+  });
+
+  if (found.chosen) {
+    ok(`Web research: driving ${found.chosen.label} (${found.chosen.how})`);
+    if (found.chosen.how !== 'bundled') {
+      // Worth saying out loud: this is the disk master did NOT have to spend.
+      plain('      An installed browser is used, so Playwright\'s ~150 MB Chromium is not needed.');
+    }
+    return notes;
+  }
+
+  warn('Web research: playwright is installed but no drivable browser was found');
+  plain(`      ${found.reason}`);
+  plain('      Packaging is unaffected; the produced app will report search unavailable.');
+  notes.push('no drivable browser (web search unavailable in the produced app)');
+  return notes;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

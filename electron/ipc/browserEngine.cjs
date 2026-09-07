@@ -13,6 +13,45 @@ try {
   console.warn('[browserEngine] playwright not installed — browser automation disabled');
 }
 
+const runtime = require('../lib/browserRuntime.cjs');
+
+/**
+ * Which browser to drive, discovered once and reused (Section 94).
+ *
+ * `require('playwright')` succeeding is NOT the same as having a browser. On this machine the module
+ * is pinned and present while its bundled Chromium is absent — nothing ever ran `playwright install`
+ * — yet Edge and Chrome are both here and both launch through Playwright's `channel` option. So
+ * every launch below goes through discovery rather than assuming the bundled binary, which turns
+ * "playwright not installed" from a dead end into a browser master already owns.
+ */
+let _runtime = null;
+function browserRuntime() {
+  if (!_runtime) {
+    _runtime = runtime.discover({
+      exists: (p) => { try { return require('fs').existsSync(p); } catch { return false; } },
+      playwright,
+    });
+    if (_runtime.chosen) {
+      console.warn(`[browserEngine] driving ${_runtime.chosen.label} (${_runtime.chosen.how})`);
+    } else if (_runtime.reason) {
+      console.warn(`[browserEngine] no drivable browser: ${_runtime.reason}`);
+    }
+  }
+  return _runtime;
+}
+
+/** Launch the best available browser, or report why none can be. */
+async function launchChosen(extra = {}) {
+  const found = browserRuntime();
+  const opts = runtime.launchOptions(found, { headless: true, args: ['--no-sandbox'], ...extra });
+  if (!opts) {
+    const err = new Error(found.reason || 'no drivable browser found');
+    err.noBrowser = true;
+    throw err;
+  }
+  return playwright.chromium.launch(opts);
+}
+
 const path = require('path');
 const fs   = require('fs');
 const os   = require('os');
@@ -50,7 +89,7 @@ function register(ipcMain) {
     if (!playwright) return { ok: false, error: 'playwright not installed' };
     if (browser) return { ok: true, message: 'already running' };
     try {
-      browser = await playwright.chromium.launch({
+      browser = await launchChosen({
         headless: opts.headless !== false,   // headless by default
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
       });
@@ -119,13 +158,44 @@ function register(ipcMain) {
     }
   });
 
+  /**
+   * Which browsers Rāma can drive, and which it chose (Section 94).
+   *
+   * Surfaced so "web search does not work" is a diagnosable statement rather than a guess. Reports
+   * every candidate with the evidence that found it, and when none is drivable, the exact remedy.
+   */
+  ipcMain.handle('browser:runtime', async () => {
+    const found = browserRuntime();
+    return {
+      ok: !!found.chosen,
+      playwrightPresent: found.playwrightPresent,
+      chosen: found.chosen
+        ? { id: found.chosen.id, label: found.chosen.label, how: found.chosen.how, path: found.chosen.executablePath }
+        : null,
+      available: found.available.map(b => ({ id: b.id, label: b.label, how: b.how, path: b.executablePath })),
+      reason: found.reason,
+    };
+  });
+
   // ── Search the web ────────────────────────────────────────────────────────
-  ipcMain.handle('browser:search', async (_e, query, engine = 'duckduckgo') => {
+  /**
+   * DEFAULT ENGINE IS BING, AND THAT IS A MEASURED CHOICE (Section 94).
+   *
+   * This defaulted to DuckDuckGo and would have returned zero results even with a working browser:
+   * probed through a real Edge and a real Chrome, DDG serves an empty shell — 305 bytes, no result
+   * nodes under any selector — because it blocks automated requests. Bing returned ten results
+   * through `.b_algo`, a selector already written below. Fixing only the missing browser would have
+   * produced a search that launches, succeeds, and finds nothing.
+   *
+   * DuckDuckGo stays selectable: a blocked engine may work again, and removing it would be a
+   * capability regression. It is simply no longer the default.
+   */
+  ipcMain.handle('browser:search', async (_e, query, engine = 'bing') => {
     if (!playwright) return { ok: false, error: 'playwright not installed' };
     try {
       // Ensure browser is up
       if (!browser) {
-        browser    = await playwright.chromium.launch({ headless: true, args: ['--no-sandbox'] });
+        browser    = await launchChosen();
         browserCtx = await browser.newContext({
           userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
         });
@@ -136,7 +206,7 @@ function register(ipcMain) {
         bing:       `https://www.bing.com/search?q=${encodeURIComponent(query)}`,
         google:     `https://www.google.com/search?q=${encodeURIComponent(query)}`,
       };
-      await page.goto(urls[engine] || urls.duckduckgo, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      await page.goto(urls[engine] || urls.bing, { waitUntil: 'domcontentloaded', timeout: 20000 });
 
       // Extract results
       const results = await page.evaluate(() => {
@@ -169,7 +239,20 @@ function register(ipcMain) {
       });
 
       await page.close();
-      return { ok: true, query, engine, results };
+      // `browser` names which one was actually driven, and zero results is reported as such rather
+      // than as success with an empty array — an engine that blocks automation looks identical to a
+      // query with no matches unless it is said out loud.
+      return {
+        ok: true,
+        query,
+        engine,
+        results,
+        browser: browserRuntime().chosen?.label ?? null,
+        note: results.length === 0
+          ? `${engine} returned no usable results — it may be blocking automated requests. `
+            + 'Try engine "bing".'
+          : null,
+      };
     } catch (err) {
       return { ok: false, error: err.message };
     }
@@ -212,7 +295,7 @@ function register(ipcMain) {
     (async () => {
       try {
         if (!browser) {
-          browser    = await playwright.chromium.launch({ headless: true, args: ['--no-sandbox'] });
+          browser    = await launchChosen();
           browserCtx = await browser.newContext({ acceptDownloads: true });
         }
         const page = await browserCtx.newPage();
