@@ -445,6 +445,74 @@ function suggestions({
   return { recommended, excluded };
 }
 
+/**
+ * What master should actually DO about a retired model (Section 93).
+ *
+ * `advisories()` reports the problem; this answers the question that follows. For every installed
+ * model Ollama has retired or will:
+ *
+ *   - the replacement Ollama itself names, when the schedule gives one
+ *   - whether that replacement is ALREADY INSTALLED, in which case the action is to stop using the
+ *     old one rather than to pull anything — telling master to download what he has would be noise
+ *   - the exact `ollama pull` command, so the fix is copyable rather than described
+ *   - a SCORED SUBSTITUTE from the catalogue when no alternative is named, because "retired, no
+ *     replacement, good luck" is not guidance. Chosen by the same `scoreCandidate()` used for
+ *     suggestions, so its reasoning is visible and consistent with everything else Rāma recommends.
+ *
+ * Urgency is DERIVED: already-retired is `critical` because it is broken now, a dated future
+ * retirement is `warn`. The status follows the measurement, so it corrects itself when Ollama moves
+ * a date rather than needing anyone to remember (Section 88's rule).
+ */
+function migrationPlan({ installed = [], catalog: lib = {}, schedule = [], now = new Date(), preferCloud = true, diskBudgetBytes = null } = {}) {
+  const have = new Set(installed.map(m => familyOf(m.model || m.id || '')));
+  const plan = [];
+
+  for (const m of installed) {
+    const ret = m.retirement || retirementFor(m.model || m.id, schedule, now);
+    if (!ret) continue;
+
+    const named = ret.alternative || null;
+    const namedFamily = named ? familyOf(named) : null;
+    const alreadyHave = namedFamily ? have.has(namedFamily) : false;
+
+    // No alternative named: pick the best-scoring live candidate so master is not left stranded.
+    let substitute = null;
+    if (!named) {
+      const { recommended } = suggestions({
+        catalog: lib, installed, schedule, now, preferCloud, diskBudgetBytes, limit: 1,
+      });
+      substitute = recommended[0] || null;
+    }
+
+    plan.push({
+      id: m.id,
+      model: m.model || m.id,
+      severity: ret.retired ? 'critical' : 'warn',
+      retired: ret.retired,
+      date: ret.date,
+      why: ret.note,
+      replacement: named || substitute?.family || null,
+      // Distinguishes "Ollama says use this" from "Rāma picked this", which are different claims.
+      replacementSource: named ? 'ollama' : (substitute ? 'rama-scored' : null),
+      replacementWhy: named
+        ? 'named by Ollama as the recommended replacement'
+        : (substitute ? substitute.why : null),
+      alreadyInstalled: alreadyHave,
+      action: alreadyHave
+        ? `Stop using ${m.model || m.id} — ${named} is already installed`
+        : (named || substitute
+          ? `ollama pull ${named || substitute.family}`
+          : `No replacement is available for ${m.model || m.id}`),
+    });
+  }
+
+  // Broken-now before breaking-later, then soonest date first.
+  return plan.sort((a, b) => {
+    if (a.retired !== b.retired) return a.retired ? -1 : 1;
+    return String(a.date || '').localeCompare(String(b.date || ''));
+  });
+}
+
 /** Anything installed that Ollama has retired or will — what master must be told without asking. */
 function advisories(models = []) {
   return models
@@ -461,7 +529,7 @@ function advisories(models = []) {
 }
 
 module.exports = {
-  classify, retirementFor, describeInstalled, suggestions, advisories, scoreCandidate,
+  classify, retirementFor, describeInstalled, suggestions, advisories, scoreCandidate, migrationPlan,
   useStore, saveCatalog, loadCatalog,
   familyOf, paramsB, smallestSizeB, q4Bytes,
   CLOUD_MAX_LOCAL_BYTES, CLOUD_MIN_PARAMS_B, EVIDENCE, DOMAIN, KEY, STALE_AFTER_MS,

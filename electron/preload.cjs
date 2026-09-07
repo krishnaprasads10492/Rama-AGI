@@ -753,6 +753,10 @@ const RAMA_API = {
     // Models master could enable but has not pulled, cloud-first by default because disk is his
     // binding constraint. Returns the tradeoff alongside the list (Section 92).
     suggestions:      (opts)       => ipcRenderer.invoke('models:suggestions', opts),
+    // Rāma reads Ollama's library and retirement schedule itself, then plans migrations off models
+    // that have been retired. Refreshing is master-only; reading the plan is not (Section 93).
+    refreshCatalog:   (opts)       => ipcRenderer.invoke('models:refresh-catalog', opts),
+    migrationPlan:    (opts)       => ipcRenderer.invoke('models:migration-plan', opts),
     needsForTask:     (task)       => ipcRenderer.invoke('models:needs-for-task', task),
     ollamaList:       ()           => ipcRenderer.invoke('models:ollama-list'),
     ollamaPull:       (opts, cb) => {

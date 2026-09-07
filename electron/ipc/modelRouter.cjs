@@ -128,6 +128,63 @@ function register(ipcMain) {
    * costs almost none. The tradeoff is returned alongside so the choice stays informed rather than
    * implicit: cloud entries are marked non-private and network-dependent.
    */
+  /**
+   * Rāma reads Ollama's own documents and populates its list (Section 93).
+   *
+   * GATE: `models.add-key` — master only. This writes the store and reaches the network, and the
+   * catalogue is what every later recommendation is built on, so it is not an unprivileged read.
+   */
+  ipcMain.handle('models:refresh-catalog', async (_e, { user } = {}) => {
+    const capability = require('../lib/capability.cjs');
+    if (!capability.can(user, 'models.add-key')) {
+      const who = capability.TIER_LABELS[String(user?.tier)] ?? 'This account';
+      return { ok: false, error: `${who} may not refresh the model catalogue (needs "models.add-key")` };
+    }
+    try {
+      const library = require('../lib/ollamaLibrary.cjs');
+      // The module's own HTTP client, so there is one place where outbound requests are shaped.
+      const res = await library.refresh({ fetchText: (url) => httpGet(url) });
+      await refreshOllamaModels();   // reclassify installs against the catalogue just fetched
+      return res;
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  /**
+   * What to do about installed models Ollama has retired — the deprecation half (Section 93).
+   *
+   * A read, so `models.use` is enough: master should not need elevated rights to be told that
+   * something he depends on is about to stop working.
+   */
+  ipcMain.handle('models:migration-plan', async (_e, { user, preferCloud = true, diskBudgetBytes = null } = {}) => {
+    const capability = require('../lib/capability.cjs');
+    if (!capability.can(user, 'models.use')) {
+      return { ok: false, error: 'Access denied: "models.use" required' };
+    }
+    try {
+      const catalog = require('../lib/ollamaCatalog.cjs');
+      await refreshOllamaModels();
+      const cached = catalog.loadCatalog();
+      return {
+        ok: true,
+        data: catalog.migrationPlan({
+          installed: Object.values(discoveredOllama),
+          catalog: cached.catalog,
+          schedule: cached.schedule,
+          preferCloud, diskBudgetBytes,
+        }),
+        // Without a schedule there is nothing to plan from, and an empty plan would otherwise read
+        // as "all clear" when it actually means "never checked".
+        scheduleLoaded: cached.schedule.length > 0,
+        fetchedAt: cached.fetchedAt,
+        stale: cached.stale,
+      };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   ipcMain.handle('models:suggestions', async (_e, { needs = [], preferCloud = true, diskBudgetBytes = null, limit = 5 } = {}) => {
     try {
       const catalog = require('../lib/ollamaCatalog.cjs');

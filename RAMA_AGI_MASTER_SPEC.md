@@ -9716,3 +9716,99 @@ Nothing fetches `ollama.com/library` or the retirement page yet, so the cache st
 `models:suggestions` returns a short list with `catalog.loaded: false` — deliberately legible as
 *"nothing fetched yet"* rather than *"nothing good exists"*. The scoring, the exclusions and the
 store are all in place and tested, so that fetch is now a small addition rather than a feature.
+
+---
+
+## SECTION 93 — Rāma populates its own model list, and plans migrations off retired models
+
+Master: *"RAMA should discern and populate list, include deprecation behavior for suggesting a new
+items to replace the old ones. Fetch the latest news to update statuses of models — a desired
+capability + research web to understand rating/desirability of the model. Differentiate based on
+usage in RAMA so that load won't fall on single modal, but synchronized result should be happening
+based on ask to give the result."*
+
+Four requests. **Two are built here; two are designed and explicitly not built**, because bundling
+all four into one pass would leave none of them properly tested — and a half-built routing layer is
+worse than none, since the next session would re-decide it differently.
+
+### Built: Rāma fetches and populates the list itself
+
+`electron/lib/ollamaLibrary.cjs` reads two documents and writes the result into the store:
+
+- `ollama.com/library?sort=newest` → families, capability tags, sizes, pull counts, last-updated
+- `docs.ollama.com/cloud` → the retirement tables, past and upcoming, with recommended alternatives
+
+**The parser is pure and takes text**, so it is tested against captured fixtures rather than against
+the live internet. HTML tags are stripped first, which makes it work on raw HTML and on
+already-extracted text alike — a page served differently, or fetched through a different client, does
+not become a new parser.
+
+### Decision: a failed parse must never overwrite good data
+
+The single most damaging outcome here is a **silent cache wipe**. Ollama redesigns the page, the
+parser matches nothing, and `saveCatalog({})` replaces a working catalogue with an empty one — so
+retirement warnings stop firing and the shortlist goes blank, with every symptom pointing at the
+wrong cause.
+
+So `refresh()` **refuses to save a parse that yielded zero families** and reports the refusal.
+Yesterday's catalogue is strictly better than an empty one, and a stale document was already designed
+to be usable (Section 92). A partial parse is likewise compared against what is already cached: a
+result that collapses to a small fraction of the known families is treated as a parse failure rather
+than as news that Ollama deleted its library.
+
+### Decision: the two documents fail independently
+
+The library and the retirement schedule are fetched separately and either may fail alone. A network
+error on the docs page must not discard a freshly parsed library, and vice versa — so each is merged
+into the cached document individually. Rejected an all-or-nothing refresh: it would mean one flaky
+page could keep both halves permanently stale.
+
+### Built: deprecation behaviour that names the replacement
+
+`migrationPlan()` answers the question master actually has — *what do I do about it* — rather than
+just flagging a problem. For every installed model that Ollama has retired or will:
+
+- the replacement Ollama itself recommends, when the schedule names one
+- whether that replacement is **already installed**, in which case the action is to stop using the old
+  one rather than to pull anything
+- the exact `ollama pull` command, so the fix is copyable rather than described
+- **a scored fallback from the catalogue when no alternative is named**, because "retired, no
+  replacement, good luck" is not guidance. The substitute is chosen by the same
+  `scoreCandidate()` used for suggestions, so its reasoning is visible and consistent with everything
+  else Rāma recommends.
+
+Urgency is derived, not stated: an already-retired model is `critical` because it is broken now; a
+dated future retirement is `warn`. That is the Section 88 rule again — the status follows from the
+measurement, so it corrects itself when the schedule moves.
+
+### Not built: web research into rating and desirability
+
+Master wants Rāma to research how good a model actually is, rather than infer it from pull counts.
+The substrate exists — `ipc/intelligenceEngine.cjs` already does query decomposition, multi-source
+gathering, source vetting with credibility scoring, cross-referencing that surfaces contradictions,
+and calibrated confidence output.
+
+The honest reason it is not wired in yet: **a benchmark number scraped from a blog is not a
+measurement, and treating it as one would undo the discipline of Section 92's scoring.** Every current
+score component is a fact from Ollama's own catalogue — tags, sizes, dates, pull counts. Mixing in
+third-party claims needs its own provenance and confidence handling, or the `why` array stops being
+trustworthy. That is a design problem to solve deliberately, not a fetch to bolt on.
+
+### Not built: role-based routing, and synthesis across models
+
+Master: *"differentiate based on usage in RAMA so that load won't fall on single modal, but
+synchronized result should be happening based on ask."* Two separate mechanisms:
+
+**Roles.** `TASK_ROUTING` already maps a task type to capabilities, and `selectModel()` already
+resolves that to a model. What is missing is a per-role *assignment* master can see and override —
+code to one model, market reasoning to another, quick reflex chat to the cheapest — so no single
+model carries everything and a free-account allowance is not spent on work a 4B local model handles.
+
+**Synthesis.** Asking several models and reconciling their answers is a genuinely different thing from
+routing, and it is the harder half: it needs a reconciliation rule for when they disagree, and a cost
+ceiling so one question cannot spend the whole allowance. `intelligenceEngine`'s cross-reference and
+contradiction logic is the right precedent, and reusing it rather than writing a second reconciler is
+the decision to record now.
+
+Both are deferred with their designs stated, so a later session extends this rather than reinventing
+it.
