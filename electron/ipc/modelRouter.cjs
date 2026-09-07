@@ -91,6 +91,13 @@ function refreshCustomProviders() {
 // ─── Register IPC ─────────────────────────────────────────────────────────────
 function register(ipcMain) {
 
+  // Inject the real store once, so `ollamaCatalog` never requires Electron and stays testable —
+  // the same idiom as the workspace registry (Section 86). `dataStore` IS the database master asked
+  // for: encrypted, already backed up, and already holding every other integrated resource.
+  try {
+    require('../lib/ollamaCatalog.cjs').useStore(require('../dataStore.cjs'));
+  } catch { /* falls back to a lazy require inside the module */ }
+
   // ── List available models ─────────────────────────────────────────────────
   ipcMain.handle('models:list', async () => {
     refreshCustomProviders();
@@ -121,22 +128,36 @@ function register(ipcMain) {
    * costs almost none. The tradeoff is returned alongside so the choice stays informed rather than
    * implicit: cloud entries are marked non-private and network-dependent.
    */
-  ipcMain.handle('models:suggestions', async (_e, { needs = [], preferCloud = true, limit = 12 } = {}) => {
+  ipcMain.handle('models:suggestions', async (_e, { needs = [], preferCloud = true, diskBudgetBytes = null, limit = 5 } = {}) => {
     try {
       const catalog = require('../lib/ollamaCatalog.cjs');
       await refreshOllamaModels();
+      const cached = catalog.loadCatalog();
+
+      const { recommended, excluded } = catalog.suggestions({
+        catalog: cached.catalog,
+        schedule: cached.schedule,
+        installed: Object.values(discoveredOllama),
+        preferCloud, needs, diskBudgetBytes, limit,
+      });
+
       return {
         ok: true,
-        data: catalog.suggestions({
-          catalog: ollamaCatalogData,
-          installed: Object.values(discoveredOllama),
-          preferCloud, needs, limit,
-        }),
+        data: recommended,
+        // Returned rather than dropped, so master can see WHY something he read about is absent.
+        excluded,
         // Said plainly rather than implied, because master chose cloud for disk reasons and that is
         // only a real choice if its cost is visible.
         caveat: 'A cloud model runs on Ollama\'s servers: it needs almost no disk, but the prompt '
           + 'leaves this machine, it cannot answer offline, and it spends a free-account allowance.',
-        catalogLoaded: Object.keys(ollamaCatalogData).length > 0,
+        // Provenance, so a thin list is legible as "nothing fetched yet" rather than "nothing good".
+        catalog: {
+          loaded: !cached.empty,
+          families: Object.keys(cached.catalog).length,
+          fetchedAt: cached.fetchedAt,
+          stale: cached.stale,
+          source: cached.source,
+        },
       };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -314,6 +335,14 @@ async function refreshOllamaModels() {
   // lazily so `selectModel` and `checkAvailable` always agree with the last probe.
   try {
     const catalog = require('../lib/ollamaCatalog.cjs');
+
+    // Read the cached library and retirement schedule from the store. Cached rather than fetched so
+    // classification and retirement warnings work with no network — which is exactly when master
+    // most needs to be told the model he is relying on has been retired.
+    const cached = catalog.loadCatalog();
+    ollamaCatalogData = cached.catalog;
+    ollamaRetirements = cached.schedule;
+
     const list = catalog.describeInstalled({
       tags: detectedOllamaModels,
       catalog: ollamaCatalogData,

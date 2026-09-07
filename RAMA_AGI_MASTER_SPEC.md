@@ -9635,3 +9635,84 @@ That fetch is the next step, and it is what makes master's *"guide me based on u
 point in time"* real rather than a shape waiting for data. Deliberately left separate: it introduces
 network I/O, a cache, a refresh policy and a failure mode, and bolting it onto the same pass as the
 classification rewrite would mean neither got tested properly.
+
+### Follow-up — curation instead of a catalogue, and the store as the database
+
+Master: *"instead of showing entire catalogue, sort through it for better. Utilise DB if needed for
+integrated resources."*
+
+Both points landed on real weaknesses in what had just shipped.
+
+### The flaw in the first cut: popularity was measuring age
+
+`suggestions()` sorted by pull count within the cloud/local split. **Pull counts accumulate for as
+long as a model exists, so ranking by them ranks by age.** It would have put `llama3.1` — 119M pulls,
+a year old, superseded twice — above `muse-glimmer` at 191K pulls, released a week ago and built
+specifically for local agents. The signal was backwards from what master needed.
+
+Now popularity is used as a **rate**: pulls per month since the model was last updated. That asks the
+question actually intended — is this being adopted *now* — and it is log-scaled and capped at +25 so
+a viral model cannot swamp capability and recency.
+
+### Decision: hard exclusions, not penalties
+
+Two things are not "worse", they are unusable, and ranking them low understates the problem:
+
+- **No tool calling** → excluded. Rāma drives an agent loop; a model that cannot call a tool cannot
+  act, whatever else it is good at.
+- **Retired** → excluded at any rank, however popular. A retired `kimi-k2.5` with 9M pulls loses to
+  `kimi-k3` with 74K, because the first one is going to stop working.
+
+**Exclusions are returned, not silently dropped.** `{recommended, excluded}` means that when master
+wonders why a model he read about is missing, the reason is in the payload rather than absent from
+the UI.
+
+### Decision: every score states its own reasoning
+
+Each recommendation carries a `why` array — `+30 runs in Ollama's cloud, so it costs almost no disk`,
+`-12 over a year old, so almost certainly superseded`. **A ranking master cannot interrogate is just
+an opinion with a number attached**, and this project has spent several sections removing exactly
+that. The weights are legible: disk fit against his stated constraint, reasoning mode, vision,
+recency band, adoption rate, permissive licence.
+
+Disk is scored against a **budget** rather than in the abstract, with an oversized local model
+penalised (−25) rather than excluded — master may free space or accept the cost, it simply must not
+outrank something that fits.
+
+### Decision: `dataStore` is the database, not a new one
+
+**Rejected SQLite and Mongo.** A second store for one cached document would put model metadata
+*outside* the vault that protects everything else, and would need its own backup, migration and
+lifecycle for no gain. `dataStore` is encrypted, per-domain, and already the home of every other
+integrated resource — Section 86's workspace registry uses the identical `useStore` injection idiom,
+so this follows a pattern rather than inventing one.
+
+**Caching matters here beyond speed.** Once fetched, the catalogue and retirement schedule are
+queryable **offline** — and a machine with no network is precisely when master would most want to be
+told that the model he is about to rely on has been retired. `fetchedAt` is recorded so staleness is
+measured rather than guessed, and **stale is advice, not refusal**: a day-old catalogue beats none,
+so a stale document is still returned and still used.
+
+### Verified
+
+`verifyOllamaCatalog.cjs` **89 assertions (+29)**. The ones that matter:
+
+- **The fresh purpose-built model outranks the old popular one**, which is the corrected behaviour
+  stated as a test rather than a comment.
+- A model without tool calling is **excluded rather than ranked low**, and the exclusion says
+  *"could not act"*.
+- A retired model is excluded **despite 9M pulls**, and its exclusion names Ollama's replacement.
+- An oversized local model is **penalised, not excluded**, and says so.
+- Persistence: an empty store loads empty rather than throwing; never-fetched counts as stale; the
+  catalogue and schedule round-trip; age is measured from the recorded fetch time; a two-day-old
+  document is stale **but still usable**; **retirement can be answered offline from the cache**; and a
+  corrupt cached document degrades to empty rather than throwing.
+
+`npm run verify` **9 suites / 651 assertions**; audit clean at 340 channels.
+
+### Still not done
+
+Nothing fetches `ollama.com/library` or the retirement page yet, so the cache starts empty and
+`models:suggestions` returns a short list with `catalog.loaded: false` — deliberately legible as
+*"nothing fetched yet"* rather than *"nothing good exists"*. The scoring, the exclusions and the
+store are all in place and tested, so that fetch is now a small addition rather than a feature.

@@ -20,6 +20,83 @@
  * module is testable with no daemon and no network. Fetching lives in the caller.
  */
 
+// ─── Persistence ──────────────────────────────────────────────────────────────
+// Master: *"utilise DB if needed for integrated resources."* The store Rāma already has IS that
+// database — `dataStore` is encrypted, per-domain and already the home of every other integrated
+// resource (Section 86's workspace registry uses the same idiom). Rejected adding SQLite or Mongo:
+// a second store for one cached document would put model metadata outside the vault that protects
+// everything else, and would need its own backup, migration and lifecycle for no gain.
+//
+// Caching matters here beyond speed: once fetched, the catalogue and the retirement schedule are
+// queryable OFFLINE. Without that, a machine with no network could not tell master that the model he
+// is about to rely on has been retired — which is precisely when he would most want to know.
+const DOMAIN = 'config';
+const KEY = 'ollamaCatalog';
+
+/** How long a fetched catalogue is trusted before a refresh is advised. */
+const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
+
+let injectedStore = null;
+
+/** Inject `dataStore`, so this module never requires Electron and stays testable. */
+function useStore(store) { injectedStore = store; }
+
+function ds() {
+  if (injectedStore) return injectedStore;
+  // Lazy, so a test that injects never loads the real store.
+  return require('../dataStore.cjs');
+}
+
+/**
+ * Persist the fetched library and retirement schedule.
+ *
+ * `fetchedAt` is recorded rather than inferred, so staleness is a measured fact and not a guess at
+ * how long the app has been running.
+ */
+function saveCatalog({ catalog = {}, schedule = [], source = null, now = new Date() } = {}) {
+  const doc = {
+    catalog,
+    schedule,
+    source,
+    fetchedAt: now.toISOString(),
+    families: Object.keys(catalog).length,
+    retirementRows: schedule.length,
+  };
+  ds().set(DOMAIN, KEY, doc);
+  ds().saveDomain?.(DOMAIN);
+  return doc;
+}
+
+/**
+ * Read the cached catalogue.
+ *
+ * Returns `{catalog, schedule, fetchedAt, ageMs, stale}` — never null, so callers get empty
+ * structures rather than having to guard. `stale` is advice, not a refusal: a day-old catalogue is
+ * far better than none, and refusing to use it would leave master with no guidance at all whenever
+ * the network is down.
+ */
+function loadCatalog({ now = new Date() } = {}) {
+  let doc = null;
+  try { doc = ds().get(DOMAIN, KEY); } catch { doc = null; }
+
+  const catalog = (doc && typeof doc.catalog === 'object' && doc.catalog) || {};
+  const schedule = Array.isArray(doc?.schedule) ? doc.schedule : [];
+  const fetchedAt = doc?.fetchedAt || null;
+  const t = fetchedAt ? Date.parse(fetchedAt) : NaN;
+  const ageMs = Number.isNaN(t) ? null : Math.max(0, now.getTime() - t);
+
+  return {
+    catalog,
+    schedule,
+    source: doc?.source || null,
+    fetchedAt,
+    ageMs,
+    // Never fetched counts as stale; an unparseable timestamp does too, rather than being trusted.
+    stale: ageMs === null || ageMs > STALE_AFTER_MS,
+    empty: Object.keys(catalog).length === 0,
+  };
+}
+
 /** A cloud model's weights are not on disk, so anything this small cannot be running locally. */
 const CLOUD_MAX_LOCAL_BYTES = 512 * 1024 * 1024;   // 512 MB
 
@@ -218,14 +295,126 @@ function describeInstalled({ tags = [], catalog = {}, schedule = [], seed = {}, 
   return out;
 }
 
+/** Smallest advertised size in billions of parameters, for judging whether a local model fits. */
+function smallestSizeB(sizes = []) {
+  const nums = sizes
+    .map(s => paramsB(`x:${s}`))
+    .filter(n => n !== null && Number.isFinite(n));
+  return nums.length ? Math.min(...nums) : null;
+}
+
+/** Rough resident bytes at 4-bit quantisation — the number that decides if it fits master's disk. */
+function q4Bytes(paramsBillions) {
+  if (!Number.isFinite(paramsBillions)) return null;
+  return paramsBillions * 0.6 * 1024 * 1024 * 1024;
+}
+
 /**
- * Models master could enable, that he has not pulled yet — the "give master the list" half.
+ * Should Rāma recommend this model, and how strongly? (Section 92)
  *
- * Cloud entries are offered first when `preferCloud`, because master's binding constraint is disk
- * and a cloud model costs him almost none. Sorted by pulls within each group, since popularity is
- * the only quality signal available without benchmarking every candidate ourselves.
+ * Master: *"instead of showing entire catalogue, sort through it for better."* So this is a judgement
+ * with stated weights, not a listing. Every contribution is reported in `why`, because a ranking
+ * master cannot interrogate is just an opinion with a number attached.
+ *
+ * TWO HARD EXCLUSIONS, not penalties:
+ *   - **No tool calling.** Rāma drives an agent loop; a model that cannot call a tool cannot act,
+ *     so ranking it lower than a capable model understates the problem — it is unusable, not worse.
+ *   - **Retired.** It will stop working, so recommending it at any rank is wrong.
+ *
+ * THE CORRECTION THAT MATTERS: popularity is used as a RATE, not a total. Pull counts accumulate for
+ * as long as a model exists, so ranking by them ranks by age — it would put `llama3.1` (119M pulls,
+ * a year old, superseded twice over) above `muse-glimmer` (191K pulls, a week old, purpose-built for
+ * local agents). Pulls per month asks the question actually intended: are people adopting this now?
  */
-function suggestions({ catalog = {}, installed = [], preferCloud = true, needs = [], limit = 12 } = {}) {
+function scoreCandidate(entry = {}, { preferCloud = true, diskBudgetBytes = null, now = new Date(), schedule = [] } = {}) {
+  const fam = String(entry.family || '').toLowerCase();
+  const why = [];
+
+  const retirement = retirementFor(fam, schedule, now);
+  if (retirement) {
+    return {
+      score: 0,
+      excluded: true,
+      excludeReason: retirement.retired
+        ? `retired by Ollama${retirement.alternative ? ` — use ${retirement.alternative}` : ''}`
+        : `retiring${retirement.date ? ` on ${retirement.date}` : ''}${retirement.alternative ? ` — use ${retirement.alternative}` : ''}`,
+      why: [],
+      retirement,
+    };
+  }
+
+  if (!entry.tools) {
+    return {
+      score: 0,
+      excluded: true,
+      excludeReason: 'no tool calling, so Rāma could not act with it',
+      why: [],
+      retirement: null,
+    };
+  }
+
+  let score = 0;
+  const add = (points, reason) => { score += points; if (points !== 0) why.push(`${points > 0 ? '+' : ''}${points} ${reason}`); };
+
+  // ── Disk, which is master's stated binding constraint ─────────────────────
+  if (entry.cloud) {
+    add(preferCloud ? 30 : -10, preferCloud
+      ? 'runs in Ollama\'s cloud, so it costs almost no disk'
+      : 'runs in the cloud, and local-only was requested');
+  } else {
+    const smallest = smallestSizeB(entry.sizes);
+    const bytes = q4Bytes(smallest);
+    if (bytes === null) {
+      add(0, 'no advertised size, so disk cost is unknown');
+    } else if (diskBudgetBytes && bytes > diskBudgetBytes) {
+      // Not excluded: master may free space or accept the cost. But it must not outrank a fit.
+      add(-25, `smallest build is about ${Math.round(bytes / 1024 / 1024 / 1024)} GB, over the budget`);
+    } else {
+      add(12, `smallest build about ${Math.round(bytes / 1024 / 1024 / 1024)} GB, which fits`);
+      add(8, 'works with no network and keeps prompts on this machine');
+    }
+  }
+
+  // ── Capability that an agent actually uses ────────────────────────────────
+  if (entry.thinking) add(15, 'reasons before answering, which matters for multi-step work');
+  if (entry.vision) add(5, 'can read images and screenshots');
+
+  // ── Recency, because a superseded model is a worse tool at the same size ──
+  const days = Number(entry.updatedDaysAgo);
+  if (Number.isFinite(days)) {
+    if (days <= 30) add(30, 'released or updated within the last month');
+    else if (days <= 90) add(22, 'updated within three months');
+    else if (days <= 180) add(14, 'updated within six months');
+    else if (days <= 365) add(6, 'updated within the year');
+    else add(-12, 'over a year old, so almost certainly superseded');
+  }
+
+  // ── Adoption RATE, never the raw total ────────────────────────────────────
+  const pulls = Number(entry.pulls) || 0;
+  if (Number.isFinite(days) && days > 0 && pulls > 0) {
+    const perMonth = pulls / Math.max(1, days / 30);
+    const points = Math.min(25, Math.round(Math.log10(Math.max(10, perMonth)) * 5));
+    add(points, `being adopted at roughly ${Math.round(perMonth).toLocaleString()} pulls a month`);
+  }
+
+  // ── Licence, where the description states one ─────────────────────────────
+  if (/apache 2\.0|mit license/i.test(entry.description || '')) {
+    add(5, 'permissively licensed');
+  }
+
+  return { score, excluded: false, excludeReason: null, why, retirement: null };
+}
+
+/**
+ * The few models worth master's attention — curated, not listed (Section 92).
+ *
+ * Returns `{ recommended, excluded }` so a rejection is visible rather than a silent omission: if
+ * master wonders why a model he read about is absent, the reason is in the payload.
+ */
+function suggestions({
+  catalog = {}, installed = [], preferCloud = true, needs = [],
+  diskBudgetBytes = null, schedule = [], now = new Date(), limit = 5,
+} = {}) {
   const have = new Set(installed.map(m => familyOf(m.model || m.id || '')));
 
   const rows = Object.entries(catalog)
@@ -237,21 +426,23 @@ function suggestions({ catalog = {}, installed = [], preferCloud = true, needs =
       thinking: !!e.thinking,
       vision: !!e.vision,
       pulls: Number(e.pulls) || 0,
+      updatedDaysAgo: Number.isFinite(Number(e.updatedDaysAgo)) ? Number(e.updatedDaysAgo) : null,
       sizes: Array.isArray(e.sizes) ? e.sizes : [],
       description: e.description || null,
-      retirement: retirementFor(fam, [], new Date()),
     }))
-    // A model Rāma is going to drive needs tool calling; without it the agent loop cannot act.
-    .filter(r => (needs.includes('tools') ? r.tools : true))
-    .filter(r => (needs.includes('vision') ? r.vision : true));
+    .filter(r => (needs.includes('vision') ? r.vision : true))
+    .map(r => ({ ...r, ...scoreCandidate(r, { preferCloud, diskBudgetBytes, now, schedule }) }));
 
-  rows.sort((a, b) => {
-    if (preferCloud && a.cloud !== b.cloud) return a.cloud ? -1 : 1;
-    if (!preferCloud && a.cloud !== b.cloud) return a.cloud ? 1 : -1;
-    return b.pulls - a.pulls;
-  });
+  const recommended = rows
+    .filter(r => !r.excluded)
+    .sort((a, b) => b.score - a.score || b.pulls - a.pulls)
+    .slice(0, limit);
 
-  return rows.slice(0, limit);
+  const excluded = rows
+    .filter(r => r.excluded)
+    .map(r => ({ family: r.family, reason: r.excludeReason }));
+
+  return { recommended, excluded };
 }
 
 /** Anything installed that Ollama has retired or will — what master must be told without asking. */
@@ -270,7 +461,8 @@ function advisories(models = []) {
 }
 
 module.exports = {
-  classify, retirementFor, describeInstalled, suggestions, advisories,
-  familyOf, paramsB,
-  CLOUD_MAX_LOCAL_BYTES, CLOUD_MIN_PARAMS_B, EVIDENCE,
+  classify, retirementFor, describeInstalled, suggestions, advisories, scoreCandidate,
+  useStore, saveCatalog, loadCatalog,
+  familyOf, paramsB, smallestSizeB, q4Bytes,
+  CLOUD_MAX_LOCAL_BYTES, CLOUD_MIN_PARAMS_B, EVIDENCE, DOMAIN, KEY, STALE_AFTER_MS,
 };
