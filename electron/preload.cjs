@@ -750,6 +750,9 @@ const RAMA_API = {
     route:            (taskType)   => ipcRenderer.invoke('models:route', taskType),
     chat:             (opts)       => ipcRenderer.invoke('models:chat', opts),
     checkCredentials: ()           => ipcRenderer.invoke('models:check-credentials'),
+    // Models master could enable but has not pulled, cloud-first by default because disk is his
+    // binding constraint. Returns the tradeoff alongside the list (Section 92).
+    suggestions:      (opts)       => ipcRenderer.invoke('models:suggestions', opts),
     needsForTask:     (task)       => ipcRenderer.invoke('models:needs-for-task', task),
     ollamaList:       ()           => ipcRenderer.invoke('models:ollama-list'),
     ollamaPull:       (opts, cb) => {

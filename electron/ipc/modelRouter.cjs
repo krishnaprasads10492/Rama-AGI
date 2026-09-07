@@ -54,6 +54,17 @@ const FALLBACK_CHAIN = [
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let detectedOllamaModels  = [];
+/**
+ * Models Ollama actually reports, keyed by `ollama/<tag>` (Section 92).
+ *
+ * `MODEL_REGISTRY` used to be the set of USABLE models, and it was a hardcoded allowlist of four
+ * names — so `ollama pull qwen3.5:9b` produced a model Rāma detected, displayed, and could never
+ * route to. The registry is now only a seed of known metadata; this is what is actually available.
+ */
+let discoveredOllama      = {};
+/** Ollama's published library and cloud-retirement schedule, when they have been fetched. */
+let ollamaCatalogData     = {};
+let ollamaRetirements     = [];
 let primaryModel          = 'gpt-4o';
 let ollamaBaseUrl         = 'http://localhost:11434';
 
@@ -84,12 +95,52 @@ function register(ipcMain) {
   ipcMain.handle('models:list', async () => {
     refreshCustomProviders();
     await refreshOllamaModels();
-    const available = Object.entries(MODEL_REGISTRY).map(([id, info]) => ({
+    // `allModels()` rather than the registry, so a model master pulled appears here instead of
+    // being detected and then silently unusable (Section 92).
+    const available = Object.entries(allModels()).map(([id, info]) => ({
       id,
       ...info,
       available: checkAvailable(id),
     }));
-    return { ok: true, data: available, ollama: detectedOllamaModels };
+
+    // Retirement advisories travel WITH the list. Ollama retires cloud models on a schedule and
+    // names a replacement for each; master should not have to go and ask whether one of his is
+    // about to stop working.
+    let advisories = [];
+    try {
+      advisories = require('../lib/ollamaCatalog.cjs').advisories(Object.values(discoveredOllama));
+    } catch { /* the list is still worth returning without them */ }
+
+    return { ok: true, data: available, ollama: detectedOllamaModels, advisories };
+  });
+
+  /**
+   * Models master could enable but has not pulled — the list he asked for (Section 92).
+   *
+   * `preferCloud` defaults true because master's binding constraint is disk, and a cloud model
+   * costs almost none. The tradeoff is returned alongside so the choice stays informed rather than
+   * implicit: cloud entries are marked non-private and network-dependent.
+   */
+  ipcMain.handle('models:suggestions', async (_e, { needs = [], preferCloud = true, limit = 12 } = {}) => {
+    try {
+      const catalog = require('../lib/ollamaCatalog.cjs');
+      await refreshOllamaModels();
+      return {
+        ok: true,
+        data: catalog.suggestions({
+          catalog: ollamaCatalogData,
+          installed: Object.values(discoveredOllama),
+          preferCloud, needs, limit,
+        }),
+        // Said plainly rather than implied, because master chose cloud for disk reasons and that is
+        // only a real choice if its cost is visible.
+        caveat: 'A cloud model runs on Ollama\'s servers: it needs almost no disk, but the prompt '
+          + 'leaves this machine, it cannot answer offline, and it spends a free-account allowance.',
+        catalogLoaded: Object.keys(ollamaCatalogData).length > 0,
+      };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   });
 
   // ── Set primary model ─────────────────────────────────────────────────────
@@ -207,24 +258,39 @@ function selectModel(taskType) {
   refreshCustomProviders();
   const caps = TASK_ROUTING[taskType] || ['general'];
 
-  // If offline task — prefer local
+  // An offline task needs a model that genuinely runs here. `caps.offline` is now set from measured
+  // evidence, so a cloud-backed Ollama model is correctly excluded — it cannot answer with the
+  // network down, whatever port it is reached on (Section 92).
   if (caps.includes('offline')) {
-    const local = FALLBACK_CHAIN.find(m => MODEL_REGISTRY[m]?.type === 'local' && checkAvailable(m));
-    if (local) return local;
+    const offline = Object.keys(allModels())
+      .find(m => modelInfo(m)?.caps?.includes('offline') && checkAvailable(m));
+    if (offline) return offline;
   }
 
-  // Find best available model with needed capability
+  // Declared preference order first, so master's configured chain still wins where it applies.
   for (const modelId of FALLBACK_CHAIN) {
-    const info = MODEL_REGISTRY[modelId];
+    const info = modelInfo(modelId);
     if (!info) continue;
     if (!checkAvailable(modelId)) continue;
     if (caps.some(cap => info.caps.includes(cap))) return modelId;
   }
 
+  // Then anything Ollama reports. Without this pass a freshly pulled model stays unreachable, which
+  // was the whole of defect A. Cheapest first, so a local model is preferred over a cloud call that
+  // spends master's free-account allowance.
+  const discovered = Object.values(discoveredOllama)
+    .filter(m => caps.some(cap => m.caps.includes(cap)))
+    .sort((a, b) => (a.costTier - b.costTier) || (b.paramsB ?? 0) - (a.paramsB ?? 0));
+  if (discovered.length) return discovered[0].id;
+
   return primaryModel;
 }
 
 function checkAvailable(modelId) {
+  // A discovered model is available by definition: Ollama just told us it has it. That covers
+  // cloud-backed models too, which are reachable through the same daemon (Section 92).
+  if (discoveredOllama[modelId]) return true;
+
   const info = MODEL_REGISTRY[modelId];
   if (!info) return false;
   if (info.type === 'local') {
@@ -243,11 +309,42 @@ async function refreshOllamaModels() {
   } catch {
     detectedOllamaModels = [];
   }
+
+  // Rebuild what is routable from what the daemon just reported (Section 92). Done here rather than
+  // lazily so `selectModel` and `checkAvailable` always agree with the last probe.
+  try {
+    const catalog = require('../lib/ollamaCatalog.cjs');
+    const list = catalog.describeInstalled({
+      tags: detectedOllamaModels,
+      catalog: ollamaCatalogData,
+      schedule: ollamaRetirements,
+      seed: MODEL_REGISTRY,
+    });
+    discoveredOllama = Object.fromEntries(list.map(m => [m.id, m]));
+  } catch (err) {
+    // A broken catalogue must not cost master his local models entirely, so the previous map stands.
+    console.warn(`[models] could not describe Ollama models: ${err.message}`);
+  }
+}
+
+/**
+ * Everything Rāma can route to: the declared registry plus whatever Ollama reports.
+ *
+ * Discovery wins on conflict — the daemon is the authority on what exists right now, and the seed's
+ * `offline`/`costTier: 0` assumptions are wrong for a cloud model (Section 92).
+ */
+function allModels() {
+  return { ...MODEL_REGISTRY, ...discoveredOllama };
+}
+
+/** One model's metadata, declared or discovered. */
+function modelInfo(modelId) {
+  return discoveredOllama[modelId] || MODEL_REGISTRY[modelId] || null;
 }
 
 // ─── Chat completion per provider ─────────────────────────────────────────────
 async function chatCompletion(messages, modelId) {
-  const info = MODEL_REGISTRY[modelId];
+  const info = modelInfo(modelId);
   if (!info) throw new Error(`Unknown model: ${modelId}`);
 
   switch (info.provider) {
@@ -456,7 +553,7 @@ async function httpGet(url) {
  */
 function credentialStatus() {
   const status = {};
-  for (const [id, info] of Object.entries(MODEL_REGISTRY)) {
+  for (const [id, info] of Object.entries(allModels())) {
     if (checkAvailable(id)) status[id] = 'available';
     else if (info.type === 'local') status[id] = 'not-installed';
     else status[id] = 'missing-key';
@@ -465,5 +562,6 @@ function credentialStatus() {
 }
 
 module.exports = {
-  register, selectModel, chatCompletion, checkAvailable, credentialStatus, MODEL_REGISTRY,
+  register, selectModel, chatCompletion, checkAvailable, credentialStatus,
+  allModels, modelInfo, MODEL_REGISTRY,
 };

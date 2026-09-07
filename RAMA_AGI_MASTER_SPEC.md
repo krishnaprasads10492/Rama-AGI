@@ -1764,6 +1764,8 @@ authenticated **Master session**, not merely an open store.
 | 110 | The Python probe under-reported, and master hit it | done | Section 91 follow-up. Master on his own machine: *"when checked for readiness, seeing limits python packages missing-fastapi."* That is the **in-range** branch, so his interpreter is fine — but the probe was wrong in a way that would have cost him ten round trips. **`import a, b, c` as one statement aborts at the FIRST failure**, so on a machine with nothing installed it named only `fastapi`; master installs it, re-runs, is told `uvicorn`, and so on through the list. Fixed three ways: (1) **each module imported separately** with every failure collected — identical cost, complete report; (2) **all-missing and some-missing get different words**, since listing thirteen names when the answer is "nothing is installed here" buries the instruction; (3) **a real import, not `importlib.util.find_spec`** — find_spec answers *is it installed*, the question is *will `main.py` start*, and a wheel that installed with a broken native binary (the usual scipy/lightgbm failure) passes find_spec and fails on import. The list also moved to **import names, not distribution names** (`scikit-learn` imports as `sklearn`, so checking the distribution name would report a working install as broken) and now covers all thirteen the engine files import rather than the ten first written. **TWO FURTHER DEFECTS FOUND WHILE TESTING:** (a) **the probe ignored `RAMA_PYTHON`** while `aiProcess.cjs` honours it — so master could point Rāma at a working venv, have the app satisfied, and still be told his packages were missing; **a diagnostic that contradicts the runtime is worse than none** because it sends master to fix something that is not broken. Both now resolve identically and the output says `(via RAMA_PYTHON)` when an override is in force. (b) **the version check returned early**, so on an out-of-range interpreter master learned nothing about the packages; it now reports and **continues**, since "wrong Python, and nothing installed in it either" is a different job from "wrong Python, otherwise ready" — and that short-circuit had made the loop unreachable on any machine whose only Python is out of range, which is this one. **VERIFIED for real, both branches:** all-missing → `Python 3.14.4 found, but NONE of the engine packages are installed in it`; partial → a throwaway venv with only `fastapi`/`httpx` reported `10 of 13 engine packages missing — uvicorn, numpy, pandas, scipy, sklearn, lightgbm, xgboost, statsmodels, ta, joblib`, where the old code would have said `uvicorn` and stopped. Configured-but-unstartable exercised by pointing `RAMA_PYTHON` at a deleted venv. Throwaway venv removed. `npm run verify` 8 suites / 562 assertions unchanged. |
 | 111 | Keeping the promise the menu makes — the build now installs Python too | done | Section 91 second follow-up. Master: *"step-2: installs what ever is missing implies what ever is missing needs to installed automatically."* Correct, and **the inconsistency was in the code not the wording**: `Rama.bat` option 3 says *"installs what is missing"* and kept that for Node while only reporting Python. Section 91's "probe, report, never install" was half sound (the build machine's Python need not be the install machine's, and packaging never runs Python so it must not block) and half excuse (**master builds on the machine he then runs**, so refusing because the general case is ambiguous left the common case broken behind a menu that claimed otherwise). **DECISION: install into a venv under userData, never the system Python.** The pins are exact (I12) — `numpy==1.26.4`, `scipy==1.14.1` — so a global `pip install -r` can break other Python work; a venv is isolated, needs no admin, and cannot conflict. **Location `<userData>/python-env`** because (a) an installed app can find it, whereas a repo venv is invisible to it and venvs are not relocatable so one cannot be shipped inside the app; (b) it is outside the app directory so it survives the reinstall an update performs (the Section 84 argument); (c) both sides derive it from `productName` in `package.json`, exactly what Electron uses for `app.getPath('userData')`, so there is one source rather than two spellings that can drift. **DECISION: the interpreter is chosen, not assumed** — `py -3.12/-3.11/-3.10` then PATH if in range, because building the venv from whatever `python` means would reproduce the failure warned about two sections earlier: a 3.13+ venv where `numpy==1.26.4` has no wheel and pip dies in a C compiler. **If no in-range interpreter exists, nothing is attempted** and the report says which versions are acceptable — guessing would produce a venv that cannot hold the requirements, worse than none because it looks like progress. **Never during `--readiness`** (its contract is that it changes nothing, and quietly installing ~500 MB would break the reason master can run it safely), **never fatal**, **skippable via `--skip-python`**, **idempotent**, and it **re-probes by real import rather than trusting pip's exit code** since a wheel can install and still fail to import. **`aiProcess.cjs` resolution order is now `RAMA_PYTHON` → `<userData>/python-env` → repo `.venv-stockmind` → PATH** — every rung additive, PATH unchanged as last resort, so an install that works today keeps working while a machine prepared by the build needs **no environment variable at all**; the manual `setx RAMA_PYTHON` of the previous section was a step master should never have needed. **AN HONESTY FIX THIS FORCED:** the help text said *"Nothing outside this project directory is modified"*, which creating a venv under `%APPDATA%` makes false — a build script that quietly writes outside where it claims erodes trust in every other statement it makes, so the help now names the directory, explains why it is outside the project, and documents `--skip-python`. **VERIFIED:** readiness creates nothing (asserted — venv absent before and after) and correctly reports that a build *could not* fix it here; `engineVenvDir()` resolves to `%APPDATA%\Rama AGI\python-env`, confirmed via `--help`; venv/pip plumbing exercised for real earlier in the session. `npm run verify` 8 suites / 562 assertions unchanged. **NOT VERIFIED and cannot be from here: the successful install path.** This machine has only Python 3.14, so the no-in-range branch is taken every time and create-and-install has never run. Master's machine is its first execution. |
 
+| 112 | Ollama models — discovered, honestly classified, retirement-aware | done | Section 92. Master: *"Cloud models are more preferred because disk space constraint… provide master the list then automate the process of integrating it, just need to guide master based on updated docs at any point of time."* **THREE DEFECTS.** (A) `MODEL_REGISTRY` was a hardcoded allowlist of four stale ids and `selectModel`/`checkAvailable` required membership, so `ollama pull qwen3.5:9b` produced a model Rāma **detected, displayed and could never route to**. (B) Ollama serves **cloud models** through the same `localhost:11434` — almost no disk, which is exactly why master wants them — but every `ollama/*` was hardcoded `type:'local'`, `costTier:0`, `caps:['offline']`, so Rāma would report a cloud call as local, free and offline when the prompt left the machine, the account has limits and it cannot work without network. **Master preferring cloud makes this worse, not acceptable: a deliberate tradeoff is only a choice if its cost is visible.** (C) **Found in the docs — Ollama RETIRES cloud models** on a published schedule naming replacements (`minimax-m2.5`→`minimax-m2.7`, `qwen3-coder:480b`→`qwen3.5:397b`, several `gemma3`→`gemma4:31b`); a hardcoded list does not go stale so much as **break**, with nothing able to explain why. This is the real argument for reading the docs rather than guessing. **DECISIONS:** *discovered not declared* — the registry becomes a seed of known metadata and anything Ollama reports is routable (rejected "add today's names": same defect with a later expiry). *Evidence-based classification* per Section 88's rule — `catalog` > `name` > `size` > `unknown`, each carrying its `why`; **unknown is never folded into local** because the failure is asymmetric (calling cloud "local" tells master his data stayed home when it did not; calling local "unknown" costs a line of UI). *No second provider* — cloud is reachable via the existing daemon, so rejected a client against `ollama.com` with `OLLAMA_API_KEY`: duplicate transport, no capability gain, another vault credential. *Capabilities rebuilt not inherited* — a cloud model loses `offline`, gains `remote`, is not `costTier 0` (a free allowance is a real budget), and **`private` becomes explicit** because "reached via localhost" stopped meaning "stayed on this machine". `selectModel` gained a discovered pass **cheapest-first** so local is preferred over spending master's allowance, and its offline branch now tests measured `offline` rather than `type==='local'`. **VERIFIED: `scripts/verifyOllamaCatalog.cjs`, 60 assertions** — a 300M model at 200 MB is NOT called cloud (size heuristic only applies ≥8B); unknown claims neither `offline` nor `private`; MoE tags read as TOTAL (`16x17b`→272B) since total is what must sit on disk; family-level retirement rows match tagged installs; past dates read retired and future ones warn with the replacement named; empty schedule invents nothing; suggestions exclude installed, lead with cloud, and drop models without tool calling since an agent loop cannot act without it; plus hostile input. `npm run verify` **9 suites / 622 assertions**, audit clean at **340 channels**. **NOT DONE — the live-document half:** `ollamaCatalogData`/`ollamaRetirements` are wired but **unpopulated**; nothing fetches the library or retirement pages yet, so classification runs on name+size (honest and functional — 397B in 40 MB is still correctly cloud) but retirement warnings **cannot fire**. That fetch is the next step and is what makes "guide me from updated docs" real; kept separate because it adds network I/O, a cache, a refresh policy and a failure mode, and bundling it here would mean neither half got tested properly. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -9500,3 +9502,136 @@ now points at the thing that does it for him.
 Python 3.14, so `ensureEngineVenv()` takes the no-in-range-interpreter branch every time and the
 create-and-install branch has never run. Master's machine, with a 3.10–3.12 present, is the first
 execution of that path.
+
+---
+
+## SECTION 92 — Ollama models: discovered, honestly classified, and aware of retirement
+
+Master: *"Cloud models are more preferred because disk space constraint in the pc but still need
+capability to integrate them in the future. Provide master the list then automate the process of
+integrating it, just need to guide master based on updated docs at any point of time."*
+
+Two defects blocked all of this, and researching the fix found a third problem nobody had considered.
+
+### Defect A — the local registry is a hardcoded allowlist, so nothing master pulls is usable
+
+`selectModel()` walks `FALLBACK_CHAIN` and requires `MODEL_REGISTRY[modelId]` to exist;
+`checkAvailable()` substring-matches Ollama's detected models against those same four ids —
+`llama3.2`, `codellama`, `mistral`, `phi3`. So `ollama pull qwen3.5:9b` produces a model Rāma
+**detects, displays, and can never route to.** The registry was written when those four were current
+and has been silently wrong ever since.
+
+### Defect B — a cloud model would be reported as local, free and offline
+
+Ollama now serves **cloud models**: pulled like any other, run through the same `localhost:11434`,
+but executed on Ollama's servers so they need no local GPU and almost no disk. That is precisely why
+master wants them. But every `ollama/*` entry is hardcoded `type:'local'`, `costTier:0`,
+`caps:['offline']`, so Rāma would tell master a cloud call was local, free and available offline
+when **the prompt left the machine, the account has limits, and it cannot work without network**.
+
+Master preferring cloud does not make this acceptable — it makes it worse. A tradeoff he has chosen
+deliberately is only a choice if the cost is visible; misreporting it turns his decision into an
+accident.
+
+### Defect C — found in the docs: Ollama RETIRES cloud models
+
+Ollama publishes a retirement schedule with recommended alternatives — `minimax-m2.5` → `minimax-m2.7`,
+`kimi-k2.5` → `kimi-k2.6`, and a long list already past, including `qwen3-coder:480b` → `qwen3.5:397b`
+and several `gemma3` sizes → `gemma4:31b`. Local models are unaffected.
+
+**This is the real argument for master's "guide me from updated docs at any point in time".** A
+hardcoded cloud list does not merely go stale: the model disappears and Rāma breaks, with nothing in
+the app able to explain why. The schedule names the replacement, so the fix is to read it rather than
+to guess.
+
+### Decision: discovered, not declared
+
+`MODEL_REGISTRY` stops being the set of usable models and becomes a **seed of known metadata**.
+Anything Ollama reports is routable; the registry only enriches what it happens to know. Rejected
+"keep the allowlist and add today's names": that is the same defect with a later expiry date, and it
+would need editing every time master pulls something.
+
+### Decision: classification is evidence-based, and says which evidence
+
+Following the self-model rule (Section 88), each model carries **how** it was classified:
+
+- **`catalog`** — the fetched library says it carries the `cloud` tag. Strongest evidence.
+- **`size`** — a many-billion-parameter model occupying almost no local disk must be cloud-backed;
+  weights that are not there cannot run here.
+- **`name`** — an explicit `-cloud`/`:cloud` suffix.
+- **`unknown`** — nothing matched, so it is reported as unknown rather than assumed local.
+
+**Unknown is never silently treated as local**, because the failure is asymmetric: calling a cloud
+model local tells master his data stayed home when it did not, while calling a local model unknown
+merely costs a line of UI.
+
+### Decision: no second provider
+
+Cloud models are reachable through the **same** `localhost:11434` Ollama already uses, so the
+existing provider path works unchanged. Rejected building a client against `ollama.com`'s direct API
+with `OLLAMA_API_KEY`: it duplicates the transport for no capability gain, and it would put another
+credential in the vault for something the local daemon already proxies.
+
+### Decision: capabilities reflect reality, not the family
+
+A cloud model loses `offline` and gains `remote`. Its cost tier is not 0 — it consumes a free-account
+allowance, which is a real budget even though no invoice arrives. **`private` becomes an explicit
+field** rather than something inferred from `type`, because "runs via localhost" and "stays on this
+machine" stopped being the same statement the moment cloud models existed.
+
+### What was built
+
+`electron/lib/ollamaCatalog.cjs` — every function pure, with tags, catalogue and schedule injected,
+so the whole module tests with no daemon and no network. Fetching lives in the caller.
+
+- `classify()` — cloud or local, with the evidence that decided it
+- `describeInstalled()` — `/api/tags` → routable model descriptors with honest capabilities
+- `retirementFor()` — matches both exact ids and bare families, since the schedule uses both
+- `advisories()` — what master must be told without asking
+- `suggestions()` — models he could enable, cloud-first, filterable by `tools`/`vision`
+
+`modelRouter.cjs` now resolves through `allModels()` and `modelInfo()` rather than reading
+`MODEL_REGISTRY` directly, so a discovered model is routable in `selectModel`, `chatCompletion`,
+`checkAvailable` and `credentialStatus`. Discovery wins on conflict, because the daemon is the
+authority on what exists and the seed's `offline`/`costTier: 0` are wrong for a cloud model.
+
+`selectModel` gained a second pass over discovered models, **cheapest first**, so a local model is
+preferred over a cloud call that spends master's allowance. Its offline branch now tests the measured
+`offline` capability instead of `type === 'local'`, which correctly excludes a cloud-backed model
+reached over localhost.
+
+`models:suggestions` returns the list plus an explicit caveat naming the three costs of cloud, and
+`models:list` carries retirement advisories so they arrive without being requested.
+
+### Verified
+
+`scripts/verifyOllamaCatalog.cjs`, **60 assertions** (`npm run verify:ollama`). The pointed ones:
+
+- **A genuinely small model is not called cloud** — a 300M embedding model at 200 MB must not trip
+  the size heuristic, so it only applies at or above 8B parameters.
+- **Unknown is never silently local**, and an unknown model claims neither `offline` nor `private`.
+- A cloud model is not `costTier: 0`, does not claim `offline`, is not `private`, and carries its
+  evidence.
+- **MoE tags are read as their total** — `16x17b` is 272B — because total parameters are what would
+  have to sit on disk, and disk is the question being asked.
+- A family-level retirement row matches a tagged install (`minimax-m2.5` covers
+  `minimax-m2.5:latest`), a past date reads as retired and a future one as a warning that names the
+  replacement, and an empty schedule never invents a retirement.
+- Suggestions exclude what is installed, lead with cloud when disk is the constraint, and drop
+  models without tool calling when asked — an agent loop cannot act without it.
+- Hostile input: no tags, nameless tags, non-numeric sizes and `classify()` with no arguments.
+
+`npm run verify` is now **9 suites / 622 assertions**; audit clean at **340 IPC channels**.
+
+### Not done yet — the live-document half
+
+`ollamaCatalogData` and `ollamaRetirements` are wired through but **not yet populated**: nothing
+fetches `ollama.com/library` or the cloud retirement page. Until that lands, classification runs on
+name and size evidence, which is honest and functional — a 397B model in 40 MB is still correctly
+called cloud — but the catalogue is the strongest evidence and retirement warnings cannot fire at
+all without the schedule.
+
+That fetch is the next step, and it is what makes master's *"guide me based on updated docs at any
+point in time"* real rather than a shape waiting for data. Deliberately left separate: it introduces
+network I/O, a cache, a refresh policy and a failure mode, and bolting it onto the same pass as the
+classification rewrite would mean neither got tested properly.
