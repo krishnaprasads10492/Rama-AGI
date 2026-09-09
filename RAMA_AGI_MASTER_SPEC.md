@@ -1672,13 +1672,13 @@ authenticated **Master session**, not merely an open store.
 | 52 | Absorb StockMind's prediction engine (not the whole app) | done | Section 39. All 10 engine modules + `__init__.py` were already copied into `ai_backend/engine/`. This session: wrote the trimmed `ai_backend/main.py` (health/predict/backtest/backtest-presets/strategy-score only, `uvicorn.run` on `STOCKMIND_PYTHON_PORT`/8001 so `aiProcess.cjs`'s `python -u main.py` spawn works unmodified) and pinned `ai_backend/requirements.txt` (exact versions, no ranges — I12). `python -c "ast.parse(...)"` passed on all 12 `.py` files. New `electron/ipc/marketIntel.cjs`: gates on `stockmind.request`/`stockmind.view` via `capability.cjs` (deny-by-default, same pattern as `releaseChannel.cjs`), auto-starts the backend through two small exports added to `aiProcess.cjs` (`getRunningStatus`, `startPythonBackendPublic` — no second spawn mechanism), calls it through `lib/http.cjs`'s `postJson`/`getJson` (I9). Registered in `main.cjs`, exposed as `window.rama.marketIntel.*` in `preload.cjs`. `StockMind.jsx` replaced with a real request form (symbol/exchange/direction/basePrice/capital/riskPct) and a signal table; the non-removable disclaimer is kept verbatim. `node --check` clean on all 4 touched `.cjs` files, diagnostics clean on `StockMind.jsx`, `npm run audit` clean (77 bridge calls resolve, including the new `marketIntel.*` ones). **Not verified**: the Python backend was not actually started (no Python ML deps installed on this machine to confirm `pip install -r requirements.txt` succeeds), and `node_modules` is absent so the renderer cannot be built/run to click through the new page — per the verification bar, stated plainly rather than claimed. Next step on resume: on a machine with Python + the pinned deps, `pip install -r ai_backend/requirements.txt`, `python ai_backend/main.py`, poll `/health`; separately `npm install` then `npm run build` to verify `StockMind.jsx` renders and the IPC round-trip works end to end. |
 | 49 | Genome hot-swap applier + verification report + auto-failover | done | Section 36. Modelled the master's architecture poster against the real codebase: mapped 8 concepts already built, closed 3 genuine gaps the diagram pointed at (genome proposals could not be applied; failover could be answered but not acted on; no verification step before a risky change), and explicitly declined 5 poster claims with no engineering referent (1.5T-param lattice, ZK-PoK, Monte-Carlo parallel universes, Coq proofs, infinite scaling) rather than fabricate metrics around them. `electron/lib/genomeApplier.cjs` registers the missing `GENOME` applier with a deep merge (verified: sibling axis untouched, locked-nucleus apply refused). `electron/lib/verifyProposal.cjs` attaches AST-based quality/issue reports to regen (before approval) and evolution (after approval, audit-only) proposals — verified a deliberately-bad file scores lower than a clean one. `selfCare.cjs` gained `checkInstanceFailover()`: auto-expresses a dormant gene on a sibling instance when an active instance needs a dead one, additive and reversible only, always notifies master. |
 | 47 | Tier 3 auto-proposal of new reflexes | not started | `findReflexCandidates()` reports escalation counts by tool but does not yet synthesise a skill. Next step: when one phrasing cluster exceeds ~20 escalations with structurally identical answers, generate a `SKILLS` entry and file it as a `SELF_MODIFY` proposal (invariant I6 — never auto-applied). |
-| 48 | Appearance panel in Settings | not started | Zoom is reachable by chat/voice command only. Next step: add a Voice + Appearance section to `Settings.jsx` with a zoom slider bound to `window.rama.appearance`, the voice level from ledger row 40, and `RAMA_WHISPER_PATH`. |
+| 48 | Appearance panel in Settings | done (by row 99) | **CLOSED BY SECTION 81, never marked** — a ledger row reporting "not started" for shipped work is the same class of drift as the declared-versus-enforced `mind.view` gap (Section 89): the record and the code disagreed and nothing was positioned to notice. `AppearancePanel` in `Settings.jsx` provides the 70–200% zoom slider, A−/A+, presets, fit-to-display and a live contrast sample. Original next step, now satisfied: | Zoom is reachable by chat/voice command only. Next step: add a Voice + Appearance section to `Settings.jsx` with a zoom slider bound to `window.rama.appearance`, the voice level from ledger row 40, and `RAMA_WHISPER_PATH`. |
 | 45 | Live reload | done | Section 34. Watching split by domain so each change does the least that makes it live: `src`/`shared`/`index.html` → HMR under Vite, otherwise rebuild + window reload; `electron/**` → restart the shell only; `server/**` → restart the API only; `package.json` → warn, never auto-install. Reload is signalled by `build/.reload` written *after* a clean `vite build`, because Vite empties `outDir` first and a watcher on `build/` would reload a half-written bundle. 250ms debounce per domain, in-flight rebuilds coalesce. `--no-watch` disables. Classification verified by 22 assertions. |
 | 44 | Error containment + optional deps | done | Section 33. `ErrorBoundary` wrapped `AppShell`, so one page crash removed the titlebar and tab strip — the same symptom as "navigation is not working". Boundary moved inside the shell, keyed on route so it clears on navigation, names the failing module, and records to the experiential dataset. Separately `systeminformation` was required at the top of `system.cjs` and `resourceOrchestrator.cjs` while the launcher classified it as *degrading*, so an absent optional module crashed main-process startup. New `electron/lib/sysinfo.cjs` guards the require and implements a Node-only fallback (verified: real CPU/RAM/OS figures with the module absent). System page dereferences hardened. |
 | 43 | Stale build + unreachable navigation | done | Section 32. Stage 4 reused `build/` without checking its age, so a stale bundle rendered pre-change code on every launch and made every fix look ineffective. `buildStaleness()` now compares build mtime against the newest source file; stage 4 rebuilds, `--diagnose` reports `build freshness`. Separately the tab strip defaulted to collapsed behind a 3px unlabelled target, so navigation was effectively invisible: it now opens by default (persisted) with a 22px labelled handle, and `goTo` no longer collapses it after every click. |
 | 42 | "not a function" bug class | done | Found a real one: `App.jsx` destructured `setLastHealthCheck` from `appStore`, but it lives in `uiStore`, so the first health tick after login threw from inside the consciousness loop. Added `scripts/auditRenderer.cjs` (`npm run audit`) which statically checks every Zustand destructure against the store's real keys and every `window.rama.<ns>.<fn>` against preload's surface — 21 destructures and 66 bridge calls, all resolving. Wired into `start.cjs` stage 1 so it runs on every boot. Preload exposure is now guarded: a `contextBridge` failure is reported to the main process, logged, and shown in the window instead of silently leaving `window.rama` undefined. |
 | 41 | Mic modes + mute/unmute | done | Section 31. Two independent mutes (mic and speech), four mic modes, and hands-free segmentation via Web Audio RMS so "unmute and just talk" works at L2 without a wake word. Mic mute releases the OS device so the platform indicator goes out. `Ctrl+Shift+M` / `Ctrl+Shift+S`, right-click for the mode menu, voice commands for muting. Preferences persist in `localStorage` because they must be readable before the passcode gate. |
-| 40 | Voice level surfaced on the Settings page | not started | The ladder is visible in the palette only. Next step: add a Voice section to `Settings.jsx` showing the level, the detected backend, a Re-check button (`window.rama.voice.rescan`), and inputs for `RAMA_WHISPER_PATH` / `RAMA_WHISPER_MODEL`. |
+| 40 | Voice level surfaced on the Settings page | done (by row 106) | **CLOSED BY SECTION 88, never marked.** Settings → Self reports `ability.voiceLevel`, measured via `resolveVoiceCapability()` and passed from the renderer because that is the only place it is known; when the probe fails it renders as *"not measured"* rather than as level 0, which is the distinction the original row was asking for. Original next step: | The ladder is visible in the palette only. Next step: add a Voice section to `Settings.jsx` showing the level, the detected backend, a Re-check button (`window.rama.voice.rescan`), and inputs for `RAMA_WHISPER_PATH` / `RAMA_WHISPER_MODEL`. |
 | 36 | Renderer entry / CSP / blank window | done | Section 29. Root cause of "Vite did not come up" and of first-run appearing to happen in the CLI: `index.html` was inside `publicDir`, so the dev server had no entry. Fixed by moving it to the project root and dropping the `rollupOptions.input` override. CSP moved to main-process headers (dev vs prod), which also un-blocks the Monaco CDN and HMR websocket. `main.cjs` now resolves dev server → build → inline diagnostic page and can never show a blank window. `start.cjs` readiness requires HTTP 200 **and** `id="root"`, and falls back to building the frontend. `diagnose()` gained `entry-missing` / `entry-duplicate` checks so this defect class cannot recur silently. |
 | 30 | Wire `mustChangePassword` into the login flow | not started | `authCore` sets it on admin-created accounts and returns it from `loginStep1`, but no UI forces the change yet. Next step: after a successful gate 3, if `user.mustChangePassword` render a forced change-password screen before the app mounts. |
 | 31 | Surface `auth:sessions` in the UI | not started | Handler exists and is gated on `audit.all`. Next step: add a Sessions panel to the Users page listing active sessions with revoke. |
@@ -9886,3 +9886,103 @@ Three changes, all in the direction of admitting absence:
 Master asked for the intelligence engine to research model ratings. **That is only worth building on
 top of a pipeline that admits when it found nothing**, which is why this ordering was chosen over
 adding the rating feature first.
+
+---
+
+## SECTION 95 — AI strategies in StockMind: the design, and the one thing that would make it lie
+
+Master: *"how about Rama creates strategies by himself and also by doing online research… backtest
+them with old data+news combo… various permutations or combinations… display in simple notation…
+a tab named 'AI Strategies'… filtration based on probability and so far accuracy from back testing…
+chart should be upgraded to display the various selected strategies, sometimes a combo… Rama should
+be able to generate code for that, test it, back test and then offer it to master… if master wants
+something done, Rama should pose questions accordingly, answers via text or vocal or any format."*
+
+**Nothing is implemented in this section.** It records the design and, more importantly, the one
+decision that determines whether the feature is useful or actively harmful. Written now so a later
+session builds it rather than re-deciding it.
+
+### THE DEFECT THIS FEATURE WOULD HAVE BY DEFAULT
+
+Master asked for **permutations and combinations of strategies, ranked by backtest accuracy**. Built
+the obvious way, that is not a strategy engine — it is a machine for manufacturing false confidence,
+and it would be the most damaging thing in this codebase because its output looks like evidence and
+concerns master's money.
+
+The mechanism is **data snooping**, also called the multiple-comparisons problem. Search 10,000
+parameter combinations against one price history and the best-performing one will show an excellent
+Sharpe ratio **whether or not any edge exists**, because the maximum of many noisy estimates is
+biased upward. The number reported would be the reward for searching hard, not for finding something
+real. Every retail backtesting tool that ranks strategies by in-sample return has this flaw, which is
+why so many strategies that backtest beautifully lose money live.
+
+Rāma has spent Sections 66–69 refusing exactly this class of dishonesty: the honest backtest, the
+`MIN_AUC` / `MIN_BRIER_SKILL` / `AUC_SIGMA_MARGIN` gate, the refusal to judge on under
+`MIN_HOLDOUT_ROWS` rows. **A strategy search that ignored those lessons would undo them.**
+
+### Decision: the search is a hypothesis generator; the holdout is the judge
+
+Non-negotiable guards, to be built with the feature rather than after it:
+
+1. **A holdout the search never sees.** The final segment of history is withheld before any search
+   begins and is used exactly once, for the strategies master is actually offered. A holdout consulted
+   during selection has already become training data.
+2. **The trial count is reported alongside every result.** "Sharpe 2.1" means nothing; "Sharpe 2.1,
+   best of 4,096 trials" is interpretable. The count must be as prominent as the metric.
+3. **A multiple-testing correction, not a raw metric.** The Deflated Sharpe Ratio adjusts an observed
+   Sharpe for the number of trials and the non-normality of returns; that, or an equivalent, is what
+   gets ranked. Ranking by raw backtest return is the defect.
+4. **Purged, embargoed walk-forward.** `backtest.py` already walks forward, which is the right base.
+   Labels built from future bars overlap in time, so a naive split leaks: the bars used to label a
+   training example must be purged from the validation fold, with an embargo either side.
+5. **Minimum trade count per strategy.** Twelve trades cannot support a claim about a win rate,
+   whatever the number says. Below the floor the verdict is *insufficient evidence*, not a percentage.
+6. **Costs and slippage in, always.** A strategy that is profitable only without them is not a
+   strategy. This is where high-frequency permutations flatter themselves most.
+7. **The gate applies here too.** No model currently clears the Section 69 gate on live data. Any
+   probability shown must inherit that status honestly rather than presenting a strategy's
+   backtested win rate as a forward-looking probability. **Those are different quantities and
+   conflating them is the single easiest way to mislead master.**
+
+### Decision: news in the backtest is point-in-time or it is not used
+
+Master wants old data **plus news**. This introduces look-ahead bias in its most seductive form: a
+news item timestamped by publication but *revised*, or scored by a model trained on later data, lets
+tomorrow's information into yesterday's decision. Section 68's outcome loop already deals in
+as-of-time records, and news must meet the same standard — a headline may only inform a simulated
+decision if it was available, in that wording, at that timestamp. **If a source cannot supply a
+reliable point-in-time timestamp, it is excluded from backtests** and used only for live context.
+
+### Decision: generated strategy code is offered, never executed against a broker
+
+Master asked for generated code as trading platforms accept. Rāma can generate it, run it in the
+sandbox, and backtest it. It must **not** gain a path to a live brokerage account. The reasoning is
+the same as the nucleus gates (row 74) but the stakes are money: a generated strategy is an untested
+hypothesis, and the distance between "backtested well" and "safe to trade" is exactly what this
+section exists to preserve. Generated code is an artefact for master to review, carrying its trial
+count, holdout result and cost assumptions.
+
+### Decision: the clarifying-question loop is a separate, smaller capability
+
+*"If master wants something done, Rāma should pose questions accordingly."* This is the most
+tractable of the three requests and the one with no honesty hazard. It composes what exists: the
+`selfModel` knows what Rāma can and cannot do, `capability.cjs` knows what this account may do, and
+`voiceEngine.js` already resolves an input ladder (text → push-to-talk → local STT → cloud STT →
+wake word), so *"answers via text or vocal"* needs a channel-agnostic prompt rather than new capture
+code.
+
+The rule that makes it useful rather than irritating: **ask only what changes the answer.** A
+question whose every possible reply leads to the same action is noise. Each question should name why
+it is being asked, and Rāma should state its assumption and proceed when master declines to answer.
+
+### Suggested build order
+
+1. **Clarifying questions** — small, independently useful, no statistical hazard.
+2. **The honest evaluation harness** — holdout, purge/embargo, trial counting, deflated metric, cost
+   model. Nothing else can be trusted until this exists, and it is testable on synthetic series with
+   known properties: a random strategy must be rejected, and one with a planted edge must be found.
+3. **The strategy search + `AI Strategies` tab**, ranked by the corrected metric, with trial count and
+   holdout status shown per row.
+4. **Chart overlay** for selected and combined strategies.
+5. **Code generation**, last, because it is the most dangerous and the least useful without the four
+   above.
