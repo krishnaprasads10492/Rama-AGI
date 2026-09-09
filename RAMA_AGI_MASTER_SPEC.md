@@ -9986,3 +9986,49 @@ it is being asked, and Rāma should state its assumption and proceed when master
 4. **Chart overlay** for selected and combined strategies.
 5. **Code generation**, last, because it is the most dangerous and the least useful without the four
    above.
+
+### Section 95 addenda from master, before implementation
+
+*"After generation it needs to be tested for bugs/optimization because this will be utilised in the
+actual trading… note the model that was used for generating it so that it can be compared by even
+better model or can be updated for future use… scrutiny and accuracy along with performance is utmost
+important… Master will inform the trades in the real world or based on assimilation it can be fetched
+from the installed trading app… Don't dump info on master, RAMA must understand context and provide
+input, consequences, warnings… provide ability to create various lists of strategies using various
+criterias that master mentions for various time cycles."*
+
+**Provenance on every generated artefact.** A strategy or a code artefact records the model that
+produced it, its version, the prompt shape, the trial count and the holdout verdict. Two reasons, and
+the second is the one master named: a later, better model can **re-derive the same artefact and be
+compared against the original on identical data**. Without recorded provenance that comparison is
+impossible and Rāma cannot tell improvement from noise. This is also the honest form of "grows
+exponentially" from Section 88 — measured succession rather than assertion.
+
+**Generated code is reviewed before it is offered, not after.** Because it may inform real trades:
+`node --check`-equivalent syntax validation, a static pass for the known hazards in strategy code
+(look-ahead by indexing future bars, division without a zero guard, unbounded position sizing, a
+missing stop), execution in the existing sandbox, then backtest. A generated artefact that fails any
+stage is shown **with its failure**, never silently discarded — master learns more from a rejected
+strategy and its reason than from a shorter list.
+
+**Trade entry is master's, with assimilation as an option.** He may enter trades by hand, or Rāma may
+read them from an installed trading application. Reading is a **separate capability from placing**,
+and only reading will be built. The Section 95 rule stands: no path to order placement.
+
+**Communication over disclosure.** *"Don't dump info on master."* A verdict is worthless if it arrives
+as a table of statistics. Every evaluation therefore produces, alongside its numbers, a short
+statement of **what this means, what could go wrong, and what would change the answer** — the same
+shape as the self-model's derived limits. The numbers remain available underneath for when master
+wants them; they are not the default presentation.
+
+**Strategy lists are named, criteria-defined and per-timeframe.** Master defines a list by criteria —
+minimum deflated Sharpe, minimum trades, timeframe, instrument, maximum drawdown — and Rāma maintains
+it. The criteria are stored with the list so a list can be **re-evaluated when new data arrives** and
+its membership recomputed, rather than being a frozen snapshot that silently ages.
+
+### Built here: the evaluation harness (`ai_backend/engine/strategy_eval.py`)
+
+**STDLIB ONLY, deliberately.** The harness is statistics and index arithmetic, not dataframe work, so
+it takes no numpy or pandas. Three payoffs: it runs on any interpreter master has, it is testable on
+this machine where the engine's packages are not installed, and the layer everything else will be
+judged by has **no dependency that can be missing at the moment it is needed**.
