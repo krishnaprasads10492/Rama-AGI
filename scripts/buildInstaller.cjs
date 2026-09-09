@@ -665,19 +665,62 @@ function venvPython(dir) {
  * channel there (Section 84). `productName` is read from `package.json` rather than written out
  * twice, since Electron derives `app.getPath('userData')` from exactly that value.
  */
-function engineVenvDir() {
-  let productName = 'Rama AGI';
-  try {
-    productName = require(path.join(ROOT, 'package.json')).build?.productName || productName;
-  } catch { /* the default is the value in package.json today */ }
-
-  const base = process.platform === 'win32'
+function userDataBase() {
+  return process.platform === 'win32'
     ? (process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'))
     : process.platform === 'darwin'
       ? path.join(os.homedir(), 'Library', 'Application Support')
       : (process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'));
+}
 
-  return path.join(base, productName, 'python-env');
+/**
+ * Every directory Electron might call userData, most likely first.
+ *
+ * THE BUG THIS EXISTS TO FIX (spec Section 99). The first version read `build.productName` — "Rama
+ * AGI" — while `app.getName()` returns package.json's **top-level** `productName`, which is not set,
+ * so it falls back to `name`: "rama-agi". Two different fields, two different directories. Option 3
+ * therefore built the venv correctly at `%APPDATA%\Rama AGI\python-env` and the app looked for it at
+ * `%APPDATA%\rama-agi\python-env` and reported the engine as not installed. Master hit exactly this.
+ *
+ * Both spellings are now returned, because which one is live depends on how Rāma was launched:
+ * electron-builder writes `productName` into the packaged app's metadata, so a PACKAGED run resolves
+ * "Rama AGI", while a run from source resolves "rama-agi".
+ *
+ * Adding a top-level `productName` to package.json would make them agree, and is DELIBERATELY NOT
+ * DONE: it would move `app.getPath('userData')` for existing source runs and orphan master's
+ * encrypted store, which is a far worse outcome than a slightly longer search.
+ */
+function engineVenvCandidates() {
+  const base = userDataBase();
+  const names = [];
+  try {
+    const pkg = require(path.join(ROOT, 'package.json'));
+    // Order matches `app.getName()`'s own precedence.
+    if (pkg.productName) names.push(pkg.productName);
+    if (pkg.name) names.push(pkg.name);
+    if (pkg.build?.productName) names.push(pkg.build.productName);
+  } catch { /* fall through to the known spellings */ }
+  names.push('rama-agi', 'Rama AGI');
+
+  const seen = new Set();
+  return names
+    .filter(n => n && !seen.has(n) && seen.add(n))
+    .map(n => path.join(base, n, 'python-env'));
+}
+
+/**
+ * Where the engine venv should be created: an existing one if any candidate already holds it,
+ * otherwise the first candidate.
+ *
+ * Reusing an existing venv matters — without it, a master who ran an older build would get a second
+ * ~500 MB environment beside the first and no explanation for the disk.
+ */
+function engineVenvDir() {
+  const candidates = engineVenvCandidates();
+  for (const dir of candidates) {
+    if (fs.existsSync(venvPython(dir))) return dir;
+  }
+  return candidates[0];
 }
 
 /** Is this interpreter inside the window the pins support? */
@@ -847,13 +890,13 @@ function probePythonRuntime() {
   // whatever `python` happens to be on PATH. A diagnostic that contradicts the runtime is worse
   // than none, because it sends master to fix something that is not broken.
   const configured = (process.env.RAMA_PYTHON || '').trim();
-  const managed = venvPython(engineVenvDir());
-  const exe = configured || (fs.existsSync(managed)
-    ? managed
-    : (process.platform === 'win32' ? 'python' : 'python3'));
+  // Every candidate, so readiness reports the venv the APP will find rather than only the one this
+  // script would create — those were different directories until Section 99.
+  const managed = engineVenvCandidates().map(venvPython).find(p => fs.existsSync(p)) || null;
+  const exe = configured || managed || (process.platform === 'win32' ? 'python' : 'python3');
   const via = configured
     ? ' (via RAMA_PYTHON)'
-    : (exe === managed ? ' (managed venv)' : '');
+    : (managed ? ' (managed venv)' : '');
 
   const ver = spawnSync(exe, ['--version'], { encoding: 'utf8', timeout: 15_000 });
   if (ver.error || ver.status !== 0) {

@@ -87,11 +87,33 @@ async function startPythonBackend() {
     ? path.join(dir, 'Scripts', 'python.exe')
     : path.join(dir, 'bin', 'python'));
 
+  // SEARCHED, not computed from one name (spec Section 99).
+  //
+  // `app.getPath('userData')` derives from `app.getName()`, which returns package.json's TOP-LEVEL
+  // `productName` — unset here — and so falls back to `name`: "rama-agi". But `buildInstaller` first
+  // built the venv from `build.productName`: "Rama AGI". Two fields, two directories, and master ran
+  // option 3 successfully only for the app to report the engine missing.
+  //
+  // Both are checked, because which one is live depends on the launch: electron-builder writes
+  // `productName` into a packaged app's metadata, so a packaged run resolves "Rama AGI" while a source
+  // run resolves "rama-agi". Searching costs two `existsSync` calls and removes a whole class of
+  // "it is installed but not found".
   let managed = null;
-  try {
-    const candidate = venvExe(path.join(app.getPath('userData'), 'python-env'));
-    if (fs.existsSync(candidate)) managed = candidate;
-  } catch { /* getPath can throw before the app is ready; fall through to the next rung */ }
+  const appData = process.platform === 'win32'
+    ? (process.env.APPDATA || '')
+    : null;
+  const venvRoots = [];
+  try { venvRoots.push(app.getPath('userData')); }
+  catch { /* getPath can throw before the app is ready */ }
+  if (appData) venvRoots.push(path.join(appData, 'rama-agi'), path.join(appData, 'Rama AGI'));
+
+  for (const root of venvRoots) {
+    if (!root) continue;
+    const candidate = venvExe(path.join(root, 'python-env'));
+    try {
+      if (fs.existsSync(candidate)) { managed = candidate; break; }
+    } catch { /* unreadable path: try the next */ }
+  }
 
   if (!managed) {
     // Running from a checkout: `backendPath` is `<repo>/ai_backend`, so its parent is the repo.
