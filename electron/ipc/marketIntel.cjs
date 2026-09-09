@@ -58,7 +58,31 @@ async function ensureBackendRunning() {
     lastError = res.error;
     await net.delay(400);
   }
-  return { ok: false, error: `Backend not reachable at ${BASE_URL}: ${lastError}` };
+  /**
+   * Report WHY, not just that (spec Section 99).
+   *
+   * `lastError` here is a connection refusal — it describes the symptom and says nothing about the
+   * cause. The cause was on the engine's stderr, which `aiProcess` used to broadcast and discard, so
+   * "Backend not reachable" was undiagnosable: an ImportError from missing packages and a wrong Python
+   * version produced exactly the same sentence.
+   */
+  let diagnosis = null;
+  let tail = [];
+  try {
+    const st = await aiProcess.getRunningStatus?.();
+    diagnosis = st?.python?.diagnosis ?? null;
+    tail = Array.isArray(st?.python?.lastStderr) ? st.python.lastStderr.slice(-4) : [];
+  } catch { /* the connection error below still stands on its own */ }
+
+  return {
+    ok: false,
+    error: diagnosis
+      ? `StockMind's engine is not running: ${diagnosis.reason}. ${diagnosis.remedy}`
+      : `Backend not reachable at ${BASE_URL}: ${lastError}`,
+    // Kept separate from the message so the UI can show the raw output without burying the remedy.
+    diagnosis,
+    stderrTail: tail,
+  };
 }
 
 // ─── Capability gate ──────────────────────────────────────────────────────────

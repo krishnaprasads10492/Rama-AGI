@@ -120,6 +120,8 @@ export default function StockMind() {
   const [status, setStatus]   = useState('idle');
   const [result, setResult]   = useState(null);
   const [error,  setError]    = useState(null);
+  // The engine's last stderr lines when a request failed because the engine did (Section 99).
+  const [engineTail, setEngineTail] = useState([]);
   const [selected, setSelected] = useState(null);
 
   const [bars, setBars]       = useState([]);
@@ -267,9 +269,12 @@ export default function StockMind() {
 
     if (res?.ok === false) {
       setError(res.error || 'Prediction request failed');
+      // The engine's own last lines, when the failure was an engine failure (Section 99).
+      setEngineTail(Array.isArray(res.stderrTail) ? res.stderrTail : []);
       setStatus('error');
       return;
     }
+    setEngineTail([]);
     setResult(res.data);
     setSelected((res.data?.signals || [])[0] || null);
     setStatus('done');
@@ -425,9 +430,25 @@ export default function StockMind() {
           <div style={{ padding: '12px 16px', background: 'rgba(255,60,60,0.08)', border: '1px solid rgba(255,60,60,0.3)',
             borderRadius: 'var(--radius)', color: 'var(--red)', fontSize: '12px' }}>
             ✕ {error}
-            {String(error).includes('not reachable') && (
+            {/* The old hint said "it may still be starting — try again" for EVERY failure, which was
+                advice to wait for a problem that waiting could never fix. A diagnosed failure now
+                shows the engine's actual last words instead (Section 99). */}
+            {engineTail.length > 0 && (
+              <details style={{ marginTop: 8 }}>
+                <summary style={{ cursor: 'pointer', color: 'var(--text-dim)', fontSize: '12px' }}>
+                  engine output
+                </summary>
+                <pre style={{
+                  margin: '6px 0 0', padding: '8px 10px', maxHeight: 140, overflow: 'auto',
+                  background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)',
+                  fontSize: '11.5px', color: 'var(--text-dim)', whiteSpace: 'pre-wrap',
+                }}>{engineTail.join('\n')}</pre>
+              </details>
+            )}
+            {engineTail.length === 0 && String(error).includes('not reachable') && (
               <div style={{ marginTop: '6px', color: 'var(--text-dim)', fontSize: '12.5px' }}>
-                The Python backend may still be starting (model ensemble load takes a few seconds). Try again.
+                The engine may still be starting — the model ensemble takes a few seconds to load.
+                If this persists, run Rama.bat option 2 to check the Python runtime.
               </div>
             )}
           </div>
