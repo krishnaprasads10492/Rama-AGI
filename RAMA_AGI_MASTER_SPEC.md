@@ -10196,3 +10196,82 @@ marginally smaller than before the feature, with the chart library in a lazy sha
 - **Not verified by eye.** No shell was launched, so the board and pop-out rest on the renderer audit
   (identifier scope, bridge calls, IPC parity) and the build. The `isElectron`-versus-`inElectron`
   free-variable bug was caught by that audit before it could render — the same class as Section 81.
+
+---
+
+## SECTION 98 — Four defects from the first real run
+
+Master, after installing and using the build: StockMind reports *"ai_backend directory is missing"*;
+the disclaimer should be at the bottom; titlebar resource details are not displayed; the tray icon is
+not displayed.
+
+**All four were packaging or resilience faults, not logic faults**, which is why every suite passed
+while the running app was visibly broken. Worth recording as a class: 868 assertions and a clean
+renderer audit say nothing about whether a file reached the installer.
+
+### 1. `ai_backend` was never packaged
+
+`build.extraResources` shipped **only `assets/`**. So an installed Rāma had no engine directory at
+all: `resolveBackendPath()` checks `resourcesPath/ai_backend` first and there was nothing to find,
+making StockMind's engine unreachable in every packaged build ever produced.
+
+It belongs in `extraResources` rather than `files` because **Python is spawned as a child process and
+cannot be executed from inside `app.asar`**. Excluded: `__pycache__` and `.venv*` are machine-specific
+and would not run on another CPU; `data/` holds fetched bars and trained models, which are master's and
+belong under userData rather than baked into an installer; `tests/` is not needed at runtime.
+
+**And the note explaining this sits at top level, not inside `build`.** electron-builder validates that
+object strictly and rejects unknown keys — the same reason `_buildFilesNote` is at top level. The
+first version of this fix put the note inside `build` and would have failed every packaging run.
+
+### 2. One flaky probe was discarding every metric
+
+`system:get-metrics` gathered eight readings with `Promise.all`, so **a single rejection threw the
+whole snapshot away** and the titlebar had no CPU or RAM to show.
+
+The probes that fail are precisely the optional ones: `battery()` on a desktop with no battery,
+`cpuTemperature()` and `graphics()` where WMI is restricted by endpoint security — which is the case
+on this machine — and `fsStats()` on some volumes. So CPU and RAM, which almost always succeed, were
+being lost because an unrelated GPU or battery reading failed.
+
+Now each probe settles independently and a failed one yields `{}`, so what worked survives. `usedPct`
+is `null` rather than `NaN` when memory could not be read, because `Math.round(NaN)` is `NaN` and React
+renders that as **nothing at all** — indistinguishable from the pill being absent, which is exactly the
+symptom reported. `probeErrors` is returned, because *"GPU unavailable because WMI is restricted"* is a
+different fact from *"this machine has no GPU"* and only the probe knows which.
+
+Same principle as Section 93's independently-failing documents: **a composite read must not be
+all-or-nothing when its parts are independently useful.**
+
+### 3. The tray icon pointed at a directory that is not shipped
+
+It loaded `../public/icon.png`, and **`public/` is not in `build.files`** — the package ships `build/`,
+`electron/`, `server/` and `shared/`. In an installed Rāma that path does not exist.
+
+The reason it failed *silently* is the interesting part: `createFromPath` on a missing file returns an
+**empty image**, `createEmpty()` is a perfectly valid `nativeImage`, and `new Tray(empty)` succeeds. So
+there was no error to catch and no log line — just an invisible icon.
+
+Now a candidate list is tried, preferring `resourcesPath/assets/icon-16.png` (`assets/` **is** shipped)
+and falling back through the repo copies, each checked with **`isEmpty()` rather than by catching**,
+because the failure mode is a silent empty image rather than a throw. A 16px source is preferred over
+resizing a 512px one, which produced a muddy icon even when it did load. If nothing resolves it now
+**says so**, since an invisible tray icon with no log line is undiagnosable.
+
+### 4. The disclaimer is now a footer, not the first thing in the scroll
+
+Master asked for it at the bottom. It is placed **outside** the scrolling region rather than at the end
+of it: inside the scroll it would be visible only after scrolling past everything, which for a
+non-removable legal notice is worse than where it started. As a fixed footer it is both at the bottom
+and always on screen, with `flexShrink: 0` so a long signal list cannot squeeze it away.
+
+### Verified
+
+`node --check` on both touched `.cjs`; `package.json` parses and asserted to carry **no underscore keys
+inside `build`**; renderer audit clean at 128 bridge calls, 61 files, 348 channels; `vite build`
+succeeds; `npm run verify` 12 suites / 868 assertions unchanged.
+
+**Not verified by eye, and two of these can only be confirmed by master.** Whether the tray icon and
+the engine directory are truly fixed depends on a packaged build, which cannot be produced here — 7-Zip
+is blocked. The metrics and disclaimer fixes are visible from source; the other two need
+`Rama.bat` → 3 on master's machine and then a look at the tray.

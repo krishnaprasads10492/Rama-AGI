@@ -336,17 +336,6 @@ export default function StockMind() {
 
       <div style={{ flex: 1, overflow: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
-        {/* Disclaimer — non-removable per spec */}
-        <div style={{
-          padding: '14px 18px',
-          background: 'rgba(255,170,0,0.06)', border: '1px solid rgba(255,170,0,0.3)',
-          borderRadius: 'var(--radius)', fontSize: '12.5px', color: 'var(--amber)', lineHeight: '1.7',
-        }}>
-          ⚠ DISCLAIMER: StockMind provides AI-generated market analysis for informational purposes only.
-          Not financial advice. Past performance does not guarantee future results.
-          All signals carry inherent risk of loss. Human judgment required for all trading decisions.
-        </div>
-
         {/* Request form */}
         <div className="hud-card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div className="section-label">SIGNAL REQUEST</div>
@@ -767,6 +756,25 @@ export default function StockMind() {
           </div>
         )}
       </div>
+
+      {/* ── Disclaimer — non-removable per spec, now a fixed footer (Section 98) ──
+          Master asked for it at the bottom. Placed OUTSIDE the scrolling region rather than at the
+          end of it: inside the scroll it would only be visible after scrolling past everything, which
+          for a non-removable legal notice is worse than where it was. As a footer it is both at the
+          bottom and always on screen.
+
+          `flexShrink: 0` so a long signal list cannot squeeze it away. */}
+      <footer style={{
+        flexShrink: 0,
+        padding: '9px 20px',
+        background: 'rgba(255,170,0,0.05)',
+        borderTop: '1px solid rgba(255,170,0,0.28)',
+        fontSize: '11.5px', color: 'var(--amber)', lineHeight: 1.6,
+      }}>
+        ⚠ StockMind provides AI-generated market analysis for informational purposes only. Not
+        financial advice. Past performance does not guarantee future results. All signals carry
+        inherent risk of loss. Human judgment required for all trading decisions.
+      </footer>
     </div>
   );
 }

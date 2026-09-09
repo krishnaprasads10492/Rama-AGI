@@ -1385,12 +1385,46 @@ function bringToFront() {
 
 // ─── System Tray ─────────────────────────────────────────────────────────────
 function createTray() {
-  // Use a blank 16x16 nativeImage if no icon present (icon.png added in Phase 6)
-  let icon;
-  try {
-    icon = nativeImage.createFromPath(path.join(__dirname, '..', 'public', 'icon.png'));
-    icon = icon.resize({ width: 16, height: 16 });
-  } catch {
+  /**
+   * Resolve a tray icon that actually exists (spec Section 98).
+   *
+   * THE BUG THIS FIXES. It read `../public/icon.png`. `public/` is **not in `build.files`** — the
+   * packaged app ships `build/`, `electron/`, `server/` and `shared/` — so in an installed Rāma that
+   * path does not exist, `createFromPath` returned an EMPTY image, and `createEmpty()` is a perfectly
+   * valid nativeImage. `new Tray(empty)` therefore succeeded with no error and produced an invisible
+   * tray icon, which is exactly what master reported.
+   *
+   * `assets/` IS shipped, via `extraResources`, so candidates are tried in that order. A 16px source
+   * is preferred over resizing a 512px one, which is what produced a muddy icon even when it loaded.
+   *
+   * Each candidate is checked with `isEmpty()` rather than by catching: the failure mode here is a
+   * silent empty image, not a thrown error, so only the emptiness test detects it.
+   */
+  const iconCandidates = [
+    path.join(process.resourcesPath || '', 'assets', 'icon-16.png'),
+    path.join(process.resourcesPath || '', 'assets', 'icon-32.png'),
+    path.join(__dirname, '..', 'assets', 'icon-16.png'),
+    path.join(__dirname, '..', 'assets', 'icon-32.png'),
+    path.join(__dirname, '..', 'assets', 'icon.png'),
+    path.join(__dirname, '..', 'public', 'icon.png'),
+  ];
+
+  let icon = null;
+  for (const candidate of iconCandidates) {
+    try {
+      if (!candidate || !fs.existsSync(candidate)) continue;
+      const img = nativeImage.createFromPath(candidate);
+      if (img.isEmpty()) continue;
+      icon = img.getSize().width === 16 ? img : img.resize({ width: 16, height: 16 });
+      break;
+    } catch { /* try the next candidate */ }
+  }
+
+  if (!icon) {
+    // Said out loud. An invisible tray icon with no log line is undiagnosable, and the previous
+    // version failed exactly this way.
+    console.warn('[tray] no usable icon found; the tray will appear blank. Looked in: '
+      + iconCandidates.filter(Boolean).join(', '));
     icon = nativeImage.createEmpty();
   }
 

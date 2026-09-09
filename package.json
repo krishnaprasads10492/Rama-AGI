@@ -5,6 +5,7 @@
   "description": "Rama - Supreme AGI Desktop. Superset of StockMind AI.",
   "author": "Krishna Prasad",
   "_buildFilesNote": "build.files: do NOT reintroduce '!node_modules/**/*' plus a hand-picked allowlist. That is exactly what shipped an installed app that died on launch with \"Cannot find module 'debug'\" - the allowlist named 18 packages, npm hoists transitive dependencies to top-level node_modules, and the exclusion stripped every one it did not name, leaving 211 of 229 production packages out of the asar. electron-builder resolves the real production tree itself and already omits devDependencies, so the correct configuration is to not fight it. Only renderer-only libraries are excluded, because Vite bundles them into build/ and nothing in electron/ or server/ requires them. Note this key lives here and not inside 'build' because electron-builder validates that object strictly and rejects unknown keys. See RAMA_AGI_MASTER_SPEC.md Section 48.",
+  "_extraResourcesNote": "ai_backend MUST stay in build.extraResources. It was omitted, so an installed Rama had no engine directory at all and StockMind reported 'ai_backend directory not found' on every request - resolveBackendPath() looks in resourcesPath/ai_backend first and there was nothing to find. It is extraResources rather than files because Python is spawned as a child process and cannot be read from inside app.asar. Excluded: __pycache__ and .venv are machine-specific and would not run on another CPU; data/ holds fetched bars and trained models, which are master's and belong in userData rather than baked into an installer; tests/ is not needed at runtime. This note lives at top level, NOT inside build, because electron-builder validates that object strictly and rejects unknown keys - the same reason _buildFilesNote is here. See RAMA_AGI_MASTER_SPEC.md Section 98.",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "node start.cjs",
@@ -133,6 +134,19 @@
         "to": "assets/",
         "filter": [
           "**/*"
+        ]
+      },
+      {
+        "from": "ai_backend/",
+        "to": "ai_backend/",
+        "filter": [
+          "**/*.py",
+          "requirements.txt",
+          "!**/__pycache__/**",
+          "!**/.venv/**",
+          "!**/.venv-*/**",
+          "!data/**",
+          "!tests/**"
         ]
       }
     ],

@@ -100,19 +100,52 @@ function register(ipcMain) {
   // ── Full metrics snapshot ────────────────────────────────────────────────
   ipcMain.handle('system:get-metrics', async () => {
     try {
-      const [cpu, mem, temp, battery, os_info, graphics] = await Promise.all([
-        si.currentLoad(),
-        si.mem(),
-        si.cpuTemperature(),
-        si.battery(),
-        si.osInfo(),
-        si.graphics(),
+      /**
+       * EVERY PROBE FAILS ALONE (spec Section 98).
+       *
+       * This used `Promise.all`, so a single rejecting probe discarded the entire snapshot and the
+       * titlebar showed no CPU or RAM at all. The flaky ones are precisely the ones that are optional:
+       * `battery()` on a desktop with no battery, `cpuTemperature()` and `graphics()` where WMI is
+       * restricted by endpoint security — which is the case on this very machine — and `fsStats()`
+       * on some volumes.
+       *
+       * So CPU and RAM, which almost always succeed, were being thrown away because an unrelated GPU
+       * or battery reading failed. `allSettled` keeps what worked, and a missing section reports as
+       * absent rather than taking the rest down with it — the same rule Section 93 applied to the two
+       * Ollama documents.
+       */
+      const settle = async (label, fn) => {
+        try { return { label, ok: true, value: await fn() }; }
+        catch (err) { return { label, ok: false, error: err.message, value: null }; }
+      };
+
+      const results = await Promise.all([
+        settle('cpu', () => si.currentLoad()),
+        settle('mem', () => si.mem()),
+        settle('temp', () => si.cpuTemperature()),
+        settle('battery', () => si.battery()),
+        settle('os', () => si.osInfo()),
+        settle('graphics', () => si.graphics()),
+        settle('net', () => si.networkStats()),
+        settle('disk', () => si.fsStats()),
       ]);
 
-      const [net, disk] = await Promise.all([
-        si.networkStats(),
-        si.fsStats(),
-      ]);
+      const by = {};
+      const probeErrors = [];
+      for (const r of results) {
+        // `?? {}` so every read below is safe on a failed probe without a guard at each site.
+        by[r.label] = r.value ?? {};
+        if (!r.ok) probeErrors.push({ probe: r.label, error: r.error });
+      }
+
+      const cpu = by.cpu;
+      const mem = by.mem;
+      const temp = by.temp;
+      const battery = by.battery;
+      const os_info = by.os;
+      const graphics = by.graphics;
+      const net = Array.isArray(by.net) ? by.net : [];
+      const disk = Array.isArray(by.disk) ? by.disk : (by.disk ?? {});
 
       return {
         ok: true,
@@ -133,7 +166,12 @@ function register(ipcMain) {
             available: mem.available,
             swapTotal: mem.swaptotal,
             swapUsed:  mem.swapused,
-            usedPct:   Math.round((mem.used / mem.total) * 100),
+            // null, not 0 or NaN, when the probe failed. `Math.round(NaN)` is NaN, which React
+            // renders as nothing at all — indistinguishable from the pill simply not being there,
+            // which is exactly the symptom master reported.
+            usedPct:   (typeof mem.used === 'number' && typeof mem.total === 'number' && mem.total > 0)
+              ? Math.round((mem.used / mem.total) * 100)
+              : null,
           },
           gpu: graphics.controllers?.map(g => ({
             model:    g.model,
@@ -164,6 +202,9 @@ function register(ipcMain) {
             hostname:  os_info.hostname,
             uptime:    Math.floor(os.uptime()),
           },
+          // Reported rather than swallowed: "GPU unavailable because WMI is restricted" is a
+          // different situation from "this machine has no GPU", and only the probe knows which.
+          probeErrors,
         },
       };
     } catch (err) {
