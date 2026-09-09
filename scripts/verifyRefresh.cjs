@@ -383,6 +383,111 @@ function fakeStore(seed = {}) {
   }
 
   sched.reset();
+  // No summary or exit here: a second phase follows and an exit at this point would stop it running.
+  // That trap has already bitten this project once (row 99's note on appending to verify scripts).
+})();
+
+// ── 11. Registry adapter: where the advisor's facts come from ────────────────
+//
+// Appended as a second phase of this suite rather than a new file, because these rows are only
+// meaningful as input to the advisor above — testing the adapter apart from the judgement it feeds
+// would verify the shape and miss whether the two agree.
+(async () => {
+  const src = require('../electron/lib/registrySources.cjs');
+  console.log('\n  registry and advisory adapter');
+
+  // Shaped like a real npm packument, trimmed to the fields that are read.
+  const PACKUMENT = {
+    'dist-tags': { latest: '1.7.9' },
+    versions: {
+      '1.7.0': { dist: { unpackedSize: 1_000_000 } },
+      '1.7.9': { dist: { unpackedSize: 2_500_000 } },
+    },
+    time: { '1.7.0': '2025-01-01T00:00:00Z', '1.7.9': '2026-09-01T00:00:00Z' },
+  };
+
+  const p = src.parsePackument(PACKUMENT);
+  check('the latest dist-tag is read', p.latest === '1.7.9');
+  check('the latest version size is read', p.latestSizeBytes === 2_500_000);
+  check('a specific version size is readable', p.sizeForVersion('1.7.0') === 1_000_000);
+  // npm omits unpackedSize on older publishes; a zero would read as "this package is empty".
+  check('a missing size is null, never zero', src.parsePackument({
+    'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': {} },
+  }).latestSizeBytes === null);
+  check('a packument with no latest tag is unusable, not half-parsed',
+    src.parsePackument({ versions: {} }) === null);
+  check('rubbish input yields null', src.parsePackument('nope') === null);
+  check('a maintainer deprecation is captured', src.parsePackument({
+    'dist-tags': { latest: '1.0.0' },
+    versions: { '1.0.0': { deprecated: 'use foo instead' } },
+  }).deprecated === 'use foo instead');
+
+  check('scoped names are URL-encoded for the registry',
+    src.npmUrl('@babel/parser').endsWith('@babel%2Fparser'), src.npmUrl('@babel/parser'));
+
+  const osv = src.parseOsv({ vulns: [{ id: 'GHSA-1', summary: 'bad thing', severity: [{ score: 'CVSS:3.1/AV:N' }] }] });
+  check('an advisory is parsed', osv.length === 1 && osv[0].id === 'GHSA-1');
+  check('its severity is carried through unchanged rather than remapped',
+    osv[0].severity === 'CVSS:3.1/AV:N');
+  // OSV answers a specific version, so empty means "nothing known about THIS version".
+  check('an empty vulns list yields no advisories', src.parseOsv({ vulns: [] }).length === 0);
+  check('a malformed response yields no advisories', src.parseOsv(null).length === 0);
+
+  check('release age is computed in days',
+    src.daysSince('2026-09-01T00:00:00Z', new Date('2026-09-09T00:00:00Z')) === 8);
+  check('an absent date yields null', src.daysSince(null, new Date()) === null);
+
+  // ── collect(): the failure behaviour is the point ──────────────────────────
+  const getJson = async (url) => {
+    if (url.includes('axios')) return PACKUMENT;
+    if (url.includes('broken')) throw new Error('ETIMEDOUT');
+    return { 'dist-tags': { latest: '9.9.9' }, versions: { '9.9.9': {} }, time: {} };
+  };
+  const postJson = async () => ({ vulns: [] });
+
+  const res = await src.collect({
+    pinned: { axios: '1.7.0', broken: '1.0.0', uuid: '9.0.0' },
+    getJson, postJson,
+    now: new Date('2026-09-09T00:00:00Z'),
+  });
+
+  check('every package produces a row, including the failed one', res.rows.length === 3,
+    String(res.rows.length));
+  check('the failure is recorded with its reason',
+    res.failures.some(f => f.name === 'broken' && /ETIMEDOUT/.test(f.reason)),
+    JSON.stringify(res.failures));
+
+  // THE ASSERTION THAT MATTERS: an unreachable package must not vanish and look fine by absence.
+  const broken = res.rows.find(r => r.name === 'broken');
+  check('an unreachable package is still present in the review', !!broken);
+  check('it is marked unavailable rather than pretending to be current',
+    broken.unavailable === true);
+  check('its latest equals its pinned version, so the advisor recommends no action',
+    broken.latest === broken.pinned);
+  check('and the advisor classifies it as current rather than inventing an upgrade',
+    adv.assess(broken).jump === 'current', adv.assess(broken).jump);
+
+  const axios = res.rows.find(r => r.name === 'axios');
+  check('a successful row carries both sizes for a disk delta',
+    axios.sizeBytes === 1_000_000 && axios.latestSizeBytes === 2_500_000);
+  check('and its release age', axios.releaseAgeDays === 8);
+  check('an advisory lookup that ran is marked checked',
+    axios.advisory.checked === true && axios.advisory.found.length === 0);
+  check('so the advisor reports no-advisory-found rather than unchecked',
+    adv.assess(axios).security.state === 'no-advisory-found');
+
+  // Without a postJson, advisories must stay UNCHECKED rather than being assumed absent.
+  const noAdv = await src.collect({ pinned: { axios: '1.7.0' }, getJson });
+  check('with no advisory fetcher the row leaves advisory null', noAdv.rows[0].advisory === null);
+  check('and the advisor surfaces that as unchecked, not safe',
+    adv.assess(noAdv.rows[0]).security.state === 'unchecked');
+
+  check('no fetcher at all is refused rather than returning an empty clean review',
+    (await src.collect({ pinned: { a: '1' } })).failures.length === 1);
+
+  check('rows come back in a stable order',
+    res.rows.map(r => r.name).join(',') === 'axios,broken,uuid');
+
   console.log(`\n  ${pass} passed, ${fail} failed\n`);
   process.exit(fail ? 1 : 0);
 })();

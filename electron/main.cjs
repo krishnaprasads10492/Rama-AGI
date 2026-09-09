@@ -528,6 +528,128 @@ function clampZoom(v) {
  * Every probe is wrapped so an absent or broken subsystem becomes an unmeasured field rather than
  * a failed call — the whole point is that this answers even on a degraded install.
  */
+/**
+ * The background schedule, and the daily upgrade review it drives (Section 96).
+ *
+ * Master: *"Online search is a regular thing at a set interval to keep RAMA up to date… it applies to
+ * existing ones and also future ones"*, and *"for this RAMA needs to verify every day online"*.
+ *
+ * Two tasks are registered here, and later modules register the same way rather than growing their
+ * own timers. Nothing scheduled ever CHANGES anything: the catalogue task refreshes a cache and the
+ * dependency task files a proposal for master. Both are reads.
+ */
+function registerRefresh(ipcMain) {
+  const capability = require('./lib/capability.cjs');
+  const sched = safeRequire('./lib/refreshScheduler.cjs', 'Refresh scheduler');
+  if (!sched) return;
+
+  try { sched.useStore(require('./dataStore.cjs')); } catch { /* lazy fallback inside the module */ }
+
+  const DAY = 24 * 60 * 60 * 1000;
+
+  // ── Task: keep Ollama's library and retirement schedule current (Section 93) ──
+  sched.register({
+    name: 'ollama-catalog',
+    label: 'Ollama model library and retirement schedule',
+    intervalMs: DAY,
+    capability: 'models.add-key',
+    run: async () => {
+      const net = require('./lib/http.cjs');
+      return require('./lib/ollamaLibrary.cjs').refresh({
+        fetchText: (url) => net.get(url).then(r => (typeof r === 'string' ? r : r?.body ?? '')),
+      });
+    },
+  });
+
+  // ── Task: the daily dependency review master asked for ───────────────────────
+  sched.register({
+    name: 'dependency-review',
+    label: 'Daily dependency upgrade review',
+    intervalMs: DAY,
+    capability: 'self-modify.view',
+    run: async () => runDependencyReview({ file: true }),
+  });
+
+  /**
+   * Gather registry facts, assess them, and file ONE proposal when there is anything to say.
+   *
+   * `file: false` is used by the on-demand handler so master can look without adding to his approval
+   * queue — a review that always filed would make the queue grow every time he glanced at it.
+   */
+  async function runDependencyReview({ file = false } = {}) {
+    const net = require('./lib/http.cjs');
+    const sources = require('./lib/registrySources.cjs');
+    const advisor = require('./lib/dependencyAdvisor.cjs');
+
+    let pinned = {};
+    try {
+      const pkg = require(path.join(app.getAppPath(), 'package.json'));
+      pinned = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+    } catch (err) {
+      return { ok: false, error: `could not read package.json: ${err.message}` };
+    }
+
+    const { rows, failures } = await sources.collect({
+      pinned,
+      getJson: (url) => net.getJson(url),
+      postJson: (url, body) => net.postJson(url, body),
+    });
+
+    const review = advisor.review(rows);
+
+    // Only file when there is an action to approve. A proposal saying "nothing to do" is noise in a
+    // queue whose whole value is that everything in it needs a decision.
+    let filed = null;
+    if (file && review.actionable.length > 0) {
+      try {
+        filed = proposalLedger.create(advisor.toProposal(review));
+      } catch (err) {
+        filed = { ok: false, error: err.message };
+      }
+    }
+
+    return {
+      ok: true,
+      summary: review.summary,
+      actionable: review.actionable.length,
+      // Reported rather than swallowed: a review that could not reach the registry for ten packages
+      // is a different thing from one that found them all healthy.
+      lookupFailures: failures,
+      filed,
+      note: failures.length
+        ? `${failures.length} package(s) could not be checked`
+        : null,
+    };
+  }
+
+  // ── IPC ─────────────────────────────────────────────────────────────────────
+  ipcMain.handle('refresh:status', async (_e, { user } = {}) => {
+    const denied = capability.deny(user, 'git.read');
+    if (denied) return denied;
+    return { ok: true, data: sched.status() };
+  });
+
+  /** Run one task by hand. Master-only: it reaches the network and may file a proposal. */
+  ipcMain.handle('refresh:run', async (_e, { user, name } = {}) => {
+    if (!capability.can(user, 'self-modify.view')) {
+      return { ok: false, error: 'Access denied: "self-modify.view" required' };
+    }
+    return sched.runNow(name);
+  });
+
+  /** Look at the upgrade picture without filing anything. */
+  ipcMain.handle('deps:review', async (_e, { user } = {}) => {
+    if (!capability.can(user, 'self-modify.view')) {
+      return { ok: false, error: 'Access denied: "self-modify.view" required' };
+    }
+    try { return await runDependencyReview({ file: false }); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+
+  // Started after registration so the first pass sees every task and can spread them.
+  sched.start();
+}
+
 function registerSelfModel(ipcMain) {
   const capability = require('./lib/capability.cjs');
   const selfModel = safeRequire('./lib/selfModel.cjs', 'Self-model');
@@ -1535,6 +1657,8 @@ app.whenReady().then(async () => {
     ['Workspace registry',    () => registerWorkspace(ipcRec)],
     // the subject all those capabilities belong to — Section 88
     ['Self-model',            () => registerSelfModel(ipcRec)],
+    // one background schedule for every module, and the daily upgrade review — Section 96
+    ['Refresh schedule',      () => registerRefresh(ipcRec)],
     // applied self-modify proposals → a new branch, never dev/source directly
     ['Proposal publishing',   () => publishProposal.register(ipcRec)],
     ['Appearance',            () => registerAppearance(ipcRec)],

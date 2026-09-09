@@ -230,6 +230,15 @@ const RAMA_API = {
     describe: (opts) => ipcRenderer.invoke('self:describe', opts),
   },
 
+  // ── Background schedule and upgrade review (Section 96) ───────────────────
+  // `status` is a read for any signed-in account; running a task or reviewing dependencies reaches
+  // the network and may file a proposal, so both are gated higher in the main process.
+  refresh: {
+    status: (opts) => ipcRenderer.invoke('refresh:status', opts),
+    run:    (opts) => ipcRenderer.invoke('refresh:run', opts),
+    deps:   (opts) => ipcRenderer.invoke('deps:review', opts),
+  },
+
   // ── Workspace (Section 86) ────────────────────────────────────────────────
   // The shared context every page reads instead of asking master to re-select a folder.
   workspace: {
