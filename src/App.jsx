@@ -5,6 +5,16 @@ import React, { useCallback, useEffect, useState } from 'react';
 // build while working fine in dev. Hash routes behave identically on both.
 // See RAMA_AGI_MASTER_SPEC.md section 30.
 import { HashRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
+// `readPopoutParams` is a tiny query-string reader and is imported eagerly; the PANEL is lazy.
+//
+// WHY THAT SPLIT MATTERS. Importing PopoutPanel statically pulled PriceChart — and with it
+// `lightweight-charts` — into the entry bundle, moving it out of StockMind's lazy chunk: measured at
+// 282 kB → 499 kB on the main bundle while StockMind's fell 234 kB → 29 kB. That is ~200 kB of
+// charting library loaded at startup for every account, including ones that never open StockMind.
+import { readPopoutParams } from '@pages/StockMind/popoutParams.js';
+
+const PopoutPanel = lazy(() => import('@pages/StockMind/PopoutPanel.jsx'));
 import AppShell      from '@components/AppShell.jsx';
 import ErrorBoundary from '@components/ErrorBoundary.jsx';
 import { useAppStore }  from '@store/appStore.js';
@@ -186,7 +196,34 @@ function InstanceProvider() {
  * never assumed, so a build handed to someone else configures itself in the UI
  * and they never open the source.
  */
+/**
+ * A popped-out panel window renders ONE surface and nothing else (spec Section 97).
+ *
+ * Checked before any hook runs and returned before the shell mounts, because a pop-out must not carry
+ * the sidebar, the titlebar or the router — it is a chart on a second monitor, not a second copy of
+ * the application. Reading the query here rather than adding a route also keeps it out of the page
+ * registry, so it can never appear in navigation as somewhere master could browse to.
+ */
+function PopoutRoot() {
+  const params = readPopoutParams();
+  if (!params) return null;
+  return (
+    <ErrorBoundary resetKey={params.panel} label={`Pop-out: ${params.panel}`}>
+      <Suspense fallback={
+        <div style={{ padding: 20, fontSize: 12, color: 'var(--muted)' }}>Opening panel…</div>
+      }>
+        <PopoutPanel params={params} />
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
+
 export default function App() {
+  // Deliberately the first statement: hooks below must not run in a pop-out window, and this branch
+  // is constant for the lifetime of the window, so the hook-order rule is not at risk.
+  const popout = readPopoutParams();
+  if (popout) return <PopoutRoot />;
+
   const { currentUser, setSession } = useUserStore();
   const [authChecked,    setAuthChecked]    = useState(false);
   const [cryptoUnlocked, setCryptoUnlocked] = useState(false);

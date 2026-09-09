@@ -10108,3 +10108,91 @@ recommendation. This is the same boundary that kept model ratings out of Section
 Master's binding constraint throughout has been disk. Where a size is available it is reported as a
 **delta**, since "42 MB" matters far less than "+31 MB". Where it is not available it is `null`, not
 zero.
+
+---
+
+## SECTION 97 — StockMind as a workspace: draggable panels and real pop-out windows
+
+Master: *"make the StockMind UI design more sci-fi, futuristic mode, draggable and multi-window
+showcase of charts, pop-out scenario of screens. See how much of it is ergonomically, aesthetically,
+programmatically possible."*
+
+### The tension that had to be resolved first
+
+**"More futuristic" and "less eye strain" pull against each other only if futuristic is taken to mean
+dimmer.** Section 81 raised `--muted` from 1.73:1 to 6.4:1 because master reported low visibility and
+strain. So every rule added here decorates the **frame** — corner brackets, edge glow, a survey grid
+at under 2% alpha, a slow sheen on the focused window — and **not one lowers the luminance of text**.
+`--text`, `--text-dim` and `--muted` are untouched, so the measured 17 / 11 / 6.4 steps still hold.
+
+Backdrop blur is applied to the panel body but never behind small type, because blurring under 11px
+text is what makes glassmorphism unreadable.
+
+### Decision: added alongside the tabs, never replacing them
+
+`WORKSPACE` is a sixth tab. Tabs are faster for one focused question; a board is better for watching
+several things at once. Removing a working layout to introduce a new one would be a capability
+regression, so master picks per task.
+
+Each panel **re-uses the existing components** — `PriceChart`, `BookPanel`, `WhyPanel` — rather than
+reimplementing them, so a fix lands in both modes and the two cannot drift apart.
+
+### Decision: written, not installed
+
+`react-grid-layout` and similar would each add a dependency for what is a few hundred lines of pointer
+maths. Master's binding constraint throughout has been disk, and every new pin becomes another entry
+in Section 96's upgrade review.
+
+### Ergonomics, each guarding a specific failure
+
+- **Drag by the header only.** Dragging by the whole panel makes its contents unusable — every
+  attempt to select text or scroll a table becomes a window move.
+- **Panels cannot be lost.** Position is clamped so a grabbable strip always remains on screen, and
+  the board re-contains every panel when the window resizes. A floating layout where a panel can be
+  dragged past the edge and never retrieved is a trap.
+- **Keyboard moves and resizes.** Arrow keys on a focused header move it; shift resizes. A drag-only
+  surface excludes anyone not using a mouse and is painful on a trackpad.
+- **Closed panels are recoverable** from a chip row, so closing one is not destructive, and
+  **layout resets** because a layout that ends up broken is otherwise unrecoverable.
+- **Pointer move/up listen on `window`, not the panel** — a fast drag outruns the element and the
+  panel would stick to the cursor after release.
+- **`prefers-reduced-motion` removes the animation but not the contrast**, so the interface stays
+  fully legible rather than merely still.
+
+### Decision: pop-out is a real OS window
+
+An in-page overlay cannot be dragged to a second monitor, which is the entire reason to want pop-out.
+So `window:popout` opens an actual `BrowserWindow` loading the same renderer with `?panel=<id>`,
+rather than a second HTML entry point — which would mean a second build target and a second place for
+the CSP to drift.
+
+**The non-obvious part:** a popped-out window is a **separate renderer with its own React tree**, so
+it cannot see bars loaded in the main window. A naive pop-out opens an empty panel and looks broken.
+It therefore receives a small **allowlisted** parameter set (symbol, exchange, interval — validated by
+shape, because each is interpolated into a URL) and loads its own data. That also means it keeps
+working if the main window is closed, which is what master would expect of a window on another screen.
+
+`SIGNALS` has no standalone view and **says so**, because it depends on the main window's selection
+state. Silently opening an empty frame would be worse than declining.
+
+### The regression caught by measuring
+
+Importing `PopoutPanel` statically into `App.jsx` — needed because the pop-out check must run before
+the shell mounts — pulled `PriceChart` and `lightweight-charts` into the **entry bundle**: the main
+chunk went 282 kB → 499 kB while StockMind's fell 234 kB → 29 kB. That is ~200 kB of charting library
+loaded at startup **for every account, including those that never open StockMind**.
+
+Fixed by splitting the cheap question from the expensive answer: `popoutParams.js` is a deliberately
+import-free module for the query check, and the panel itself is `lazy()`. Entry is now **276.9 kB**,
+marginally smaller than before the feature, with the chart library in a lazy shared chunk.
+
+### What is not possible, or not done
+
+- **Panels cannot be dragged between windows.** Two renderers cannot share a React tree; the
+  professional-terminal behaviour of tearing a tab into an existing window is out of reach without a
+  shared state layer, which is a much larger change.
+- **No live data push into pop-outs.** A popped-out panel refreshes on demand. A background poll in
+  every window would multiply engine load by the number of windows for a benefit nobody asked for.
+- **Not verified by eye.** No shell was launched, so the board and pop-out rest on the renderer audit
+  (identifier scope, bridge calls, IPC parity) and the build. The `isElectron`-versus-`inElectron`
+  free-variable bug was caught by that audit before it could render — the same class as Section 81.

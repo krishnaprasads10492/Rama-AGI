@@ -3,6 +3,7 @@ import { useUserStore } from '@store/userStore.js';
 import PriceChart from './PriceChart.jsx';
 import BookPanel from './BookPanel.jsx';
 import WhyPanel from './WhyPanel.jsx';
+import PanelBoard from '@components/PanelBoard.jsx';
 
 /**
  * StockMind — market intelligence panel.
@@ -312,6 +313,11 @@ export default function StockMind() {
           ['book', 'YOUR BOOK'],
           ['why', 'WHY'],
           ['engine', 'ENGINE'],
+          // The draggable multi-window mode (Section 97). ADDED alongside the tabs rather than
+          // replacing them: tabs are faster for a single focused question, a board is better for
+          // watching several things at once, and removing a working layout to add a new one would
+          // be a capability regression. Master picks per task.
+          ['workspace', '◈ WORKSPACE'],
         ].map(([id, label]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id}
                   onClick={() => setTab(id)}
@@ -439,6 +445,65 @@ export default function StockMind() {
         )}
 
         {/* Chart */}
+        {/* ── Workspace: the same surfaces, arrangeable and poppable (Section 97) ──
+            Each panel RE-USES the existing components rather than reimplementing them, so a fix to
+            PriceChart or BookPanel lands in both modes and the two cannot drift apart. */}
+        {tab === 'workspace' && (
+          <div style={{ flex: 1, minHeight: 520, margin: '-20px', display: 'flex' }}>
+            <PanelBoard
+              storageKey="rama.stockmind.workspace"
+              onPopOut={(p) => {
+                // `inElectron` is this file's guard; `isElectron` is another page's name for it and
+                // was a free variable here — caught by the scope check before it ever rendered.
+                if (!inElectron || !window.rama?.popout) return;
+                // The new window is a separate renderer and cannot see the bars loaded here, so it
+                // is told what to fetch for itself.
+                window.rama.popout.open({
+                  panel: p.id,
+                  title: p.title,
+                  params: { symbol, exchange, interval: barInterval },
+                });
+              }}
+              panels={[
+                {
+                  id: 'chart',
+                  title: `${symbol} · ${barInterval}`,
+                  x: 16, y: 16, w: 720, h: 400,
+                  render: () => (bars.length > 0
+                    ? <PriceChart bars={bars} signal={selected} cone={coneOn ? cone : null} />
+                    : <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                        Load bars from the CHART tab first.
+                      </span>),
+                },
+                {
+                  id: 'signals',
+                  title: 'SIGNALS',
+                  x: 752, y: 16, w: 420, h: 400,
+                  render: () => (result?.signals?.length
+                    ? result.signals.map((s, i) => (
+                        <SignalRow key={i} signal={s}
+                                   selected={selected === s}
+                                   onSelect={() => setSelected(s)} />
+                      ))
+                    : <span style={{ fontSize: 12, color: 'var(--muted)' }}>No signals yet.</span>),
+                },
+                {
+                  id: 'book',
+                  title: 'YOUR BOOK',
+                  x: 16, y: 432, w: 560, h: 300,
+                  render: () => <BookPanel symbol={symbol} exchange={exchange} />,
+                },
+                {
+                  id: 'why',
+                  title: 'WHY',
+                  x: 592, y: 432, w: 580, h: 300,
+                  render: () => <WhyPanel symbol={symbol} exchange={exchange} signal={selected} />,
+                },
+              ]}
+            />
+          </div>
+        )}
+
         {tab === 'chart' && (
           <div className="hud-card" style={{ padding: '14px 16px 4px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>

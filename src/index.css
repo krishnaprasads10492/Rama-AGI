@@ -522,3 +522,121 @@ textarea.input { resize: vertical; min-height: 80px; }
 .drag-region     { -webkit-app-region: drag; }
 
 
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HUD PANELS — the draggable workspace (spec Section 97)
+
+   THE CONSTRAINT THAT SHAPES ALL OF THIS. Master asked for a more futuristic
+   feel; Section 81 raised contrast because he reported eye strain and low
+   visibility. Those pull in opposite directions only if "futuristic" is taken to
+   mean dimmer. So every rule below decorates the FRAME — corner brackets, edge
+   glow, a scanline sheen, a bloom on the active window — and not one of them
+   lowers the luminance of text. `--text`, `--text-dim` and `--muted` are
+   untouched, so the 17:1 / 11:1 / 6.4:1 steps measured in Section 81 still hold.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.hud-board {
+  /* A faint survey grid: depth without competing with content. Sub-2% alpha, so
+     it reads as texture rather than as lines to be parsed. */
+  background-image:
+    linear-gradient(rgba(0, 200, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 200, 255, 0.018) 1px, transparent 1px);
+  background-size: 32px 32px, 32px 32px;
+  overflow: hidden;
+}
+
+.hud-panel {
+  background: linear-gradient(180deg, rgba(8, 20, 38, 0.97), rgba(4, 12, 24, 0.97));
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  /* Backdrop blur only on the panel body, never behind text: blurring under
+     small type is what makes "glassmorphism" unreadable. */
+  backdrop-filter: blur(6px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  contain: layout paint;   /* a dragged panel must not force the page to re-layout */
+}
+
+/* Corner brackets — the cheapest way to read as an instrument panel. Decorative
+   only, so they are hidden from assistive technology by being pseudo-elements. */
+.hud-panel::before,
+.hud-panel::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+  border-color: var(--accent);
+  opacity: 0.55;
+}
+.hud-panel::before { top: -1px; left: -1px; border-top: 2px solid; border-left: 2px solid; }
+.hud-panel::after { bottom: -1px; right: -1px; border-bottom: 2px solid; border-right: 2px solid; }
+
+/* The focused window is the one thing that must be obvious at a glance in a
+   multi-window layout, so it gets both a brighter edge and a bloom. Colour alone
+   would fail for anyone with reduced colour discrimination; the shadow carries
+   the same signal redundantly. */
+.hud-panel-active {
+  border-color: var(--accent);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.6), var(--glow-cyan);
+}
+.hud-panel-active::before,
+.hud-panel-active::after { opacity: 1; }
+
+.hud-panel-bar {
+  background: linear-gradient(90deg, rgba(0, 200, 255, 0.10), rgba(0, 200, 255, 0.02) 60%, transparent);
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+.hud-panel-bar:focus-visible {
+  /* The header is a keyboard target for move/resize, so its focus ring must be
+     unmistakable — this is the affordance that makes the board usable without a
+     mouse, and an invisible focus ring would hide it entirely. */
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.hud-panel-glyph { color: var(--accent); font-size: 11px; opacity: 0.9; }
+
+.hud-panel-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.hud-panel-btn:hover { color: var(--text); border-color: var(--border); background: rgba(0, 200, 255, 0.08); }
+.hud-panel-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hud-panel-btn-danger:hover { color: var(--red); border-color: var(--red); background: rgba(255, 64, 96, 0.10); }
+
+/* Resize grip: two diagonal rules, which reads as a grip without an icon font. */
+.hud-panel-grip {
+  background-image: linear-gradient(135deg, transparent 0 6px, var(--border) 6px 7px,
+    transparent 7px 10px, var(--border) 10px 11px, transparent 11px);
+  opacity: 0.85;
+}
+.hud-panel-grip:hover { background-image: linear-gradient(135deg, transparent 0 6px, var(--accent) 6px 7px,
+    transparent 7px 10px, var(--accent) 10px 11px, transparent 11px); }
+
+/* A slow sheen across the active window's header. Purely atmospheric, so it is
+   the first thing dropped under reduced-motion. */
+@keyframes hud-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.hud-panel-active .hud-panel-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(0, 200, 255, 0.13), transparent);
+  animation: hud-sweep 5.5s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Movement removed, contrast and structure kept — the interface must stay fully
+     legible, not merely still. */
+  .hud-panel-active .hud-panel-bar::after { animation: none; display: none; }
+  .hud-panel { transition: none !important; }
+}

@@ -230,6 +230,14 @@ const RAMA_API = {
     describe: (opts) => ipcRenderer.invoke('self:describe', opts),
   },
 
+  // ── Pop a panel into its own OS window (Section 97) ───────────────────────
+  // A real window, so master can put a chart on a second monitor — which is the only reason to want
+  // pop-out at all, and something an in-page overlay cannot do.
+  popout: {
+    open: (opts) => ipcRenderer.invoke('window:popout', opts),
+    list: ()     => ipcRenderer.invoke('window:popouts'),
+  },
+
   // ── Background schedule and upgrade review (Section 96) ───────────────────
   // `status` is a read for any signed-in account; running a task or reviewing dependencies reaches
   // the network and may file a proposal, so both are gated higher in the main process.

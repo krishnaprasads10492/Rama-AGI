@@ -1481,6 +1481,89 @@ ipcMain.on('updater:install-now', () => {
   }
 });
 
+// ─── IPC: Pop a panel out into its own OS window (Section 97) ────────────────
+//
+// Master asked for a "pop-out scenario of screens". This is a REAL second window, not a floating div:
+// it can be moved to another monitor, which is the entire reason to want it — a chart on a second
+// screen beside the main workspace is the ergonomic win, and an in-page overlay cannot do that.
+//
+// It loads the same renderer with `?panel=<id>`, so the React app renders that one panel standalone.
+// A separate HTML entry point would mean a second build target and a second place for the CSP to
+// drift out of step with the main one.
+const popouts = new Map();   // panel id → BrowserWindow
+
+ipcMain.handle('window:popout', async (_e, { panel, title, params = {} } = {}) => {
+  const id = String(panel || '').trim();
+  // An allowlist shape rather than free text: this value is concatenated into a URL, and a panel id
+  // arriving from the renderer must not be able to steer where the window navigates.
+  if (!/^[a-z][a-z0-9-]{0,31}$/.test(id)) {
+    return { ok: false, error: 'invalid panel id' };
+  }
+
+  // A popped-out window is a SEPARATE renderer with its own React state, so it cannot read the main
+  // window's loaded bars — it must fetch its own. These few values tell it what to load.
+  //
+  // Allowlisted by key AND by shape, because every one is interpolated into a URL. Passing the whole
+  // object through would let a renderer bug put arbitrary text into the address the window opens.
+  const ALLOWED = { symbol: /^[A-Z0-9._-]{1,24}$/i, exchange: /^[A-Z]{2,8}$/i, interval: /^[0-9a-z]{1,6}$/i };
+  const query = { panel: id };
+  for (const [k, re] of Object.entries(ALLOWED)) {
+    const v = params[k];
+    if (typeof v === 'string' && re.test(v)) query[k] = v;
+  }
+
+  // Re-focus rather than opening a second copy of the same panel.
+  const existing = popouts.get(id);
+  if (existing && !existing.isDestroyed()) {
+    existing.focus();
+    return { ok: true, reused: true };
+  }
+
+  const win = new BrowserWindow({
+    width: 900,
+    height: 620,
+    minWidth: 420,
+    minHeight: 260,
+    frame: false,
+    backgroundColor: '#020408',
+    show: false,
+    // Same parent-less lifetime as the main window: a popped-out chart should survive the main window
+    // being minimised, but it must not outlive the app.
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  win.setMenuBarVisibility(false);
+  popouts.set(id, win);
+  win.on('closed', () => popouts.delete(id));
+
+  try {
+    if (isDev) {
+      await win.loadURL(`${VITE_URL}/?${new URLSearchParams(query).toString()}`);
+    } else {
+      // `loadFile` with a query, so the production `file://` origin and its CSP are unchanged.
+      await win.loadFile(BUILD_INDEX, { query });
+    }
+    win.setTitle(`Rāma — ${title || id}`);
+    win.show();
+    return { ok: true, id };
+  } catch (err) {
+    // A pop-out that fails must not leave an invisible window holding a preload bridge.
+    if (!win.isDestroyed()) win.destroy();
+    popouts.delete(id);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('window:popouts', async () => ({
+  ok: true,
+  open: [...popouts.keys()].filter(k => !popouts.get(k)?.isDestroyed()),
+}));
+
 // ─── IPC: Open external links safely ─────────────────────────────────────────
 ipcMain.handle('shell:open-external', async (_e, url) => {
   const safe = url.startsWith('https://') || url.startsWith('http://');
