@@ -38,7 +38,8 @@
     "verify:ollama": "node scripts/verifyOllamaCatalog.cjs",
     "verify:ollama-lib": "node scripts/verifyOllamaLibrary.cjs",
     "verify:web": "node scripts/verifyWebResearch.cjs",
-    "verify": "node scripts/verifyAudit.cjs && node scripts/verifyUpdateEngine.cjs && node scripts/verifySelfBuild.cjs && node scripts/verifyUpdateChannel.cjs && node scripts/simulateUpdateChannel.cjs && node scripts/verifyWorkspace.cjs && node scripts/verifySelfModel.cjs && node scripts/verifyOllamaCatalog.cjs && node scripts/verifyOllamaLibrary.cjs && node scripts/verifyWebResearch.cjs && node scripts/auditRenderer.cjs",
+    "verify:refresh": "node scripts/verifyRefresh.cjs",
+    "verify": "node scripts/verifyAudit.cjs && node scripts/verifyUpdateEngine.cjs && node scripts/verifySelfBuild.cjs && node scripts/verifyUpdateChannel.cjs && node scripts/simulateUpdateChannel.cjs && node scripts/verifyWorkspace.cjs && node scripts/verifySelfModel.cjs && node scripts/verifyOllamaCatalog.cjs && node scripts/verifyOllamaLibrary.cjs && node scripts/verifyWebResearch.cjs && node scripts/verifyRefresh.cjs && node scripts/auditRenderer.cjs",
     "rebuild": "electron-rebuild",
     "start": "electron .",
     "preview": "vite preview"

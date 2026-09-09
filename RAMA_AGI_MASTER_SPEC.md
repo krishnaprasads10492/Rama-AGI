@@ -10032,3 +10032,79 @@ its membership recomputed, rather than being a frozen snapshot that silently age
 it takes no numpy or pandas. Three payoffs: it runs on any interpreter master has, it is testable on
 this machine where the engine's packages are not installed, and the layer everything else will be
 judged by has **no dependency that can be missing at the moment it is needed**.
+
+---
+
+## SECTION 96 — Staying current: a refresh schedule for every module, and upgrades that need approval
+
+Master: *"regarding upgrades of packages → fetch, study, analyze, read comments online for info,
+consider various things related to RAMA, its security and system impact like diskspace, then consider
+for upgradation and put it in the master's approval list. For this RAMA needs to verify every day
+online."* And: *"Online search is a regular thing at a set interval to keep RAMA up to date… It
+applies to existing ones and also future ones and even when Rāma creates modules as per master's
+orders."*
+
+### Decision: generalise the scheduler that already exists rather than add a second one
+
+Section 71 built a scheduler inside `marketIntel.cjs` — private to that module, with its own timers
+and its own `SCHEDULE` constant. Master now wants scheduled refresh for **everything, including
+modules that do not exist yet**. Adding a second timer system would mean two places that decide when
+work happens, two places to disable it, and no single answer to *"what is Rāma doing on a timer"*.
+
+`electron/lib/refreshScheduler.cjs` is therefore a **registry**: a module declares a named task, an
+interval and the capability it needs, and the scheduler owns when it runs. Section 92's model
+catalogue and Section 93's library fetch are the first candidates to move onto it, and anything Rāma
+builds later registers the same way.
+
+### Decision: stagger and persist, because a cold start must not stampede
+
+Naively, every task with a due interval fires at launch. Ten tasks means ten simultaneous network
+calls the moment Rāma opens, which is slow, looks like an attack to a rate limiter, and makes startup
+failures interdependent.
+
+So **last-run times are persisted** and survive restart — a task that ran an hour ago is not due
+again just because the process restarted — and due tasks are **spread over a startup window** rather
+than fired together. Each interval also carries **jitter**, so many installs of Rāma do not hit the
+same endpoint at the same second.
+
+### Decision: a failing task backs off, and says it is failing
+
+A permanently broken endpoint retrying every interval forever is how a background system quietly
+wastes a machine's day. Consecutive failures increase the delay exponentially to a cap, and the task
+reports its failure count, so *"this has failed 40 times"* is visible rather than inferred from logs.
+A success resets the backoff.
+
+### Decision: the advisor proposes, master disposes — never an automatic upgrade
+
+I12 pins every dependency deliberately. `dependencyAdvisor.cjs` therefore **never upgrades anything**.
+It produces an assessment and files it for approval through the ledger that already exists
+(`lib/proposals.cjs`), which has master's gate and an audit trail. An advisor that could act would
+turn a pinned dependency set into a moving one, which is the opposite of what pinning is for.
+
+### Decision: a major version bump is breaking until proven otherwise
+
+Semantic versioning means the author is *telling you* a major bump breaks something. So a major bump
+is classified `breaking` by default and requires master to read the note, rather than being ranked by
+how new it is. A patch bump on a package with a security advisory is the opposite case: low risk to
+take, high risk to skip.
+
+### Decision: "no known advisory" is not "safe", and it must say which it means
+
+The most tempting dishonesty here. An advisory database that returns nothing may mean the package is
+clean or may mean nobody has looked. The assessment therefore distinguishes **`no-advisory-found`**
+from **`verified-clean`** and never prints the second when it only established the first — the same
+rule as Section 88's unmeasured fields and Section 94's refusal to fabricate a source.
+
+### Decision: online commentary is signal with provenance, never a measurement
+
+Master asked Rāma to read comments online. Those are **claims**, not data: an issue thread saying a
+release is broken is worth surfacing and worth attributing, and is not a fact about the package. So
+commentary is carried as `signals` with source and date, kept separate from the version arithmetic
+and the advisory lookup, and it can raise a concern for master to weigh but cannot by itself decide a
+recommendation. This is the same boundary that kept model ratings out of Section 92's scoring.
+
+### Disk impact is a first-class field
+
+Master's binding constraint throughout has been disk. Where a size is available it is reported as a
+**delta**, since "42 MB" matters far less than "+31 MB". Where it is not available it is `null`, not
+zero.
