@@ -458,8 +458,11 @@ export default function StockMind() {
         {/* ── Workspace: the same surfaces, arrangeable and poppable (Section 97) ──
             Each panel RE-USES the existing components rather than reimplementing them, so a fix to
             PriceChart or BookPanel lands in both modes and the two cannot drift apart. */}
+        {/* No negative margin on the board wrapper below. `margin: -20px` was cancelling the parent's
+            padding, which made the board 40px WIDER than its container — and with `overflow: hidden`
+            on the board, panels near the right edge were clipped rather than contained (Section 100). */}
         {tab === 'workspace' && (
-          <div style={{ flex: 1, minHeight: 520, margin: '-20px', display: 'flex' }}>
+          <div style={{ flex: 1, minHeight: 520, display: 'flex' }}>
             <PanelBoard
               storageKey="rama.stockmind.workspace"
               onPopOut={(p) => {
@@ -477,10 +480,11 @@ export default function StockMind() {
               panels={[
                 {
                   id: 'chart',
-                  title: `${symbol} · ${barInterval}`,
+                  title: `${sym} · ${barInterval}`,
                   x: 16, y: 16, w: 720, h: 400,
                   render: () => (bars.length > 0
-                    ? <PriceChart bars={bars} signal={selected} cone={coneOn ? cone : null} />
+                    ? <PriceChart bars={bars} signal={selected} symbol={sym}
+                                  interval={barInterval} cone={coneOn ? cone : null} />
                     : <span style={{ fontSize: 12, color: 'var(--muted)' }}>
                         Load bars from the CHART tab first.
                       </span>),
@@ -501,13 +505,23 @@ export default function StockMind() {
                   id: 'book',
                   title: 'YOUR BOOK',
                   x: 16, y: 432, w: 560, h: 300,
-                  render: () => <BookPanel symbol={symbol} exchange={exchange} />,
+                  // `currentUser` and `canConfig` are NOT optional. Omitting them sent `user:
+                  // undefined` to the capability gate, which correctly refused with
+                  // "Access denied: stockmind.view is not available unauthenticated" — the panel
+                  // looked broken while the gate was doing its job (Section 100).
+                  render: () => <BookPanel currentUser={currentUser} canConfig={canConfig}
+                                           symbol={sym} exchange={exchange} lastClose={lastClose}
+                                           onPickSymbol={(s) => { setSymbol(s); setTab('chart'); }} />,
                 },
                 {
                   id: 'why',
                   title: 'WHY',
                   x: 592, y: 432, w: 580, h: 300,
-                  render: () => <WhyPanel symbol={symbol} exchange={exchange} signal={selected} />,
+                  // `thesis`, not `signal` — WhyPanel has no `signal` prop, so the value was silently
+                  // discarded. A wrong prop name fails quietly in React, which is why the panel
+                  // rendered without complaint and simply showed nothing useful.
+                  render: () => <WhyPanel currentUser={currentUser} symbol={sym} exchange={exchange}
+                                          thesis={held?.thesis || null} />,
                 },
               ]}
             />

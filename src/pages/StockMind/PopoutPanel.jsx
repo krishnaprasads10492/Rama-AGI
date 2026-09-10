@@ -95,6 +95,62 @@ export default function PopoutPanel({ params }) {
     );
   }
 
+  /**
+   * A POPPED-OUT WINDOW HAS NO SESSION, and that is not something this file can work around
+   * (spec Section 100).
+   *
+   * `loadSession()` reads `sessionStorage`, which Chromium scopes PER WINDOW. So a second
+   * BrowserWindow starts unauthenticated and every StockMind channel — all of them gated on
+   * `stockmind.view` — refuses it. Rendering the panel anyway would show master the same
+   * "Access denied: stockmind.view is not available unauthenticated" he already reported, which
+   * would look like a bug in the panel rather than a missing capability in the pop-out.
+   *
+   * Saying so plainly is the honest state until a session hand-off exists. That hand-off is a
+   * security-relevant change — it means passing a token to a new window — and is deliberately not
+   * improvised here.
+   */
+  return (
+    <Frame title={title}>
+      <div style={{ fontSize: 12.5, color: 'var(--amber)', lineHeight: 1.7 }}>
+        Popped-out windows are not signed in yet.
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7, marginTop: 8 }}>
+        A separate window gets its own session storage, so this one has no login and StockMind's data
+        channels refuse it. Showing you an “access denied” panel would be worse than saying this.
+        <br /><br />
+        Use the <strong>WORKSPACE</strong> tab in the main window for a draggable board — that is
+        fully working. Handing a session to a second window is a security change worth doing
+        deliberately rather than quickly.
+      </div>
+    </Frame>
+  );
+}
+
+/** Kept for when the session hand-off lands; not reachable until then. */
+function PopoutPanelWithSession({ params }) {
+  const { panel, symbol, exchange, interval } = params;
+  const [bars, setBars] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const loadBars = useCallback(async () => {
+    if (!inElectron || panel !== 'chart') return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await window.rama.marketIntel.ohlcv({ symbol, exchange, interval, limit: 400 });
+      if (res?.ok) setBars(Array.isArray(res.data?.bars) ? res.data.bars : []);
+      else setError(res?.error || 'could not load bars');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }, [panel, symbol, exchange, interval]);
+
+  useEffect(() => { loadBars(); }, [loadBars]);
+  const title = `${symbol} · ${panel.toUpperCase()}`;
+
   if (panel === 'chart') {
     return (
       <Frame title={`${title} · ${interval}`} onRefresh={loadBars} busy={busy}>

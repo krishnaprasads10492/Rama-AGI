@@ -172,6 +172,10 @@ export default function PanelBoard({ panels: initial, storageKey = null, onPopOu
   const reduced = usePrefersReducedMotion();
   const [bounds, setBounds] = useState({ w: 1200, h: 800 });
 
+  // Set once the board has been measured, so the first layout can fit the window that exists rather
+  // than the one the defaults assumed.
+  const laidOut = useRef(false);
+
   const [geo, setGeo] = useState(() => {
     const base = {};
     initial.forEach((p, i) => {
@@ -192,6 +196,11 @@ export default function PanelBoard({ panels: initial, storageKey = null, onPopOu
     if (storageKey && typeof localStorage !== 'undefined') {
       try {
         const saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+        if (saved && typeof saved === 'object' && Object.keys(saved).length) {
+          // A saved layout is master's arrangement and must not be overwritten by the responsive
+          // default, so tiling is skipped entirely when one exists.
+          laidOut.current = true;
+        }
         if (saved && typeof saved === 'object') {
           for (const id of Object.keys(base)) {
             // Merged per key rather than replacing wholesale, so a panel added in a later version
@@ -215,7 +224,41 @@ export default function PanelBoard({ panels: initial, storageKey = null, onPopOu
       const r = el.getBoundingClientRect();
       const b = { w: r.width, h: r.height };
       setBounds(b);
+
       setGeo(g => {
+        const ids = Object.keys(g);
+
+        // FIRST MEASURE WITH NO SAVED LAYOUT: tile to the window that actually exists.
+        //
+        // The defaults were absolute pixels — a panel at x:752 w:420 needs a 1190px board. On a
+        // narrower window those panels sat past the right edge, and `containPanel` only guarantees a
+        // 64px grabbable strip, so most of each panel was clipped by the board's `overflow: hidden`.
+        // Master saw exactly that. Column count now follows the measured width.
+        if (!laidOut.current && b.w > 0 && ids.length) {
+          laidOut.current = true;
+          const cols = b.w >= 1100 ? 2 : 1;
+          const rows = Math.ceil(ids.length / cols);
+          const gap = 12;
+          const cw = Math.max(MIN_W, Math.floor((b.w - gap * (cols + 1)) / cols));
+          // Height is allowed to overflow a short board — the alternative is panels too small to use,
+          // and vertical overflow is recoverable by dragging whereas an unusable panel is not.
+          const ch = Math.max(MIN_H, Math.floor((Math.max(b.h, 420) - gap * (rows + 1)) / rows));
+
+          const next = {};
+          ids.forEach((id, i) => {
+            const col = i % cols;
+            const row = Math.floor(i / cols);
+            next[id] = containPanel({
+              ...g[id],
+              x: gap + col * (cw + gap),
+              y: gap + row * (ch + gap),
+              w: cw,
+              h: ch,
+            }, b);
+          });
+          return next;
+        }
+
         const next = {};
         for (const [id, p] of Object.entries(g)) next[id] = containPanel(p, b);
         return next;
@@ -311,18 +354,29 @@ export default function PanelBoard({ panels: initial, storageKey = null, onPopOu
     if (storageKey && typeof localStorage !== 'undefined') {
       try { localStorage.removeItem(storageKey); } catch { /* nothing to do */ }
     }
+    // Re-tile against the CURRENT bounds rather than restoring the original pixel defaults, which is
+    // what master wants from "reset": a layout that fits this window, not the one it was written for.
+    const cols = bounds.w >= 1100 ? 2 : 1;
+    const rows = Math.ceil(initial.length / cols);
+    const gap = 12;
+    const cw = Math.max(MIN_W, Math.floor((bounds.w - gap * (cols + 1)) / cols));
+    const ch = Math.max(MIN_H, Math.floor((Math.max(bounds.h, 420) - gap * (rows + 1)) / rows));
+
     setGeo(() => {
       const base = {};
       initial.forEach((p, i) => {
-        base[p.id] = {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        base[p.id] = containPanel({
           id: p.id, title: p.title,
-          x: 24 + (i % 2) * 520, y: 24 + Math.floor(i / 2) * 300,
-          w: 500, h: 280, collapsed: false, maximised: false, closed: false, z: i + 1,
-        };
+          x: gap + col * (cw + gap), y: gap + row * (ch + gap),
+          w: cw, h: ch,
+          collapsed: false, maximised: false, closed: false, z: i + 1,
+        }, bounds);
       });
       return base;
     });
-  }, [initial, storageKey]);
+  }, [initial, storageKey, bounds]);
 
   const open = initial.filter(p => !geo[p.id]?.closed);
   const hidden = initial.filter(p => geo[p.id]?.closed);
