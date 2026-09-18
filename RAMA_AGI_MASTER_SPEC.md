@@ -1778,6 +1778,8 @@ authenticated **Master session**, not merely an open store.
 
 | 122 | Every field in StockMind, reviewed from the user's side | done | Section 102. Master: *"go through every field and item in StockMind and research UI/UX. For example it is not possible to know every stock/index name in every market but you implemented text field with no search. Things like this matter from UI/UX."* **THE EXAMPLE IS A CORRECT CRITICISM OF ROW 121'S OWN WORK.** Section 101 reviewed the chart and not the form around it, and the picker it shipped — a curated `<select>` of ~50 names beside a raw text box — is a text box with decoration: it cannot answer *"what is Reliance Power called"*, which is the only question a picker exists for. The mistake was treating "offer a list" as the requirement when the requirement was "let master find something he does not already know the ticker for". **DECISION: do not try to know every instrument — SEARCH THE PROVIDER.** A longer curated list is the same defect with a later expiry (the Section 92 argument again); a downloaded instrument master was rejected again because no free endpoint this project already talks to serves one, a scrape needs its own refresh policy and goes stale silently, and it still would not cover *every market*. `GET /symbols/search` + `market:symbol-search` + a real ARIA combobox. **Measured before building on it:** `reliance` returns Reliance Industries (NSE), Reliance Power (NSE), Reliance Global (NASDAQ), the London GDR and the Australian listing. **A FAILURE IS REPORTED DISTINCTLY FROM AN EMPTY RESULT** — collapsing them would say "no such symbol" for a network fault and send master to fix his spelling; the renderer can only choose its offline fallback because it can tell them apart, and **on master's machine the fallback is the live path**, so it is built and tested rather than assumed. **TWO REAL BUGS FOUND BY INSISTING THE TRANSLATION ROUND-TRIPS** (`to_yahoo_symbol(*from_yahoo_symbol(y)) == y`): `^NSEI` would have been stored beside an existing `NIFTY50`, splitting one series into two copies — so the reverse map is canonical-first; and `RWC.AX` became `RWC.AX.NS`, meaning **every non-Indian, non-US search result was offerable and unfetchable**, the exact failure a picker is meant to remove. Free text still commits on Enter (I11) because the provider is not omniscient either. **THE SECOND WORST ITEM IN THE MODULE, NOW GONE: closing a position used `window.prompt`** — on a real-money action it accepted any string, showed no consequence, no quantity so a partial exit was impossible, no date, no fees, no confirmation; typing `24.50` where `2450` was meant recorded a loss silently. Replaced by a form with a live preview of what the exit realises net of fees, what stays open, and how the price sits against master's own recorded stop and target. **That exposed a trap: `/ledger/close` takes NO quantity** and exits the whole position by design, so sending one would have been ignored while the preview promised "60 remaining" — the form would have claimed a partial exit and the ledger recorded a full one; partial exits route through `/ledger/fill`, chosen by `preview.partial`, so preview and record describe one event. **Also fixed:** RISK % showed only a percentage, so the number master was actually choosing — money at stake — was his to compute in his head (`1,500 at risk`, plus implied size against his stop); the `⚡ Generate Signals` button was disabled with **no stated cause**, so busy / wrong-tier / empty-field were indistinguishable; the **SIGNALS tab rendered nothing at all** before a request, a blank page indistinguishable from a crash; clicking a signal row overlaid levels **on a different tab**, so the action read as doing nothing; the book's symbol→chart link was a `<span>` with an `onClick`, so **the only route from the book to the chart was mouse-only**; `Load history` vs `Fetch & store` differed only in whether the network is touched and only one said so, now `From disk` / `Fetch from provider`; nine unexplained column heads; a bare `?` for an assumed trade style; and **my own row-121 regression — about thirty controls above a 400px chart**, so presentation collapsed into one menu whose label shows the current choice. **VERIFIED: 124 new assertions, `npm run verify` 17 suites.** The position-math suite's key assertion is the **short** case — a sign taken from the exit side rather than the held quantity inverts the P&L on every short while looking plausible on every long, so it would pass any suite written with only long fixtures and master would see a loss reported as a gain. Audit clean at **131 bridge calls / 66 files / 349 channels**; `vite build` entry unchanged at 283.53 kB. **NOT DONE, recorded as an ordered backlog rather than dropped** (Section 102's "Open" verdicts): one error presentation and one number formatter across every panel; splitting the ENGINE tab's three unrelated things and making the tabs a real keyboard tablist; a sentence for the six remaining WHY statistics and the titlebar badges; text or glyph companions for every colour-only signal such as `priceStale`; and a recently-used instrument list, which is what master will actually want now that search exists. **Nothing seen on screen, and the search cannot run on master's install until the engine does.** |
 
+| 123 | Composable strategies — pick the parts, backtest the combination, emit the Python | done | Section 103. Master: *"strategies can be made individually or various combo of probability calculation + higherhigh-lowerlow (trend lines) + technical indicators + various things (news + sentiment) etc… ability to pick things, backtest them for various scenarios → converting to code mostly Python… based on the investment, ROI, risk. You know the motto of StockMind in Rāma right?"* **The motto, from Section 64 where master set it: StockMind exists to generate wealth for a real trader, and Rāma must be able to upgrade the capability itself.** Everything here is shaped by the first half — real money means the tool's job is to stop master trusting what it cannot support — and Section 95's rule stands: **no path to order placement, ever.** **THE GAP THIS STARTED FROM IS A BAD ONE: `strategy_eval.py` was reachable from NOTHING.** Built in Section 95 with 64 assertions, no route, no IPC, no caller — the harness that decides whether a strategy found an edge or found noise sat outside the product from the day it was written. Row 115 says done and the module is done; the capability was not. **A judge nobody can call does not judge anything.** Now `/strategy/blocks`, `/strategy/validate`, `/strategy/backtest`, `/strategy/code` and four IPC channels. **DECISION: a strategy is a DECLARATION and the Python is generated from it.** Rejected master-or-model-writes-Python for three reasons: a spec **can be counted** (the trial count is the single number that makes a backtest interpretable, and freeform code has none); a spec can be re-run, diffed and versioned; and master never has to write Python, which was the point. **DECISION: Rāma does not execute what it generates, and the backtest is not run by it.** `exec`-ing generated source in the process holding master's data is arbitrary code execution — but the reason that actually matters is that **if the emitted code ran the backtest, a codegen bug would silently change the number master is deciding on.** Separating them lets the two be compared, and **the emitted file is `inspect.getsource()` of the very interpreter functions**, so agreement is structural rather than hoped for. A template would have drifted the first time a block was fixed in one place. **DECISION: blocks that cannot be backtested are OFFERED and REFUSED, naming the reason.** Two of master's four ingredients land here. *Model probability* against historical bars is look-ahead — the model was fitted on the period being tested — and would be the most flattering number in the tool; *news and sentiment* have no free history, the same finding that labels the NEWS panel NOT BACKTESTABLE (Sections 66, 70). Both usable live, both refused by the backtest. **A verdict is never stronger than the weakest block in the spec.** **DECISION: ROI is an OUTPUT, never an input** — a field that accepts a target return and produces a strategy meeting it is the commonest way a strategy tool lies, because the search simply runs until something in the noise clears the bar. Capital and risk in; ROI reported. Also: **one position at a time** (overlapping trades need a portfolio model and `strategy_eval` judges independent round trips); **entry on the NEXT bar's open**, because a signal from a close cannot be acted on at that close and filling there is most of the apparent edge on a breakout system; **a stop and a target touched in the same bar resolve as the STOP**, since bar data cannot say which came first; an unclosed trade contributes nothing; and **risk is a percentage of ORIGINAL capital, not running equity**, because compounding it makes a good run look exponential and a bad one bottomless. 16 blocks across 8 groups; combination is all / any / at least k, deliberately not a nested boolean tree master could build and not read. **VERIFIED, AND FOR ONCE ACTUALLY EXECUTED: `ai_backend/tests/test_strategy_spec.py`, 220 assertions, run on this machine** — these modules are stdlib-only precisely so that is possible, and it found four real defects immediately: `engine/__init__` drags numpy in so `strategy_codegen` now falls back to an absolute import; **the generated script crashed on `python s.py` with no arguments** because printing its own docstring hit cp1252 on a macron, so the emitted file is ASCII-only by design; a fixture claimed a trade where the breakout block could not yet fire, meaning the same-bar stop assertion was passing vacuously; and **`position_size` existed twice** — it decides how much money is at risk, so it moved into `strategy_spec` and is emitted by `getsource` like everything else. Key assertions: every unbacktestable block is refused with its reason and returns **no trades at all**; each has `fn = None` so it cannot leak into a simulation; duplicate sweep values are collapsed so the trial count cannot be inflated either; `at least 1` equals `any` and `at least n of n` equals `all`; every catalogue default validates; and **the generated file reproduces the interpreter's trades bar for bar and reason for reason**, then runs end to end over a CSV. `npm run verify` 17 suites; audit clean at **135 bridge calls / 67 files / 353 channels**; `vite build` entry unchanged at 283.53 kB. **NEXT STEPS, in order:** (1) **per-fold model refit**, which is what would make the probability block backtestable and is the largest upgrade available here; (2) save and reload strategies via `dataStore` — a spec is small JSON and every configuration is currently lost on navigation; (3) write the generated file to disk through a save dialog rather than only the clipboard; (4) **a scenario matrix** for the other half of "various scenarios" — the same spec across instruments, intervals and date ranges, **and the trial-count arithmetic must cover it**, because one spec over ten instruments is ten trials and getting that wrong would reintroduce exactly the bias this section removes. **Nothing seen on screen, and the backtest cannot run on master's install until the engine does.** |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -10742,3 +10744,176 @@ wrote down is a list of things that will be re-discovered instead of fixed.
 cannot run on master's install until the engine does, which is still waiting on Python 3.10–3.12 —
 until then the combobox falls back to the offline list and says so, which is why that path was built
 and tested rather than assumed.
+
+---
+
+## SECTION 103 — Composable strategies: pick the parts, backtest the combination, emit the Python
+
+Master: *"strategies can be made individually or various combo of probability calculation +
+higherhigh-lowerlow (trend lines) + technical indicators + various things (news + sentiment) etc., so we
+need to have ability to pick things, backtest them for various scenarios → converting to code mostly
+Python to execute strategy based on the investment, ROI, risk. You know the motto of StockMind in Rāma
+right?"*
+
+**The motto, quoted from Section 64 where master set it: StockMind exists to generate wealth for a real
+trader, and Rāma must be able to upgrade the capability itself.** Everything below is shaped by the
+first half — real money means the tool's job is to stop master trusting something it cannot support,
+not to agree with him — and Section 95's rule stands unchanged: **no path to order placement, ever.**
+
+*Written before implementing, per Section 28's working agreement.*
+
+### The gap this starts from, and it is a bad one
+
+`strategy_eval.py` was built in Section 95 with 64 assertions and **is reachable from nothing.** No
+route, no IPC channel, no caller. The harness that decides whether a strategy found an edge or found
+noise has been sitting outside the product since the day it was written. Ledger row 115 says `done`,
+and the module is done; the capability is not. **A judge nobody can call does not judge anything.**
+
+### Decision: a strategy is a DECLARATION, and the Python is generated from it
+
+Master picks blocks and parameters; Rāma holds that as a spec and generates code from it. The
+alternative — master or a model writes Python and Rāma runs it — was rejected for three reasons that
+all trace to the motto:
+
+1. **A spec can be counted.** The single most important number in a backtest is how many variants were
+   tried, because Section 95 established that the best of N noisy results looks excellent whether or
+   not an edge exists. A spec with a declared parameter sweep has an exact trial count. Freeform code
+   has none, so nothing downstream could deflate anything.
+2. **A spec can be re-run, diffed and versioned.** "The strategy that worked last month" has to be a
+   thing Rāma can reproduce exactly.
+3. **Master never has to write Python**, which is the point of asking for it to be generated.
+
+### Decision: Rāma does not execute generated code, and the backtest is not run by it
+
+**The backtest runs on a fixed, audited interpreter in the engine. The generated Python is an
+artefact.** Two reasons, and the second is the one that matters:
+
+- `exec`-ing generated source inside the engine is arbitrary code execution in the process that holds
+  master's data. There is a sandbox in this project and this is still not worth doing.
+- **If the emitted code were the thing that ran the backtest, a bug in codegen would silently change
+  the result master is judging.** Separating them lets the two be *compared* — which is the guarantee
+  that actually makes the emitted file trustworthy.
+
+**So the emitted code is produced by `inspect.getsource()` of the very functions the interpreter uses,
+not by re-implementing them in a template string.** Agreement is then structural rather than hoped for,
+and the test still verifies it by executing the generated file and asserting the trade list matches
+the interpreter's bar for bar. A template would drift the first time a block was fixed in one place.
+
+The emitted script **prints signals and never places orders**, per Section 95.
+
+### Decision: blocks that cannot be backtested are OFFERED and REFUSED, not quietly included
+
+This is the honesty decision, and two of master's four named ingredients land on it.
+
+**Model probability.** Using the current trained model's probability against historical bars is
+look-ahead: the model was fitted on data that includes the period being tested. A backtest containing
+it would be the most flattering number in the whole tool and would mean nothing. It is therefore
+usable in a live strategy and **the backtest refuses a spec containing it**, naming the reason. Making
+it honest needs a per-fold refit, which is a larger piece of work recorded as the next step rather
+than faked now.
+
+**News and sentiment.** Sections 66 and 70 already established that no free feed carries enough
+history to measure whether tone predicts anything — the NEWS panel is labelled `NOT BACKTESTABLE` for
+exactly this reason. Same treatment: allowed in the live artefact, refused in the backtest.
+
+The alternative — including them and letting the number come out flattering — is precisely the failure
+Sections 64 through 69 exist to prevent. **A block declares `backtestable`, and a spec's verdict can
+never be stronger than its weakest block.**
+
+### Decision: ROI is an OUTPUT, never an input
+
+Master listed *"investment, ROI, risk"*. Investment and risk are inputs — capital, and the fraction of
+it exposed per trade. **ROI is a result.** A field that accepts a target return and then produces a
+strategy meeting it is the single most common way a strategy tool lies: the search simply keeps going
+until something in the noise clears the bar. So the form takes capital, risk per trade and a drawdown
+tolerance master states he can sit through, and reports ROI — with the trial count beside it.
+
+Sizing is separate from signalling: the blocks say *when*, the sizing says *how much*, and they are
+composed rather than mixed. Sizing is `riskBudget`-shaped — risk amount divided by the distance to the
+stop — which is the same arithmetic Section 102 put under the RISK % field.
+
+### Decision: one position at a time, and exits are explicit
+
+No pyramiding and no overlapping entries in v1. A strategy that can hold several overlapping positions
+needs a portfolio model, and the trade-return series `strategy_eval` judges assumes independent round
+trips. Exits are a stop, a target, a maximum holding period, and optionally a block — all four
+recorded, because a backtest whose exit rule is "the next opposite signal" hides its holding period and
+therefore its cost drag.
+
+### The block library
+
+Grouped by what the block is evidence *of*, not by how it is computed.
+
+| Group | Blocks | Backtestable |
+|---|---|---|
+| Trend structure | higher highs and higher lows, lower lows and lower highs, trendline break | yes |
+| Moving averages | SMA cross, EMA cross, price vs SMA | yes |
+| Momentum | RSI band, MACD signal cross | yes |
+| Volatility | Bollinger touch, ATR expansion | yes |
+| Breakout | N-bar high or low break, volume surge | yes |
+| Session | day of week, time of day (intraday only) | yes |
+| Probability | model directional probability above a threshold | **no** — look-ahead, needs per-fold refit |
+| News | sentiment above/below, headline-volume spike | **no** — no free feed has the history (Sections 66, 70) |
+
+Combination is `all` / `any` / `at least k` over the chosen blocks, which covers master's "individually
+or various combo" without inventing a rule language. Deliberately not a nested boolean tree in v1: a
+tree the UI can express but master cannot read is a worse tool than a flat combiner.
+
+### Verification plan
+
+`strategy_spec.py` is **stdlib only**, for the same reason `strategy_eval.py` is: it is the layer the
+results come from, and it must be testable on a machine with no numpy. That also means — unlike every
+Python change in Sections 101 and 102 — **its tests actually run here.**
+
+The properties worth asserting are: a spec containing a non-backtestable block is refused with the
+reason; the trial count equals the product of the sweep; the sweep expansion is exhaustive and
+duplicate-free; entry and exit produce independent round trips with no overlap; a stop and a target hit
+in the same bar resolve pessimistically; and **the generated Python reproduces the interpreter's trades
+exactly.**
+
+### Verified — and for once, actually executed
+
+**`ai_backend/tests/test_strategy_spec.py`, 220 assertions, RUN HERE.** Every Python change in Sections
+101 and 102 had to be shipped unrun because this machine has no pandas. These modules are stdlib-only
+precisely so that is not true of them, and it paid off immediately — four real defects were found by
+running rather than by reading:
+
+- **`engine/__init__` imports the dispatcher, which imports numpy**, so `from engine import
+  strategy_spec` dragged the whole ML stack into a suite written to avoid it. `strategy_codegen` now
+  tries the relative import and falls back to the absolute one, and the suite puts `engine/` on the
+  path directly.
+- **The generated script crashed on the most basic thing master could do with it.** `main` with no
+  arguments prints the docstring, and a macron in "RĀMA" is unencodable on a cp1252 Windows console.
+  The emitted file is now ASCII-only, deliberately, and says why.
+- **A fixture claimed a trade where none was possible** — the wide bar was at index 2, and the
+  breakout block needs two prior bars before it can fire. The same-bar stop-versus-target assertion
+  was passing vacuously.
+- **`position_size` existed twice**, once in the runner template and once for the money summary. It
+  decides how much money is at risk, which is the last place a second implementation should be
+  tolerated, so it moved into `strategy_spec` and is emitted by `getsource` like every other block.
+
+The assertions that matter: all three non-backtestable blocks are refused by `run_spec` with their
+reason and **return no trades at all**; every non-backtestable block has `fn = None`, so one cannot leak
+into a simulation even by a caller's mistake; the trial count is the product of the sweep and
+**duplicate sweep values are collapsed so it cannot be inflated either**; entry is proven to be the bar
+after the signal at that bar's open; a bar touching both the stop and the target resolves as the stop
+and the return is a loss; an unclosed trade contributes nothing; trades never overlap; `at least 1`
+equals `any` and `at least n of n` equals `all`; every default spec built from the catalogue validates;
+and **the generated file produces the same trades as the interpreter, bar for bar and reason for
+reason**, then runs end to end over a CSV.
+
+`npm run verify` 17 suites unchanged; renderer audit clean at **135 bridge calls / 67 files / 353 IPC
+channels**; `vite build` succeeds with the entry chunk **unchanged at 283.53 kB** and StockMind at
+93.79 kB.
+
+### Next steps, in order
+
+1. **Per-fold model refit**, which is what would make the probability block backtestable. It is the
+   largest single upgrade available to this feature and the one master's first ingredient asks for.
+2. **Save and reload strategies** — a spec is a small JSON document and `dataStore` is the vault, so
+   this is cheap, and without it every configuration is lost on navigation.
+3. **Write the generated file to disk** through a save dialog rather than only to the clipboard.
+4. **A scenario matrix**, which is the other half of *"backtest them for various scenarios"*: the same
+   spec across several instruments, intervals and date ranges, reported as a grid. The trial-count
+   arithmetic must cover it — running one spec over ten instruments is ten trials, not one, and getting
+   that wrong would reintroduce exactly the bias this section exists to remove.

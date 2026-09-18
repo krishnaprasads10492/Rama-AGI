@@ -5,6 +5,7 @@ import BookPanel from './BookPanel.jsx';
 import WhyPanel from './WhyPanel.jsx';
 import PanelBoard from '@components/PanelBoard.jsx';
 import SymbolSearch from './SymbolSearch.jsx';
+import StrategyBuilder from './StrategyBuilder.jsx';
 import { barsFor, defaultRangeFor, reconcileRange, capBarsFor } from './timeframes.js';
 import { riskBudget, whyCannotPredict } from './positionMath.js';
 
@@ -382,6 +383,10 @@ export default function StockMind() {
           ['signals', 'SIGNALS'],
           ['book', 'YOUR BOOK'],
           ['why', 'WHY'],
+          // Composable strategies (Section 103). Its own tab rather than a card inside SIGNALS: a
+          // signal is one reading now, a strategy is a rule tested over history, and mixing them
+          // would blur the one distinction this module most needs master to keep.
+          ['strategy', '⚗ STRATEGY'],
           ['engine', 'ENGINE'],
           // The draggable multi-window mode (Section 97). ADDED alongside the tabs rather than
           // replacing them: tabs are faster for a single focused question, a board is better for
@@ -735,6 +740,12 @@ far as the provider allows, which for intraday is a few days to two years.">
         {tab === 'why' && (
           <WhyPanel currentUser={currentUser} symbol={sym} exchange={exchange}
                     thesis={held?.thesis || null} />
+        )}
+
+        {tab === 'strategy' && (
+          <StrategyBuilder currentUser={currentUser} canRequest={canRequest}
+                           symbol={sym} exchange={exchange} interval={barInterval}
+                           capital={capital} riskPct={riskPct} />
         )}
 
         {/* THE SIGNALS TAB RENDERED NOTHING AT ALL before a request (Section 102): the whole block

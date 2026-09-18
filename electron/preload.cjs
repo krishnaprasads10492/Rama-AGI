@@ -178,6 +178,14 @@ const RAMA_API = {
     schedulerStatus: (opts) => ipcRenderer.invoke('market:scheduler-status', opts),
     inventory:       (opts) => ipcRenderer.invoke('market:inventory', opts),
     symbolSearch:    (opts) => ipcRenderer.invoke('market:symbol-search', opts),
+
+    // Composable strategies (Section 103). `blocks` and `validate` are reads; `backtest` and `code`
+    // sit on `stockmind.request`, because a backtest spends engine time and yields something
+    // actionable.
+    strategyBlocks:   (opts) => ipcRenderer.invoke('market:strategy-blocks', opts),
+    strategyValidate: (opts) => ipcRenderer.invoke('market:strategy-validate', opts),
+    strategyBacktest: (opts) => ipcRenderer.invoke('market:strategy-backtest', opts),
+    strategyCode:     (opts) => ipcRenderer.invoke('market:strategy-code', opts),
     news:            (opts) => ipcRenderer.invoke('market:news', opts),
     newsCoverage:    (opts) => ipcRenderer.invoke('market:news-coverage', opts),
     derivatives:     (opts) => ipcRenderer.invoke('market:derivatives', opts),

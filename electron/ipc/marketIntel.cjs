@@ -164,6 +164,31 @@ async function inventory() {
   return getPath('/store/inventory');
 }
 
+// ── Composable strategies (spec Section 103) ─────────────────────────────────
+//
+// `strategyBlocks` and `strategyValidate` are READS — a catalogue and a pure check, both on
+// `stockmind.view`. `strategyBacktest` and `strategyCode` sit on `stockmind.request` below, beside
+// `predict`: a backtest spends real engine time and produces something master may act on.
+
+async function strategyBlocks() {
+  return getPath('/strategy/blocks');
+}
+
+async function strategyValidate({ spec } = {}) {
+  return postPath('/strategy/validate', { spec: spec || {} });
+}
+
+async function strategyBacktest({ spec, holdoutFrac = 0.3, minBars = 200 } = {}) {
+  // A wide sweep over a deep series is minutes of work, not seconds. The timeout is generous for the
+  // same reason the trial count is shown up front: master chose to search that widely.
+  return postPath('/strategy/backtest',
+    { spec: spec || {}, holdoutFrac, minBars }, { timeout: 300000 });
+}
+
+async function strategyCode({ spec, verdict = null, trials = 1 } = {}) {
+  return postPath('/strategy/code', { spec: spec || {}, verdict, trials });
+}
+
 /**
  * Search the provider for an instrument (spec Section 102).
  *
@@ -351,6 +376,20 @@ function register(ipcMain) {
     catch (err) { return { ok: false, error: err.message }; }
   });
 
+  // A backtest spends real engine time and produces something master may act on, so it sits on
+  // `stockmind.request` beside `predict` rather than on the read gate (Section 103).
+  ipcMain.handle('market:strategy-backtest', async (_e, { user, ...body } = {}) => {
+    const denied = denyUnless(user, 'stockmind.request');
+    if (denied) return denied;
+    try { return await strategyBacktest(body); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+  ipcMain.handle('market:strategy-code', async (_e, { user, ...body } = {}) => {
+    const denied = denyUnless(user, 'stockmind.request');
+    if (denied) return denied;
+    try { return await strategyCode(body); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
   ipcMain.handle('market:health', async (_e, { user } = {}) => {
     const denied = denyUnless(user, 'stockmind.view');
     if (denied) return denied;
@@ -373,6 +412,8 @@ function register(ipcMain) {
     'market:ohlcv':           ohlcv,
     'market:inventory':       inventory,
     'market:symbol-search':   symbolSearch,
+    'market:strategy-blocks': strategyBlocks,
+    'market:strategy-validate': strategyValidate,
     'market:news':            news,
     'market:news-coverage':   newsCoverage,
     'market:derivatives':     derivatives,
@@ -610,6 +651,7 @@ function schedulerStatus() {
 module.exports = {
   register, predict, backtest, backtestPresets, strategyScore, health,
   ohlcv, inventory, symbolSearch, news, newsCoverage, newsBackfill, derivatives, optionChain,
+  strategyBlocks, strategyValidate, strategyBacktest, strategyCode,
   outcomeStats, modelsStatus, horizonsList, predictMulti, trainHorizons,
   startScheduler, stopScheduler, schedulerStatus,
   tickResolveOutcomes, tickSyncNews,

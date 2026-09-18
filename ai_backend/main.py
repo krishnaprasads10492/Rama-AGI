@@ -638,6 +638,162 @@ def store_inventory():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Composable strategies (spec Section 103) ───────────────────────────────────
+#
+# THE GAP THESE ROUTES CLOSE. `strategy_eval.py` was built in Section 95 with 64 assertions and was
+# reachable from nothing — no route, no IPC, no caller. The harness that decides whether a strategy
+# found an edge or found noise sat outside the product from the day it was written. A judge nobody can
+# call does not judge anything.
+
+@app.get("/strategy/blocks")
+def strategy_blocks():
+    """The block catalogue, for the builder. Includes which blocks a backtest will refuse, and why."""
+    from engine import strategy_spec
+    return strategy_spec.catalogue()
+
+
+class StrategySpecRequest(BaseModel):
+    spec: dict
+
+
+@app.post("/strategy/validate")
+def strategy_validate(req: StrategySpecRequest):
+    """
+    Normalise a spec and report every fault at once, plus the trial count.
+
+    The trial count is returned BEFORE any backtest runs, because it is what determines whether a
+    result could mean anything — and master should see "this searches 1,296 variants" while he is still
+    choosing, not afterwards.
+    """
+    from engine import strategy_spec
+    return strategy_spec.validate_spec(req.spec)
+
+
+class StrategyBacktestRequest(BaseModel):
+    spec:        dict
+    holdoutFrac: float = Field(default=0.30, ge=0.1, le=0.6)
+    minBars:     int   = Field(default=200, ge=50, le=100000)
+
+
+@app.post("/strategy/backtest")
+def strategy_backtest(req: StrategyBacktestRequest):
+    """
+    Search the spec's variants on one window, then judge the winner on data the search never saw.
+
+    `search_and_judge` owns that structure so this route cannot accidentally peek: the ranking sees
+    `[0, search_end)` and exactly one variant is ever run against the holdout.
+    """
+    try:
+        from engine import store, strategy_spec, strategy_eval
+
+        v = strategy_spec.validate_spec(req.spec)
+        if not v["ok"]:
+            return {"ok": False, "reason": "; ".join(v["errors"]), "errors": v["errors"],
+                    "warnings": v["warnings"], "trials": v["trials"]}
+        if v["blocked"]:
+            return {
+                "ok": False,
+                "reason": "cannot be backtested: "
+                          + ", ".join(b["label"] for b in v["blocked"]),
+                "blocked": v["blocked"], "trials": v["trials"], "warnings": v["warnings"],
+            }
+
+        clean = v["spec"]
+        df = store.load(clean["symbol"], clean["exchange"], clean["interval"])
+        if df is None or len(df) < req.minBars:
+            have = 0 if df is None else len(df)
+            return {
+                "ok": False,
+                "reason": (f"only {have} stored {clean['interval']} bars for {clean['symbol']}; "
+                           f"at least {req.minBars} are needed to split a search window from a "
+                           f"holdout. Fetch more history first."),
+                "trials": v["trials"], "storedBars": have,
+            }
+
+        bars = [
+            {"date": str(r["date"]), "open": float(r["open"]), "high": float(r["high"]),
+             "low": float(r["low"]), "close": float(r["close"]),
+             "volume": float(r["volume"]) if r.get("volume") is not None else 0.0}
+            for _, r in df.iterrows()
+        ]
+
+        c = clean["costs"]
+        costs = strategy_eval.CostModel(
+            commission_pct=c["commissionPct"], slippage_pct=c["slippagePct"],
+            spread_pct=c["spreadPct"],
+        )
+        variants = strategy_spec.expand_sweep(clean)
+        result = strategy_eval.search_and_judge(
+            variants,
+            lambda variant, a, b: strategy_spec.simulate(variant, bars, a, b),
+            n=len(bars),
+            holdout_frac=req.holdoutFrac,
+            cost_model=costs,
+            provenance={
+                "symbol": clean["symbol"], "exchange": clean["exchange"],
+                "interval": clean["interval"], "specHash": v["specHash"],
+                "bars": len(bars), "firstBar": bars[0]["date"], "lastBar": bars[-1]["date"],
+                "generator": "strategy_spec", "side": clean["side"],
+            },
+        )
+        if not result.get("ok"):
+            return {**result, "warnings": v["warnings"], "trials": result.get("trials", v["trials"])}
+
+        # The winning variant's money outcome, on the HOLDOUT only. Quoting a currency figure from the
+        # search window would be quoting the number the search was optimising.
+        search_end, total = strategy_eval.holdout_split(len(bars), req.holdoutFrac)
+        best = result["variant"]
+        holdout_trades = strategy_spec.simulate(best, bars, search_end, total)
+        money = strategy_spec.money_summary(best, holdout_trades, costs.round_trip_pct())
+
+        return {
+            **result,
+            "spec": best,
+            "specHash": strategy_spec.spec_hash(best),
+            "warnings": v["warnings"],
+            "bars": len(bars),
+            "window": {"searchBars": search_end, "holdoutBars": total - search_end,
+                       "firstBar": bars[0]["date"], "lastBar": bars[-1]["date"]},
+            "holdoutTrades": holdout_trades,
+            "money": money,
+        }
+    except Exception as e:
+        logger.error(f"Strategy backtest failed: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e)}
+
+
+class StrategyCodeRequest(BaseModel):
+    spec:    dict
+    verdict: Optional[dict] = None
+    trials:  int = Field(default=1, ge=1)
+
+
+@app.post("/strategy/code")
+def strategy_code(req: StrategyCodeRequest):
+    """
+    Emit the standalone Python for a spec.
+
+    The verdict travels in the header. A generated strategy file that does not carry what Rāma
+    concluded would look like an endorsement, get kept, and be run months later with no record of
+    whether it ever passed.
+    """
+    try:
+        from engine import strategy_codegen, strategy_spec
+        name = "".join(ch if ch.isalnum() else "_"
+                       for ch in str(req.spec.get("name") or "strategy")).strip("_").lower()
+        out = strategy_codegen.to_python(
+            req.spec, verdict=req.verdict, trials=req.trials,
+            filename=f"{name or 'strategy'}.py",
+        )
+        out["trials"] = req.trials
+        out["catalogueVersion"] = strategy_spec.spec_hash(
+            {k: v["label"] for k, v in strategy_spec.BLOCKS.items()})
+        return out
+    except Exception as e:
+        logger.error(f"Strategy codegen failed: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e), "code": None}
+
+
 @app.get("/symbols/search")
 def symbols_search(q: str, limit: int = 12):
     """

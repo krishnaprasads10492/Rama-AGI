@@ -2,13 +2,25 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { localSearch } from './symbols.js';
 
 /**
- * SymbolSearch — type-ahead instrument search (spec Section 102).
+ * SymbolSearch — a select dropdown over every market (spec Sections 102, 103).
  *
- * WHY THIS REPLACED A SELECT PLUS A TEXT BOX. Master's objection was exact: *"it is not possible to
- * know every stock/index name in every market but you implemented text field with no search."* He is
- * right, and the fix is not a longer curated list. A hand-written list of fifty names beside a raw
- * text box is a text box with decoration — it cannot answer "what is Reliance Power called", which
- * is the actual question a picker exists to answer.
+ * WHAT THIS IS, AFTER TWO CORRECTIONS FROM MASTER.
+ *
+ * First: *"it is not possible to know every stock/index name in every market but you implemented text
+ * field with no search."* Correct — a curated list of fifty names beside a raw text box is a text box
+ * with decoration, and it cannot answer "what is Reliance Power called".
+ *
+ * Then: *"instead of searchbox give me a select dropdown."* Also correct, and it is a different point.
+ * What I built was an `<input>`: closed, it looked like an empty text field, so it still demanded that
+ * master already know what to type before anything appeared. A dropdown asks nothing of him — it shows
+ * the current choice, and clicking it reveals what is on offer.
+ *
+ * So the CLOSED state is a dropdown: a button showing the selected instrument and a caret, styled as
+ * the form's other selects. The OPEN state lists everything grouped, and carries a filter field at the
+ * top of the panel. The filter is what keeps the first correction satisfied — a native `<select>`
+ * genuinely cannot hold every instrument in every market, so the reach has to live inside the panel
+ * rather than replace it. Nothing was removed (I11): browse if you do not know the name, type if you
+ * do.
  *
  * TWO SOURCES, AND THE DIFFERENCE IS VISIBLE.
  *
@@ -66,6 +78,7 @@ export default function SymbolSearch({
 
   const boxRef = useRef(null);
   const inputRef = useRef(null);
+  const triggerRef = useRef(null);
   const listRef = useRef(null);
   const timerRef = useRef(null);
   // Monotonic request id. Without it a slow answer for "rel" can land after a fast answer for
@@ -142,6 +155,25 @@ export default function SymbolSearch({
     timerRef.current = setTimeout(() => search(next), DEBOUNCE_MS);
   };
 
+  // Opening from the trigger clears the filter and lists everything: master pressed a dropdown, so he
+  // is browsing. Carrying the previous filter forward would show him a narrowed list he did not ask
+  // for and could not see the cause of.
+  const openPanel = () => {
+    setOpen(true);
+    setActive(-1);
+    setText('');
+    search('');
+    // The filter, not the trigger, takes focus — otherwise arrow keys would move the page.
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const closePanel = (refocus = true) => {
+    setOpen(false);
+    setActive(-1);
+    setText(value || '');
+    if (refocus) triggerRef.current?.focus();
+  };
+
   const openWith = () => {
     setOpen(true);
     setActive(-1);
@@ -155,7 +187,7 @@ export default function SymbolSearch({
   useEffect(() => {
     if (!open) return undefined;
     const away = (e) => {
-      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false);
+      if (boxRef.current && !boxRef.current.contains(e.target)) closePanel(false);
     };
     document.addEventListener('mousedown', away);
     return () => document.removeEventListener('mousedown', away);
@@ -173,6 +205,7 @@ export default function SymbolSearch({
     setActive(-1);
     setText(row.symbol);
     onPick?.({ symbol: row.symbol, exchange: row.exchange || exchange, name: row.name || '' });
+    triggerRef.current?.focus();
   };
 
   const commitTyped = () => {
@@ -180,6 +213,15 @@ export default function SymbolSearch({
     setOpen(false);
     setActive(-1);
     if (typed) onPick?.({ symbol: typed, exchange, name: '' });
+    triggerRef.current?.focus();
+  };
+
+  // The closed dropdown. Enter, Space and Down all open it, which is what a `<select>` does.
+  const onTriggerKeyDown = (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      openPanel();
+    }
   };
 
   const onKeyDown = (e) => {
@@ -202,7 +244,7 @@ export default function SymbolSearch({
       return;
     }
     if (e.key === 'Escape') {
-      if (open) { e.preventDefault(); setOpen(false); setActive(-1); }
+      if (open) { e.preventDefault(); closePanel(); }
       return;
     }
     if (e.key === 'Tab' && open) setOpen(false);
@@ -219,28 +261,46 @@ export default function SymbolSearch({
     return null;
   }, [busy, note, source, rows.length]);
 
+  const selectedName = useMemo(() => {
+    const cur = String(value || '').toUpperCase();
+    const hit = rows.find((r) => r.symbol === cur);
+    return hit?.name || '';
+  }, [rows, value]);
+
   return (
     <div ref={boxRef} style={{ position: 'relative' }}>
-      <input
-        ref={inputRef}
+      {/* THE CLOSED CONTROL IS A DROPDOWN, not a text field. It shows what is selected and a caret, so
+          master never has to know a name before the control will show him anything. */}
+      <button
+        ref={triggerRef}
         id={id}
+        type="button"
         className="input"
-        value={text}
         disabled={disabled}
         autoFocus={autoFocus}
-        onChange={onChange}
-        onFocus={openWith}
-        onKeyDown={onKeyDown}
-        placeholder={placeholder}
+        onClick={() => (open ? closePanel() : openPanel())}
+        onKeyDown={onTriggerKeyDown}
         role="combobox"
         aria-expanded={open}
         aria-controls={listId}
-        aria-autocomplete="list"
-        aria-activedescendant={activeId}
+        aria-haspopup="listbox"
         aria-label={ariaLabel}
-        autoComplete="off"
-        spellCheck="false"
-      />
+        style={{
+          display: 'flex', alignItems: 'center', gap: '8px', width: '100%',
+          textAlign: 'left', cursor: disabled ? 'default' : 'pointer',
+        }}
+      >
+        <span style={{ color: value ? 'var(--text)' : 'var(--muted)', fontWeight: value ? 600 : 400 }}>
+          {value || 'choose an instrument'}
+        </span>
+        {selectedName && (
+          <span style={{ color: 'var(--muted)', flex: 1, overflow: 'hidden',
+            textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px' }}>
+            {selectedName}
+          </span>
+        )}
+        <span aria-hidden="true" style={{ marginLeft: 'auto', color: 'var(--muted)' }}>▾</span>
+      </button>
 
       {open && (
         <div
@@ -255,6 +315,26 @@ export default function SymbolSearch({
             borderRadius: 'var(--radius, 6px)', boxShadow: '0 10px 28px rgba(0,0,0,0.5)',
           }}
         >
+          {/* The filter lives INSIDE the panel. A native select cannot hold every instrument in every
+              market, so the reach has to be here rather than instead of the dropdown. */}
+          <div style={{ padding: '6px', borderBottom: '1px solid var(--border)',
+            position: 'sticky', top: 0, background: 'var(--panel, #131722)', zIndex: 1 }}>
+            <input
+              ref={inputRef}
+              className="input"
+              value={text}
+              onChange={onChange}
+              onKeyDown={onKeyDown}
+              placeholder={placeholder}
+              aria-label="Filter the list, or search any market"
+              aria-controls={listId}
+              aria-activedescendant={activeId}
+              aria-autocomplete="list"
+              autoComplete="off"
+              spellCheck="false"
+              style={{ width: '100%' }}
+            />
+          </div>
           {rows.length === 0 && (
             <div style={{ padding: '10px 12px', fontSize: '12.5px', color: 'var(--muted)',
               lineHeight: 1.6 }}>
