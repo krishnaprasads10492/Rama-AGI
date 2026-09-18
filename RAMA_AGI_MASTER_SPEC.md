@@ -1765,6 +1765,16 @@ authenticated **Master session**, not merely an open store.
 | 111 | Keeping the promise the menu makes — the build now installs Python too | done | Section 91 second follow-up. Master: *"step-2: installs what ever is missing implies what ever is missing needs to installed automatically."* Correct, and **the inconsistency was in the code not the wording**: `Rama.bat` option 3 says *"installs what is missing"* and kept that for Node while only reporting Python. Section 91's "probe, report, never install" was half sound (the build machine's Python need not be the install machine's, and packaging never runs Python so it must not block) and half excuse (**master builds on the machine he then runs**, so refusing because the general case is ambiguous left the common case broken behind a menu that claimed otherwise). **DECISION: install into a venv under userData, never the system Python.** The pins are exact (I12) — `numpy==1.26.4`, `scipy==1.14.1` — so a global `pip install -r` can break other Python work; a venv is isolated, needs no admin, and cannot conflict. **Location `<userData>/python-env`** because (a) an installed app can find it, whereas a repo venv is invisible to it and venvs are not relocatable so one cannot be shipped inside the app; (b) it is outside the app directory so it survives the reinstall an update performs (the Section 84 argument); (c) both sides derive it from `productName` in `package.json`, exactly what Electron uses for `app.getPath('userData')`, so there is one source rather than two spellings that can drift. **DECISION: the interpreter is chosen, not assumed** — `py -3.12/-3.11/-3.10` then PATH if in range, because building the venv from whatever `python` means would reproduce the failure warned about two sections earlier: a 3.13+ venv where `numpy==1.26.4` has no wheel and pip dies in a C compiler. **If no in-range interpreter exists, nothing is attempted** and the report says which versions are acceptable — guessing would produce a venv that cannot hold the requirements, worse than none because it looks like progress. **Never during `--readiness`** (its contract is that it changes nothing, and quietly installing ~500 MB would break the reason master can run it safely), **never fatal**, **skippable via `--skip-python`**, **idempotent**, and it **re-probes by real import rather than trusting pip's exit code** since a wheel can install and still fail to import. **`aiProcess.cjs` resolution order is now `RAMA_PYTHON` → `<userData>/python-env` → repo `.venv-stockmind` → PATH** — every rung additive, PATH unchanged as last resort, so an install that works today keeps working while a machine prepared by the build needs **no environment variable at all**; the manual `setx RAMA_PYTHON` of the previous section was a step master should never have needed. **AN HONESTY FIX THIS FORCED:** the help text said *"Nothing outside this project directory is modified"*, which creating a venv under `%APPDATA%` makes false — a build script that quietly writes outside where it claims erodes trust in every other statement it makes, so the help now names the directory, explains why it is outside the project, and documents `--skip-python`. **VERIFIED:** readiness creates nothing (asserted — venv absent before and after) and correctly reports that a build *could not* fix it here; `engineVenvDir()` resolves to `%APPDATA%\Rama AGI\python-env`, confirmed via `--help`; venv/pip plumbing exercised for real earlier in the session. `npm run verify` 8 suites / 562 assertions unchanged. **NOT VERIFIED and cannot be from here: the successful install path.** This machine has only Python 3.14, so the no-in-range branch is taken every time and create-and-install has never run. Master's machine is its first execution. |
 
 | 112 | Ollama models — discovered, honestly classified, retirement-aware | done | Section 92. Master: *"Cloud models are more preferred because disk space constraint… provide master the list then automate the process of integrating it, just need to guide master based on updated docs at any point of time."* **THREE DEFECTS.** (A) `MODEL_REGISTRY` was a hardcoded allowlist of four stale ids and `selectModel`/`checkAvailable` required membership, so `ollama pull qwen3.5:9b` produced a model Rāma **detected, displayed and could never route to**. (B) Ollama serves **cloud models** through the same `localhost:11434` — almost no disk, which is exactly why master wants them — but every `ollama/*` was hardcoded `type:'local'`, `costTier:0`, `caps:['offline']`, so Rāma would report a cloud call as local, free and offline when the prompt left the machine, the account has limits and it cannot work without network. **Master preferring cloud makes this worse, not acceptable: a deliberate tradeoff is only a choice if its cost is visible.** (C) **Found in the docs — Ollama RETIRES cloud models** on a published schedule naming replacements (`minimax-m2.5`→`minimax-m2.7`, `qwen3-coder:480b`→`qwen3.5:397b`, several `gemma3`→`gemma4:31b`); a hardcoded list does not go stale so much as **break**, with nothing able to explain why. This is the real argument for reading the docs rather than guessing. **DECISIONS:** *discovered not declared* — the registry becomes a seed of known metadata and anything Ollama reports is routable (rejected "add today's names": same defect with a later expiry). *Evidence-based classification* per Section 88's rule — `catalog` > `name` > `size` > `unknown`, each carrying its `why`; **unknown is never folded into local** because the failure is asymmetric (calling cloud "local" tells master his data stayed home when it did not; calling local "unknown" costs a line of UI). *No second provider* — cloud is reachable via the existing daemon, so rejected a client against `ollama.com` with `OLLAMA_API_KEY`: duplicate transport, no capability gain, another vault credential. *Capabilities rebuilt not inherited* — a cloud model loses `offline`, gains `remote`, is not `costTier 0` (a free allowance is a real budget), and **`private` becomes explicit** because "reached via localhost" stopped meaning "stayed on this machine". `selectModel` gained a discovered pass **cheapest-first** so local is preferred over spending master's allowance, and its offline branch now tests measured `offline` rather than `type==='local'`. **VERIFIED: `scripts/verifyOllamaCatalog.cjs`, 60 assertions** — a 300M model at 200 MB is NOT called cloud (size heuristic only applies ≥8B); unknown claims neither `offline` nor `private`; MoE tags read as TOTAL (`16x17b`→272B) since total is what must sit on disk; family-level retirement rows match tagged installs; past dates read retired and future ones warn with the replacement named; empty schedule invents nothing; suggestions exclude installed, lead with cloud, and drop models without tool calling since an agent loop cannot act without it; plus hostile input. `npm run verify` **9 suites / 622 assertions**, audit clean at **340 channels**. **NOT DONE — the live-document half:** `ollamaCatalogData`/`ollamaRetirements` are wired but **unpopulated**; nothing fetches the library or retirement pages yet, so classification runs on name+size (honest and functional — 397B in 40 MB is still correctly cloud) but retirement warnings **cannot fire**. That fetch is the next step and is what makes "guide me from updated docs" real; kept separate because it adds network I/O, a cache, a refresh policy and a failure mode, and bundling it here would mean neither half got tested properly. |
+| — | **LEDGER REPAIR, recorded as a finding in its own right** | done | Rows 113–120 below were **missing entirely**: the ledger stopped at Section 92 while Sections 93–98 were written and committed, and Sections 99–100 were committed as code while never being written into this document at all — with source comments in `StockMind.jsx` and `PriceChart.jsx` **citing "Section 99" and "Section 100" that did not exist.** This is the exact drift Section 28 exists to prevent and the same class as rows 40/48/`mind.view`: the record and the code disagreed and nothing was positioned to notice. A cold session reading the ledger would have concluded eight sections of work never happened and redone them differently. Found while resuming for Section 101. Sections 99 and 100 have now been written from the commit record; the rows below close the gap. **The lesson is procedural, not technical:** the working agreement says *ledger first, code second*, and six consecutive sections were shipped with the ledger left for later — "later" is where sessions end. |
+| 113 | Rāma populates its own model list, and plans migrations off retired models | done | Section 93. Commit `4e47d59`. Closes the "live-document half" row 112 left open: `ollamaLibrary.cjs` fetches and parses `ollama.com/library` and the retirement schedule, and `migrationPlan()` names a replacement for anything retiring. **Three parser bugs and a timezone bug, all caught by the suite:** `stripTags` joined words with no space; a `e4b` tag hijacked the parameter reading; `24.3M` was read as a size rather than a pull count; and `normaliseDate` drifted a day across timezones. **Design rule kept from row 112:** a document that fails to parse leaves the previous cache intact rather than replacing it with nothing, and a failed refresh does not write a fresh timestamp — so "we tried and failed" can never read as "this is current". `scripts/verifyOllamaLibrary.cjs`, 74 assertions. |
+| 114 | Web search that works, and a fabricated source removed | done | Section 94. Commit `22ae449`. Master: *"how about 1 and 2 with ability to assimilate existing browsers."* **Measured, not assumed:** Playwright is installed but its **Chromium binary is absent**, while the machine's Edge and Chrome both launch — so `browserRuntime.cjs` assimilates an installed browser via Playwright's `channel` rather than downloading ~150 MB, since master's binding constraint is disk. Edge preferred over Chrome for cross-machine consistency. **DuckDuckGo returns an empty 305-byte shell to automation; Bing returns 10 results via `.b_algo`** — measured both ways, so the default is Bing and DDG stays selectable. **THE REAL DEFECT: `buildFallbackResults` scored 0.60 and passed `vetSources`** — a search that found nothing produced a *credible-looking source that does not exist*. `vetSources` now drops fallbacks, and the failure marker survives so callers can still distinguish searched-and-found-nothing from never-searched. 35 assertions. |
+| 115 | AI strategies in StockMind — the design, and the harness that judges them | done | Sections 95 + its addenda. Commits `d36570c` (design), `1632e9b` (harness). Master: *"Rāma creates strategies by himself and by doing online research… backtest… after generation it needs to be tested."* **THE ONE THING THAT WOULD MAKE IT LIE, written down before any code: ranking candidates by raw backtest return.** Searching N permutations inflates the best result whether or not any edge exists, so the *guards are the feature* — `ai_backend/engine/strategy_eval.py` does holdout, purged walk-forward, deflated Sharpe against the **trial count**, and records provenance including **which model generated the code** so better models can be compared later. **DECISION: stdlib only**, no numpy or pandas — this is the layer everything else is judged by, and it must be testable on a machine with no ML stack. Reports `meaning` / `risks` / `would_change` rather than a number, per master's *"don't dump info on master"*. **Verified it rejects noise and finds a planted edge**; `ai_backend/tests/test_strategy_eval.py`, 64 assertions. Four fixture bugs found, including a holdout seeded non-independently of the training set — which would have made the holdout agree with training by construction. **No path to order placement, ever** — reading trades from an installed application is a separate capability from placing them, and only reading is in scope. |
+| 116 | One refresh schedule for every module, and upgrades that need approval | done | Section 96. Commits `142b729`, `8673bcb`. Master: *"upgrades of packages → fetch, study, analyze, read comments online… online search at a set interval."* `refreshScheduler.cjs` is a **registry**, not a second timer: a module declares a named task, an interval and the capability it needs, and the scheduler owns when it runs — generalising the private timers `marketIntel` already had. Persists last-run, staggers startup so a cold launch does not fire everything at once, and backs off exponentially on failure with the failure count **visible rather than buried in a log**. `dependencyAdvisor.cjs` **proposes and never upgrades** (I12 pinning), as **one** proposal rather than one per package. **DECISION: `no-advisory-found` is not `verified-clean`** — an empty advisory list may mean clean or may mean nobody looked, and the assessment never prints the second when it only established the first. Online commentary is an `unverified claim` with provenance and **cannot outweigh a CVE**. `registrySources.cjs` queries npm and OSV and **reports a failure rather than dropping it**. 188 assertions across two suites. |
+| 117 | StockMind as a workspace — draggable panels and real pop-out windows | done | Section 97. Commit `4996e53`. Master: *"more sci-fi, futuristic mode, draggable and multi-window showcase of charts, pop-out scenario of screens. See how much is ergonomically, aesthetically, programmatically possible."* **WORKSPACE is a sixth tab, not a replacement** — tabs are faster for one focused question, a board is better for watching several things, and removing a working layout to add a new one would be a capability regression (I11). `PanelBoard.jsx` is hand-written: `react-grid-layout` would add a dependency and another Section 96 pin for a few hundred lines of pointer maths. **Pop-out is a real `BrowserWindow`** loading the same renderer with `?panel=<id>`; a second HTML entry was rejected as a second build target and a second place for the CSP to drift. **The sci-fi styling decorates the frame only** — no text-luminance reduction, which preserves Section 81's measured 17 / 11 / 6.4 contrast ratios. **A bundle regression was caught and fixed:** eagerly importing the pop-out check dragged `lightweight-charts` into the entry chunk (282 → 499 kB), so `readPopoutParams` moved into its own **import-free** module and the panel stayed lazy. Scope check caught `isElectron` used as a free variable. |
+| 118 | Four defects from the first real run | done | Section 98. Commit `a050c60`. Master, after installing: *"ai_backend directory is missing / disclaimer should be at the bottom / titlebar resource details not displayed / tray icon not displayed."* **All four were packaging or resilience faults, not logic faults — which is why every suite passed while the running app was visibly broken. Worth recording as a class: 868 assertions and a clean audit say nothing about whether a file reached the installer.** (1) **`ai_backend` was never packaged** — `extraResources` shipped only `assets/`, so **no packaged build ever produced had an engine directory**. It belongs in `extraResources` rather than `files` because Python is spawned as a child process and cannot execute from inside `app.asar`. (2) `system:get-metrics` used `Promise.all`, so **one flaky optional probe (battery on a desktop, CPU temperature) threw the entire snapshot away** and the titlebar had nothing to show → `allSettled`. (3) The tray read an **unshipped** `public/icon.png` and `nativeImage.createEmpty()` **succeeded silently**, producing an invisible tray icon → reads from `assets/`. (4) The disclaimer became a **fixed footer outside the scroll**; at the end of a long scroll it was effectively invisible. **Caught in my own fix:** the explanatory note was first placed *inside* `build`, which electron-builder validates strictly and would have failed every packaging run — now asserted by checking `build` carries no underscore keys. |
+| 119 | "Backend not reachable" now says why | done | Section 99 (written this session, see the repair row above). Commit `f688833`. `aiProcess` broadcast every stderr line as an `ai:log` event and **discarded it**, and kept no exit code — so a missing package, a wrong interpreter and an occupied port produced the **identical sentence**, with the distinguishing information gone. Now a bounded 24-line ring buffer plus exit code, signal and interpreter path, and a **pure, exported** `diagnoseFailure()` that names a remedy rather than "check the logs". `ModuleNotFoundError` is matched **before** the generic exit-code branch, because "No module named fastapi" has an obvious fix and "exited with code 1" has none. Test found that uvicorn on Windows emits `[Errno 10048]`, not `WinError 10048`. `scripts/verifyEngineDiagnosis.cjs`, 17 assertions. **Master confirmed it working** in a later screenshot. |
+| 120 | What master's install and screenshots found | done | Section 100 (written this session). Commits `a3be1bd`, `a3cbe42`. **The venv was created in one directory and looked for in another** — `build.productName` ("Rama AGI") versus `app.getName()` which resolves package.json's top-level `productName` and falls back to `name` ("rama-agi"). Both sides now **search both spellings**; a single guess is wrong in one of the packaged/source cases whichever is chosen. **Deliberately not adding a top-level `productName`**: it would move `app.getPath('userData')` and orphan master's encrypted store. Then three workspace defects, all from Section 97: panels missing `currentUser` so the gate correctly refused them; `signal=` passed where `WhyPanel` takes `thesis` (**a wrong prop name fails silently in React**); and `margin: -20px` making the board 40px wider than its container so `overflow: hidden` clipped rather than contained. Layout now tiles from **measured** bounds. **Pop-out states its own limitation** instead of showing "access denied" — `sessionStorage` is per-window, so a second `BrowserWindow` has no session; the hand-off is security-relevant and deliberately not improvised. |
+| 121 | StockMind charts — the UI/UX review, and timeframes from 1m to a decade | done | Section 101. Master: *"do each and every aspect a thorough review in the point of UI/UX… time frames can be from 1min to 1month/6mon/1year."* **FIRST FINDING CORRECTED AN ASSUMPTION CARRIED IN: the engine already served every interval.** `store.INTRADAY_INTERVALS` has nine, `providers.INTRADAY_RANGE` has measured caps, `/ohlcv` passes `interval` to `store.sync`, and the only hardcoded `1d` is in a function Section 64 proved is never awaited. **The limitation was entirely in the dropdown**, which offered two. Researching first saved an engine rewrite that was not needed. **DECISION: a timeframe is the PAIR `(interval, window)`** — Section 74's unit applied to the chart — **and only servable pairs are offered**, because Yahoo answers an over-deep intraday window with HTTP 422 which arrives as zero bars, *visually identical to a misspelt symbol*. Nine intervals × ten windows, capped per interval. **DECISION: the cap table is duplicated in `timeframes.js` and a test enforces it** — serving it from the engine would make the control unrenderable exactly when the engine is down, which is master's situation right now; `verifyTimeframes.mjs` parses `providers.py` and fails on drift. **DECISION: the "everything comes from the engine" rule is REFINED, not broken** — the renderer may draw any *pure function of the visible bars*; anything forward-looking or advisory must come from the engine. The cone and the levels stay engine-only, and the line is written down because the temptation later is to compute a signal in `indicators.js`. **Thirteen defects found and fixed (A–M in Section 101)**, of which the most consequential are: `fitContent()` on every data change threw away master's zoom on every poll; volume rode an overlay scale costing price a quarter of its pane; candles-only made a decade unreadable; the crosshair readout sat 400px below the bar it described; `barsBusy` never reached the chart so a slow fetch advised master to start the fetch. **M is an engine data defect: `is_stale` normalised the newest bar to a DATE, so an intraday series fetched at 10:00 read as current all day** and `sync=true` returned a frozen frame — intraday now tests bar age AND a per-interval **fetch cooldown**, which bounds network calls without needing a market calendar. **Symbol became a grouped picker with the free text box kept** (I11) — two thousand NSE names against a few dozen listed means a picker-only control would be a downgrade; a full instrument master was **not** invented, because no free endpoint this project already talks to serves one. **VERIFIED: 200 new assertions across three suites**, the indicator suite deliberately built on **discrimination** — the EMA seed is provably the SMA and not the first close, the band is population and provably not sample sd, Wilder's RSI is measurably not the plain-average lookalike, VWAP resets at the session boundary — because a subtly wrong indicator produces a smooth plausible curve nothing downstream can question. Two real code fixes fell out of the tests (`bars || []` throws on a non-array; MACD must align by time). `npm run verify` **16 suites**, audit clean at **129 bridge calls / 64 files / 348 channels**, `vite build` entry **unchanged at 283.53 kB**. **NOT VERIFIED: the Python staleness fix has never been executed** (no pandas here) — its 7 new assertions in `ai_backend/tests/test_store.py` are the first thing to run on master's machine; and **nothing here has been seen on screen**. Next step: master installs Python 3.10–3.12, runs `Rama.bat` option 3, then `python -m tests.test_store` from `ai_backend/`, then opens the CHART tab and reports what the 1m/5m/15m buttons actually draw. |
 
 ### Resume checklist for a cold session
 
@@ -10275,3 +10285,295 @@ succeeds; `npm run verify` 12 suites / 868 assertions unchanged.
 the engine directory are truly fixed depends on a packaged build, which cannot be produced here — 7-Zip
 is blocked. The metrics and disclaimer fixes are visible from source; the other two need
 `Rama.bat` → 3 on master's machine and then a look at the tray.
+
+---
+
+## SECTION 99 — "Backend not reachable" now says why, because the reason was being discarded
+
+Master: *"seeing backend not reachable."* A different message from Section 98's *"ai_backend directory
+is missing"*, so the packaging fix worked and the engine directory is now found. This is the next
+failure in the chain, and the real problem was that it was **undiagnosable**.
+
+### The reason existed for one instant, in a stream nobody watched
+
+The message came from a `/health` poll timing out after ~8s, so `lastError` was a connection refusal.
+That describes the symptom and says nothing about the cause. The actual cause was printed on the
+engine's **stderr** — and `aiProcess` broadcast every stderr line to open windows as an `ai:log`
+event and then **threw it away**. Nothing retained it, and the exit code was not kept either.
+
+So a missing Python package, a wrong interpreter version and an occupied port all produced the
+**identical sentence**, and the one piece of information that distinguished them was gone. This is the
+shape Section 80 calls the worst a bug can take: *the system reports a state it cannot justify.*
+
+### Decision: a bounded ring buffer, and a pure diagnosis function
+
+`aiProcess` keeps the **last 24 stderr lines**, bounded because uvicorn is chatty and the useful part
+of a fatal error is always at the tail — an unbounded buffer would grow for the process lifetime to
+hold something only ever read from the end. Plus the exit code, the signal, and the interpreter path
+that produced it. **The exit is kept separately from the output** because "started and died" is a
+different situation from "never spawned", and they need different advice.
+
+`diagnoseFailure()` turns that into a sentence master can act on. It is **pure and exported**, per the
+row-99 precedent, so it is tested rather than asserted in a comment. Missing package, occupied port,
+parse failure, absent interpreter, generic non-zero exit and silence are each distinguished, and each
+carries a **remedy** rather than "check the logs".
+
+**The ordering is deliberate**: a `ModuleNotFoundError` is matched *before* the generic exit-code
+branch, because "No module named fastapi" has an obvious fix while "exited with code 1" has none.
+
+`marketIntel.ensureBackendRunning` leads with the diagnosis and keeps the raw stderr tail in a
+separate field, so the UI can show the output without burying the remedy.
+
+**And a wrong hint was corrected.** `StockMind.jsx` said *"the backend may still be starting, try
+again"* for **every** failure — advice to wait for a problem waiting can never fix. The wait-and-retry
+hint now appears only when there is genuinely no output to show.
+
+**One bug found by the tests:** the occupied-port pattern matched only the literal `WinError 10048`,
+but uvicorn on Windows emits `[Errno 10048]`. The fixture reflected reality and the regex did not; all
+three spellings are now accepted.
+
+**Verified:** `scripts/verifyEngineDiagnosis.cjs`, 17 assertions. It loads `aiProcess` by path with a
+minimal Electron stub, since that module requires `electron` at module scope and the suite must run
+under plain node. `npm run verify` 13 suites; audit clean at 128 bridge calls / 61 files / 348
+channels; `vite build` succeeds.
+
+---
+
+## SECTION 100 — What master's own install and screenshots found
+
+Two threads, both from master running the real thing rather than from any test.
+
+### The venv was created in one directory and looked for in another
+
+Master: *"stockmind engine is not running. I have run option 3 in bat file. still the issue."*
+
+Option 3 worked. The venv was built correctly. **The app then looked somewhere else.** My bug, from
+Section 96: two places computed the same path from two different fields —
+
+    buildInstaller.engineVenvDir()   read  build.productName   -> "Rama AGI"
+    aiProcess via app.getPath()      resolves app.getName()    -> "rama-agi"
+
+`app.getName()` returns package.json's **top-level** `productName`, which is not set here, so it falls
+back to `name`. `build.productName` is electron-builder's own config and is **not** what Electron
+reads at runtime. I assumed they were the same field. So the environment was created at
+`%APPDATA%\Rama AGI\python-env` and searched for at `%APPDATA%\rama-agi\python-env`, and Rāma reported
+the engine as not installed immediately after successfully installing it.
+
+**Decision: both sides SEARCH both spellings rather than computing one.** Which name is live depends on
+the launch — electron-builder writes `productName` into a packaged app's metadata, so a packaged run
+resolves "Rama AGI" while a source run resolves "rama-agi". A single hardcoded guess is therefore wrong
+in one of the two cases whichever is chosen, and searching costs two `existsSync` calls. Master's
+existing venv is found as-is; nothing needs reinstalling. `engineVenvDir()` also prefers a candidate
+that **already holds** a venv, because otherwise a master who ran an older build would get a second
+~500 MB environment beside the first with no explanation for the disk.
+
+**DELIBERATELY NOT DONE: adding a top-level `productName` to package.json**, which would make the two
+agree. It would move `app.getPath('userData')` for existing source runs and **orphan master's
+encrypted store** — far worse than a slightly longer search. Recorded so a later session does not
+"tidy" it.
+
+### Three workspace defects, all mine from Section 97
+
+1. **YOUR BOOK and WHY showed "Access denied: stockmind.view is not available unauthenticated."** Not
+   a gate bug — the gate was right. Both panels take `currentUser` as a **prop** and pass it to their
+   IPC calls, and the workspace wiring never passed it, so `user` arrived `undefined`. Same class as
+   the `sandbox:execute` defect in Section 81. Fixed by matching the tab call sites exactly.
+2. **`WhyPanel` was given `signal={selected}`.** `WhyPanel` has no `signal` prop — it takes `thesis`.
+   **A wrong prop name fails silently in React**, so the panel rendered without complaint and showed
+   nothing useful.
+3. **Panels were clipped at the right edge**, two causes compounding. The wrapper had `margin: -20px`
+   to cancel the parent's padding, which made the board **40px wider** than its container — and with
+   `overflow: hidden`, panels near the right edge were clipped rather than contained. And the defaults
+   were absolute pixels: a panel at `x:752 w:420` needs a 1190px board. The layout is now tiled from
+   the **measured** bounds on first paint, and "reset layout" re-tiles against current bounds rather
+   than restoring the original pixels — which is what reset should mean. A saved layout is left
+   untouched, since that is master's own arrangement.
+
+**And one honest limitation, now stated instead of hidden.** Pop-out cannot be signed in:
+`loadSession()` reads `sessionStorage`, which Chromium scopes **per window**, so a second
+`BrowserWindow` starts unauthenticated and every StockMind channel refuses it. Rendering the panel
+anyway would show master the same "access denied" as defect 1, looking like a broken panel rather than
+a missing capability. The window explains the reason and points at the WORKSPACE tab. **A session
+hand-off means passing a token to a new window; that is security-relevant and is deliberately not
+improvised.**
+
+**Also caught:** a JSX comment placed directly inside `{cond && (` where only an expression is allowed;
+and the renderer audit reporting a parse error at a line already fixed — **stale output from running
+the audit in the same batch as the edit**, hit several times this session. Run the command separately.
+
+---
+
+## SECTION 101 — StockMind charts: a UI/UX review, and timeframes from one minute to a decade
+
+Master: *"DO THOROUGH RESEARCH REGARDING CHARTS IN STOCKMIND MODULE AND ITS RELATED UI. DO EACH AND
+EVERY ASPECT A THOROUGH REVIEW IN THE POINT OF UI/UX… TIME FRAMES CAN BE FROM 1MIN TO
+1MONTH/6MON/1YEAR ETC. LIKE THIS GIVE MASTER SUPER CAPABILITY FOR STOCKMIND."* Earlier, from the
+screenshots: *"symbol field — it should be dropdown with all symbols based on market and exchange
+selection. charts are also not getting populated with bars."*
+
+*Written before implementing, per Section 28's working agreement.*
+
+### The first finding corrects an assumption carried into this session
+
+**The engine could already serve every interval master asked for.** `store.INTRADAY_INTERVALS` holds
+nine, `providers.INTRADAY_RANGE` holds a measured per-interval cap, `providers.to_yahoo_symbol` already
+handles NSE / BSE / US, and the daily branch passes any interval through with explicit epochs. `main.py`
+`/ohlcv` takes `interval` and hands it to `store.sync`.
+
+The only `1d` hardcoded on the chart path is in `data_fetcher.fetch_ohlcv_yahoo`, which Section 64
+established is **never awaited** and therefore dead. So **the limitation was entirely in the dropdown**,
+which offered two of nine. Researching before changing saved an engine rewrite that was not needed.
+
+### Decision: a timeframe is the PAIR `(interval, window)`, and the pairs are constrained
+
+Interval and lookback are not independent. Yahoo caps intraday windows server-side and answers an
+over-deep request with **HTTP 422**, which arrives at the UI as zero bars — **visually identical to a
+misspelt symbol**. So "1m over 3 years", a reasonable sentence in English, must not be an offerable
+combination: it promises depth no free provider serves and then fails while pointing master at the
+wrong cause.
+
+This is the same unit Section 74 locked for horizons, applied to the chart. The measured caps, in
+sessions:
+
+| Interval | Deepest window | About |
+|---|---|---|
+| 1m, 2m | 5 sessions | 375 / 188 bars per day |
+| 5m, 15m, 30m | 1 month | 1,575 / 525 / 263 bars |
+| 60m | 2 years | ~3,150 bars |
+| 1d, 1wk, 1mo | no provider cap | limited by the instrument's own history |
+
+Master gets nine intervals (1m → 1mo) and ten windows (1D → MAX), with only the servable pairs
+offered — which covers "1 month / 6 months / 1 year" and a good deal more.
+
+**DECISION: the table is duplicated in the renderer, and a test enforces the duplication.** Two
+alternatives were rejected. *Serving the matrix from the engine* makes the control unrenderable exactly
+when the engine is down, which is when master most needs to see what is on offer — and the engine is
+down on his machine right now. *Leaving the renderer permissive* turns a provider limit into an
+unexplained empty chart. So `src/pages/StockMind/timeframes.js` declares it and
+`scripts/verifyTimeframes.mjs` **parses `providers.py` and fails the suite if the two disagree** — a
+drift detector across a language boundary nothing else in the toolchain spans.
+
+**DECISION: the display floor is 10 bars, not the engine's 20.** Master asked to see a year of monthly
+bars, which is twelve. Refusing to draw twelve candles because a model could not be *fitted* on them
+would confuse two different questions.
+
+**DECISION: switching interval RECONCILES the window rather than resetting it.** 1d/1Y switched to 5m
+cannot keep a year, so it falls to the deepest window 5m can serve — master's expressed intent was "as
+much as possible", not "back to the default". Deepening beyond what was asked happens in exactly one
+case, when the request is shallower than the shallowest drawable window, and that is asserted.
+
+### Decision: the line on what the renderer may compute
+
+`PriceChart`'s standing rule was *"everything drawn comes from the engine; a chart that draws a level
+the engine did not emit is a lie with axes on it."* That was written about **signal levels and
+projections** — claims — and for those it remains absolute.
+
+A moving average is a different kind of object: **a deterministic function of the bars already on
+screen**, asserting nothing they do not contain. Recomputing it in the engine would produce identical
+numbers one round trip later and make every overlay toggle a network request. So the rule is refined,
+not broken:
+
+> The renderer may draw any **pure function of the visible bars**. Anything forward-looking,
+> model-derived or advisory **must** come from the engine.
+
+The cone, the signal levels and master's thesis stay engine-only. This is written down because the
+temptation later will be to compute "a signal" in `indicators.js` because the maths is nearby — that is
+the line, and crossing it now has to be deliberate.
+
+### The review — every defect found, and why each mattered
+
+| # | Defect | Why it mattered |
+|---|---|---|
+| A | Two of nine intervals offered | The thing master asked for, and the engine already supported it |
+| B | Interval and bar count independent | An unservable pair fails as "no bars", which reads as a bad symbol |
+| C | `fitContent()` on **every** data change | Every poll threw away the zoom master had just set |
+| D | Volume on an overlay price scale with `scaleMargins: {top: 0.82}` | A way of saying "price may use 74% of its own pane". v5.2 has a pane API |
+| E | Candles only | At 2,500 bars a candle is under a pixel and the OHLC information is gone — a ten-year view was unreadable |
+| F | Linear scale only | On a decade of an index, linear makes the recent years look like all the movement |
+| G | No overlays at all | See the rule above |
+| H | Crosshair readout 400px **below** the candle | Reading a bar meant looking away from it and back |
+| I | `barsBusy` never reached the chart | A slow fetch rendered *"fetch price history first"* — advice to do what was in flight |
+| J | Empty state named a fix it could not perform | The button was in another card |
+| K | Chart destroyed and rebuilt on interval change | `timeVisible` is an `applyOptions` field; no teardown was needed |
+| L | SYMBOL was free text | A typo does not read as a typo — it reads as missing data |
+| M | **Intraday series never refreshed** | `is_stale` normalised the newest bar to a date, so a 5m series fetched at 10:00 read as current all day |
+
+**M is the answer to "charts are not getting populated" for intraday specifically**, and it is a data
+defect rather than a UI one. The fix cannot simply be bar age: outside market hours the newest bar only
+gets older, so age alone would re-fetch on every request all night. **The intraday test is bar age AND
+a per-interval cooldown on the FETCH** — which bounds network calls regardless of whether the market is
+open, without needing a holiday calendar. Coarse intervals got the mirror-image fix: a weekly bar is
+not late until a whole week could have closed.
+
+### Decision: the symbol picker is a shortcut, never a gate
+
+A `<select>` grouped by *stored locally* / indices / commodities / currencies / crypto / equities,
+scoped by exchange, with stored series marked `●` because those draw with no network call. **The free
+text box stays** (I11): NSE lists about two thousand names and this list is a few dozen, so a picker
+that cannot express a symbol master wants would be a **downgrade** from a text box. Both controls write
+the same state, so they cannot disagree.
+
+**A full exchange instrument master was NOT built.** There is no free endpoint this project already
+talks to that serves the list, so inventing one means a new provider, a new cache and a new refresh
+policy. That is a decision for master, recorded rather than guessed at.
+
+`normaliseExchange()` **mirrors `providers.to_yahoo_symbol` including its fallback** — an unrecognised
+exchange gets `.NS` there, so it must offer the Indian list here. An earlier draft returned a nearly
+empty list, which would have told master there is nothing to trade on an exchange the engine would in
+fact have resolved.
+
+### Ergonomics, each guarding a specific failure
+
+- **The legend is on the chart**, top-left, `pointer-events: none` so it cannot steal a drag. The text
+  readout below it **stays** with `aria-live`, because a canvas is not readable by assistive technology
+  and the on-chart legend is `aria-hidden`.
+- **Overlay colours come from a fixed list, not the theme.** Two averages that both read `--accent` are
+  indistinguishable, which is the one thing an overlay must not be.
+- **Oscillators get their own pane.** A 0–100 RSI on a 24,000-point index scale renders as a flat line
+  along the bottom — a classic chart bug.
+- **Warm-up is dropped, never filled.** A 200-period average has no value on bar 1; emitting `null`,
+  `0` or a partial average would be a wrong number that looks right.
+- **An overlay that drew nothing says why.** A toggle that turns on and changes nothing visible is
+  indistinguishable from a broken toggle.
+- **VWAP is withheld on daily rather than drawn wrong.** Anchoring is the whole point; run across days
+  it drifts further from price each day and stops being the indicator the name means.
+- **Keyboard is scoped to the chart's own focus**, never a document listener — that would swallow `l`
+  and `r` while master types a symbol.
+- **Preferences persist** in `localStorage`, and a corrupt preference never stops the chart drawing.
+
+### Verified
+
+- `scripts/verifyTimeframes.mjs` — **67 assertions.** Mostly negative: 1m over a year is refused, MAX
+  is only offered where there is no window cap, every offered pair is inside its cap and above the
+  display floor, every reconciled range is allowed, and the JS table still equals the Python it
+  duplicates.
+- `scripts/verifyIndicators.mjs` — **80 assertions**, mostly **discrimination** tests. An indicator
+  that is subtly wrong does not look broken: a simple-average RSI, a sample-sd Bollinger band or an EMA
+  seeded on the first close all produce a smooth plausible curve carrying a well-known name that is not
+  that indicator, and nothing downstream could notice. So: the EMA seed **is** the SMA of the first
+  window and is provably not the first close; the band uses the **population** sd and provably not the
+  sample sd; Wilder's RSI is measurably **not** the plain-average lookalike while agreeing with it on
+  the shared seed; MACD's histogram exists only where its signal does; VWAP **resets** at the session
+  boundary.
+- `scripts/verifySymbols.mjs` — **53 assertions**, including that every mapped name exists in
+  `providers.YAHOO_SYMBOLS`, that equity names are **not** double-mapped (they rely on the suffix
+  rules), and that an unknown typed symbol is never dropped.
+- **Two real code fixes came out of writing the tests.** `indicators` used `bars || []`, which throws on
+  a non-null non-array — a malformed IPC reply would have crashed the chart rather than degrading. And
+  a fixture that cycled 28 dates across 120 bars exposed that **MACD aligns by time**, which is correct
+  precisely because duplicate times would otherwise mismatch the three series.
+- `npm run verify` **16 suites**; renderer audit clean at **129 bridge calls / 64 files / 348 channels**;
+  `vite build` succeeds — entry **283.53 kB unchanged**, `PriceChart` its own **216 kB** chunk (was 191,
+  the growth is the overlays), StockMind 57 kB.
+- `py -c ast.parse` clean on `store.py`, `providers.py` and `test_store.py`.
+
+### Not verified, stated plainly
+
+- **The Python staleness fix has not been executed.** This machine has no pandas, so the seven new
+  assertions in `ai_backend/tests/test_store.py` are written and unrun. They are the first thing to run
+  on master's machine once the engine environment exists.
+- **Nothing here has been seen on screen.** No shell was launched. The chart rests on the build, the
+  audit and three suites — not on observation.
+- **Master's install still cannot reach the engine** until Python 3.10–3.12 is present and
+  `Rama.bat` option 3 has run. Every chart change above is inert until then, because bars come from the
+  engine.

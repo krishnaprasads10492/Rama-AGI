@@ -4,6 +4,8 @@ import PriceChart from './PriceChart.jsx';
 import BookPanel from './BookPanel.jsx';
 import WhyPanel from './WhyPanel.jsx';
 import PanelBoard from '@components/PanelBoard.jsx';
+import { barsFor, defaultRangeFor, reconcileRange, capBarsFor } from './timeframes.js';
+import { optionsFor } from './symbols.js';
 
 /**
  * StockMind — market intelligence panel.
@@ -140,6 +142,11 @@ export default function StockMind() {
   // NOT named `interval`/`setInterval`: that shadows the global `setInterval` inside this
   // component, and the failure would look like a mystery rather than a name collision.
   const [barInterval, setBarInterval] = useState('1d');
+  // The lookback window (Section 101). A timeframe is the PAIR — interval alone cannot say whether
+  // master wants three days of 5m bars or a month of them.
+  const [barRange, setBarRange] = useState(() => defaultRangeFor('1d'));
+  // Every symbol Rāma actually holds, so the picker can mark the no-network choices.
+  const [inventory, setInventory] = useState([]);
   const [cone, setCone] = useState(null);
   const [coneOn, setConeOn] = useState(false);
   const [held, setHeld] = useState(null);   // the tracked position in this symbol, if any
@@ -158,9 +165,15 @@ export default function StockMind() {
     if (!inElectron || !sym) return;
     setBarsBusy(true);
     setBarsNote(null);
+    // The limit is clamped to what the provider can actually serve for this interval. Asking Yahoo
+    // for a year of 1m bars returns HTTP 422, which arrives here as zero bars — indistinguishable
+    // from a misspelt symbol, so the request is kept inside the window instead (Section 101).
+    const cap = capBarsFor(barInterval);
+    const wanted = parseInt(barCount, 10) || barsFor(barInterval, barRange);
+    const limit = cap == null ? wanted : Math.min(wanted, cap);
     const res = await window.rama.marketIntel.ohlcv({
       user: currentUser, symbol: sym, exchange,
-      interval: barInterval, limit: parseInt(barCount, 10) || 180, sync: doSync,
+      interval: barInterval, limit, sync: doSync,
     });
     setBarsBusy(false);
     if (res?.ok === false) {
@@ -170,7 +183,38 @@ export default function StockMind() {
     setBars(res.data?.bars || []);
     setBarsMeta(res.data || null);
     if (res.data?.note) setBarsNote(res.data.note);
-  }, [sym, exchange, barCount, currentUser, barInterval]);
+  }, [sym, exchange, barCount, barRange, currentUser, barInterval]);
+
+  // ── The timeframe pair (Section 101) ────────────────────────────────────────
+  //
+  // Changing interval RECONCILES the window rather than resetting it: switching 1d/1Y to 5m cannot
+  // keep a year, so it falls to the deepest window 5m can serve. Silently keeping "1Y" selected
+  // while fetching one month would make the control lie about what is on screen.
+  const pickInterval = useCallback((id) => {
+    const next = reconcileRange(id, barRange);
+    setBarInterval(id);
+    setBarRange(next);
+    setBarCount(String(barsFor(id, next)));
+  }, [barRange]);
+
+  const pickRange = useCallback((id) => {
+    setBarRange(id);
+    setBarCount(String(barsFor(barInterval, id)));
+  }, [barInterval]);
+
+  // What Rāma already holds, so the symbol picker can mark the choices that need no network.
+  const loadInventory = useCallback(async () => {
+    if (!inElectron) return;
+    const res = await window.rama.marketIntel.inventory({ user: currentUser });
+    // A failed inventory read is not an error worth showing: the picker degrades to the known list,
+    // which is still every name the engine can resolve.
+    setInventory(res?.ok === false ? [] : (res.data?.inventory || []));
+  }, [currentUser]);
+
+  const symbolGroups = useMemo(
+    () => optionsFor(exchange, inventory, sym),
+    [exchange, inventory, sym],
+  );
 
   // The tracked position in this symbol, so the chart can mark master's own fills and draw the
   // levels he committed to. Section 79: "where am I inside this move?" was previously answerable
@@ -224,15 +268,23 @@ export default function StockMind() {
       loadBars(false);
       loadContext();
       loadHeld();
+      loadInventory();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Re-read bars when the interval changes, so the 60m/1d switch is not a dead control.
+  // Re-read bars when either half of the timeframe changes. Both, not just the interval: the range
+  // buttons would otherwise be decorative until master pressed Load history.
   useEffect(() => {
     if (inElectron && canView) loadBars(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [barInterval]);
+  }, [barInterval, barRange]);
+
+  // A new exchange means a different instrument universe, so the picker is refreshed with it.
+  useEffect(() => {
+    if (inElectron && canView) loadInventory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exchange]);
 
   useEffect(() => {
     if (coneOn) loadCone();
@@ -345,9 +397,33 @@ export default function StockMind() {
         <div className="hud-card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div className="section-label">SIGNAL REQUEST</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+            {/* SYMBOL is a picker AND a text box (Section 101). The picker exists because a typo in
+                a free-text field does not read as a typo — the request succeeds, the store has
+                nothing under the misspelling, and the chart reports "no bars", which is the same
+                message a real symbol with no history produces. The text box STAYS because NSE lists
+                about two thousand names and this list is a few dozen: a picker that cannot express
+                a symbol master wants would be a downgrade from a text box (I11). Both write the
+                same state, so they cannot disagree. */}
             <div>
               <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>SYMBOL</div>
-              <input className="input" value={symbol} onChange={e => setSymbol(e.target.value)} placeholder="NIFTY50" />
+              <select className="input" value={sym} aria-label="Pick a symbol"
+                      onChange={e => setSymbol(e.target.value)}>
+                {symbolGroups.map(g => (
+                  <optgroup key={g.group} label={g.group}>
+                    {g.items.map(o => (
+                      <option key={o.id} value={o.id}>
+                        {o.held ? '● ' : ''}{o.label}{o.label === o.id ? '' : ` (${o.id})`}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <input className="input" value={symbol} onChange={e => setSymbol(e.target.value)}
+                     placeholder="or type any symbol" aria-label="Or type a symbol"
+                     style={{ marginTop: '4px' }} />
+              <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>
+                ● already stored — draws with no network call
+              </div>
             </div>
             <div>
               <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>EXCHANGE</div>
@@ -385,18 +461,23 @@ export default function StockMind() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
-            {/* Interval is a real control now, not a hardcoded '1d' (Section 79). 60m is the only
-                intraday depth Yahoo gives — 5m and 15m cap at a month, see horizons.DISPLAY_ONLY. */}
-            <div style={{ fontSize: '12px', color: 'var(--muted)' }}>INTERVAL</div>
-            <select className="input" style={{ width: '78px' }} value={barInterval}
-                    onChange={e => setBarInterval(e.target.value)}>
-              <option value="1d">1d</option>
-              <option value="60m">60m</option>
-            </select>
-            <div style={{ fontSize: '12px', color: 'var(--muted)' }}>BARS</div>
-            <input className="input" type="number" min="40" max="1200" step="20"
-                   style={{ width: '84px' }}
+            {/* The interval and window buttons live ON THE CHART now (Section 101), which is where a
+                trading platform puts them and which gives the pop-out and workspace panels the same
+                control for free. This box stays as the exact-bar override: the range buttons SET it,
+                and master can still type a number the presets do not offer. Nothing was removed —
+                the old two-option dropdown became nine intervals and ten windows. */}
+            <div style={{ fontSize: '12px', color: 'var(--muted)' }}
+                 title="Set by the window buttons on the chart. Override it here for an exact count.">
+              BARS
+            </div>
+            <input className="input" type="number" min="10" max="20000" step="10"
+                   style={{ width: '92px' }}
                    value={barCount} onChange={e => setBarCount(e.target.value)} />
+            <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+              {barInterval} · {barRange}
+              {capBarsFor(barInterval) != null
+                && ` · max ${capBarsFor(barInterval).toLocaleString()}`}
+            </span>
             <button className="btn" disabled={barsBusy || !canView} onClick={() => loadBars(false)}>
               {barsBusy ? 'Loading…' : '↺ Load history'}
             </button>
@@ -474,20 +555,24 @@ export default function StockMind() {
                 window.rama.popout.open({
                   panel: p.id,
                   title: p.title,
-                  params: { symbol, exchange, interval: barInterval },
+                  params: { symbol, exchange, interval: barInterval, range: barRange },
                 });
               }}
               panels={[
                 {
                   id: 'chart',
-                  title: `${sym} · ${barInterval}`,
+                  title: `${sym} · ${barInterval} · ${barRange}`,
                   x: 16, y: 16, w: 720, h: 400,
-                  render: () => (bars.length > 0
-                    ? <PriceChart bars={bars} signal={selected} symbol={sym}
-                                  interval={barInterval} cone={coneOn ? cone : null} />
-                    : <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-                        Load bars from the CHART tab first.
-                      </span>),
+                  // The panel gets the SAME timeframe control as the tab, because it is the same
+                  // component — a board where the chart cannot change interval would send master
+                  // back to the tabs for the one thing he changes most.
+                  render: () => <PriceChart bars={bars} signal={selected} symbol={sym}
+                                            interval={barInterval} rangeId={barRange}
+                                            onInterval={pickInterval} onRange={pickRange}
+                                            busy={barsBusy} onFetch={() => loadBars(true)}
+                                            basePrice={held?.avgCost ?? null}
+                                            height={260}
+                                            cone={coneOn ? cone : null} />,
                 },
                 {
                   id: 'signals',
@@ -561,6 +646,12 @@ export default function StockMind() {
               signal={selected}
               symbol={sym}
               interval={barInterval}
+              rangeId={barRange}
+              onInterval={pickInterval}
+              onRange={pickRange}
+              busy={barsBusy}
+              onFetch={() => loadBars(true)}
+              basePrice={held?.avgCost ?? null}
               height={400}
               fills={held?.fills || []}
               thesis={held?.thesis || null}

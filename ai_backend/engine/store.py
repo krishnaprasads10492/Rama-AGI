@@ -226,22 +226,76 @@ def merge(symbol: str, incoming: pd.DataFrame, exchange: str = "NSE",
     return combined
 
 
+# How many minutes one bar spans, for the intervals finer than a day. Used only for staleness —
+# the fetch itself is shaped by `providers.INTRADAY_RANGE`.
+INTERVAL_MINUTES = {
+    "1m": 1, "2m": 2, "5m": 5, "15m": 15, "30m": 30,
+    "60m": 60, "1h": 60, "90m": 90, "4h": 240,
+}
+
+# How many sessions one bar spans, for daily and coarser. A weekly series whose newest bar is
+# Monday's is not behind on Thursday — the bar is still forming.
+INTERVAL_SESSIONS = {"1d": 1, "5d": 5, "1wk": 5, "1mo": 21, "3mo": 63}
+
+
 def is_stale(symbol: str, exchange: str = "NSE", interval: str = "1d",
              max_age_days: int = 1, columns: Optional[list] = None) -> bool:
     """
     Does the store need topping up?
 
-    Weekends and holidays are why this is date-based rather than "was it fetched
-    today": on a Sunday the newest available bar is Friday's, and treating that as
-    stale would re-fetch all weekend for nothing.
+    Weekends and holidays are why the daily branch is date-based rather than "was it fetched
+    today": on a Sunday the newest available bar is Friday's, and treating that as stale
+    would re-fetch all weekend for nothing.
+
+    INTRADAY NEEDED ITS OWN BRANCH (spec Section 101). The whole function used to `normalise()`
+    the newest bar to a date, which for an intraday series is always today during a session —
+    so a 5m series fetched at 10:00 read as CURRENT for the rest of the day and `sync=True`
+    kept returning the same frozen frame. The chart looked broken while the store believed it
+    was up to date, which is the worst combination: no error anywhere.
+
+    The fix cannot simply be bar age, either. Outside market hours the newest bar only gets
+    older, so bar age alone would re-fetch on every request all night and all weekend. So the
+    intraday test is bar age AND a per-interval cooldown on the FETCH — which bounds network
+    calls regardless of whether the market is open, without needing a holiday calendar.
     """
     df = load(symbol, exchange, interval, columns)
     if df is None or len(df) == 0:
         return True
+
+    iv = str(interval or "1d").strip().lower()
+
+    if is_intraday(iv):
+        span = INTERVAL_MINUTES.get(iv, 60)
+        # Stored intraday stamps are naive UTC (Section 73), so `now` must be naive UTC too.
+        # A naive local `now` would be 5h30m ahead in IST and read every fresh bar as stale.
+        now_utc = pd.Timestamp.now(tz="UTC").tz_localize(None)
+        last = pd.Timestamp(df["date"].iloc[-1])
+        if getattr(last, "tzinfo", None) is not None:
+            last = last.tz_convert("UTC").tz_localize(None)
+        age_min = (now_utc - last).total_seconds() / 60.0
+        # Two bar widths of slack: one for the bar still forming, one for provider lag.
+        if age_min <= 2 * span:
+            return False
+        cooldown = max(5, span)
+        stamp = meta(symbol, exchange, interval).get("lastFetchedAt")
+        if stamp:
+            try:
+                since_min = ((_dt.datetime.now() - _dt.datetime.fromisoformat(stamp))
+                             .total_seconds() / 60.0)
+                if since_min < cooldown:
+                    return False
+            except Exception:
+                # An unparseable stamp must not make the series permanently fresh; fall through
+                # and treat it as stale, which is the recoverable direction.
+                pass
+        return True
+
     last = pd.Timestamp(df["date"].iloc[-1]).normalize()
     today = pd.Timestamp.today().normalize()
     business_gap = len(pd.bdate_range(last, today)) - 1
-    return business_gap > max_age_days
+    # A coarse bar is not late until a whole bar could have closed.
+    allowed = max(int(max_age_days), INTERVAL_SESSIONS.get(iv, 1))
+    return business_gap > allowed
 
 
 def sync(symbol: str, exchange: str = "NSE", interval: str = "1d",

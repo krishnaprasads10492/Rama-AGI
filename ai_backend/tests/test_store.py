@@ -155,6 +155,71 @@ check("a store ending today is not stale", not store.is_stale("FRESHSYM", "NSE",
 check("an old store is stale", store.is_stale("TESTSYM", "NSE", "1d"))
 check("an absent symbol is stale", store.is_stale("NEVERSEEN", "NSE", "1d"))
 
+# ── Intraday staleness, which the date-based test could not express (spec Section 101) ──
+#
+# THE DEFECT THIS COVERS. `is_stale` used to normalise the newest bar to a DATE, so for an
+# intraday series it compared today against today and answered "current" — a 5m series fetched
+# at 10:00 stayed "current" until midnight and `sync=True` returned the same frozen frame for
+# the rest of the session. The chart looked broken while the store believed it was up to date.
+print("\n--- store: intraday staleness is clock-based, not date-based ---")
+
+
+def intraday_bars(n, last_utc, minutes):
+    """`n` bars of `minutes` width ending at `last_utc`, stamped naive UTC as the store does."""
+    stamps = [last_utc - pd.Timedelta(minutes=minutes * i) for i in range(n - 1, -1, -1)]
+    close = np.linspace(100.0, 101.0, n)
+    return pd.DataFrame({
+        "date": stamps, "open": close, "high": close * 1.002,
+        "low": close * 0.998, "close": close, "volume": np.full(n, 1000.0),
+    })
+
+
+_now = pd.Timestamp.now(tz="UTC").tz_localize(None)
+
+# A 5m series whose newest bar is 4 minutes old: inside two bar widths, so not stale.
+store.merge("INTRAFRESH", intraday_bars(60, _now - pd.Timedelta(minutes=4), 5),
+            "NSE", "5m", source="unit-test")
+check("a 5m series with a 4-minute-old bar is current",
+      not store.is_stale("INTRAFRESH", "NSE", "5m"))
+
+# The same series aged past two bar widths. The cooldown is keyed on `lastFetchedAt`, which the
+# merge above has just written, so it is rewritten into the past to reach the stale branch.
+store.merge("INTRASTALE", intraday_bars(60, _now - pd.Timedelta(hours=3), 5),
+            "NSE", "5m", source="unit-test")
+_stale_meta_path = store.paths("INTRASTALE", "NSE", "5m")[1]
+_rec = json.load(open(_stale_meta_path, encoding="utf-8"))
+_rec["lastFetchedAt"] = (_dt.datetime.now() - _dt.timedelta(hours=3)).isoformat(timespec="seconds")
+json.dump(_rec, open(_stale_meta_path, "w", encoding="utf-8"))
+check("a 5m series three hours behind IS stale",
+      store.is_stale("INTRASTALE", "NSE", "5m"))
+
+# The same bars, still three hours old, but fetched a moment ago: the cooldown holds. Without
+# this, an out-of-hours request would re-fetch on every single call all night.
+store.merge("INTRACOOL", intraday_bars(60, _now - pd.Timedelta(hours=3), 5),
+            "NSE", "5m", source="unit-test")
+check("a just-fetched series is not re-fetched merely because the market is shut",
+      not store.is_stale("INTRACOOL", "NSE", "5m"))
+
+# An unparseable fetch stamp must fail toward "stale", which is the recoverable direction.
+_rec["lastFetchedAt"] = "not-a-timestamp"
+json.dump(_rec, open(_stale_meta_path, "w", encoding="utf-8"))
+check("an unparseable fetch stamp does not make a series permanently fresh",
+      store.is_stale("INTRASTALE", "NSE", "5m"))
+
+# Coarse intervals: a weekly bar is not late until a whole week could have closed.
+_two_days_back = (pd.Timestamp.today() - pd.tseries.offsets.BDay(2)).normalize()
+store.merge("WEEKLYSYM",
+            pd.DataFrame({
+                "date": pd.date_range(end=_two_days_back, periods=60, freq="7D"),
+                "open": np.full(60, 100.0), "high": np.full(60, 101.0),
+                "low": np.full(60, 99.0), "close": np.full(60, 100.5),
+                "volume": np.full(60, 1000.0),
+            }), "NSE", "1wk", source="unit-test")
+check("a weekly series two sessions behind is not stale",
+      not store.is_stale("WEEKLYSYM", "NSE", "1wk"))
+check("but a daily series two sessions behind is",
+      store.is_stale("TESTSYM", "NSE", "1d"))
+
 print("\n--- store: empty and malformed inputs ---")
 check("merging nothing returns what was there",
       len(store.merge("TESTSYM", None, "NSE", "1d")) == len(extended))

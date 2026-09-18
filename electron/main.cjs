@@ -1539,7 +1539,12 @@ ipcMain.handle('window:popout', async (_e, { panel, title, params = {} } = {}) =
   //
   // Allowlisted by key AND by shape, because every one is interpolated into a URL. Passing the whole
   // object through would let a renderer bug put arbitrary text into the address the window opens.
-  const ALLOWED = { symbol: /^[A-Z0-9._-]{1,24}$/i, exchange: /^[A-Z]{2,8}$/i, interval: /^[0-9a-z]{1,6}$/i };
+  // `range` joined the list with Section 101: a timeframe is the pair (interval, window), so passing
+  // only the interval would leave a popped-out chart guessing how much history to fetch.
+  const ALLOWED = {
+    symbol: /^[A-Z0-9._-]{1,24}$/i, exchange: /^[A-Z]{2,8}$/i,
+    interval: /^[0-9a-z]{1,6}$/i, range: /^[0-9A-Z]{1,4}$/i,
+  };
   const query = { panel: id };
   for (const [k, re] of Object.entries(ALLOWED)) {
     const v = params[k];

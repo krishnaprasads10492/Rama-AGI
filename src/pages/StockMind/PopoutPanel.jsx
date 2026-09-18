@@ -128,7 +128,7 @@ export default function PopoutPanel({ params }) {
 
 /** Kept for when the session hand-off lands; not reachable until then. */
 function PopoutPanelWithSession({ params }) {
-  const { panel, symbol, exchange, interval } = params;
+  const { panel, symbol, exchange, interval, range } = params;
   const [bars, setBars] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -155,11 +155,11 @@ function PopoutPanelWithSession({ params }) {
     return (
       <Frame title={`${title} · ${interval}`} onRefresh={loadBars} busy={busy}>
         {error && <div style={{ fontSize: 12, color: 'var(--red)', marginBottom: 8 }}>{error}</div>}
-        {bars.length > 0
-          ? <PriceChart bars={bars} />
-          : <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-              {busy ? 'Loading bars…' : 'No bars available for this symbol and interval.'}
-            </span>}
+        {/* `symbol` and `interval` were missing here, so the popped-out chart would have drawn with
+            an empty header and a daily time axis whatever the bars actually were. PriceChart now
+            also owns the empty and loading states, so the sibling branch is no longer needed. */}
+        <PriceChart bars={bars} symbol={symbol} interval={interval} rangeId={range}
+                    busy={busy} onFetch={loadBars} />
       </Frame>
     );
   }
