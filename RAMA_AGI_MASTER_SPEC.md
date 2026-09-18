@@ -1776,6 +1776,8 @@ authenticated **Master session**, not merely an open store.
 | 120 | What master's install and screenshots found | done | Section 100 (written this session). Commits `a3be1bd`, `a3cbe42`. **The venv was created in one directory and looked for in another** — `build.productName` ("Rama AGI") versus `app.getName()` which resolves package.json's top-level `productName` and falls back to `name` ("rama-agi"). Both sides now **search both spellings**; a single guess is wrong in one of the packaged/source cases whichever is chosen. **Deliberately not adding a top-level `productName`**: it would move `app.getPath('userData')` and orphan master's encrypted store. Then three workspace defects, all from Section 97: panels missing `currentUser` so the gate correctly refused them; `signal=` passed where `WhyPanel` takes `thesis` (**a wrong prop name fails silently in React**); and `margin: -20px` making the board 40px wider than its container so `overflow: hidden` clipped rather than contained. Layout now tiles from **measured** bounds. **Pop-out states its own limitation** instead of showing "access denied" — `sessionStorage` is per-window, so a second `BrowserWindow` has no session; the hand-off is security-relevant and deliberately not improvised. |
 | 121 | StockMind charts — the UI/UX review, and timeframes from 1m to a decade | done | Section 101. Master: *"do each and every aspect a thorough review in the point of UI/UX… time frames can be from 1min to 1month/6mon/1year."* **FIRST FINDING CORRECTED AN ASSUMPTION CARRIED IN: the engine already served every interval.** `store.INTRADAY_INTERVALS` has nine, `providers.INTRADAY_RANGE` has measured caps, `/ohlcv` passes `interval` to `store.sync`, and the only hardcoded `1d` is in a function Section 64 proved is never awaited. **The limitation was entirely in the dropdown**, which offered two. Researching first saved an engine rewrite that was not needed. **DECISION: a timeframe is the PAIR `(interval, window)`** — Section 74's unit applied to the chart — **and only servable pairs are offered**, because Yahoo answers an over-deep intraday window with HTTP 422 which arrives as zero bars, *visually identical to a misspelt symbol*. Nine intervals × ten windows, capped per interval. **DECISION: the cap table is duplicated in `timeframes.js` and a test enforces it** — serving it from the engine would make the control unrenderable exactly when the engine is down, which is master's situation right now; `verifyTimeframes.mjs` parses `providers.py` and fails on drift. **DECISION: the "everything comes from the engine" rule is REFINED, not broken** — the renderer may draw any *pure function of the visible bars*; anything forward-looking or advisory must come from the engine. The cone and the levels stay engine-only, and the line is written down because the temptation later is to compute a signal in `indicators.js`. **Thirteen defects found and fixed (A–M in Section 101)**, of which the most consequential are: `fitContent()` on every data change threw away master's zoom on every poll; volume rode an overlay scale costing price a quarter of its pane; candles-only made a decade unreadable; the crosshair readout sat 400px below the bar it described; `barsBusy` never reached the chart so a slow fetch advised master to start the fetch. **M is an engine data defect: `is_stale` normalised the newest bar to a DATE, so an intraday series fetched at 10:00 read as current all day** and `sync=true` returned a frozen frame — intraday now tests bar age AND a per-interval **fetch cooldown**, which bounds network calls without needing a market calendar. **Symbol became a grouped picker with the free text box kept** (I11) — two thousand NSE names against a few dozen listed means a picker-only control would be a downgrade; a full instrument master was **not** invented, because no free endpoint this project already talks to serves one. **VERIFIED: 200 new assertions across three suites**, the indicator suite deliberately built on **discrimination** — the EMA seed is provably the SMA and not the first close, the band is population and provably not sample sd, Wilder's RSI is measurably not the plain-average lookalike, VWAP resets at the session boundary — because a subtly wrong indicator produces a smooth plausible curve nothing downstream can question. Two real code fixes fell out of the tests (`bars || []` throws on a non-array; MACD must align by time). `npm run verify` **16 suites**, audit clean at **129 bridge calls / 64 files / 348 channels**, `vite build` entry **unchanged at 283.53 kB**. **NOT VERIFIED: the Python staleness fix has never been executed** (no pandas here) — its 7 new assertions in `ai_backend/tests/test_store.py` are the first thing to run on master's machine; and **nothing here has been seen on screen**. Next step: master installs Python 3.10–3.12, runs `Rama.bat` option 3, then `python -m tests.test_store` from `ai_backend/`, then opens the CHART tab and reports what the 1m/5m/15m buttons actually draw. |
 
+| 122 | Every field in StockMind, reviewed from the user's side | done | Section 102. Master: *"go through every field and item in StockMind and research UI/UX. For example it is not possible to know every stock/index name in every market but you implemented text field with no search. Things like this matter from UI/UX."* **THE EXAMPLE IS A CORRECT CRITICISM OF ROW 121'S OWN WORK.** Section 101 reviewed the chart and not the form around it, and the picker it shipped — a curated `<select>` of ~50 names beside a raw text box — is a text box with decoration: it cannot answer *"what is Reliance Power called"*, which is the only question a picker exists for. The mistake was treating "offer a list" as the requirement when the requirement was "let master find something he does not already know the ticker for". **DECISION: do not try to know every instrument — SEARCH THE PROVIDER.** A longer curated list is the same defect with a later expiry (the Section 92 argument again); a downloaded instrument master was rejected again because no free endpoint this project already talks to serves one, a scrape needs its own refresh policy and goes stale silently, and it still would not cover *every market*. `GET /symbols/search` + `market:symbol-search` + a real ARIA combobox. **Measured before building on it:** `reliance` returns Reliance Industries (NSE), Reliance Power (NSE), Reliance Global (NASDAQ), the London GDR and the Australian listing. **A FAILURE IS REPORTED DISTINCTLY FROM AN EMPTY RESULT** — collapsing them would say "no such symbol" for a network fault and send master to fix his spelling; the renderer can only choose its offline fallback because it can tell them apart, and **on master's machine the fallback is the live path**, so it is built and tested rather than assumed. **TWO REAL BUGS FOUND BY INSISTING THE TRANSLATION ROUND-TRIPS** (`to_yahoo_symbol(*from_yahoo_symbol(y)) == y`): `^NSEI` would have been stored beside an existing `NIFTY50`, splitting one series into two copies — so the reverse map is canonical-first; and `RWC.AX` became `RWC.AX.NS`, meaning **every non-Indian, non-US search result was offerable and unfetchable**, the exact failure a picker is meant to remove. Free text still commits on Enter (I11) because the provider is not omniscient either. **THE SECOND WORST ITEM IN THE MODULE, NOW GONE: closing a position used `window.prompt`** — on a real-money action it accepted any string, showed no consequence, no quantity so a partial exit was impossible, no date, no fees, no confirmation; typing `24.50` where `2450` was meant recorded a loss silently. Replaced by a form with a live preview of what the exit realises net of fees, what stays open, and how the price sits against master's own recorded stop and target. **That exposed a trap: `/ledger/close` takes NO quantity** and exits the whole position by design, so sending one would have been ignored while the preview promised "60 remaining" — the form would have claimed a partial exit and the ledger recorded a full one; partial exits route through `/ledger/fill`, chosen by `preview.partial`, so preview and record describe one event. **Also fixed:** RISK % showed only a percentage, so the number master was actually choosing — money at stake — was his to compute in his head (`1,500 at risk`, plus implied size against his stop); the `⚡ Generate Signals` button was disabled with **no stated cause**, so busy / wrong-tier / empty-field were indistinguishable; the **SIGNALS tab rendered nothing at all** before a request, a blank page indistinguishable from a crash; clicking a signal row overlaid levels **on a different tab**, so the action read as doing nothing; the book's symbol→chart link was a `<span>` with an `onClick`, so **the only route from the book to the chart was mouse-only**; `Load history` vs `Fetch & store` differed only in whether the network is touched and only one said so, now `From disk` / `Fetch from provider`; nine unexplained column heads; a bare `?` for an assumed trade style; and **my own row-121 regression — about thirty controls above a 400px chart**, so presentation collapsed into one menu whose label shows the current choice. **VERIFIED: 124 new assertions, `npm run verify` 17 suites.** The position-math suite's key assertion is the **short** case — a sign taken from the exit side rather than the held quantity inverts the P&L on every short while looking plausible on every long, so it would pass any suite written with only long fixtures and master would see a loss reported as a gain. Audit clean at **131 bridge calls / 66 files / 349 channels**; `vite build` entry unchanged at 283.53 kB. **NOT DONE, recorded as an ordered backlog rather than dropped** (Section 102's "Open" verdicts): one error presentation and one number formatter across every panel; splitting the ENGINE tab's three unrelated things and making the tabs a real keyboard tablist; a sentence for the six remaining WHY statistics and the titlebar badges; text or glyph companions for every colour-only signal such as `priceStale`; and a recently-used instrument list, which is what master will actually want now that search exists. **Nothing seen on screen, and the search cannot run on master's install until the engine does.** |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -10577,3 +10579,166 @@ fact have resolved.
 - **Master's install still cannot reach the engine** until Python 3.10–3.12 is present and
   `Rama.bat` option 3 has run. Every chart change above is inert until then, because bars come from the
   engine.
+
+---
+
+## SECTION 102 — Every field in StockMind, reviewed from the user's side
+
+Master: *"GO THROUGH EVERY FIELD AND ITEM IN STOCKMIND AND RESEARCH UI/UX. FOR EXAMPLE IT IS NOT
+POSSIBLE TO KNOW EVERY STOCK/INDEX NAME IN EVERY MARKET BUT YOU IMPLEMENTED TEXT FIELD WITH NO
+SEARCH. THINGS LIKE THIS MATTER FROM UI/UX. SO REVIEW EVERYTHING FROM UX POV."*
+
+**The example is a correct criticism of Section 101's own work, and the general point behind it is the
+more important half.** Section 101 reviewed the *chart*. It did not review the *form around it*, and
+the symbol picker it shipped — a curated `<select>` of about fifty names beside a raw text box — is a
+text box with decoration. It cannot answer *"what is Reliance Power called"*, which is the only
+question a picker exists to answer. The failure was treating "offer a list" as the requirement when
+the requirement was "let master find a thing he does not already know the ticker for".
+
+### The decision that follows from master's objection
+
+**Do not try to know every instrument. Search the provider.**
+
+A longer curated list is the same defect with a later expiry date — the same reasoning Section 92
+applied to the Ollama registry. Downloading a full instrument master was rejected again: NSE alone
+lists ~2,000 names, no free endpoint this project already talks to serves one, a scraped list needs
+its own refresh policy and goes stale silently, and it still would not cover *"every market"*.
+
+Yahoo's search endpoint answers by name or ticker across every market it knows, returning the ticker,
+a readable name, the exchange and the instrument class. Measured before building on it: `reliance`
+returns Reliance Industries on NSE, Reliance Power on NSE, Reliance Global on NASDAQ, the London GDR
+and the Australian listing — which is exactly the question master said cannot be answered from a list.
+
+**`GET /symbols/search` reports a failure distinctly from an empty result.** `{ok: true, results: []}`
+means the provider has no such instrument; `{ok: false, reason}` means Rāma could not ask. Collapsing
+the two would show master *"no such symbol"* for a network problem, sending him to fix his spelling
+when the fault is elsewhere. The renderer can only choose to fall back to its offline list because it
+can tell them apart — and on master's machine, with the engine down, **the fallback is the live path**,
+not a theoretical branch.
+
+**Search results are translated into Rāma's own vocabulary, and the translation must round-trip.**
+Yahoo returns `RELIANCE.NS`; the rest of this project stores `RELIANCE` with exchange `NSE`.
+`from_yahoo_symbol` inverts `to_yahoo_symbol` exactly, and the test asserts
+`to_yahoo_symbol(*from_yahoo_symbol(y)) == y` for every ticker the search can return. **Two real bugs
+were found by insisting on that property:** `^NSEI` would have been stored beside an existing
+`NIFTY50`, splitting one series into two copies, so the reverse map is canonical-first
+(`YAHOO_SYMBOLS` order decides, `NIFTY50` before `NIFTY`); and `RWC.AX` became `RWC.AX.NS`, meaning
+**every non-Indian, non-US result was offered and unfetchable** — the precise failure a picker exists
+to remove. `to_yahoo_symbol` now passes an already-suffixed ticker through.
+
+**Free text is still committed on Enter (I11).** The provider is not omniscient either, and a picker
+that cannot express a name master knows would be a downgrade from the box it replaced.
+
+**The combobox is the ARIA pattern, not a div with a click handler.** `role="combobox"` with
+`aria-expanded`, `aria-controls`, `aria-activedescendant` over a `role="listbox"` of `role="option"` —
+which is also what makes arrow keys, Enter and Escape work, because implementing the pattern properly
+and making it keyboard-usable are the same work. A monotonic request id discards a slow answer for
+`rel` that lands after a fast answer for `relian`.
+
+### The review — every field and item, with a verdict
+
+**Header**
+
+| Item | Verdict |
+|---|---|
+| `ABSORBED ENGINE` badge | **Open.** Internal provenance, meaningless to the reader. Carries no information a user can act on. |
+| `IDLE / REQUESTING / DONE / ERROR` | **Open.** "DONE" of *what* — the last request? The page? Needs a subject. |
+| `0 trained · contract aligned` | **Open.** Jargon with no stated consequence. |
+
+**SIGNAL REQUEST**
+
+| Field | Verdict |
+|---|---|
+| SYMBOL | **Fixed.** Now a type-ahead search across every market, with the offline list as a labelled fallback and free text preserved. |
+| EXCHANGE | **Fixed.** Exchange is a *property of the instrument*, not an independent axis — master could pick `RELIANCE` with `NASDAQ` and get nothing. Picking a search result now sets it, options say which country, and manual override remains. |
+| DIRECTION | **Open.** No statement of what it does (it filters which setups come back). |
+| BASE PRICE | Already good — read-only and taken from the last stored close, so a signal cannot be priced off a typed stale number. |
+| CAPITAL | **Fixed.** Echoes a grouped figure under the field, so `100000` cannot be misread. |
+| RISK % | **Fixed.** Showed only a percentage, so *the number master was actually choosing* — money at stake — was his to compute in his head on every change. Now `1,500 at risk`, plus the implied position size when a stop is recorded. One multiplication, and the whole point of the field. |
+| BARS | **Partly fixed** in Section 101 (driven by the window buttons). Still an expert override sitting in the primary row. |
+| `Load history` vs `Fetch & store` | **Fixed.** Two similarly-weighted buttons whose difference only the author knew. Now `↺ From disk` and `⇩ Fetch from provider`, which is the actual distinction, both with a `title` saying so. |
+| `⚡ Generate Signals` when disabled | **Fixed.** A disabled control with no stated cause is a dead end — master could not tell busy from wrong-tier from empty-field. `whyCannotPredict()` returns one sentence, shown beside the button and as its tooltip. |
+
+**CHART tab** — covered by Section 101, with one regression of my own found here:
+
+| Item | Verdict |
+|---|---|
+| Toolbar density | **Fixed.** My Section 101 toolbar put nine intervals, ten windows, five chart types, three scales, an indicator menu and five chips above a 400px chart — about thirty controls, which is a usability defect however capable each one is. Timeframe stays visible because master changes it constantly; **presentation collapses into one menu whose label shows the current choice**, so nothing is hidden. |
+| Menus stayed open over the chart | **Fixed.** Outside-click and Escape close them. |
+| `barsMeta.stored from storedFirstBar` | **Open.** A raw field dump with no label. |
+| `projection` checkbox | **Open.** Triggers a forecast fetch with no busy state. |
+
+**SIGNALS tab**
+
+| Item | Verdict |
+|---|---|
+| The whole tab rendered **nothing** before a request | **Fixed.** The block was gated on `result`, so clicking the tab gave a blank page indistinguishable from a crash. It now explains that a signal is a request rather than a feed — deliberately not generated in the background, because a stale entry price is worse than none — and offers the button, with the disabled reason if it cannot run. |
+| Ten abbreviated columns | **Fixed.** `ENTRY / SL / T1–T3 / R:R / PROB / GRADE` are each explained once under the table. |
+| Clicking a row overlays levels on a chart **on another tab** | **Fixed.** An action whose only result is on a different screen reads as doing nothing. The selection is confirmed in place, with a button to go and look. |
+| The eight WHY stats | **Open.** `UNCERTAINTY 0.031`, `AGREEMENT 0.82` — two carry a tooltip, six do not. |
+| `MOCK DATA — INDICATIVE ONLY` | Already good, and important. |
+
+**YOUR BOOK tab**
+
+| Item | Verdict |
+|---|---|
+| **Closing a position used `window.prompt`** | **Fixed, and it was the worst control in the module.** On a real-money action a native prompt accepts any string, shows no consequence, offers no quantity so a partial exit was impossible, no date, no fees, and no confirmation. Typing `24.50` where `2450` was meant recorded a loss with no warning of any kind. |
+| Irreversible with no preview | **Fixed.** A form with a live preview: what the exit realises net of fees, the percentage on cost, what remains open, and how the price sits against master's own recorded stop and target. |
+| Partial exits impossible | **Fixed, and it exposed a trap.** `/ledger/close` takes **no quantity** — it exits the whole position by design. Sending it one would have been ignored silently while the preview promised "60 remaining", so **the form would have claimed a partial exit and the ledger would have recorded a full one.** Reducing a position is what `/ledger/fill` is for, and the route is chosen by `preview.partial` so the preview and the record describe the same event. |
+| SYMBOL in "record a trade" | **Fixed** — same search. This is the worse place for a raw text box: a mistyped symbol creates a position that can never be priced, and the portfolio totals then silently exclude it. |
+| Symbol → chart link | **Fixed.** It was a `<span>` with an `onClick`: not focusable, not keyboard-reachable, not announced as an action, so the only route from the book to the chart was mouse-only. Now a real `<button>`. |
+| Nine column heads, no explanations | **Fixed.** Each carries its meaning, including that a negative QTY is a short. |
+| `POSITIONAL?` for an inferred style | **Fixed.** A bare `?` explained only in a separate paragraph is now `POSITIONAL (assumed)` with the reason and the remedy on hover. |
+| `close` button label | **Fixed** → `exit…`, because the ellipsis is the convention for "opens a form" rather than "does it now". |
+| `priceStale` amber with a tooltip only | **Open.** Colour alone is not an accessible signal. |
+| Alert split actionable / withheld | Already good — Section 75's rule, and it holds up. |
+
+**Global**
+
+| Item | Verdict |
+|---|---|
+| Three different error presentations | **Open.** Red card, amber text, red text, by accident rather than by severity. |
+| Inconsistent number formatting | **Open.** `toFixed` in one place, `toLocaleString` in another, raw `String()` in a third. |
+| Tabs are not a keyboard tablist | **Open.** `role="tablist"` with no roving tabindex, no `aria-controls`, no `tabpanel`. |
+| `ENGINE` tab holds derivatives, news **and** engine state | **Open.** Three unrelated things under one label; news is not "engine". |
+| Footer disclaimer | Already good (Section 98). |
+
+### Verified
+
+- `scripts/verifyPositionMath.mjs` — **107 assertions.** The assertion that matters most is the
+  **short** case: a short's profit runs opposite to a long's, and a sign taken from the exit *side*
+  rather than from the held quantity inverts the P&L on every short while looking entirely plausible
+  on every long — so it would pass any suite written with only long fixtures, and master would see a
+  loss reported as a gain. Also: fees come off the net and never the gross; over-closing is refused
+  and explains that it would be a new position in the other direction; every refusal reports `null`
+  rather than `0`, because a zero P&L beside a Close button is a claim; `1,20,500` parses, because
+  that is what master's own platform prints.
+- `scripts/verifySymbols.mjs` — **70 assertions** (+17), covering offline ranking: exact ticker first,
+  prefix above containment, human name matched as well as ticker, and a stored series outranking an
+  equally-good unstored one.
+- `ai_backend/tests/test_store.py` — the round-trip property across 13 tickers from 8 markets, plus a
+  live search attempted-not-required. **Unrun here** (no pandas).
+- `npm run verify` **17 suites**; audit clean at **131 bridge calls / 66 files / 349 channels**;
+  `vite build` succeeds — entry **283.53 kB unchanged**, StockMind 57 → 73.64 kB (the combobox and the
+  exit form), `PriceChart` 218 kB.
+- `node --check` clean on `marketIntel.cjs`, `preload.cjs`, `main.cjs`; `py -c ast.parse` clean on
+  `providers.py`, `main.py`, `test_store.py`.
+
+### Not done, deliberately, and in priority order
+
+Recorded rather than dropped, because the "Open" verdicts above are a backlog and a backlog nobody
+wrote down is a list of things that will be re-discovered instead of fixed.
+
+1. **One error presentation and one number formatter.** Cuts across every panel; worth doing as a pass
+   rather than per-site, which is why it is not bundled here.
+2. **The `ENGINE` tab split** into DERIVATIVES / NEWS / ENGINE, and a proper keyboard tablist.
+3. **Every remaining statistic gets its sentence** — the six WHY stats, `DIRECTION`, the titlebar
+   badges.
+4. **`priceStale` and every other colour-only signal** gets a text or glyph companion.
+5. **A recently-used instrument list**, which is what master will actually want once search exists —
+   searching for the same five names every morning is its own friction.
+
+**Nothing in this section has been seen on screen.** No shell was launched. And the symbol search
+cannot run on master's install until the engine does, which is still waiting on Python 3.10–3.12 —
+until then the combobox falls back to the offline list and says so, which is why that path was built
+and tested rather than assumed.

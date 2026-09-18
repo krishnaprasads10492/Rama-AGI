@@ -177,6 +177,46 @@ export function flatOptionsFor(exchange, inventory = [], current = '') {
   return out;
 }
 
+/**
+ * Search the offline lists. This is the FALLBACK for when the engine cannot answer — which on
+ * master's machine is right now, and which is the whole reason it exists (spec Section 102).
+ *
+ * Ranking is explicit rather than incidental, because a picker that puts the right answer fourth is
+ * only marginally better than no picker: exact ticker, then ticker prefix, then name prefix, then
+ * anything containing the query. Within a rank, a series already stored comes first — those draw
+ * with no network call.
+ *
+ * @returns {Array<{id, label, held, group, score}>}
+ */
+export function localSearch(query, exchange, inventory = [], limit = 12) {
+  const q = String(query || '').trim().toUpperCase();
+  const all = [];
+  for (const g of optionsFor(exchange, inventory, '')) {
+    for (const item of g.items) all.push({ ...item, group: g.group });
+  }
+  if (!q) {
+    // No query: the stored series first, then the head of the known list. An empty dropdown on
+    // focus tells master nothing about what is on offer.
+    return all.slice(0, limit);
+  }
+  const scored = [];
+  for (const item of all) {
+    const id = item.id;
+    const label = String(item.label || '').toUpperCase();
+    let score = 0;
+    if (id === q) score = 100;
+    else if (id.startsWith(q)) score = 80;
+    else if (label.startsWith(q)) score = 60;
+    else if (id.includes(q)) score = 40;
+    else if (label.includes(q)) score = 20;
+    if (score === 0) continue;
+    if (item.held) score += 5;
+    scored.push({ ...item, score });
+  }
+  scored.sort((a, b) => (b.score - a.score) || a.id.localeCompare(b.id));
+  return scored.slice(0, limit);
+}
+
 /** Is this a name the picker knows, or something master typed? Used only to label, never to block. */
 export function isKnown(symbol, exchange) {
   const s = String(symbol || '').toUpperCase().trim();

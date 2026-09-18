@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import SymbolSearch from './SymbolSearch.jsx';
+import { closePreview, closeAgainstThesis } from './positionMath.js';
 
 /**
  * BookPanel — what master actually holds, and what Rāma wants to tell him about it.
@@ -53,6 +55,11 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
   const [showAdd, setShowAdd] = useState(false);
   const [showWithheld, setShowWithheld] = useState(false);
   const [expanded, setExpanded] = useState(null);
+  // Closing a position (Section 102). `closing` holds the position, never just its id, so the
+  // preview can be computed without another lookup that could go stale mid-edit.
+  const [closing, setClosing] = useState(null);
+  const [closeForm, setCloseForm] = useState({ price: '', quantity: '', date: '', fees: '' });
+  const [closeBusy, setCloseBusy] = useState(false);
 
   const [form, setForm] = useState({
     symbol: symbol || '', instrType: 'EQUITY', tradeStyle: 'POSITIONAL', side: 'BUY',
@@ -111,16 +118,69 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
     load();
   };
 
-  const closeOut = async (pos) => {
-    if (!hasBridge) return;
-    const price = window.prompt(
-      `Exit price for ${pos.symbol} (${pos.tradeStyle}, ${pos.netQty} @ ${pos.avgCost})`,
-      pos.lastPrice ?? '');
-    if (price === null || !Number.isFinite(Number(price))) return;
-    const res = await window.rama.marketIntel.ledgerClose({
-      user: currentUser, positionId: pos.positionId, price: Number(price),
+  /**
+   * WHAT THIS REPLACED, AND WHY IT MATTERED (spec Section 102).
+   *
+   * Closing a position used `window.prompt`. On a real-money action that is the worst control in the
+   * module: it accepts any string, shows no consequence, offers no quantity so a partial exit was
+   * impossible, no date, no fees, and no confirmation of what is about to be realised. Typing 24.50
+   * where 2450 was meant produced a recorded loss with no warning of any kind.
+   *
+   * It is now a form with a live preview: what this exit realises net of fees, how it sits against
+   * master's own recorded stop and target, and what remains open. The maths is in `positionMath.js`
+   * and is tested, because a wrong number beside a commit button converts caution into false
+   * confidence.
+   */
+  const beginClose = (pos) => {
+    setNote(null);
+    setClosing(pos);
+    setCloseForm({
+      // Prefilled with the last known price so the common case is one click — but editable, because
+      // the last stored close is not necessarily where master actually got out.
+      price: pos.lastPrice != null ? String(pos.lastPrice) : '',
+      quantity: String(Math.abs(Number(pos.netQty) || 0)),
+      date: '', fees: '',
     });
-    if (res?.ok === false) { setNote(res.error); return; }
+  };
+
+  const preview = useMemo(
+    () => (closing ? closePreview(closing, closeForm.price, closeForm.quantity, closeForm.fees) : null),
+    [closing, closeForm.price, closeForm.quantity, closeForm.fees],
+  );
+  const thesisNotes = useMemo(
+    () => (closing ? closeAgainstThesis(closing, closeForm.price) : []),
+    [closing, closeForm.price],
+  );
+
+  /**
+   * A PARTIAL EXIT IS AN OPPOSING FILL, NOT A CLOSE, and the two use different routes.
+   *
+   * `/ledger/close` takes no quantity — it exits the whole open position by design. Sending it a
+   * quantity would have been ignored silently while the preview here promised "60 remaining", so the
+   * form would have claimed a partial exit and the ledger would have recorded a full one. Reducing a
+   * position is what `/ledger/fill` is for, and routing by `preview.partial` keeps the preview and
+   * the record describing the same event.
+   */
+  const confirmClose = async (e) => {
+    e.preventDefault();
+    if (!hasBridge || !closing || !preview?.ok) return;
+    setCloseBusy(true);
+    const fees = Number(closeForm.fees) || 0;
+    const common = {
+      user: currentUser, positionId: closing.positionId,
+      price: preview.price, date: closeForm.date || null, fees,
+    };
+    const res = preview.partial
+      ? await window.rama.marketIntel.ledgerFill({
+        ...common,
+        side: preview.isShort ? 'BUY' : 'SELL',
+        quantity: preview.quantity,
+        note: 'partial exit',
+      })
+      : await window.rama.marketIntel.ledgerClose({ ...common, note: 'closing fill' });
+    setCloseBusy(false);
+    if (res?.ok === false) { setNote(res.error || 'Could not record the exit'); return; }
+    setClosing(null);
     load();
   };
 
@@ -290,9 +350,18 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
           <div className="section-label">RECORD A TRADE YOU TOOK</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(96px,1fr))',
             gap: '10px' }}>
-            <Field label="SYMBOL">
-              <input className="input" required value={form.symbol}
-                     onChange={(e) => setForm({ ...form, symbol: e.target.value })} />
+            {/* Searchable here too (Section 102). This form had the same raw text box, and it is the
+                worse place for it: a mistyped symbol on a recorded trade puts a position in the book
+                that can never be priced, and the portfolio totals then silently exclude it. */}
+            <Field label="INSTRUMENT">
+              <SymbolSearch
+                id="book-symbol"
+                value={form.symbol}
+                exchange={exchange || 'NSE'}
+                onPick={({ symbol: s }) => setForm((f) => ({ ...f, symbol: s }))}
+                ariaLabel="Search for the instrument you traded"
+                placeholder="search, or type the exact ticker"
+              />
             </Field>
             <Field label="STYLE">
               <select className="input" value={form.tradeStyle}
@@ -365,6 +434,102 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
         </form>
       )}
 
+      {/* ── Closing a position: a form with a preview, not a native prompt (Section 102) ────── */}
+      {closing && canConfig && (
+        <form className="hud-card" onSubmit={confirmClose}
+              style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px',
+                borderColor: 'var(--amber)' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap' }}>
+            <div className="section-label">
+              EXIT {closing.symbol} — {preview?.direction || ''} {Math.abs(closing.netQty)} @ {money(closing.avgCost)}
+            </div>
+            <span style={{ fontSize: '12px', color: STYLE_COLOR[closing.tradeStyle] }}>
+              {closing.tradeStyle}
+            </span>
+            <span style={{ flex: 1 }} />
+            <button type="button" className="btn btn-sm" onClick={() => setClosing(null)}>cancel</button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(96px,1fr))',
+            gap: '10px' }}>
+            <Field label="EXIT PRICE">
+              <input className="input" type="number" step="any" min="0" required autoFocus
+                     value={closeForm.price}
+                     onChange={(e) => setCloseForm({ ...closeForm, price: e.target.value })} />
+            </Field>
+            <Field label="QUANTITY">
+              <input className="input" type="number" step="any" min="0"
+                     max={Math.abs(Number(closing.netQty) || 0)}
+                     value={closeForm.quantity}
+                     onChange={(e) => setCloseForm({ ...closeForm, quantity: e.target.value })} />
+            </Field>
+            <Field label="DATE">
+              <input className="input" type="date" value={closeForm.date}
+                     onChange={(e) => setCloseForm({ ...closeForm, date: e.target.value })} />
+            </Field>
+            <Field label="FEES">
+              <input className="input" type="number" step="any" min="0" value={closeForm.fees}
+                     onChange={(e) => setCloseForm({ ...closeForm, fees: e.target.value })} />
+            </Field>
+          </div>
+
+          {/* The consequence, before the commit. This is the whole reason the prompt had to go. */}
+          <div aria-live="polite" style={{
+            padding: '9px 11px', borderRadius: 'var(--radius)', lineHeight: 1.7,
+            background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)',
+            fontSize: '12.5px',
+          }}>
+            {preview?.ok ? (
+              <>
+                <div>
+                  <span style={{ color: 'var(--muted)' }}>This realises </span>
+                  <strong style={{ color: pnlColor(preview.net), fontSize: '13.5px' }}>
+                    {signed(preview.net)}
+                  </strong>
+                  {preview.pctOnCost !== null && (
+                    <span style={{ color: pnlColor(preview.pctOnCost) }}>
+                      {' '}({preview.pctOnCost >= 0 ? '+' : ''}{preview.pctOnCost.toFixed(2)}%)
+                    </span>
+                  )}
+                  <span style={{ color: 'var(--muted)' }}>
+                    {' '}on {preview.quantity} at {money(preview.price)}
+                    {Number(closeForm.fees) > 0 && ` · gross ${signed(preview.gross)} less fees`}
+                  </span>
+                </div>
+                <div style={{ color: 'var(--muted)' }}>
+                  {preview.partial
+                    ? `Partial exit — ${preview.remaining} stays open and is recorded as a `
+                      + 'reducing fill, not a close.'
+                    : 'Closes the position in full.'}
+                </div>
+                {thesisNotes.map((n, i) => (
+                  <div key={i} style={{
+                    color: n.tone === 'good' ? 'var(--green)'
+                      : n.tone === 'warn' ? 'var(--amber)' : 'var(--muted)',
+                  }}>
+                    {n.text}
+                  </div>
+                ))}
+              </>
+            ) : (
+              <span style={{ color: 'var(--muted)' }}>{preview?.reason || 'Enter an exit price.'}</span>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button type="submit" className="btn btn-primary btn-sm"
+                    disabled={!preview?.ok || closeBusy}
+                    title={preview?.ok ? '' : (preview?.reason || 'Enter an exit price')}>
+              {closeBusy ? 'recording…'
+                : preview?.partial ? `record exit of ${preview.quantity}` : 'close the position'}
+            </button>
+            {!preview?.ok && (
+              <span style={{ fontSize: '12px', color: 'var(--amber)' }}>{preview?.reason}</span>
+            )}
+          </div>
+        </form>
+      )}
+
       {/* ── Open positions ──────────────────────────────────────────────────── */}
       <div className="hud-card" style={{ padding: '12px 14px' }}>
         <div className="section-label" style={{ marginBottom: '8px' }}>
@@ -380,14 +545,24 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
               <thead>
                 <tr style={{ color: 'var(--muted)', textAlign: 'left' }}>
+                  {/* Every abbreviation carries its meaning (Section 102). Nine short column heads
+                      with no explanation is a table only its author can read. */}
                   <th style={{ padding: '4px 6px' }}>SYMBOL</th>
-                  <th style={{ padding: '4px 6px' }}>STYLE</th>
-                  <th style={{ padding: '4px 6px', textAlign: 'right' }}>QTY</th>
-                  <th style={{ padding: '4px 6px', textAlign: 'right' }}>AVG</th>
-                  <th style={{ padding: '4px 6px', textAlign: 'right' }}>LAST</th>
-                  <th style={{ padding: '4px 6px', textAlign: 'right' }}>P&amp;L</th>
-                  <th style={{ padding: '4px 6px', textAlign: 'right' }}>%</th>
-                  <th style={{ padding: '4px 6px', textAlign: 'right' }}>DAYS</th>
+                  <th style={{ padding: '4px 6px' }}
+                      title="How you intended to hold it. Drives which warnings Rāma raises — an
+intraday position still open overnight is the expensive one.">STYLE</th>
+                  <th style={{ padding: '4px 6px', textAlign: 'right' }}
+                      title="Net open quantity. Negative means short.">QTY</th>
+                  <th style={{ padding: '4px 6px', textAlign: 'right' }}
+                      title="Average cost across every fill, including fees you recorded.">AVG</th>
+                  <th style={{ padding: '4px 6px', textAlign: 'right' }}
+                      title="Last stored close for this symbol. Amber when the stored price is behind.">LAST</th>
+                  <th style={{ padding: '4px 6px', textAlign: 'right' }}
+                      title="Unrealised profit or loss at the last stored price.">P&amp;L</th>
+                  <th style={{ padding: '4px 6px', textAlign: 'right' }}
+                      title="The same, as a percentage of what you put in.">%</th>
+                  <th style={{ padding: '4px 6px', textAlign: 'right' }}
+                      title="Calendar days since your first fill.">DAYS</th>
                   <th />
                 </tr>
               </thead>
@@ -397,16 +572,28 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
                     <tr style={{ borderTop: '1px solid var(--border)', cursor: 'pointer' }}
                         onClick={() => setExpanded(expanded === p.positionId ? null : p.positionId)}>
                       <td style={{ padding: '5px 6px', fontWeight: 600 }}>
-                        <span onClick={(e) => { e.stopPropagation(); onPickSymbol?.(p.symbol); }}
-                              style={{ textDecoration: 'underline dotted' }}
-                              title="show this symbol on the chart">{p.symbol}</span>
+                        {/* A BUTTON, NOT A SPAN (Section 102). This was a `<span>` with an onClick:
+                            not focusable, not reachable by keyboard, and not announced as an action —
+                            so the only route from the book to the chart was mouse-only. */}
+                        <button type="button"
+                                onClick={(e) => { e.stopPropagation(); onPickSymbol?.(p.symbol); }}
+                                style={{
+                                  background: 'none', border: 'none', padding: 0, font: 'inherit',
+                                  color: 'var(--accent)', cursor: 'pointer',
+                                  textDecoration: 'underline dotted',
+                                }}
+                                title={`Show ${p.symbol} on the chart`}>{p.symbol}</button>
                         <span style={{ color: 'var(--muted)', fontWeight: 400 }}>
                           {' '}{p.instrType !== 'EQUITY' ? p.instrType : ''}
                         </span>
                       </td>
                       <td style={{ padding: '5px 6px' }}>
-                        <span style={{ color: STYLE_COLOR[p.tradeStyle] || 'var(--muted)' }}>
-                          {p.tradeStyle}{p.styleInferred ? '?' : ''}
+                        <span style={{ color: STYLE_COLOR[p.tradeStyle] || 'var(--muted)' }}
+                              title={p.styleInferred
+                                ? 'Assumed, not chosen — this position predates trade styles. Open '
+                                  + 'the row and set the real one to get the right warnings.'
+                                : 'You set this style.'}>
+                          {p.tradeStyle}{p.styleInferred ? ' (assumed)' : ''}
                         </span>
                       </td>
                       <td style={{ padding: '5px 6px', textAlign: 'right' }}>{p.netQty}</td>
@@ -427,8 +614,11 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
                       <td style={{ padding: '5px 6px', textAlign: 'right' }}>
                         {canConfig && (
                           <button type="button" className="btn btn-sm"
-                                  onClick={(e) => { e.stopPropagation(); closeOut(p); }}>
-                            close
+                                  aria-expanded={closing?.positionId === p.positionId}
+                                  onClick={(e) => { e.stopPropagation(); beginClose(p); }}
+                                  title="Open the exit form — it shows what the exit realises before
+anything is recorded.">
+                            exit…
                           </button>
                         )}
                       </td>

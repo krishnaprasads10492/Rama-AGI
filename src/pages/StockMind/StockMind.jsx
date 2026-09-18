@@ -4,8 +4,9 @@ import PriceChart from './PriceChart.jsx';
 import BookPanel from './BookPanel.jsx';
 import WhyPanel from './WhyPanel.jsx';
 import PanelBoard from '@components/PanelBoard.jsx';
+import SymbolSearch from './SymbolSearch.jsx';
 import { barsFor, defaultRangeFor, reconcileRange, capBarsFor } from './timeframes.js';
-import { optionsFor } from './symbols.js';
+import { riskBudget, whyCannotPredict } from './positionMath.js';
 
 /**
  * StockMind — market intelligence panel.
@@ -211,10 +212,10 @@ export default function StockMind() {
     setInventory(res?.ok === false ? [] : (res.data?.inventory || []));
   }, [currentUser]);
 
-  const symbolGroups = useMemo(
-    () => optionsFor(exchange, inventory, sym),
-    [exchange, inventory, sym],
-  );
+  // Does Rāma already hold bars for the selected instrument? Worth saying, because a stored series
+  // draws instantly and an unstored one needs a network fetch that may fail.
+  const heldHere = useMemo(() => inventory.some((r) => String(r?.symbol || '').toUpperCase() === sym),
+    [inventory, sym]);
 
   // The tracked position in this symbol, so the chart can mark master's own fills and draw the
   // levels he committed to. Section 79: "where am I inside this move?" was previously answerable
@@ -340,6 +341,18 @@ export default function StockMind() {
   const dataIsMock = result && result.dataSource !== 'real';
   const latestDeriv = derivs?.latest || null;
 
+  // RISK % in money, and the position size it implies against master's own stop when he has one.
+  const budget = useMemo(
+    () => riskBudget(capital, riskPct, lastClose, held?.thesis?.stopPrice ?? null),
+    [capital, riskPct, lastClose, held?.thesis?.stopPrice],
+  );
+
+  // One sentence for why Generate Signals cannot run, so the greyed-out button is never a mystery.
+  const cannotPredict = useMemo(() => whyCannotPredict({
+    inElectron, canRequest, busy: status === 'requesting',
+    symbol: sym, capital, riskPct, lastClose,
+  }), [canRequest, status, sym, capital, riskPct, lastClose]);
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', background: 'var(--surface)',
@@ -397,41 +410,46 @@ export default function StockMind() {
         <div className="hud-card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div className="section-label">SIGNAL REQUEST</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
-            {/* SYMBOL is a picker AND a text box (Section 101). The picker exists because a typo in
-                a free-text field does not read as a typo — the request succeeds, the store has
-                nothing under the misspelling, and the chart reports "no bars", which is the same
-                message a real symbol with no history produces. The text box STAYS because NSE lists
-                about two thousand names and this list is a few dozen: a picker that cannot express
-                a symbol master wants would be a downgrade from a text box (I11). Both write the
-                same state, so they cannot disagree. */}
+            {/* SYMBOL IS A SEARCH (Section 102). Master's objection to the previous version was
+                exact: a curated dropdown of fifty names plus a raw text box cannot answer "what is
+                Reliance Power called", which is the question a picker exists for. This asks the
+                provider, falls back to Rāma's own list when the engine cannot be reached, and still
+                commits free text on Enter (I11). Picking a result also sets the exchange, because
+                the exchange is a property of the instrument rather than an independent choice —
+                master could previously pick RELIANCE with NASDAQ and get nothing back. */}
             <div>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>SYMBOL</div>
-              <select className="input" value={sym} aria-label="Pick a symbol"
-                      onChange={e => setSymbol(e.target.value)}>
-                {symbolGroups.map(g => (
-                  <optgroup key={g.group} label={g.group}>
-                    {g.items.map(o => (
-                      <option key={o.id} value={o.id}>
-                        {o.held ? '● ' : ''}{o.label}{o.label === o.id ? '' : ` (${o.id})`}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-              <input className="input" value={symbol} onChange={e => setSymbol(e.target.value)}
-                     placeholder="or type any symbol" aria-label="Or type a symbol"
-                     style={{ marginTop: '4px' }} />
+              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>
+                <label htmlFor="stockmind-symbol">INSTRUMENT</label>
+              </div>
+              <SymbolSearch
+                id="stockmind-symbol"
+                value={sym}
+                exchange={exchange}
+                inventory={inventory}
+                onPick={({ symbol: s, exchange: ex }) => {
+                  setSymbol(s);
+                  if (ex && ex !== exchange) setExchange(ex);
+                }}
+                ariaLabel="Search for a stock, index, ETF, currency or crypto"
+              />
               <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>
-                ● already stored — draws with no network call
+                {heldHere
+                  ? '● Rāma already holds bars for this one'
+                  : 'Type a name or a ticker. Any market.'}
               </div>
             </div>
             <div>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>EXCHANGE</div>
-              <select className="input" value={exchange} onChange={e => setExchange(e.target.value)}>
-                <option value="NSE">NSE</option>
-                <option value="BSE">BSE</option>
-                <option value="NASDAQ">NASDAQ</option>
-                <option value="NYSE">NYSE</option>
+              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>
+                <label htmlFor="stockmind-exchange">EXCHANGE</label>
+              </div>
+              <select className="input" id="stockmind-exchange" value={exchange}
+                      onChange={e => setExchange(e.target.value)}
+                      title="Set automatically when you pick a search result. Change it only to
+override where an unlisted ticker should be looked up.">
+                <option value="NSE">NSE — India</option>
+                <option value="BSE">BSE — India</option>
+                <option value="NASDAQ">NASDAQ — US</option>
+                <option value="NYSE">NYSE — US</option>
               </select>
             </div>
             <div>
@@ -451,12 +469,37 @@ export default function StockMind() {
                      title="Taken from the last stored bar rather than typed, so a signal cannot be priced off a stale number." />
             </div>
             <div>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>CAPITAL</div>
-              <input className="input" type="number" value={capital} onChange={e => setCapital(e.target.value)} />
+              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>
+                <label htmlFor="stockmind-capital">CAPITAL</label>
+              </div>
+              <input className="input" id="stockmind-capital" type="number" min="0" step="1000"
+                     value={capital} onChange={e => setCapital(e.target.value)} />
+              <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>
+                {budget.capital != null
+                  ? budget.capital.toLocaleString()
+                  : 'the amount you are sizing against'}
+              </div>
             </div>
+            {/* RISK % USED TO SHOW ONLY A PERCENTAGE (Section 102), so the number master was actually
+                choosing — how much money is at stake — was his to work out in his head on every
+                change. It is one multiplication and it is the whole point of the field. */}
             <div>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>RISK %</div>
-              <input className="input" type="number" step="0.5" min="0.5" max="5" value={riskPct} onChange={e => setRiskPct(e.target.value)} />
+              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>
+                <label htmlFor="stockmind-risk">RISK %</label>
+              </div>
+              <input className="input" id="stockmind-risk" type="number" step="0.25" min="0.25"
+                     max="10" value={riskPct} onChange={e => setRiskPct(e.target.value)} />
+              <div style={{ fontSize: '12px', marginTop: '2px',
+                color: budget.ok ? 'var(--amber)' : 'var(--muted)' }}>
+                {budget.ok
+                  ? `${budget.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })} at risk`
+                  : (budget.reason || '—')}
+                {budget.ok && budget.units != null && (
+                  <span style={{ color: 'var(--muted)' }}>
+                    {' '}· about {budget.units.toLocaleString()} units to your stop
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -478,23 +521,36 @@ export default function StockMind() {
               {capBarsFor(barInterval) != null
                 && ` · max ${capBarsFor(barInterval).toLocaleString()}`}
             </span>
-            <button className="btn" disabled={barsBusy || !canView} onClick={() => loadBars(false)}>
-              {barsBusy ? 'Loading…' : '↺ Load history'}
+            {/* THE TWO LOAD BUTTONS NEEDED DISTINGUISHING (Section 102). "Load history" and
+                "Fetch & store" differ only in whether the network is touched, and only one of them
+                said so — a distinction only the author understood. They now read as "from disk" and
+                "from the internet", which is the actual difference. */}
+            <button className="btn" disabled={barsBusy || !canView} onClick={() => loadBars(false)}
+                    title="Read bars already stored on this machine. No network.">
+              {barsBusy ? 'Loading…' : '↺ From disk'}
             </button>
             <button className="btn" disabled={barsBusy || !canView} onClick={() => loadBars(true)}
-                    title="Fetch from the provider chain into the local store. Reaches back as far as the provider allows.">
-              ⇩ Fetch &amp; store
+                    title="Ask the provider chain for anything missing and store it. Reaches back as
+far as the provider allows, which for intraday is a few days to two years.">
+              ⇩ Fetch from provider
             </button>
-            <button className="btn" disabled={newsBusy || !canView} onClick={loadNews}>
+            <button className="btn" disabled={newsBusy || !canView} onClick={loadNews}
+                    title="Pull recent headlines for this instrument and score their tone.">
               {newsBusy ? 'Reading…' : '📰 Read news'}
             </button>
             <div style={{ flex: 1 }} />
-            {!canRequest && (
-              <span style={{ fontSize: '12.5px', color: 'var(--amber)' }}>Requires Operator tier or higher</span>
+            {/* A DISABLED BUTTON WITH NO STATED CAUSE IS A DEAD END. Master could not tell whether
+                Rāma was busy, whether his tier was too low, or whether a field above was empty. */}
+            {cannotPredict && (
+              <span style={{ fontSize: '12.5px', color: 'var(--amber)', maxWidth: '42ch',
+                lineHeight: 1.5 }}>
+                {cannotPredict}
+              </span>
             )}
             <button
               className="btn btn-primary"
-              disabled={!canRequest || status === 'requesting' || !sym || !capital || !lastClose}
+              disabled={!!cannotPredict}
+              title={cannotPredict || 'Ask the engine for signals on this instrument'}
               onClick={runPredict}
             >
               {status === 'requesting' ? 'Requesting…' : '⚡ Generate Signals'}
@@ -681,7 +737,27 @@ export default function StockMind() {
                     thesis={held?.thesis || null} />
         )}
 
-        {/* Signals */}
+        {/* THE SIGNALS TAB RENDERED NOTHING AT ALL before a request (Section 102): the whole block
+            was gated on `result`, so clicking the tab gave master a blank page with no explanation
+            and no way to tell it apart from a crash. */}
+        {tab === 'signals' && !result && (
+          <div className="hud-card" style={{ padding: '20px', display: 'flex',
+            flexDirection: 'column', gap: '10px', alignItems: 'flex-start' }}>
+            <div className="section-label">SIGNALS</div>
+            <div style={{ fontSize: '12.5px', color: 'var(--muted)', lineHeight: 1.7,
+              maxWidth: '62ch' }}>
+              No signals yet for {sym}. A signal is a request, not a feed — Rāma does not generate
+              them in the background, because a stale entry price is worse than none.
+              {cannotPredict && <><br /><span style={{ color: 'var(--amber)' }}>{cannotPredict}</span></>}
+            </div>
+            <button className="btn btn-primary" disabled={!!cannotPredict}
+                    title={cannotPredict || 'Ask the engine for signals on this instrument'}
+                    onClick={runPredict}>
+              {status === 'requesting' ? 'Requesting…' : `⚡ Generate signals for ${sym}`}
+            </button>
+          </div>
+        )}
+
         {tab === 'signals' && result && (
           <div className="hud-card" style={{ padding: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', flexWrap: 'wrap' }}>
@@ -719,9 +795,23 @@ export default function StockMind() {
                     ))}
                   </tbody>
                 </table>
-                <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px' }}>
-                  Click a row to overlay its levels on the chart. Each row is a different risk
-                  geometry over <strong>one</strong> prediction — not {signals.length} independent forecasts.
+                {/* CLICKING A ROW PUT LEVELS ON A CHART THAT IS ON ANOTHER TAB, so the feedback for
+                    the action was invisible (Section 102). The selection is now confirmed here, with
+                    a way to go and look. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px',
+                  flexWrap: 'wrap', fontSize: '12px', color: 'var(--muted)' }}>
+                  <span style={{ maxWidth: '62ch', lineHeight: 1.6 }}>
+                    Each row is a different risk geometry over <strong>one</strong> prediction — not
+                    {' '}{signals.length} independent forecasts. Column meanings: ENTRY/SL/T1–T3 are
+                    price levels, R:R is reward divided by risk, PROB is the modelled chance of
+                    reaching T1, GRADE is the engine's own confidence band.
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  {selected && (
+                    <button type="button" className="btn btn-sm" onClick={() => setTab('chart')}>
+                      show {selected.variant || `#${selected.rank}`} on the chart →
+                    </button>
+                  )}
                 </div>
               </>
             ) : (

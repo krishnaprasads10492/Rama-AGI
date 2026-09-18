@@ -181,6 +181,7 @@ export default function PriceChart({
   const [layers, setLayers] = useState({ fills: true, levels: true, cone: true });
   const [full, setFull] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
 
   const prefs = useRef(loadPrefs());
   const [chartType, setChartType] = useState(() => {
@@ -647,12 +648,32 @@ export default function PriceChart({
     try { chartRef.current?.timeScale().fitContent(); } catch { /* no chart yet */ }
   }, []);
 
+  // A menu that only closes by clicking its own button sits over the chart master is trying to read.
+  useEffect(() => {
+    if (!menuOpen && !viewOpen) return undefined;
+    const away = (e) => {
+      if (holder.current?.contains(e.target)) { setMenuOpen(false); setViewOpen(false); return; }
+      if (!e.target.closest?.('[aria-haspopup="true"], [role="group"][aria-label]')) {
+        setMenuOpen(false);
+        setViewOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', away);
+    return () => document.removeEventListener('mousedown', away);
+  }, [menuOpen, viewOpen]);
+
   // Keyboard, because a chart master uses every day should not need the mouse for the six things he
   // changes most. Scoped to the chart's own focus, never a document-level listener that would
   // hijack typing in the symbol field.
   const onKeyDown = (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.toLowerCase();
+    if (k === 'escape' && (menuOpen || viewOpen)) {
+      setMenuOpen(false);
+      setViewOpen(false);
+      e.preventDefault();
+      return;
+    }
     const type = CHART_TYPES.find((t) => t.key === k);
     if (type) { setChartType(type.id); e.preventDefault(); return; }
     if (k === 'f') { setFull((v) => !v); e.preventDefault(); return; }
@@ -792,30 +813,65 @@ export default function PriceChart({
       <div style={{
         display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', paddingBottom: '6px',
       }}>
-        <div style={{ display: 'flex', gap: '3px' }} role="group" aria-label="Chart type">
-          {CHART_TYPES.map((t) => (
-            <button key={t.id} type="button" style={seg(t.id === chartType)}
-                    aria-pressed={t.id === chartType}
-                    onClick={() => setChartType(t.id)}
-                    title={`${t.label} (${t.key})`}>
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: '3px' }} role="group" aria-label="Price scale">
-          {SCALE_MODES.map((m) => (
-            <button key={m.id} type="button" style={seg(m.id === scaleMode)}
-                    aria-pressed={m.id === scaleMode}
-                    onClick={() => setScaleMode(m.id)} title={m.title}>
-              {m.label}
-            </button>
-          ))}
+        {/* CHART TYPE AND SCALE ARE IN A MENU, NOT EIGHT MORE BUTTONS (Section 102).
+            The first draft of this toolbar put nine intervals, ten windows, five chart types, three
+            scales, an indicator menu and five chips above a 400px chart — about thirty controls, which
+            is its own usability defect however capable each one is. The timeframe rows stay visible
+            because they are what master changes constantly; presentation is a setting he picks once,
+            so it collapses. The current choice is in the button label, so nothing is hidden. */}
+        <div style={{ position: 'relative' }}>
+          <button type="button" style={chip(viewOpen)}
+                  aria-expanded={viewOpen} aria-haspopup="true"
+                  onClick={() => { setViewOpen((v) => !v); setMenuOpen(false); }}
+                  title="How the price is drawn, and which price scale is used">
+            {CHART_TYPES.find((t) => t.id === chartType)?.label || 'Candles'}
+            {scaleMode !== 'normal' ? ` · ${SCALE_MODES.find((m) => m.id === scaleMode)?.label}` : ''} ▾
+          </button>
+          {viewOpen && (
+            <div style={{
+              position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: '4px',
+              background: 'var(--panel, #131722)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius, 6px)', padding: '6px', minWidth: '200px',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+            }} role="group" aria-label="Chart appearance">
+              <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '2px 6px 4px' }}>
+                DRAW AS
+              </div>
+              <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', padding: '0 4px 6px' }}>
+                {CHART_TYPES.map((t) => (
+                  <button key={t.id} type="button" style={seg(t.id === chartType)}
+                          aria-pressed={t.id === chartType}
+                          onClick={() => setChartType(t.id)}
+                          title={`${t.label} (press ${t.key})`}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '2px 6px 4px',
+                borderTop: '1px solid var(--border)' }}>
+                PRICE SCALE
+              </div>
+              <div style={{ display: 'flex', gap: '3px', padding: '0 4px 4px' }}>
+                {SCALE_MODES.map((m) => (
+                  <button key={m.id} type="button" style={seg(m.id === scaleMode)}
+                          aria-pressed={m.id === scaleMode}
+                          onClick={() => setScaleMode(m.id)} title={m.title}>
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '4px 6px 2px',
+                borderTop: '1px solid var(--border)', lineHeight: 1.5 }}>
+                {SCALE_MODES.find((m) => m.id === scaleMode)?.title}
+              </div>
+            </div>
+          )}
         </div>
 
         <div style={{ position: 'relative' }}>
           <button type="button" style={chip(active.length > 0)}
                   aria-expanded={menuOpen} aria-haspopup="true"
-                  onClick={() => setMenuOpen((v) => !v)}
+                  onClick={() => { setMenuOpen((v) => !v); setViewOpen(false); }}
                   title="Overlays computed from the bars on screen — never a forecast">
             indicators{active.length > 0 ? ` (${active.length})` : ''} ▾
           </button>

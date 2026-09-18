@@ -44,7 +44,8 @@
     "verify:timeframes": "node scripts/verifyTimeframes.mjs",
     "verify:indicators": "node scripts/verifyIndicators.mjs",
     "verify:symbols": "node scripts/verifySymbols.mjs",
-    "verify": "node scripts/verifyAudit.cjs && node scripts/verifyUpdateEngine.cjs && node scripts/verifySelfBuild.cjs && node scripts/verifyUpdateChannel.cjs && node scripts/simulateUpdateChannel.cjs && node scripts/verifyWorkspace.cjs && node scripts/verifySelfModel.cjs && node scripts/verifyOllamaCatalog.cjs && node scripts/verifyOllamaLibrary.cjs && node scripts/verifyWebResearch.cjs && node scripts/verifyRefresh.cjs && node scripts/verifyEngineDiagnosis.cjs && node scripts/verifyTimeframes.mjs && node scripts/verifyIndicators.mjs && node scripts/verifySymbols.mjs && node scripts/auditRenderer.cjs",
+    "verify:position-math": "node scripts/verifyPositionMath.mjs",
+    "verify": "node scripts/verifyAudit.cjs && node scripts/verifyUpdateEngine.cjs && node scripts/verifySelfBuild.cjs && node scripts/verifyUpdateChannel.cjs && node scripts/simulateUpdateChannel.cjs && node scripts/verifyWorkspace.cjs && node scripts/verifySelfModel.cjs && node scripts/verifyOllamaCatalog.cjs && node scripts/verifyOllamaLibrary.cjs && node scripts/verifyWebResearch.cjs && node scripts/verifyRefresh.cjs && node scripts/verifyEngineDiagnosis.cjs && node scripts/verifyTimeframes.mjs && node scripts/verifyIndicators.mjs && node scripts/verifySymbols.mjs && node scripts/verifyPositionMath.mjs && node scripts/auditRenderer.cjs",
     "rebuild": "electron-rebuild",
     "start": "electron .",
     "preview": "vite preview"

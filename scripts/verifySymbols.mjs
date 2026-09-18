@@ -133,6 +133,40 @@ eq('an empty symbol is not known', sym.isKnown('', 'NSE'), false);
 check('every group is non-empty',
   sym.optionsFor('NSE', inventory, 'X').every((g) => g.items.length > 0));
 
+// ── The offline search, which is the fallback when the engine cannot answer ───
+//
+// This is not a theoretical branch: it is what master sees today, because his engine is not running.
+// So the ranking matters. A picker that puts the right answer fourth is barely better than none.
+console.log('\n--- offline search ranking ---');
+
+const ls = (q, inv = []) => sym.localSearch(q, 'NSE', inv, 12).map((r) => r.id);
+
+check('an exact ticker ranks first', ls('TCS')[0] === 'TCS', ls('TCS').join(','));
+check('a prefix ranks above a mere containment',
+  ls('NIF').indexOf('NIFTY50') < ls('NIF').indexOf('MIDCPNIFTY')
+  || !ls('NIF').includes('MIDCPNIFTY'), ls('NIF').join(','));
+check('a human name matches, not only the ticker',
+  ls('BANK').includes('BANKNIFTY'), ls('BANK').join(','));
+check('lower case works', ls('reliance')[0] === 'RELIANCE');
+check('a stored series outranks an equally-good unstored one',
+  sym.localSearch('TA', 'NSE', [{ symbol: 'TATASTEEL', exchange: 'NSE' }], 12)[0].id === 'TATASTEEL',
+  sym.localSearch('TA', 'NSE', [{ symbol: 'TATASTEEL', exchange: 'NSE' }], 12)[0].id);
+check('no query returns something rather than an empty panel', sym.localSearch('', 'NSE', []).length > 0);
+check('stored series lead the no-query list',
+  sym.localSearch('', 'NSE', [{ symbol: 'RELIANCE', exchange: 'NSE' }], 12)[0].held === true);
+eq('nonsense matches nothing rather than everything', ls('ZZZQQQ').length, 0);
+check('the limit is respected', sym.localSearch('A', 'NSE', [], 5).length <= 5);
+check('every result carries the fields the combobox renders',
+  sym.localSearch('NIF', 'NSE', [], 12).every((r) => typeof r.id === 'string'
+    && typeof r.label === 'string' && typeof r.group === 'string' && typeof r.held === 'boolean'));
+check('results are unique',
+  new Set(ls('A')).size === ls('A').length);
+for (const bad of [null, undefined, 0, {}, [], '__proto__']) {
+  let threw = null;
+  try { sym.localSearch(bad, bad, bad, bad); } catch (e) { threw = e.message; }
+  check(`localSearch handles ${JSON.stringify(bad)}`, threw === null, threw);
+}
+
 // ── The cross-language drift check ────────────────────────────────────────────
 //
 // This is the assertion that stops the dropdown promising something the engine cannot resolve.

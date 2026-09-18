@@ -638,6 +638,28 @@ def store_inventory():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/symbols/search")
+def symbols_search(q: str, limit: int = 12):
+    """
+    Search the provider for an instrument by name or ticker (spec Section 102).
+
+    Master's objection to the previous picker was exact: nobody can know every stock and index in
+    every market, so a curated list beside a bare text box is not a picker. This is the honest
+    answer — ask the provider, which is what a trading platform does.
+
+    A FAILURE IS REPORTED, NEVER RETURNED AS "NOTHING MATCHED". The renderer falls back to its own
+    offline list when this route cannot answer, and it can only choose to do that if it can tell the
+    two apart. `{results: [], ok: true}` means the provider has no such instrument;
+    `{ok: false, reason}` means Rāma could not ask.
+    """
+    try:
+        from engine import providers
+        return {"ok": True, "query": q, "results": providers.search_symbols(q, limit)}
+    except Exception as e:
+        logger.warning(f"Symbol search failed for {q!r}: {e}")
+        return {"ok": False, "query": q, "results": [], "reason": str(e)}
+
+
 # ── Multi-horizon (spec Section 73) ───────────────────────────────────────────
 
 @app.get("/horizons")

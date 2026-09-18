@@ -177,6 +177,7 @@ const RAMA_API = {
     ohlcv:           (opts) => ipcRenderer.invoke('market:ohlcv', opts),
     schedulerStatus: (opts) => ipcRenderer.invoke('market:scheduler-status', opts),
     inventory:       (opts) => ipcRenderer.invoke('market:inventory', opts),
+    symbolSearch:    (opts) => ipcRenderer.invoke('market:symbol-search', opts),
     news:            (opts) => ipcRenderer.invoke('market:news', opts),
     newsCoverage:    (opts) => ipcRenderer.invoke('market:news-coverage', opts),
     derivatives:     (opts) => ipcRenderer.invoke('market:derivatives', opts),

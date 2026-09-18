@@ -220,6 +220,64 @@ check("a weekly series two sessions behind is not stale",
 check("but a daily series two sessions behind is",
       store.is_stale("TESTSYM", "NSE", "1d"))
 
+# ── Symbol search must only offer names the fetcher can use (spec Section 102) ──
+#
+# The picker is now backed by the provider's own search, which returns already-suffixed Yahoo tickers
+# for every market. If `from_yahoo_symbol` does not round-trip, the picker offers master a name and the
+# fetcher turns it into something else — `RWC.AX` became `RWC.AX.NS` before the suffix branch existed,
+# which is precisely the "offers something it cannot resolve" failure the picker was meant to remove.
+print("\n--- symbol search: every offerable name round-trips ---")
+
+for _y, _disp in [
+    ("RELIANCE.NS", "NSE"), ("TCS.NS", "NSE"), ("RELIANCE.BO", "BSE"),
+    ("^NSEI", "NSE"), ("^GSPC", "SNP"), ("^N225", "Osaka"),
+    ("AAPL", "NASDAQ"), ("RS", "NYSE"),
+    ("RWC.AX", "Australian"), ("RIGD.IL", "International Orderbook - London"),
+    ("BTC-USD", "CCC"), ("GC=F", "COMEX"), ("USDINR=X", "CCY"),
+]:
+    _sym, _ex = providers.from_yahoo_symbol(_y, _disp)
+    _back = providers.to_yahoo_symbol(_sym, _ex)
+    check(f"{_y} round-trips via ({_sym}, {_ex})", _back == _y, f"got {_back}")
+
+check("a mapped index comes back as Rama's canonical name, not the Yahoo ticker",
+      providers.from_yahoo_symbol("^NSEI", "NSE")[0] == "NIFTY50",
+      str(providers.from_yahoo_symbol("^NSEI", "NSE")))
+check("an alias never wins over the canonical name",
+      providers.YAHOO_TO_RAMA.get("^NSEI") == "NIFTY50",
+      str(providers.YAHOO_TO_RAMA.get("^NSEI")))
+check("a bare ticker from an unnameable exchange is not given .NS",
+      providers.from_yahoo_symbol("XYZ", "Some Exchange")[1] == "US",
+      str(providers.from_yahoo_symbol("XYZ", "Some Exchange")))
+check("an empty ticker degrades rather than throwing",
+      providers.from_yahoo_symbol("", "")[0] == "")
+check("every Yahoo value in the forward map round-trips through the reverse map",
+      all(providers.to_yahoo_symbol(*providers.from_yahoo_symbol(_v)) == _v
+          for _v in providers.YAHOO_SYMBOLS.values()),
+      str([_v for _v in providers.YAHOO_SYMBOLS.values()
+           if providers.to_yahoo_symbol(*providers.from_yahoo_symbol(_v)) != _v]))
+
+# The search itself needs network, so it is attempted and not required — same rule as the fetch below.
+try:
+    _hits = providers.search_symbols("reliance", limit=6)
+    check("search returned usable rows", len(_hits) > 0, "network may be blocked")
+    if _hits:
+        check("every hit carries a symbol and an exchange",
+              all(h.get("symbol") and h.get("exchange") for h in _hits))
+        check("every hit is fetchable — its symbol resolves back to its own Yahoo ticker",
+              all(providers.to_yahoo_symbol(h["symbol"], h["exchange"]) == h["yahooSymbol"]
+                  for h in _hits),
+              str([h for h in _hits
+                   if providers.to_yahoo_symbol(h["symbol"], h["exchange"]) != h["yahooSymbol"]]))
+        check("no option contracts are offered — no history can be drawn for one",
+              all(h.get("kind") != "Option" for h in _hits))
+        check("hits are unique on (symbol, exchange)",
+              len({(h["symbol"], h["exchange"]) for h in _hits}) == len(_hits))
+except Exception as _e:
+    print(f"  SKIP  live symbol search unavailable ({_e})")
+
+check("an empty query asks the provider nothing", providers.search_symbols("") == [])
+check("a whitespace query asks the provider nothing", providers.search_symbols("   ") == [])
+
 print("\n--- store: empty and malformed inputs ---")
 check("merging nothing returns what was there",
       len(store.merge("TESTSYM", None, "NSE", "1d")) == len(extended))

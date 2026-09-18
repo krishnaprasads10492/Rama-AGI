@@ -33,6 +33,7 @@ import time
 import logging
 import datetime as _dt
 from typing import Optional
+from urllib.parse import quote as _quote
 
 import numpy as np
 import pandas as pd
@@ -57,18 +58,143 @@ YAHOO_SYMBOLS = {
 }
 
 
+# Yahoo's market suffixes. Needed because the symbol SEARCH (below) returns already-suffixed
+# tickers for every market, and a picker that offers `RWC.AX` while `to_yahoo_symbol` turns it into
+# `RWC.AX.NS` would offer master a name the engine cannot resolve — the exact failure a picker is
+# supposed to remove. `.NS` and `.BO` are deliberately absent: those two round-trip through
+# `from_yahoo_symbol` into Rāma's own (symbol, exchange) vocabulary instead, so the store does not
+# end up holding `RELIANCE` and `RELIANCE.NS` as two copies of one series.
+YAHOO_SUFFIXES = {
+    "AX", "AS", "BA", "BE", "BK", "BR", "CN", "CO", "DE", "F", "HE", "HK", "IL", "IR",
+    "IS", "JK", "JO", "KL", "KQ", "KS", "L", "LS", "MC", "ME", "MI", "MX", "NE", "NZ",
+    "OL", "PA", "PR", "SA", "SG", "SI", "SN", "SR", "SS", "ST", "SW", "SZ", "T", "TA",
+    "TO", "TW", "TWO", "V", "VI", "VN", "WA",
+}
+
+# The reverse of YAHOO_SYMBOLS, used to turn a search hit back into the name the rest of Rāma uses.
+# FIRST key wins, so dict order above defines which alias is canonical: `NIFTY50` before `NIFTY`,
+# `NIFTYMID` before `MIDCPNIFTY`. Without this, searching "nifty" would store `^NSEI` beside an
+# existing `NIFTY50` and split one series into two.
+YAHOO_TO_RAMA = {}
+for _rama, _yahoo in YAHOO_SYMBOLS.items():
+    YAHOO_TO_RAMA.setdefault(_yahoo, _rama)
+
+
 def to_yahoo_symbol(symbol: str, exchange: str = "NSE") -> str:
     s = (symbol or "").upper().strip()
     if s in YAHOO_SYMBOLS:
         return YAHOO_SYMBOLS[s]
     if s.startswith("^") or "=" in s or "-" in s:
         return s                                    # already a Yahoo ticker
+    # An already-suffixed foreign ticker passes through. Without this branch a search result from
+    # any market other than India or the US became unfetchable.
+    if "." in s and s.rsplit(".", 1)[1] in YAHOO_SUFFIXES:
+        return s
     ex = (exchange or "NSE").upper()
     if ex == "BSE":
         return f"{s}.BO"
     if ex in ("NASDAQ", "NYSE", "AMEX", "US"):
         return s
     return f"{s}.NS"
+
+
+def from_yahoo_symbol(yahoo: str, exch_disp: str = "") -> tuple:
+    """
+    The inverse: a Yahoo ticker becomes the `(symbol, exchange)` pair Rāma stores under.
+
+    Exact so that `to_yahoo_symbol(*from_yahoo_symbol(y)) == y` for every ticker the search can
+    return — asserted in `tests/test_store.py`. A search result that did not round-trip would be a
+    name the picker offers and the fetcher cannot use.
+    """
+    s = (yahoo or "").upper().strip()
+    if not s:
+        return "", "NSE"
+    if s in YAHOO_TO_RAMA:
+        canonical = YAHOO_TO_RAMA[s]
+        # Indices, futures, currencies and crypto have no meaningful exchange of their own here;
+        # `to_yahoo_symbol` resolves them from the name alone, so NSE is a harmless default.
+        return canonical, "NSE"
+    if s.endswith(".NS"):
+        return s[:-3], "NSE"
+    if s.endswith(".BO"):
+        return s[:-3], "BSE"
+    if s.startswith("^") or "=" in s:
+        return s, "NSE"                              # passes through to_yahoo_symbol unchanged
+    if "." in s and s.rsplit(".", 1)[1] in YAHOO_SUFFIXES:
+        return s, "NSE"                              # ditto, via the suffix branch
+    disp = (exch_disp or "").upper()
+    if "NASDAQ" in disp:
+        return s, "NASDAQ"
+    if "NYSE" in disp or "AMEX" in disp:
+        return s, "NYSE"
+    # A bare ticker from an exchange we cannot name: US is the branch that leaves it untouched, so
+    # it is the only safe guess. Guessing NSE would silently append `.NS` to a US ticker.
+    return s, "US"
+
+
+# ── Symbol search (spec Section 102) ─────────────────────────────────────────
+
+# WHY THIS EXISTS. The picker previously held a hand-written list of about fifty names. Master's
+# objection is exact: nobody can know every stock and index in every market, so a curated list plus
+# a bare text box is not a picker — it is a text box with decoration. The honest answer is not a
+# longer list, it is to SEARCH THE PROVIDER, which is what every trading platform does.
+#
+# Rejected: downloading and caching a full instrument master. NSE alone lists ~2,000 names and there
+# is no free endpoint this project already talks to that serves one; a scraped list needs its own
+# refresh policy, goes stale silently, and still would not cover "every market".
+SEARCH_URL = "https://query2.finance.yahoo.com/v1/finance/search"
+
+# Yahoo's own words for what a result is, mapped to something readable. Anything unlisted is
+# reported with its raw value rather than dropped — an unknown instrument class is information.
+QUOTE_TYPES = {
+    "EQUITY": "Stock", "INDEX": "Index", "ETF": "ETF", "MUTUALFUND": "Fund",
+    "CURRENCY": "Currency", "CRYPTOCURRENCY": "Crypto", "FUTURE": "Future",
+    "OPTION": "Option",
+}
+
+
+def search_symbols(query: str, limit: int = 12) -> list:
+    """
+    Look a name up with the provider rather than guessing from a list.
+
+    @returns a list of `{symbol, exchange, yahooSymbol, name, kind, exchangeName, sector}` —
+             `symbol` and `exchange` are already in Rāma's vocabulary, so a hit can be handed
+             straight to `/ohlcv` with no further translation.
+             An empty list means "nothing matched"; an exception means "could not ask".
+    """
+    q = (query or "").strip()
+    if len(q) < 1:
+        return []
+    n = max(1, min(25, int(limit or 12)))
+    url = f"{SEARCH_URL}?q={_quote(q)}&quotesCount={n}&newsCount=0&listsCount=0"
+    payload = _http_get(url, timeout=8.0).json()
+
+    out = []
+    seen = set()
+    for row in (payload.get("quotes") or []):
+        y = str(row.get("symbol") or "").strip()
+        if not y:
+            continue
+        kind = str(row.get("quoteType") or "").upper()
+        if kind == "OPTION":
+            # An option contract is not something this engine fetches history for, and offering one
+            # would promise a chart that cannot be drawn.
+            continue
+        symbol, exchange = from_yahoo_symbol(y, row.get("exchDisp") or "")
+        key = (symbol, exchange)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "symbol": symbol,
+            "exchange": exchange,
+            "yahooSymbol": y,
+            "name": (row.get("longname") or row.get("shortname") or symbol).strip(),
+            "kind": QUOTE_TYPES.get(kind, kind or "Unknown"),
+            "exchangeName": (row.get("exchDisp") or row.get("exchange") or "").strip(),
+            "sector": (row.get("sectorDisp") or "").strip() or None,
+        })
+    return out
 
 
 # ── Normalisation ─────────────────────────────────────────────────────────────

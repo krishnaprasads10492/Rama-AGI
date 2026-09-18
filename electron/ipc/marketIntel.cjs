@@ -164,6 +164,20 @@ async function inventory() {
   return getPath('/store/inventory');
 }
 
+/**
+ * Search the provider for an instrument (spec Section 102).
+ *
+ * A SHORT TIMEOUT ON PURPOSE. This runs on every few keystrokes, so a slow answer is worse than no
+ * answer: the renderer falls back to its own offline list, and an 8s hang would leave master typing
+ * into a box that shows nothing. Gated on `stockmind.view` like every other read.
+ */
+async function symbolSearch({ query, limit = 12 } = {}) {
+  const q = String(query || '').trim();
+  if (q.length < 1) return { ok: true, data: { ok: true, results: [] } };
+  return getPath(`/symbols/search?q=${encodeURIComponent(q)}&limit=${Number(limit) || 12}`,
+    { timeout: 6000 });
+}
+
 async function news({ symbol, limit = 30 } = {}) {
   return getPath(`/news/${sym(symbol)}?limit=${Number(limit) || 30}`, { timeout: 45000 });
 }
@@ -358,6 +372,7 @@ function register(ipcMain) {
   const readOnly = {
     'market:ohlcv':           ohlcv,
     'market:inventory':       inventory,
+    'market:symbol-search':   symbolSearch,
     'market:news':            news,
     'market:news-coverage':   newsCoverage,
     'market:derivatives':     derivatives,
@@ -594,7 +609,7 @@ function schedulerStatus() {
 
 module.exports = {
   register, predict, backtest, backtestPresets, strategyScore, health,
-  ohlcv, inventory, news, newsCoverage, newsBackfill, derivatives, optionChain,
+  ohlcv, inventory, symbolSearch, news, newsCoverage, newsBackfill, derivatives, optionChain,
   outcomeStats, modelsStatus, horizonsList, predictMulti, trainHorizons,
   startScheduler, stopScheduler, schedulerStatus,
   tickResolveOutcomes, tickSyncNews,
