@@ -10,6 +10,7 @@
 const { getCredential } = require('./credentialVault.cjs');
 const net = require('../lib/http.cjs');
 const customProviders = require('../lib/customProviders.cjs');
+const claimGate = require('../lib/claimGate.cjs');
 
 // ─── Model registry ────────────────────────────────────────────────────────────
 const MODEL_REGISTRY = {
@@ -239,11 +240,45 @@ function register(ipcMain) {
   });
 
   // ── Chat completion (routes to correct provider) ───────────────────────────
-  ipcMain.handle('models:chat', async (_e, { messages, model, taskType, stream = false }) => {
+  /**
+   * The claim gate runs here because this is where model prose crosses into the renderer — the
+   * output boundary HALO describes (Section 111). `attribution` is ALWAYS attached so the report
+   * exists whether or not it is enforced; `requireAttribution` decides whether `content` is replaced
+   * by the gated body.
+   *
+   * DEFAULT OFF, deliberately. Flipping it on for every existing caller at once would withhold
+   * ordinary prose from screens nobody has run yet, and a gate that breaks its callers gets bypassed,
+   * which forfeits the whole point. Callers are turned on one at a time, evidence in hand — the list
+   * is in Section 111. Off still costs nothing: the report is there to read.
+   */
+  ipcMain.handle('models:chat', async (_e, { messages, model, taskType, stream = false,
+                                             requireAttribution = false, sources = [], reflexes = {} } = {}) => {
     const targetModel = model || selectModel(taskType || 'general');
+
+    const gated = (result, extra) => {
+      let attribution = null;
+      try {
+        attribution = claimGate.gate({ text: result.content ?? '', sources, reflexes });
+      } catch (err) {
+        // A broken gate must not cost master the answer, but it must not read as a clean pass either.
+        console.warn(`[models] claim gate failed: ${err.message}`);
+        return { ok: true, ...result, model: targetModel, ...extra, attribution: null, attributionError: err.message };
+      }
+      return {
+        ok: true,
+        ...result,
+        content: requireAttribution ? attribution.body : result.content,
+        model: targetModel,
+        ...extra,
+        attribution: claimGate.attest(attribution),
+        withheld: attribution.withheld.map(w => ({ reason: w.reason, detail: w.detail })),
+        notice: attribution.notice,
+        enforced: requireAttribution,
+      };
+    };
+
     try {
-      const result = await chatCompletion(messages, targetModel);
-      return { ok: true, ...result, model: targetModel };
+      return gated(await chatCompletion(messages, targetModel));
     } catch (err) {
       // Try fallback chain
       for (const fallback of FALLBACK_CHAIN) {
@@ -251,7 +286,7 @@ function register(ipcMain) {
         if (!checkAvailable(fallback))  continue;
         try {
           const result = await chatCompletion(messages, fallback);
-          return { ok: true, ...result, model: fallback, fallbackFrom: targetModel };
+          return gated(result, { model: fallback, fallbackFrom: targetModel });
         } catch { continue; }
       }
       return { ok: false, error: `All models failed. Last error: ${err.message}` };

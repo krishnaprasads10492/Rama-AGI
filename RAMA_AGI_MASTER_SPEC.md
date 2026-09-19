@@ -1791,6 +1791,7 @@ authenticated **Master session**, not merely an open store.
 | 129 | Pop-outs carry a session and dock back; comments cut | done | Section 109. Master: *"concise the comments overall"* and *"do the above mentioned as best possible"*. Day 1 of the Section 108 plan is his machine, so this takes the highest-value row finishable here — **pop-out windows that carry a session and dock back** (plan days 12–13), asked for twice. `electron/lib/popoutGrant.cjs` mints a **single-use ticket**: 32 random bytes bound to `(user, panel)`, main-process memory only, 30s expiry, burned on first redemption whatever the outcome. **DECISION: the ticket, not the token** — a real session token on a URL leaves a long-lived credential in histories, logs and crash reports; a ticket that dies on first use is worthless to any later reader and worthless before redemption to anything that is not that window. **DECISION: it creates NO new authority** — the renderer already passes `user` to every gated channel, so handing that object to another window adds nothing it could not already do; `popoutGrant` makes **no capability decision at all** and every channel still checks against `shared/capabilities.json` per call (I1, I2, I8), asserted by grepping the module for capability logic. **Docking back needs no ticket:** `popout:dock` revokes any unredeemed grant, tells the opener to restore the panel, destroys the window; `PanelBoard` removes a popped-out panel from the board and shows it as a `⇤ TITLE` button, so a panel is never in two places at once and the way back does not mean hunting for a window. A pop-out only leaves the board if the window actually opened, or the panel would vanish with nowhere to be. **VERIFIED: 39 assertions**, mostly about what must NOT work — replay from the same and a different window, expiry at the boundary, a grant with no user or no id (it would redeem into a session that looks authenticated and is not), a mutation of the live user object after minting, a bounded map so renderer-triggered minting cannot exhaust memory, revocation on window close, `__proto__` as a ticket — plus three source-level checks: nothing persisted, no capability decision here, token from a CSPRNG. `npm run verify` **19 suites**; audit clean; `vite build` succeeds. **COMMENT PASS:** `timeframes.js` 148→96 comment lines, `indicators.js` 103→74, `positionMath.js` 67→58, `PriceChart`/`PanelBoard` headers roughly halved. **The rule applied: a comment earns its length by recording a decision, a measurement, or a defect that will otherwise be reintroduced — not by restating the code or narrating the change.** Nothing a verify script greps for was removed; `verifyGlossary` and `verifyEngineDiagnosis` both assert on source text and both still pass. **NOT VERIFIED: no shell launched** — the hand-off is reasoned from the IPC path, and the first real test is master popping a panel out and seeing the book render instead of "not signed in". |
 
 | 130 | Legible zoom, independent filters, Home on reopen; Rāma as a harness | 1–3 done, 4–5 designed | Section 110. **(1) Default zoom.** `fitContent()` squeezed the whole series into the pane — 4,649 bars in 900px is 0.19px per candle, the exact defect Section 79 replaced the hand-written SVG over, **reintroduced by the fit call itself.** Default is now 8px per candle on the newest bars with the rest left to scrolling; `reset zoom` returns to that and a separate **`fit all`** does what `fitContent` used to, because "readable" and "everything" are different requests. **(2) Interval and dates are INDEPENDENT.** Changing interval used to *reconcile* the window, so picking 5m silently rewrote a window master had chosen — the control editing his input. Now two filters over one series, with `shortfallNote` reporting when the provider serves less rather than the control preventing it. **A new instrument opens unfiltered** (30m, earliest stored bar → today), because a window chosen for the last symbol says nothing about this one. **Date picker upgraded:** own row; `min`/`max` bound by **actual stored coverage** so master picks inside what exists; `⇤ beginning` (he should not have to know the date); `today ⇥`; `✕ clear`; and a plain statement of state — *custom* or *no date filter · everything stored* — with coverage printed at the row end. **(3) Reopening lands on Home.** Closing hides to tray, so reopening showed the last page. The `hide` event now sends the existing `nav:goto` `/` — **on hide, not on show**, so the old page never flashes; reuses the tray channel rather than adding a second thing to keep in step. **(4) DESIGN — Rāma is a HARNESS, and "no hallucination" is a property a SYSTEM enforces.** Research decides the form: HALO (arXiv 2607.17883) — *"zero hallucination is not a property a model possesses but a property a system enforces"*, treating it as **containable** rather than eliminable; hallucination as **output-boundary misclassification**, a completion emitted *as if* grounded (arXiv 2604.06195); and multi-model comparison letting *"consistently hallucinating models be out-voted"* (arXiv 2510.19507). Also: *"an agent is a model and a harness — with a local model the harness matters more."* **So the honest statement of master's requirement: Rāma cannot stop a base model confabulating, and it CAN refuse to pass an unattributed claim through its own boundary.** Much of HALO's stack already exists scattered under other names — `vetSources` (grounded generation), tier-0 reflexes (deterministic execution), deflated Sharpe against trial count (multi-signal verification), the acceptance gate and `{value, source, measured}` with `null` + `why` (calibrated abstention), NOT BACKTESTABLE badges (refusing to score the unmeasurable). **DECISION: the next real piece is a CLAIM GATE, not a better model** — one module at the output boundary classifying every claim as `grounded` / `reflex` / `unattributed` and refusing to emit the third as fact, turning scattered honesty into one enforced rule. **It must NOT become a confidence score:** a number on a sentence is the "emitted as if grounded" failure with extra decimals. Output is a class and a source, or a refusal. **(5) DESIGN — evolve by assimilation.** Measured landscape: open weights are within single digits of frontier on reasoning and coding and **at parity on extraction, classification and tool calling**, which is most of what a harness needs; Qwen holds ~10 of 13 BFCL slots, GLM and Kimi lead agentic work, DeepSeek leads agentic coding, Qwen3.5 spans 0.8B–397B with a 27B fitting 24GB at Q4_K_M. **The base model is a replaceable part; the durable asset is the harness** — capability gates, provenance discipline, the store, the genome, the loyalty core — and that cannot be downloaded. Sections 92/93 already built discovery, evidence-based classification and retirement-aware migration; **the missing piece is role-based routing**: declare what a model is needed FOR and select per role against measured capability, cost and disk, rather than one "best model" for everything — which is how a 397B cloud model ends up parsing a date. **And the invariant: capability compounds, autonomy does not.** A new model is a new tool, never a new authority over master's capital or identity (I15, I16) — which is why swapping the base model cannot introduce order placement. **VERIFIED: 19 suites; audit clean at 139 bridge calls / 72 files / 355 channels; `vite build` succeeds. Nothing seen on screen** — zoom, picker and Home-on-reopen are reasoned from the code path. **Next: the claim gate, then role-based routing.** |
+| 131 | The claim gate — Rāma's output boundary | done | Section 111. Builds the piece row 130 decided on: `electron/lib/claimGate.cjs`, four classes — `grounded` / `reflex` / `prose` / `unattributed` — and the fourth is **not emitted**. **THE THING IT REPLACES:** `intelligenceEngine.buildOutput` already ships `overallConfidence: 78.4`, a letter `grade`, and *"78.4% confidence means ~21.6% chance of being wrong"* — computed in `extractTruth` from **average domain credibility** plus keyword overlap, with **nothing measuring whether any finding answers the question**, so five reputable domains that address nothing still grade A. That is the "emitted as if grounded" failure (arXiv 2604.06195) with decimals attached, which is exactly what row 130 forbade the gate from becoming. **DECISION: a class and a source, or a refusal — never a number.** Asserted two ways: no output object carries a key matching `confidence\|probability\|certainty\|score\|grade\|likelihood`, and the module source computes none. **What it decides is ATTRIBUTION, not truth** — entailment needs a model and the model is the thing being contained. The cited id must exist in the evidence **actually supplied** (catches a fabricated citation) and every checkable token must appear in that source (catches an invented figure). **Evidence is re-vetted here rather than trusted from the caller**, because `vetSources` dropping fallbacks is defeated by one caller that forgets — Section 94's defect exactly; a `fallback` marker, an empty document, or one id over two documents is refused **with its reason retained**. **DECISION: figures canonicalised on both sides** (`1,402.55` = `1402.55` = `1402.550`) or the gate would withhold true claims until callers stopped using it; `%` stripped, a disclosed loosening. **DECISION: a sentence-initial capital is grammar, not a name — unless ticker-shaped**, so `RELIANCE` and `NIFTY50` are still checked but *"Earnings"* is not demanded against a source saying *"profit"*. **THE DEFECT FOUND BY RUNNING IT: `Profit will double next year.` has no digit and no ticker, so it passed as prose** — the most damaging confabulation in a market context, emitted unchallenged. **DECISION: predictive and absolute modality is checkable by definition, and a retrieved document CANNOT ground the future** — a modal claim is groundable only by a `reflex` projection record with a method; citing a prediction to a news article is `unsourceable-prediction`. First-person abstention (`I do not know`, `no data`, `not backtestable`) is exempt and always emitted — **Rāma saying it does not know is the goal state.** **DISCLOSED HOLES:** a fact written in words (*"twelve percent"*) escapes the figure check, which is why structured `claims:[{text,cite}]` is preferred; and `prose` can still be wrong — the gate bounds factual assertion, not helpfulness. It refuses to gate connective language because a gate that breaks its callers gets bypassed. **`body` is asserted never to contain withheld text**; `notice` counts refusals **by reason in words**, not one by one (*"don't dump info on master"*); an empty body **says** nothing survived attribution rather than reading as "no answer"; `attest()` omits the text, because keeping the confabulation beside the account of refusing it defeats the record. **WIRED at `models:chat`** — the report is **always** attached, `requireAttribution` decides whether `content` is replaced, and it **defaults false. DECISION: callers flipped on one at a time** — enforcing everywhere at once would withhold ordinary prose from screens never run, and the first output of a broken gate is a caller that stops using it; a throwing gate returns the answer with `attributionError` set so it never reads as a clean pass. **FLIP LIST in order of exposure: StockMind `why`/`book` narration → market-intel news summaries → strategy `meaning`/`risks`/`would_change` → general chat.** **No capability decision here — attribution is not authorisation** (grep-asserted, as `popoutGrant` is); no Electron, nothing persisted. **VERIFIED: `npm run verify` 20 suites; `verifyClaimGate` 98 assertions; audit clean at 139 bridge calls / 72 files / 355 channels; `vite build` succeeds. Seven defects found by running and fixed.** **NOT VERIFIED: no real model output has passed through it, and nothing seen on screen.** **NEXT: role-based model routing** — declare the roles (extraction, tool-calling, code, multilingual, embedding) and select per role on measured capability/cost/disk, building on `ollamaCatalog.cjs` / `ollamaLibrary.cjs` / `registrySources.cjs`, replacing `TASK_ROUTING`'s eight hand-written buckets and the hardcoded `FALLBACK_CHAIN` in `modelRouter.cjs`. |
 
 ### Resume checklist for a cold session
 
@@ -11685,3 +11686,141 @@ next two concrete pieces.
 
 **Not verified:** nothing seen on screen. The zoom, the picker and the Home-on-reopen behaviour are all
 reasoned from the code path, and master's next run is the test.
+---
+
+## SECTION 111 — The claim gate: Rāma's output boundary
+
+Section 110 decided that the next real piece of *"no allowance for hallucinations"* was **a claim gate,
+not a better model**. This builds it: `electron/lib/claimGate.cjs`, 98 assertions in
+`scripts/verifyClaimGate.cjs`, wired at `models:chat`.
+
+### What was already shipped, and why it is the thing being replaced
+
+`intelligenceEngine.buildOutput()` returns:
+
+```
+overallConfidence: 78.4,
+grade:             'B',
+complementLabel:   '78.4% confidence means ~21.6% chance of being wrong',
+```
+
+That number is computed in `extractTruth()` from **average domain credibility**, a bonus for keyword
+overlap between sources, and a penalty for rough sentiment divergence. **Nothing in it measures whether
+any finding answers the question.** Five reputable domains that address nothing still average to a high
+credibility and still grade `B` or `A`. The `complementLabel` then converts that into a calibrated-sounding
+error rate over material that was never checked for relevance at all.
+
+This is the failure mechanism exactly: a completion emitted *as if* grounded in evidence
+(arXiv 2604.06195). Section 110 forbade the claim gate from becoming a confidence score for this reason —
+**a number attached to a sentence is the same failure with extra decimals.** The gate's output is a class
+and a source, or a refusal. `verifyClaimGate` asserts no output object anywhere in the module carries a
+key matching `confidence|probability|certainty|score|grade|likelihood`, and asserts the module source
+computes none.
+
+### The four classes
+
+| class | meaning | emitted? |
+|---|---|---|
+| `grounded` | a supplied source carries every checkable token in the claim | yes, as evidence |
+| `reflex` | Rāma computed it deterministically; the record *is* the evidence | yes, as evidence |
+| `prose` | asserts no checkable external fact | yes, marked **non-evidential** |
+| `unattributed` | everything else | **no** |
+
+### What it decides, and what it honestly cannot
+
+It does **not** judge truth. Entailment needs a model, and the model is the thing being contained. It
+decides **attribution**, which is decidable:
+
+1. The cited id must exist in the evidence **actually supplied**. A fabricated citation is caught because
+   the id is not there.
+2. Every checkable token in the claim — canonicalised figures, ISO dates, named entities — must appear in
+   that source. An invented figure is caught because the digits are not there.
+3. Evidence is re-vetted here, not trusted from the caller. A `fallback` search-failure marker, an empty
+   document, or one id covering two documents is **refused with its reason retained**, so a citation to a
+   dropped source reports *why* rather than reading as a hallucinated id.
+
+**DECISION: figures are canonicalised on both sides.** `1,402.55`, `1402.55` and `1402.550` are one
+measurement written three ways; a gate that called them different would withhold true claims until callers
+stopped using it. `%` is stripped, deliberately — a disclosed loosening.
+
+**DECISION: a date's own parts are not demanded as separate figures.** `2026-09-18` is checked whole;
+demanding `2026`, `8` and `18` independently adds only false rejections.
+
+**DECISION: a sentence-initial capital is grammar, not a name — unless it is ticker-shaped.** Demanding
+every opening word appear in the source would withhold true claims over wording (*"Earnings"* against a
+source saying *"profit"*). But a first word is exactly where a ticker sits, so an all-caps or
+digit-bearing token like `RELIANCE` or `NIFTY50` is still checked. Found by running: the original
+`i === 0` exemption let `RELIANCE closed at …` past unchecked.
+
+### The defect found by running it: a document cannot contain the future
+
+`Profit will double next year.` carries **no digit and no ticker**, so it passed as `prose` and was
+emitted unchallenged — the single most damaging shape of confabulation in a market context, and the one
+master's money is exposed to.
+
+**DECISION: predictive and absolute modality is checkable content by definition.** `will`, `going to`,
+`guaranteed`, `always`, `never`, `risk-free`, `best`/`worst`/`highest`/`lowest`. A retrieved document
+**cannot** support a statement about what will happen, so a modal claim is groundable *only* by a `reflex`
+projection record with a method behind it. Citing a prediction to a news article is refused as
+`unsourceable-prediction` — which is the discipline Rāma already applies to projections (Section 105),
+now enforced rather than asked for.
+
+First-person abstention is exempt and always emitted: `I do not know`, `no data`, `not backtestable`.
+**Rāma saying it does not know is the goal state, never something to withhold.**
+
+### Which way it errs, stated plainly
+
+Toward withholding. Two real holes remain, both disclosed rather than hidden:
+
+- A fact written in words — *"revenue rose twelve percent"* — carries no numeral and escapes the figure
+  check. This is why the structured `claims: [{ text, cite }]` form exists and is preferred.
+- `prose` can still be wrong. The gate bounds **factual assertion**, not helpfulness.
+
+The gate refuses to gate ordinary connective language, because a gate that breaks its callers gets
+bypassed, and a bypassed gate forfeits everything.
+
+### The body is safe to show; the refusal is visible
+
+`gate()` returns `body` containing only emitted claims — asserted never to contain withheld text — plus
+`withheld` with a reason each, and a `notice` counting refusals **by reason**, in words:
+
+> Withheld 2 statements: 1 with no source, 1 citing a source that was never supplied.
+
+Counted by reason rather than listed one by one, per master's *"don't dump info on master"*. And when
+nothing survives, that is **said**: an empty body would read as *"no answer"* when it means *"nothing
+survived attribution"*, which is a different and more useful fact.
+
+`attest()` produces the audit record and **deliberately omits the text.** Keeping the withheld sentence
+would store the confabulation next to the account of refusing it.
+
+### Wiring, and why enforcement is opt-in for now
+
+`models:chat` runs the gate on every completion, including a fallback-chain completion. `attribution`,
+`withheld` and `notice` are **always** attached. `requireAttribution` decides whether `content` is
+replaced by the gated body, and it **defaults false**.
+
+**DECISION: default off, callers flipped on one at a time.** Turning it on everywhere at once would
+withhold ordinary prose from screens that have never been run, and the first thing a broken gate produces
+is a caller that stops using it. Off still costs nothing — the report is there to read. A gate that throws
+returns the answer with `attribution: null` and `attributionError` set, so a broken gate never reads as a
+clean pass. This is additive with a fallback, per the working agreement.
+
+**The flip list, in order of how much master's money depends on it:** StockMind `why`/`book` narration,
+market-intel news summaries, strategy `meaning`/`risks`/`would_change`, then general chat.
+
+### The invariant it does not touch
+
+`claimGate` makes **no capability decision** — asserted by grepping the module for capability logic, the
+same check `popoutGrant` carries. **Attribution is not authorisation.** It requires no Electron, persists
+nothing, and computes no score.
+
+### Verified
+
+`npm run verify` **20 suites**, all green; `verifyClaimGate` **98 assertions**; audit clean at **139 bridge
+calls / 72 files / 355 IPC channels**; `vite build` succeeds. Seven defects were found by running the
+suite and fixed: the sentence-initial ticker exemption, an ordered-list marker read as a figure, a
+citation after the full stop detaching from the claim it cites, and the prediction hole above.
+
+**Not verified:** no shell launched. The gate is exercised entirely through its own suite; nothing has been
+seen on screen, and no real model output has passed through it yet.
+
