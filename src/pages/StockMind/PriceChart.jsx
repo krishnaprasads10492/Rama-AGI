@@ -9,6 +9,7 @@ import {
 import {
   intervalGroups, rangesFor, describeLimit, showsClock, barsFor, interval as intervalDef,
 } from './timeframes';
+import InfoTip from './InfoTip.jsx';
 
 /**
  * PriceChart — candlesticks, master's own fills, his levels, and the projection cone.
@@ -751,7 +752,9 @@ export default function PriceChart({
             {changePct !== null && ` (${change >= 0 ? '+' : ''}${changePct.toFixed(2)}%)`}
           </span>
         )}
-        <span>{candles.length.toLocaleString()} bars</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+          {candles.length.toLocaleString()} bars<InfoTip id="bars" />
+        </span>
         {busy && <span style={{ color: 'var(--accent)' }}>loading…</span>}
         <span style={{ flex: 1 }} />
         <button type="button" onClick={resetZoom} style={chip(false)}
@@ -769,17 +772,27 @@ export default function PriceChart({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingBottom: '6px' }}>
           {onInterval && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', fontSize: '12px',
+                color: 'var(--muted)' }}>
+                BAR<InfoTip id="interval" />
+              </span>
+              {/* Groups are LABELLED BY PURPOSE, not by unit (Section 104): "intraday / swing / long
+                  term" is the distinction master is making when he reaches for the control, and it is
+                  how trading platforms describe the same three clusters. */}
               {intervalGroups().map((g) => (
-                <div key={g.group} style={{ display: 'flex', gap: '3px' }}
-                     role="group" aria-label={`Bar interval — ${g.group.toLowerCase()}`}>
+                <div key={g.group} style={{ display: 'flex', gap: '3px', alignItems: 'baseline' }}
+                     role="group" aria-label={`Bar interval — ${g.label}`}>
                   {g.items.map((iv) => (
                     <button key={iv.id} type="button" style={seg(iv.id === interval)}
                             aria-pressed={iv.id === interval}
                             onClick={() => onInterval(iv.id)}
-                            title={`${iv.label} bars`}>
+                            title={`${iv.label} bars — ${g.label}`}>
                       {iv.label}
                     </button>
                   ))}
+                  <span style={{ fontSize: '12px', color: 'var(--muted)', paddingLeft: '2px' }}>
+                    {g.label}
+                  </span>
                 </div>
               ))}
             </div>
@@ -787,6 +800,10 @@ export default function PriceChart({
           {onRange && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexWrap: 'wrap' }}
                  role="group" aria-label="Lookback window">
+              <span style={{ display: 'inline-flex', alignItems: 'center', fontSize: '12px',
+                color: 'var(--muted)', paddingRight: '4px' }}>
+                BACK<InfoTip id="window" />
+              </span>
               {allowedRanges.map((rg) => (
                 <button key={rg.id} type="button" style={seg(rg.id === rangeId)}
                         aria-pressed={rg.id === rangeId}
@@ -875,6 +892,7 @@ export default function PriceChart({
                   title="Overlays computed from the bars on screen — never a forecast">
             indicators{active.length > 0 ? ` (${active.length})` : ''} ▾
           </button>
+          <InfoTip id="overlay" />
           {menuOpen && (
             <div style={{
               position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: '4px',

@@ -201,10 +201,25 @@ export function showsClock(intervalId) {
  * Bar intervals grouped for a segmented control, in the order a trading platform shows them.
  * @returns {Array<{group: string, items: Array}>}
  */
+/**
+ * Bar intervals grouped for a segmented control.
+ *
+ * GROUPED BY WHAT THEY ARE FOR, NOT BY THEIR UNIT (spec Section 104). "Minutes / hours / days" is a
+ * fact about arithmetic; "intraday / swing / long term" is the distinction a trader is actually making
+ * when he reaches for the control, and it is how every trading platform's own documentation describes
+ * the same three clusters.
+ *
+ * @returns {Array<{group: string, label: string, items: Array}>}
+ */
 export function intervalGroups() {
-  const order = ['MINUTES', 'HOURS', 'DAYS'];
-  return order.map((group) => ({
+  const order = [
+    { group: 'MINUTES', label: 'intraday' },
+    { group: 'HOURS',   label: 'swing' },
+    { group: 'DAYS',    label: 'long term' },
+  ];
+  return order.map(({ group, label }) => ({
     group,
+    label,
     items: INTERVALS.filter((iv) => iv.group === group),
   })).filter((g) => g.items.length > 0);
 }

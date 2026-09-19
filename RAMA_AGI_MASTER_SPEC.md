@@ -1780,6 +1780,8 @@ authenticated **Master session**, not merely an open store.
 
 | 123 | Composable strategies — pick the parts, backtest the combination, emit the Python | done | Section 103. Master: *"strategies can be made individually or various combo of probability calculation + higherhigh-lowerlow (trend lines) + technical indicators + various things (news + sentiment) etc… ability to pick things, backtest them for various scenarios → converting to code mostly Python… based on the investment, ROI, risk. You know the motto of StockMind in Rāma right?"* **The motto, from Section 64 where master set it: StockMind exists to generate wealth for a real trader, and Rāma must be able to upgrade the capability itself.** Everything here is shaped by the first half — real money means the tool's job is to stop master trusting what it cannot support — and Section 95's rule stands: **no path to order placement, ever.** **THE GAP THIS STARTED FROM IS A BAD ONE: `strategy_eval.py` was reachable from NOTHING.** Built in Section 95 with 64 assertions, no route, no IPC, no caller — the harness that decides whether a strategy found an edge or found noise sat outside the product from the day it was written. Row 115 says done and the module is done; the capability was not. **A judge nobody can call does not judge anything.** Now `/strategy/blocks`, `/strategy/validate`, `/strategy/backtest`, `/strategy/code` and four IPC channels. **DECISION: a strategy is a DECLARATION and the Python is generated from it.** Rejected master-or-model-writes-Python for three reasons: a spec **can be counted** (the trial count is the single number that makes a backtest interpretable, and freeform code has none); a spec can be re-run, diffed and versioned; and master never has to write Python, which was the point. **DECISION: Rāma does not execute what it generates, and the backtest is not run by it.** `exec`-ing generated source in the process holding master's data is arbitrary code execution — but the reason that actually matters is that **if the emitted code ran the backtest, a codegen bug would silently change the number master is deciding on.** Separating them lets the two be compared, and **the emitted file is `inspect.getsource()` of the very interpreter functions**, so agreement is structural rather than hoped for. A template would have drifted the first time a block was fixed in one place. **DECISION: blocks that cannot be backtested are OFFERED and REFUSED, naming the reason.** Two of master's four ingredients land here. *Model probability* against historical bars is look-ahead — the model was fitted on the period being tested — and would be the most flattering number in the tool; *news and sentiment* have no free history, the same finding that labels the NEWS panel NOT BACKTESTABLE (Sections 66, 70). Both usable live, both refused by the backtest. **A verdict is never stronger than the weakest block in the spec.** **DECISION: ROI is an OUTPUT, never an input** — a field that accepts a target return and produces a strategy meeting it is the commonest way a strategy tool lies, because the search simply runs until something in the noise clears the bar. Capital and risk in; ROI reported. Also: **one position at a time** (overlapping trades need a portfolio model and `strategy_eval` judges independent round trips); **entry on the NEXT bar's open**, because a signal from a close cannot be acted on at that close and filling there is most of the apparent edge on a breakout system; **a stop and a target touched in the same bar resolve as the STOP**, since bar data cannot say which came first; an unclosed trade contributes nothing; and **risk is a percentage of ORIGINAL capital, not running equity**, because compounding it makes a good run look exponential and a bad one bottomless. 16 blocks across 8 groups; combination is all / any / at least k, deliberately not a nested boolean tree master could build and not read. **VERIFIED, AND FOR ONCE ACTUALLY EXECUTED: `ai_backend/tests/test_strategy_spec.py`, 220 assertions, run on this machine** — these modules are stdlib-only precisely so that is possible, and it found four real defects immediately: `engine/__init__` drags numpy in so `strategy_codegen` now falls back to an absolute import; **the generated script crashed on `python s.py` with no arguments** because printing its own docstring hit cp1252 on a macron, so the emitted file is ASCII-only by design; a fixture claimed a trade where the breakout block could not yet fire, meaning the same-bar stop assertion was passing vacuously; and **`position_size` existed twice** — it decides how much money is at risk, so it moved into `strategy_spec` and is emitted by `getsource` like everything else. Key assertions: every unbacktestable block is refused with its reason and returns **no trades at all**; each has `fn = None` so it cannot leak into a simulation; duplicate sweep values are collapsed so the trial count cannot be inflated either; `at least 1` equals `any` and `at least n of n` equals `all`; every catalogue default validates; and **the generated file reproduces the interpreter's trades bar for bar and reason for reason**, then runs end to end over a CSV. `npm run verify` 17 suites; audit clean at **135 bridge calls / 67 files / 353 channels**; `vite build` entry unchanged at 283.53 kB. **NEXT STEPS, in order:** (1) **per-fold model refit**, which is what would make the probability block backtestable and is the largest upgrade available here; (2) save and reload strategies via `dataStore` — a spec is small JSON and every configuration is currently lost on navigation; (3) write the generated file to disk through a save dialog rather than only the clipboard; (4) **a scenario matrix** for the other half of "various scenarios" — the same spec across instruments, intervals and date ranges, **and the trial-count arithmetic must cover it**, because one spec over ten instruments is ten trials and getting that wrong would reintroduce exactly the bias this section removes. **Nothing seen on screen, and the backtest cannot run on master's install until the engine does.** |
 
+| 124 | Does StockMind explain itself? No — a glossary, a help screen, and grouped forms | done | Section 104. Master, five parts, the third being the one that mattered: *"does the StockMind screen give any info on each and every field so that user can understand it??"* **THE ANSWER IS NO, COUNTED RATHER THAN ESTIMATED:** of roughly 80 labelled fields, badges and columns, **about a third carried a hover `title` and the rest carried nothing** — and the ones carrying nothing included `ABSORBED ENGINE` (provenance, nothing actionable), `DONE` (of *what*), `0 trained · contract aligned`, `UNCERTAINTY 0.031`, `AGREEMENT 0.82`, and `DAYS 14` beside `INTRADAY` — **the most expensive mistake in the book, with nothing saying so.** A second failure no per-field tooltip could fix: **nothing anywhere explained what StockMind is for**, so the signal-versus-strategy distinction — the single most important idea in the module — existed only in this document. **DECISION: one glossary, two readers.** Rejected `title` attributes everywhere for three reasons, the third deciding: unreachable by keyboard, wraps badly at the needed length, and **invisible until hovered, so master cannot SEE that an explanation exists.** A visible `?` is the affordance; `title` is kept on the button as well. The deeper problem is drift — hand-written help across five files diverges until one term means two things — so **105 terms are defined once in `glossary.js`**, the `?` reads `short`, the help screen reads `long`, and each entry says what to DO where that matters, because a definition leaving master no better able to act is a dictionary entry rather than help. **DECISION: the layout maps are SCHEMATICS, not screen captures**, stated in the panel itself: a capture needs a running window and a permission; **it goes stale on the next restyle and then actively misleads with nothing able to notice**; and a schematic can carry **numbered callouts that link to glossary terms**, which a capture cannot without being re-annotated by hand. **The callout text lives in `screenMapData.js`, a plain module** — an earlier version kept it in the `.jsx` and the suite scraped it by regex, which could not tell a pin's term id from an SVG column heading, so it reported `GRADE` and `TCS` as broken references and missed real ones: **data that needs checking must not be embedded in something the checker cannot parse.** **RESEARCH → TWO CHANGES.** Trading-platform layout is consistent (top toolbar: symbol, timeframe, type, indicators; left edge: drawing tools; bottom: positions) and Section 101's toolbar already matched the order — with one finding worth adopting: **every platform's own documentation groups intervals by PURPOSE, not unit**, so `MINUTES/HOURS/DAYS` became **`intraday / swing / long term`** printed beside each cluster. *Not adopted:* a left drawing-tool rail — there are no drawing tools, and an empty rail matching a convention while doing nothing is worse than its absence. Progressive disclosure (four decades of evidence: novices err less, experts pay one click) restructured the request form from **one undifferentiated grid of six fields over a flat row of four equally-weighted buttons** into three numbered groups — WHAT ARE YOU LOOKING AT / HOW MUCH ARE YOU RISKING / WHAT DO YOU WANT — with the direction filter and exact bar count in a collapsed ADVANCED row. **Nothing removed**, which is what separates this from simplification by deletion. **THE HELP TAB HAS FOUR LAYERS:** start here (five numbered steps, plus signal-versus-strategy side by side) · screen by screen (four annotated maps) · glossary (searchable, grouped, cross-referenced) · what it will not do. **Layer 4 is separate on purpose** — the limits are necessarily scattered across the product and a user who has met one deserves to find the rest without hunting; it states the four permanent refusals: no order placement ever, no advice, no broker connection, no live stream. **VERIFIED: `scripts/verifyGlossary.mjs`, 48 assertions, mostly REFERENTIAL INTEGRITY ACROSS FILES**, because help text rots silently — a `?` opening onto nothing neither breaks a build nor shows in a diff, and costs more trust than no help at all. Every `InfoTip id=`/`info=` resolves; every `seeAlso` resolves; every callout resolves; **every term is reachable from somewhere**, so a definition nobody links to cannot sit going stale; none is circular; every `short` fits a popover and every `long` says more than it. **And the suite asserts the help screen's own promises against the code** — it greps the bridge and preload for order-placement channels, the generated Python for its no-orders line, the news panel for its badge, the disclaimer for its text: **if the code ever gains that ability the help becomes a false promise, which is worse than silence.** **One real defect found while writing it:** `InfoTip` had `return null` above a `useEffect`, changing the hook count between renders — React treats that as a corrupted component, and it would only have broken once a term id went missing. `npm run verify` **18 suites**; audit clean at **135 bridge calls / 72 files / 353 channels**; `vite build` entry **unchanged at 283.53 kB**, StockMind 93.79→135.04 kB and PriceChart 218→266.88 kB (the glossary is ~40 kB of prose in the shared lazy chunk — startup cost unchanged, stated rather than glossed). **NOT DONE:** the Section 102 backlog still stands (one error presentation, one number formatter, splitting the ENGINE tab's three unrelated things) — the glossary makes those survivable, not fixed; the tabs are still not a keyboard tablist, and the help screen's own section tabs share that gap; real screen captures once a shell has been run, as a supplement rather than a replacement, since the callouts carry the explanation. **Nothing seen on screen — the maps are asserted to mirror the components by reading both, which is exactly the kind of claim that needs master's eye.** |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -10917,3 +10919,148 @@ channels**; `vite build` succeeds with the entry chunk **unchanged at 283.53 kB*
    spec across several instruments, intervals and date ranges, reported as a grid. The trial-count
    arithmetic must cover it — running one spec over ten instruments is ten trials, not one, and getting
    that wrong would reintroduce exactly the bias this section exists to remove.
+
+---
+
+## SECTION 104 — Does StockMind explain itself? No. What was done about it.
+
+Master, in five parts: *"research… charts for a normal trading app and its related layout and basic
+functionality"*; *"our Rāma-related StockMind features screen should be in sync with other chart screens
+but with feature-related layout"*; ***"please understand from user perspective, does the StockMind screen
+give any info on each and every field so that user can understand it??"***; *"if no, then start making
+screens simpler by dividing various functionalities grouped as needed"*; *"also develop an info screen
+with all the related info needed for understanding functionality, include the StockMind-related
+screenshots and explain the terminology."*
+
+### The answer to question 3, plainly: no
+
+Counted rather than estimated. Before this section, of roughly 80 labelled fields, badges and columns
+across the five StockMind surfaces, **about a third carried a hover `title` and the rest carried
+nothing**. Worse, the ones carrying nothing included several of the most consequential:
+
+| What master saw | What it actually means |
+|---|---|
+| `ABSORBED ENGINE` | provenance of the Python engine — nothing a user can act on |
+| `DONE` | the last *signal request* finished. Not "the engine is healthy" |
+| `0 trained · contract aligned` | no model has been fitted, and the stored feature set still matches |
+| `UNCERTAINTY 0.031` | how spread out the models' outputs were |
+| `AGREEMENT 0.82` | share of models within 0.15 of the blended probability |
+| `DAYS 14` beside `INTRADAY` | **the most expensive mistake in the book, and nothing said so** |
+
+And a second failure that a per-field tooltip cannot fix: **nothing anywhere explained what StockMind
+is for**, so the distinction between a *signal* (one reading now) and a *strategy* (a rule tested over
+years) — the single most important idea in the module — existed only in this document.
+
+### Decision: one glossary, two readers
+
+The obvious fix is `title` attributes everywhere. Rejected, for three reasons and the third decided it:
+a native tooltip is unreachable by keyboard; it wraps badly at the length these definitions need; and
+**it is invisible until hovered, so master cannot SEE that an explanation exists.** A visible `?` is the
+affordance, the popover is the content, and `title` is kept on the button as well so a hover still
+works.
+
+The deeper problem is drift. Hand-written help scattered across five files diverges until the same term
+means two things in two places. So **every term is defined exactly once in `glossary.js`** — the
+`?` affordances read `short`, the help screen reads `long`, and `scripts/verifyGlossary.mjs` fails the
+suite on a broken reference in either direction.
+
+**105 terms across 12 groups.** Each carries what it means and, where it matters, **what to do about
+it** — a definition that leaves master no better able to act is a dictionary entry, not help.
+
+### Decision: the layout maps are SCHEMATICS, not screen captures
+
+Master asked for screenshots. The substitution is deliberate and is stated in the panel itself, not
+only here:
+
+- A capture cannot be taken from inside the renderer without a running window and a capture
+  permission, and nothing in this build has been run with a shell.
+- **A screenshot goes stale on the next restyle and then actively misleads, with nothing in the
+  toolchain able to notice** — the same drift class as a stale ledger row.
+- A schematic can carry **numbered callouts that link to glossary terms**. A screenshot cannot, without
+  being re-annotated by hand every time.
+
+Each map mirrors the real arrangement of the real component — same regions, same order, same relative
+sizes — as inline SVG with a `viewBox` and no fixed width. `preserveAspectRatio` is left at its default,
+which is the correction Section 79 demanded of the old hand-rolled chart, applied correctly this time.
+
+**The callout TEXT lives in `screenMapData.js`, a plain module with no JSX.** An earlier version kept it
+inside the `.jsx` and the suite scraped it with a regex, which could not tell a pin's term id from a
+column heading inside the SVG — so it simultaneously reported `GRADE` and `TCS` as broken references and
+missed real ones. **Data that needs checking must not be embedded in something the checker cannot
+parse.**
+
+### What the research said, and what changed because of it
+
+**Trading-platform layout** is consistent across TradingView, GoCharting, LuxAlgo and the broker
+platforms: a top toolbar carrying symbol lookup, then timeframe, then chart type and indicators, then
+settings; the left edge for drawing tools; the bottom for positions. The chart toolbar already matched
+that order after Section 101, with one exception worth adopting: **every platform's own documentation
+groups intervals by PURPOSE, not by unit** — "1m, 5m, 30m for intraday setups; 1h, 4h for swing; 1D, 1W,
+1M for long-term". So `MINUTES / HOURS / DAYS` became **`intraday / swing / long term`**, printed beside
+each cluster. That is the distinction master is making when he reaches for the control.
+
+*Not adopted:* a left-edge drawing-tool strip. There are no drawing tools, and an empty rail that
+matches a convention while doing nothing is worse than its absence.
+
+**Progressive disclosure** has four decades of evidence behind it: put the few controls that serve most
+tasks on the first level, defer the rest behind one clearly-labelled second level; novices learn faster
+and err less, experts pay one click. The request form was **one undifferentiated grid of six fields over
+a flat row of four equally-weighted buttons**, which reads as a wall rather than a sequence. It is now
+three numbered groups —
+
+1. **WHAT ARE YOU LOOKING AT** — instrument, exchange
+2. **HOW MUCH ARE YOU RISKING** — base price, capital, risk %
+3. **WHAT DO YOU WANT** — the four actions
+
+— with the direction filter and the exact bar count moved into a collapsed **ADVANCED** row. **Nothing
+was removed**, which is what separates this from simplification by deletion.
+
+### The four-layer help screen
+
+Ordered so a new user and a stuck user each find what they need first.
+
+1. **Start here** — what StockMind is, five numbered steps end to end, and the signal-versus-strategy
+   distinction side by side.
+2. **Screen by screen** — the four annotated maps with callouts that link into the glossary.
+3. **Glossary** — 105 terms, searchable, grouped, with cross-references.
+4. **What it will not do** — the permanent limits in one place.
+
+**Layer 4 exists separately on purpose.** The limits are necessarily scattered across the product — the
+news badge, the two unbacktestable blocks, the acceptance gate, the provider caps — and a user who has
+met one of them deserves to find the rest without hunting. It also states the four permanent refusals:
+no order placement ever, no financial advice, no broker connection, no live price stream.
+
+### Verified
+
+- `scripts/verifyGlossary.mjs` — **48 assertions**, mostly **referential integrity across files**,
+  because help text rots silently: a `?` opening onto nothing and a definition for a renamed field
+  neither break a build nor show up in a diff, and both cost more trust than having no help at all.
+  Asserted: every `<InfoTip id=>` and `info=` in the renderer names a real term; every `seeAlso`
+  resolves; every screen-map callout resolves; **every term is reachable from somewhere**, so a
+  definition nobody links to cannot sit there quietly going stale; no definition is circular; every
+  `short` fits a popover and every `long` says more than its own `short`.
+- **And it asserts the help screen's own promises against the code.** The panel tells master Rāma will
+  never place an order — so the suite greps the bridge and the preload for order-placement channels, the
+  generated Python for its no-orders statement, the news panel for its badge, and the disclaimer for its
+  text. **If the code ever gains that ability the help becomes a false promise, which is worse than
+  silence.**
+- **One real defect found while writing it:** `InfoTip` had `return null` for an unknown term placed
+  *above* a `useEffect`, which changes the hook count between renders — React treats that as a corrupted
+  component, and it would only have broken once a term id went missing, which is the least convenient
+  moment to discover it.
+- `npm run verify` **18 suites**; renderer audit clean at **135 bridge calls / 72 files / 353 channels**;
+  `vite build` succeeds with the **entry chunk unchanged at 283.53 kB**. StockMind 93.79 → 135.04 kB and
+  `PriceChart` 218 → 266.88 kB — the glossary is ~40 kB of prose and lands in the shared StockMind
+  chunk. Both are lazily loaded, so startup cost is unchanged; stated rather than glossed over.
+
+### Not done
+
+1. **The remaining Section 102 backlog still stands** — one error presentation and one number formatter
+   across every panel, and the ENGINE tab still holds derivatives, news and engine state under one
+   label. The glossary makes those *survivable*; it does not fix them.
+2. **The tabs are still not a keyboard tablist** — no roving tabindex, no `aria-controls`. The help
+   screen's own section tabs have the same gap.
+3. **Real screen captures**, once a shell has been run, as a supplement to the schematics rather than a
+   replacement — the callouts are the part that carries the explanation.
+4. **Nothing in this section has been seen on screen.** No shell was launched. The maps are asserted to
+   mirror the components by reading both, which is exactly the kind of claim that needs master's eye.

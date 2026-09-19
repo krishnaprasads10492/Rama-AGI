@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import InfoTip from './InfoTip.jsx';
 
 /**
  * StrategyBuilder — pick the parts, see what the search costs, judge the result, take the Python.
@@ -199,7 +200,10 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
       <div className="hud-card" style={{ padding: '14px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '10px',
           flexWrap: 'wrap' }}>
-          <div className="section-label">BUILD A STRATEGY</div>
+          <div className="section-label" style={{ display: 'flex', alignItems: 'center',
+            gap: '6px' }}>
+            BUILD A STRATEGY<InfoTip id="strategy" />
+          </div>
           <input className="input" value={name} onChange={(e) => setName(e.target.value)}
                  aria-label="Strategy name" style={{ width: '200px' }} />
           <span style={{ flex: 1 }} />
@@ -393,8 +397,8 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', flexWrap: 'wrap' }}>
           <div className="section-label">BEFORE YOU RUN IT</div>
           <span style={{ fontSize: '13px', color: trials > 1 ? 'var(--amber)' : 'var(--text)',
-            fontWeight: 700 }}>
-            {trials.toLocaleString()} variant{trials === 1 ? '' : 's'}
+            fontWeight: 700, display: 'inline-flex', alignItems: 'center' }}>
+            {trials.toLocaleString()} variant{trials === 1 ? '' : 's'}<InfoTip id="trials" />
           </span>
           <span style={{ fontSize: '12px', color: 'var(--muted)', maxWidth: '58ch',
             lineHeight: 1.6 }}>
@@ -467,7 +471,9 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
             <span className={`badge ${verdict.passed ? 'badge-green' : 'badge-red'}`}>
               {verdict.passed ? 'EDGE DEMONSTRATED' : 'NOT DEMONSTRATED'}
             </span>
-            <span className="badge">{String(verdict.confidence || '').toUpperCase()}</span>
+            <span className="badge" style={{ display: 'inline-flex', alignItems: 'center' }}>
+              {String(verdict.confidence || '').toUpperCase()}<InfoTip id="confidence" />
+            </span>
             <span style={{ flex: 1 }} />
             <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
               {result.trials} variant{result.trials === 1 ? '' : 's'} searched ·{' '}
@@ -585,7 +591,10 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
         <div className="hud-card" style={{ padding: '14px' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap',
             marginBottom: '8px' }}>
-            <div className="section-label">PYTHON</div>
+            <div className="section-label" style={{ display: 'flex', alignItems: 'center',
+              gap: '6px' }}>
+              PYTHON<InfoTip id="generatedPython" />
+            </div>
             {code.ok ? (
               <>
                 <span style={{ fontSize: '12px', color: 'var(--muted)' }}>

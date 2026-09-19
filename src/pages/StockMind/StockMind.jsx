@@ -6,6 +6,8 @@ import WhyPanel from './WhyPanel.jsx';
 import PanelBoard from '@components/PanelBoard.jsx';
 import SymbolSearch from './SymbolSearch.jsx';
 import StrategyBuilder from './StrategyBuilder.jsx';
+import HelpPanel from './HelpPanel.jsx';
+import InfoTip from './InfoTip.jsx';
 import { barsFor, defaultRangeFor, reconcileRange, capBarsFor } from './timeframes.js';
 import { riskBudget, whyCannotPredict } from './positionMath.js';
 
@@ -44,10 +46,20 @@ const num = (v, dp = 2) =>
 const pct = (v) =>
   (typeof v === 'number' && isFinite(v)) ? `${Math.round(v)}%` : '—';
 
-function Stat({ label, value, color, title }) {
+/**
+ * One labelled figure.
+ *
+ * `info` names a glossary term (Section 104). It was `title` only, and only two of the eight WHY
+ * statistics ever passed one — so `UNCERTAINTY 0.031` sat on the screen with no way to find out what
+ * it was or what to do about it. A `?` is visible; a `title` is not.
+ */
+function Stat({ label, value, color, title, info }) {
   return (
     <div title={title} style={{ minWidth: '78px' }}>
-      <div style={{ fontSize: '12.5px', color: 'var(--muted)', letterSpacing: '0.08em' }}>{label}</div>
+      <div style={{ fontSize: '12.5px', color: 'var(--muted)', letterSpacing: '0.08em',
+        display: 'flex', alignItems: 'center' }}>
+        {label}{info && <InfoTip id={info} />}
+      </div>
       <div style={{ fontSize: '12px', color: color || 'var(--text)', fontWeight: 600 }}>{value}</div>
     </div>
   );
@@ -358,17 +370,32 @@ export default function StockMind() {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', background: 'var(--surface)',
         display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+        {/* EVERY BADGE IN THIS BAR WAS JARGON WITH NO EXPLANATION (Section 104). "ABSORBED ENGINE"
+            said nothing a user could act on, "DONE" did not say done of what, and "contract aligned"
+            is a phrase only the author understood. Each now carries its definition. */}
         <span style={{ fontWeight: 700, color: 'var(--magenta)', letterSpacing: '0.1em' }}>STOCKMIND AI</span>
-        <span className="badge badge-magenta">ABSORBED ENGINE</span>
-        <span className={`badge ${status === 'done' ? 'badge-green' : status === 'requesting' ? 'badge-amber' : status === 'error' ? 'badge-red' : ''}`}>
-          {status.toUpperCase()}
+        <span className="badge badge-magenta" style={{ display: 'inline-flex', alignItems: 'center' }}>
+          ABSORBED ENGINE<InfoTip id="absorbedEngine" />
+        </span>
+        <span className={`badge ${status === 'done' ? 'badge-green' : status === 'requesting' ? 'badge-amber' : status === 'error' ? 'badge-red' : ''}`}
+              style={{ display: 'inline-flex', alignItems: 'center' }}>
+          {status === 'idle' ? 'NO REQUEST YET'
+            : status === 'done' ? 'SIGNALS READY'
+              : status === 'requesting' ? 'REQUESTING' : 'REQUEST FAILED'}
+          <InfoTip id="engineStatus" />
         </span>
         <div style={{ flex: 1 }} />
         {engine && !engine.error && (
-          <span style={{ fontSize: '12px', color: 'var(--muted)' }}
+          <span style={{ fontSize: '12px', color: 'var(--muted)', display: 'inline-flex',
+            alignItems: 'center' }}
                 title={engine.note || ''}>
-            {engine.registry?.models_trained || 0} trained ·{' '}
-            {engine.featureContract?.aligned ? 'contract aligned' : 'CONTRACT MISALIGNED'}
+            {engine.registry?.models_trained || 0} models trained
+            <InfoTip id="modelsTrained" side="left" />
+            <span style={{ padding: '0 6px' }}>·</span>
+            <span style={{ color: engine.featureContract?.aligned ? 'var(--muted)' : 'var(--red)' }}>
+              {engine.featureContract?.aligned ? 'inputs match training' : 'INPUTS NO LONGER MATCH'}
+            </span>
+            <InfoTip id="featureContract" side="left" />
           </span>
         )}
       </div>
@@ -388,6 +415,10 @@ export default function StockMind() {
           // would blur the one distinction this module most needs master to keep.
           ['strategy', '⚗ STRATEGY'],
           ['engine', 'ENGINE'],
+          // HELP last in the strip and first in the answer to "what is this" (Section 104). A module
+          // whose every screen needs a glossary should carry the glossary, not assume master will find
+          // it elsewhere.
+          ['help', '? HELP'],
           // The draggable multi-window mode (Section 97). ADDED alongside the tabs rather than
           // replacing them: tabs are faster for a single focused question, a board is better for
           // watching several things at once, and removing a working layout to add a new one would
@@ -411,9 +442,26 @@ export default function StockMind() {
 
       <div style={{ flex: 1, overflow: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
-        {/* Request form */}
+        {/* ── The request form, in three labelled groups (Section 104) ──────────────────────────
+            IT WAS ONE UNDIFFERENTIATED GRID of six fields over a flat row of four buttons, which
+            reads as a wall rather than as a sequence. Master asked for the screens to be simplified
+            by grouping, and the research answer is progressive disclosure: put the few controls that
+            serve most tasks first, and defer the rest behind one clearly-labelled click.
+
+            So the groups are WHAT (instrument, exchange), MONEY (capital, risk, base price) and then
+            ACTIONS — and the expert controls (direction filter, exact bar count) move into a
+            collapsed ADVANCED row. Nothing is removed; a novice sees five fields instead of eight,
+            and an expert pays one click. */}
         <div className="hud-card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div className="section-label">SIGNAL REQUEST</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <div className="section-label">1 · WHAT ARE YOU LOOKING AT</div>
+            <InfoTip id="instrument" />
+            <span style={{ flex: 1 }} />
+            <button type="button" className="btn btn-sm" onClick={() => setTab('help')}
+                    title="Every field on this page, explained, plus a glossary">
+              ? new here
+            </button>
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
             {/* SYMBOL IS A SEARCH (Section 102). Master's objection to the previous version was
                 exact: a curated dropdown of fifty names plus a raw text box cannot answer "what is
@@ -446,6 +494,7 @@ export default function StockMind() {
             <div>
               <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>
                 <label htmlFor="stockmind-exchange">EXCHANGE</label>
+                <InfoTip id="exchange" />
               </div>
               <select className="input" id="stockmind-exchange" value={exchange}
                       onChange={e => setExchange(e.target.value)}
@@ -457,25 +506,32 @@ override where an unlisted ticker should be looked up.">
                 <option value="NYSE">NYSE — US</option>
               </select>
             </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap',
+            borderTop: '1px solid var(--border)', paddingTop: '10px' }}>
+            <div className="section-label">2 · HOW MUCH ARE YOU RISKING</div>
+            <InfoTip id="riskAmount" />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
             <div>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>DIRECTION</div>
-              <select className="input" value={direction} onChange={e => setDirection(e.target.value)}>
-                <option value="both">Both</option>
-                <option value="long">Long</option>
-                <option value="short">Short</option>
-              </select>
-            </div>
-            <div>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>
-                BASE PRICE (last stored close)
+              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px',
+                display: 'flex', alignItems: 'center' }}>
+                <label htmlFor="stockmind-base">BASE PRICE</label>
+                <InfoTip id="basePrice" />
               </div>
-              <input className="input" value={lastClose ?? ''} readOnly
+              <input className="input" id="stockmind-base" value={lastClose ?? ''} readOnly
                      placeholder="load history →"
                      title="Taken from the last stored bar rather than typed, so a signal cannot be priced off a stale number." />
+              <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>
+                {lastClose == null ? 'load history first' : 'last stored close'}
+              </div>
             </div>
             <div>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px',
+                display: 'flex', alignItems: 'center' }}>
                 <label htmlFor="stockmind-capital">CAPITAL</label>
+                <InfoTip id="capital" />
               </div>
               <input className="input" id="stockmind-capital" type="number" min="0" step="1000"
                      value={capital} onChange={e => setCapital(e.target.value)} />
@@ -489,8 +545,10 @@ override where an unlisted ticker should be looked up.">
                 choosing — how much money is at stake — was his to work out in his head on every
                 change. It is one multiplication and it is the whole point of the field. */}
             <div>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px',
+                display: 'flex', alignItems: 'center' }}>
                 <label htmlFor="stockmind-risk">RISK %</label>
+                <InfoTip id="riskPct" />
               </div>
               <input className="input" id="stockmind-risk" type="number" step="0.25" min="0.25"
                      max="10" value={riskPct} onChange={e => setRiskPct(e.target.value)} />
@@ -508,24 +566,9 @@ override where an unlisted ticker should be looked up.">
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
-            {/* The interval and window buttons live ON THE CHART now (Section 101), which is where a
-                trading platform puts them and which gives the pop-out and workspace panels the same
-                control for free. This box stays as the exact-bar override: the range buttons SET it,
-                and master can still type a number the presets do not offer. Nothing was removed —
-                the old two-option dropdown became nine intervals and ten windows. */}
-            <div style={{ fontSize: '12px', color: 'var(--muted)' }}
-                 title="Set by the window buttons on the chart. Override it here for an exact count.">
-              BARS
-            </div>
-            <input className="input" type="number" min="10" max="20000" step="10"
-                   style={{ width: '92px' }}
-                   value={barCount} onChange={e => setBarCount(e.target.value)} />
-            <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
-              {barInterval} · {barRange}
-              {capBarsFor(barInterval) != null
-                && ` · max ${capBarsFor(barInterval).toLocaleString()}`}
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px',
+            borderTop: '1px solid var(--border)', paddingTop: '10px', flexWrap: 'wrap' }}>
+            <div className="section-label">3 · WHAT DO YOU WANT</div>
             {/* THE TWO LOAD BUTTONS NEEDED DISTINGUISHING (Section 102). "Load history" and
                 "Fetch & store" differ only in whether the network is touched, and only one of them
                 said so — a distinction only the author understood. They now read as "from disk" and
@@ -561,6 +604,53 @@ far as the provider allows, which for intraday is a few days to two years.">
               {status === 'requesting' ? 'Requesting…' : '⚡ Generate Signals'}
             </button>
           </div>
+
+          {/* ── ADVANCED, collapsed (Section 104) ────────────────────────────────────────────────
+              Progressive disclosure: the direction filter and the exact bar count serve a minority of
+              requests, so they are behind one labelled click. The research finding is that novices
+              learn faster and err less while experts pay exactly one click — and neither control is
+              removed, which is what separates this from simplification by deletion. */}
+          <details style={{ borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
+            <summary style={{ cursor: 'pointer', fontSize: '12px', color: 'var(--muted)',
+              letterSpacing: '0.08em' }}>
+              ADVANCED — direction filter, exact bar count
+            </summary>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '12px', flexWrap: 'wrap',
+              paddingTop: '10px' }}>
+              <div>
+                <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px',
+                  display: 'flex', alignItems: 'center' }}>
+                  <label htmlFor="stockmind-direction">DIRECTION FILTER</label>
+                  <InfoTip id="directionFilter" />
+                </div>
+                <select className="input" id="stockmind-direction" style={{ width: '130px' }}
+                        value={direction} onChange={e => setDirection(e.target.value)}>
+                  <option value="both">Both</option>
+                  <option value="long">Long only</option>
+                  <option value="short">Short only</option>
+                </select>
+              </div>
+              {/* The interval and window buttons live ON THE CHART (Section 101), which is where a
+                  trading platform puts them and which gives the pop-out and workspace panels the same
+                  control for free. This box remains as the exact-bar override: the window buttons SET
+                  it, and master can still type a count the presets do not offer. */}
+              <div>
+                <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px',
+                  display: 'flex', alignItems: 'center' }}>
+                  <label htmlFor="stockmind-bars">BARS</label>
+                  <InfoTip id="barsOverride" />
+                </div>
+                <input className="input" id="stockmind-bars" type="number" min="10" max="20000"
+                       step="10" style={{ width: '100px' }}
+                       value={barCount} onChange={e => setBarCount(e.target.value)} />
+              </div>
+              <span style={{ fontSize: '12px', color: 'var(--muted)', paddingBottom: '6px' }}>
+                set by the window buttons on the chart · currently {barInterval} · {barRange}
+                {capBarsFor(barInterval) != null
+                  && ` · provider limit ${capBarsFor(barInterval).toLocaleString()}`}
+              </span>
+            </div>
+          </details>
 
           {barsNote && (
             <div style={{ fontSize: '12.5px', color: 'var(--amber)' }}>{barsNote}</div>
@@ -742,6 +832,8 @@ far as the provider allows, which for intraday is a few days to two years.">
                     thesis={held?.thesis || null} />
         )}
 
+        {tab === 'help' && <HelpPanel />}
+
         {tab === 'strategy' && (
           <StrategyBuilder currentUser={currentUser} canRequest={canRequest}
                            symbol={sym} exchange={exchange} interval={barInterval}
@@ -773,12 +865,15 @@ far as the provider allows, which for intraday is a few days to two years.">
           <div className="hud-card" style={{ padding: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', flexWrap: 'wrap' }}>
               <div className="section-label">SIGNALS — {result.symbol} ({result.exchange})</div>
-              <span className={`badge ${dataIsMock ? 'badge-amber' : 'badge-green'}`}>
+              <span className={`badge ${dataIsMock ? 'badge-amber' : 'badge-green'}`}
+                    style={{ display: 'inline-flex', alignItems: 'center' }}>
                 {dataIsMock ? 'MOCK DATA — INDICATIVE ONLY' : 'REAL OHLCV'}
+                <InfoTip id="mockData" />
               </span>
               {result.suppressedCount > 0 && (
-                <span className="badge badge-amber" title="Models disagreed on these setups">
-                  {result.suppressedCount} SUPPRESSED
+                <span className="badge badge-amber"
+                      style={{ display: 'inline-flex', alignItems: 'center' }}>
+                  {result.suppressedCount} SUPPRESSED<InfoTip id="suppressed" />
                 </span>
               )}
               <div style={{ flex: 1 }} />
@@ -790,11 +885,24 @@ far as the provider allows, which for intraday is a few days to two years.">
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                      {['SETUP', 'DIR', 'ENTRY', 'SL', 'T1', 'T2', 'T3', 'R:R', 'PROB', 'GRADE'].map((h, i) => (
-                        <th key={h} style={{
-                          padding: '7px 9px', fontSize: '12.5px', color: 'var(--muted)',
-                          textAlign: i === 0 ? 'left' : i >= 2 && i <= 6 ? 'right' : 'center',
-                        }}>{h}</th>
+                      {/* Each abbreviation carries its own definition (Section 104). Ten short heads
+                          with the meanings only in a paragraph below is a table you have to look away
+                          from to read. */}
+                      {/* T2 and T3 share `targets` with T1, so only T1 carries the marker — three
+                          identical `?` in a row is clutter, not help. */}
+                      {[['SETUP', 'setup'], ['DIR', 'directionType'], ['ENTRY', 'entryPrice'],
+                        ['SL', 'stopLoss'], ['T1', 'targets'], ['T2', null], ['T3', null],
+                        ['R:R', 'riskReward'], ['PROB', 'probability'], ['GRADE', 'grade']]
+                        .map(([h, info], i) => (
+                          <th key={h} style={{
+                            padding: '7px 9px', fontSize: '12.5px', color: 'var(--muted)',
+                            textAlign: i === 0 ? 'left' : i >= 2 && i <= 6 ? 'right' : 'center',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                              {h}{info && <InfoTip id={info} side={i > 6 ? 'left' : 'right'} />}
+                            </span>
+                          </th>
                       ))}
                     </tr>
                   </thead>
@@ -832,21 +940,26 @@ far as the provider allows, which for intraday is a few days to two years.">
             {/* Why — straight from the ensemble */}
             {selected && Array.isArray(selected.reasons) && selected.reasons.length > 0 && (
               <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid var(--border)' }}>
-                <div className="section-label" style={{ marginBottom: '8px' }}>
+                <div className="section-label" style={{ marginBottom: '8px', display: 'flex',
+                  alignItems: 'center', gap: '6px' }}>
                   WHY — {selected.variant || `#${selected.rank}`}
+                  <InfoTip id="reasons" />
                 </div>
                 <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', marginBottom: '10px' }}>
                   <Stat label="DIRECTIONAL" value={pct(selected.directionalProbability)}
-                        title="The ensemble's view on direction, before geometry" />
-                  <Stat label="T1 / T2 / T3"
+                        info="directionalProbability" />
+                  <Stat label="T1 / T2 / T3" info="targets"
                         value={`${pct(selected.t1Probability)} / ${pct(selected.t2Probability)} / ${pct(selected.t3Probability)}`} />
-                  <Stat label="SL RISK" value={pct(selected.slProbability)} color="var(--red)" />
-                  <Stat label="REGIME" value={selected.regime || '—'} />
+                  <Stat label="SL RISK" value={pct(selected.slProbability)} color="var(--red)"
+                        info="slProbability" />
+                  <Stat label="REGIME" value={selected.regime || '—'} info="regime" />
                   <Stat label="AGREEMENT" value={num(selected.modelAgreement, 2)}
-                        title="Share of models within 0.15 of the blended probability" />
-                  <Stat label="UNCERTAINTY" value={num(selected.uncertainty, 3)} />
-                  <Stat label="MAX RISK" value={selected.maxRisk != null ? String(selected.maxRisk) : '—'} />
-                  <Stat label="VALID FOR" value={selected.validityBars != null ? `${selected.validityBars} bars` : '—'} />
+                        info="modelAgreement" />
+                  <Stat label="UNCERTAINTY" value={num(selected.uncertainty, 3)} info="uncertainty" />
+                  <Stat label="MAX RISK" value={selected.maxRisk != null ? String(selected.maxRisk) : '—'}
+                        info="maxRisk" />
+                  <Stat label="VALID FOR" value={selected.validityBars != null ? `${selected.validityBars} bars` : '—'}
+                        info="validityBars" />
                 </div>
                 <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12.5px', color: 'var(--text-dim)', lineHeight: '1.8' }}>
                   {selected.reasons.map((r, i) => <li key={i}>{r}</li>)}
@@ -873,20 +986,19 @@ far as the provider allows, which for intraday is a few days to two years.">
               </span>
             </div>
             <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
-              <Stat label="PCR (OI)" value={num(latestDeriv.pcr_oi, 3)}
-                    title="Put/call open-interest ratio for the nearest expiry" />
-              <Stat label="MAX PAIN" value={num(latestDeriv.max_pain, 0)}
-                    title="Strike at which option writers pay out least" />
-              <Stat label="SUPPORT" value={num(latestDeriv.max_pe_oi_strike, 0)} color="var(--green)" />
-              <Stat label="RESISTANCE" value={num(latestDeriv.max_ce_oi_strike, 0)} color="var(--red)" />
-              <Stat label="FUT BASIS" value={latestDeriv.fut_basis_pct != null
+              <Stat label="PCR (OI)" value={num(latestDeriv.pcr_oi, 3)} info="pcrOi" />
+              <Stat label="MAX PAIN" value={num(latestDeriv.max_pain, 0)} info="maxPain" />
+              <Stat label="SUPPORT" value={num(latestDeriv.max_pe_oi_strike, 0)} color="var(--green)"
+                    info="oiSupportResistance" />
+              <Stat label="RESISTANCE" value={num(latestDeriv.max_ce_oi_strike, 0)} color="var(--red)"
+                    info="oiSupportResistance" />
+              <Stat label="FUT BASIS" info="futBasis" value={latestDeriv.fut_basis_pct != null
                     ? `${(latestDeriv.fut_basis_pct * 100).toFixed(2)}%` : '—'} />
-              <Stat label="ROLLOVER" value={latestDeriv.rollover_pct != null
+              <Stat label="ROLLOVER" info="rollover" value={latestDeriv.rollover_pct != null
                     ? `${(latestDeriv.rollover_pct * 100).toFixed(1)}%` : '—'} />
-              <Stat label="EXPECTED MOVE" value={latestDeriv.straddle_pct != null
-                    ? `${(latestDeriv.straddle_pct * 100).toFixed(2)}%` : '—'}
-                    title="ATM straddle as a fraction of spot — the market's own priced move to expiry" />
-              <Stat label="DAYS TO EXPIRY" value={latestDeriv.days_to_expiry != null
+              <Stat label="EXPECTED MOVE" info="expectedMove" value={latestDeriv.straddle_pct != null
+                    ? `${(latestDeriv.straddle_pct * 100).toFixed(2)}%` : '—'} />
+              <Stat label="DAYS TO EXPIRY" info="daysToExpiry" value={latestDeriv.days_to_expiry != null
                     ? String(latestDeriv.days_to_expiry) : '—'} />
             </div>
           </div>
@@ -897,17 +1009,19 @@ far as the provider allows, which for intraday is a few days to two years.">
           <div className="hud-card" style={{ padding: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
               <div className="section-label">NEWS — {sym}</div>
-              <span className="badge badge-amber" title="No free feed has enough history to measure whether this predicts anything">
-                NOT BACKTESTABLE
+              <span className="badge badge-amber"
+                    style={{ display: 'inline-flex', alignItems: 'center' }}>
+                NOT BACKTESTABLE<InfoTip id="newsNotBacktestable" />
               </span>
               {news.aggregate && (
                 <>
-                  <Stat label="SENTIMENT" value={num(news.aggregate.sentiment, 3)}
+                  <Stat label="SENTIMENT" info="sentiment" value={num(news.aggregate.sentiment, 3)}
                         color={news.aggregate.sentiment > 0.05 ? 'var(--green)'
                           : news.aggregate.sentiment < -0.05 ? 'var(--red)' : 'var(--muted)'} />
                   <Stat label="POS / NEG"
                         value={`${news.aggregate.positive} / ${news.aggregate.negative}`} />
-                  <Stat label="EVENT" value={news.aggregate.dominantEvent || '—'} />
+                  <Stat label="EVENT" info="dominantEvent"
+                        value={news.aggregate.dominantEvent || '—'} />
                   <Stat label="SOURCES" value={String(news.aggregate.sources ?? '—')} />
                 </>
               )}
