@@ -11,6 +11,7 @@ const { getCredential } = require('./credentialVault.cjs');
 const net = require('../lib/http.cjs');
 const customProviders = require('../lib/customProviders.cjs');
 const claimGate = require('../lib/claimGate.cjs');
+const modelRoles = require('../lib/modelRoles.cjs');
 
 // ─── Model registry ────────────────────────────────────────────────────────────
 const MODEL_REGISTRY = {
@@ -236,7 +237,48 @@ function register(ipcMain) {
   // ── Route a task to best model ────────────────────────────────────────────
   ipcMain.handle('models:route', async (_e, taskType) => {
     const model = selectModel(taskType);
-    return { ok: true, model };
+    return { ok: true, model, ...roleNoteFor(taskType) };
+  });
+
+  /**
+   * The role table — what Rāma needs a model FOR, and which install fills it (Section 112).
+   *
+   * A read, so `models.use` is enough: being told a role is unfilled should not need elevated rights.
+   */
+  ipcMain.handle('models:roles', async (_e, { user, diskBudgetBytes = null } = {}) => {
+    const capability = require('../lib/capability.cjs');
+    if (!capability.can(user, 'models.use')) {
+      return { ok: false, error: 'Access denied: "models.use" required' };
+    }
+    await refreshOllamaModels();
+    return {
+      ok: true,
+      data: modelRoles.plan(Object.values(discoveredOllama), { diskBudgetBytes }),
+      roles: modelRoles.ROLE_IDS.map(id => ({
+        id,
+        label: modelRoles.ROLES[id].label,
+        why: modelRoles.ROLES[id].why,
+        requirement: modelRoles.describeRequirement(modelRoles.ROLES[id]),
+        note: modelRoles.ROLES[id].note ?? null,
+      })),
+    };
+  });
+
+  /** What would fill the unfilled roles — recommended from the FETCHED catalogue only. */
+  ipcMain.handle('models:role-research', async (_e, { user, diskBudgetBytes = null, preferCloud = true } = {}) => {
+    const capability = require('../lib/capability.cjs');
+    if (!capability.can(user, 'models.use')) {
+      return { ok: false, error: 'Access denied: "models.use" required' };
+    }
+    await refreshOllamaModels();
+    const cached = require('../lib/ollamaCatalog.cjs').loadCatalog();
+    return {
+      ok: true,
+      data: modelRoles.researchPlan(Object.values(discoveredOllama), {
+        catalogData: cached.catalog, schedule: cached.schedule, diskBudgetBytes, preferCloud,
+      }),
+      catalog: { loaded: !cached.empty, fetchedAt: cached.fetchedAt, stale: cached.stale },
+    };
   });
 
   // ── Chat completion (routes to correct provider) ───────────────────────────
@@ -367,8 +409,36 @@ function register(ipcMain) {
 }
 
 // ─── Model selection logic ────────────────────────────────────────────────────
+
+/**
+ * Why a role-named task routed where it did, for the caller to pass on (Section 112).
+ *
+ * Returned alongside the model rather than folded into it, so a SUBSTITUTE is legible as one. A role
+ * that nothing fits reports the absence; the old chain reported the first available model instead,
+ * which is how a 397B cloud model ends up parsing a date.
+ */
+function roleNoteFor(taskType) {
+  if (!modelRoles.ROLE_IDS.includes(String(taskType))) return {};
+  const pick = modelRoles.selectForRole(String(taskType), Object.values(discoveredOllama));
+  return { role: pick.role, roleFit: pick.fit, roleWhy: pick.why, roleExcluded: pick.excluded };
+}
+
+/**
+ * DECISION: role selection is tried FIRST and the old path is the fallback, not the reverse.
+ *
+ * `TASK_ROUTING`'s eight buckets and the fixed `FALLBACK_CHAIN` stay exactly as they were, so nothing
+ * that routes today changes. But when a caller names a declared role, fitness decides — and only if no
+ * install is fit does the old chain answer, which keeps the capability while ending the silent default.
+ */
 function selectModel(taskType) {
   refreshCustomProviders();
+
+  if (modelRoles.ROLE_IDS.includes(String(taskType))) {
+    const pick = modelRoles.selectForRole(String(taskType), Object.values(discoveredOllama));
+    if (pick.model) return pick.model;
+    console.warn(`[models] no install is fit for role "${taskType}": ${pick.why}`);
+  }
+
   const caps = TASK_ROUTING[taskType] || ['general'];
 
   // An offline task needs a model that genuinely runs here. `caps.offline` is now set from measured

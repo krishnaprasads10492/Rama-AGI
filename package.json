@@ -48,7 +48,8 @@
     "verify:glossary": "node scripts/verifyGlossary.mjs",
     "verify:popout": "node scripts/verifyPopoutGrant.cjs",
     "verify:claim-gate": "node scripts/verifyClaimGate.cjs",
-    "verify": "node scripts/verifyAudit.cjs && node scripts/verifyUpdateEngine.cjs && node scripts/verifySelfBuild.cjs && node scripts/verifyUpdateChannel.cjs && node scripts/simulateUpdateChannel.cjs && node scripts/verifyWorkspace.cjs && node scripts/verifySelfModel.cjs && node scripts/verifyOllamaCatalog.cjs && node scripts/verifyOllamaLibrary.cjs && node scripts/verifyWebResearch.cjs && node scripts/verifyRefresh.cjs && node scripts/verifyEngineDiagnosis.cjs && node scripts/verifyTimeframes.mjs && node scripts/verifyIndicators.mjs && node scripts/verifySymbols.mjs && node scripts/verifyPositionMath.mjs && node scripts/verifyGlossary.mjs && node scripts/verifyPopoutGrant.cjs && node scripts/verifyClaimGate.cjs && node scripts/auditRenderer.cjs",
+    "verify:roles": "node scripts/verifyModelRoles.cjs",
+    "verify": "node scripts/verifyAudit.cjs && node scripts/verifyUpdateEngine.cjs && node scripts/verifySelfBuild.cjs && node scripts/verifyUpdateChannel.cjs && node scripts/simulateUpdateChannel.cjs && node scripts/verifyWorkspace.cjs && node scripts/verifySelfModel.cjs && node scripts/verifyOllamaCatalog.cjs && node scripts/verifyOllamaLibrary.cjs && node scripts/verifyWebResearch.cjs && node scripts/verifyRefresh.cjs && node scripts/verifyEngineDiagnosis.cjs && node scripts/verifyTimeframes.mjs && node scripts/verifyIndicators.mjs && node scripts/verifySymbols.mjs && node scripts/verifyPositionMath.mjs && node scripts/verifyGlossary.mjs && node scripts/verifyPopoutGrant.cjs && node scripts/verifyClaimGate.cjs && node scripts/verifyModelRoles.cjs && node scripts/auditRenderer.cjs",
     "rebuild": "electron-rebuild",
     "start": "electron .",
     "preview": "vite preview"

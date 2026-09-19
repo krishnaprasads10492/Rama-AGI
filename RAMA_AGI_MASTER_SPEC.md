@@ -1792,6 +1792,7 @@ authenticated **Master session**, not merely an open store.
 
 | 130 | Legible zoom, independent filters, Home on reopen; Rāma as a harness | 1–3 done, 4–5 designed | Section 110. **(1) Default zoom.** `fitContent()` squeezed the whole series into the pane — 4,649 bars in 900px is 0.19px per candle, the exact defect Section 79 replaced the hand-written SVG over, **reintroduced by the fit call itself.** Default is now 8px per candle on the newest bars with the rest left to scrolling; `reset zoom` returns to that and a separate **`fit all`** does what `fitContent` used to, because "readable" and "everything" are different requests. **(2) Interval and dates are INDEPENDENT.** Changing interval used to *reconcile* the window, so picking 5m silently rewrote a window master had chosen — the control editing his input. Now two filters over one series, with `shortfallNote` reporting when the provider serves less rather than the control preventing it. **A new instrument opens unfiltered** (30m, earliest stored bar → today), because a window chosen for the last symbol says nothing about this one. **Date picker upgraded:** own row; `min`/`max` bound by **actual stored coverage** so master picks inside what exists; `⇤ beginning` (he should not have to know the date); `today ⇥`; `✕ clear`; and a plain statement of state — *custom* or *no date filter · everything stored* — with coverage printed at the row end. **(3) Reopening lands on Home.** Closing hides to tray, so reopening showed the last page. The `hide` event now sends the existing `nav:goto` `/` — **on hide, not on show**, so the old page never flashes; reuses the tray channel rather than adding a second thing to keep in step. **(4) DESIGN — Rāma is a HARNESS, and "no hallucination" is a property a SYSTEM enforces.** Research decides the form: HALO (arXiv 2607.17883) — *"zero hallucination is not a property a model possesses but a property a system enforces"*, treating it as **containable** rather than eliminable; hallucination as **output-boundary misclassification**, a completion emitted *as if* grounded (arXiv 2604.06195); and multi-model comparison letting *"consistently hallucinating models be out-voted"* (arXiv 2510.19507). Also: *"an agent is a model and a harness — with a local model the harness matters more."* **So the honest statement of master's requirement: Rāma cannot stop a base model confabulating, and it CAN refuse to pass an unattributed claim through its own boundary.** Much of HALO's stack already exists scattered under other names — `vetSources` (grounded generation), tier-0 reflexes (deterministic execution), deflated Sharpe against trial count (multi-signal verification), the acceptance gate and `{value, source, measured}` with `null` + `why` (calibrated abstention), NOT BACKTESTABLE badges (refusing to score the unmeasurable). **DECISION: the next real piece is a CLAIM GATE, not a better model** — one module at the output boundary classifying every claim as `grounded` / `reflex` / `unattributed` and refusing to emit the third as fact, turning scattered honesty into one enforced rule. **It must NOT become a confidence score:** a number on a sentence is the "emitted as if grounded" failure with extra decimals. Output is a class and a source, or a refusal. **(5) DESIGN — evolve by assimilation.** Measured landscape: open weights are within single digits of frontier on reasoning and coding and **at parity on extraction, classification and tool calling**, which is most of what a harness needs; Qwen holds ~10 of 13 BFCL slots, GLM and Kimi lead agentic work, DeepSeek leads agentic coding, Qwen3.5 spans 0.8B–397B with a 27B fitting 24GB at Q4_K_M. **The base model is a replaceable part; the durable asset is the harness** — capability gates, provenance discipline, the store, the genome, the loyalty core — and that cannot be downloaded. Sections 92/93 already built discovery, evidence-based classification and retirement-aware migration; **the missing piece is role-based routing**: declare what a model is needed FOR and select per role against measured capability, cost and disk, rather than one "best model" for everything — which is how a 397B cloud model ends up parsing a date. **And the invariant: capability compounds, autonomy does not.** A new model is a new tool, never a new authority over master's capital or identity (I15, I16) — which is why swapping the base model cannot introduce order placement. **VERIFIED: 19 suites; audit clean at 139 bridge calls / 72 files / 355 channels; `vite build` succeeds. Nothing seen on screen** — zoom, picker and Home-on-reopen are reasoned from the code path. **Next: the claim gate, then role-based routing.** |
 | 131 | The claim gate — Rāma's output boundary | done | Section 111. Builds the piece row 130 decided on: `electron/lib/claimGate.cjs`, four classes — `grounded` / `reflex` / `prose` / `unattributed` — and the fourth is **not emitted**. **THE THING IT REPLACES:** `intelligenceEngine.buildOutput` already ships `overallConfidence: 78.4`, a letter `grade`, and *"78.4% confidence means ~21.6% chance of being wrong"* — computed in `extractTruth` from **average domain credibility** plus keyword overlap, with **nothing measuring whether any finding answers the question**, so five reputable domains that address nothing still grade A. That is the "emitted as if grounded" failure (arXiv 2604.06195) with decimals attached, which is exactly what row 130 forbade the gate from becoming. **DECISION: a class and a source, or a refusal — never a number.** Asserted two ways: no output object carries a key matching `confidence\|probability\|certainty\|score\|grade\|likelihood`, and the module source computes none. **What it decides is ATTRIBUTION, not truth** — entailment needs a model and the model is the thing being contained. The cited id must exist in the evidence **actually supplied** (catches a fabricated citation) and every checkable token must appear in that source (catches an invented figure). **Evidence is re-vetted here rather than trusted from the caller**, because `vetSources` dropping fallbacks is defeated by one caller that forgets — Section 94's defect exactly; a `fallback` marker, an empty document, or one id over two documents is refused **with its reason retained**. **DECISION: figures canonicalised on both sides** (`1,402.55` = `1402.55` = `1402.550`) or the gate would withhold true claims until callers stopped using it; `%` stripped, a disclosed loosening. **DECISION: a sentence-initial capital is grammar, not a name — unless ticker-shaped**, so `RELIANCE` and `NIFTY50` are still checked but *"Earnings"* is not demanded against a source saying *"profit"*. **THE DEFECT FOUND BY RUNNING IT: `Profit will double next year.` has no digit and no ticker, so it passed as prose** — the most damaging confabulation in a market context, emitted unchallenged. **DECISION: predictive and absolute modality is checkable by definition, and a retrieved document CANNOT ground the future** — a modal claim is groundable only by a `reflex` projection record with a method; citing a prediction to a news article is `unsourceable-prediction`. First-person abstention (`I do not know`, `no data`, `not backtestable`) is exempt and always emitted — **Rāma saying it does not know is the goal state.** **DISCLOSED HOLES:** a fact written in words (*"twelve percent"*) escapes the figure check, which is why structured `claims:[{text,cite}]` is preferred; and `prose` can still be wrong — the gate bounds factual assertion, not helpfulness. It refuses to gate connective language because a gate that breaks its callers gets bypassed. **`body` is asserted never to contain withheld text**; `notice` counts refusals **by reason in words**, not one by one (*"don't dump info on master"*); an empty body **says** nothing survived attribution rather than reading as "no answer"; `attest()` omits the text, because keeping the confabulation beside the account of refusing it defeats the record. **WIRED at `models:chat`** — the report is **always** attached, `requireAttribution` decides whether `content` is replaced, and it **defaults false. DECISION: callers flipped on one at a time** — enforcing everywhere at once would withhold ordinary prose from screens never run, and the first output of a broken gate is a caller that stops using it; a throwing gate returns the answer with `attributionError` set so it never reads as a clean pass. **FLIP LIST in order of exposure: StockMind `why`/`book` narration → market-intel news summaries → strategy `meaning`/`risks`/`would_change` → general chat.** **No capability decision here — attribution is not authorisation** (grep-asserted, as `popoutGrant` is); no Electron, nothing persisted. **VERIFIED: `npm run verify` 20 suites; `verifyClaimGate` 98 assertions; audit clean at 139 bridge calls / 72 files / 355 channels; `vite build` succeeds. Seven defects found by running and fixed.** **NOT VERIFIED: no real model output has passed through it, and nothing seen on screen.** **NEXT: role-based model routing** — declare the roles (extraction, tool-calling, code, multilingual, embedding) and select per role on measured capability/cost/disk, building on `ollamaCatalog.cjs` / `ollamaLibrary.cjs` / `registrySources.cjs`, replacing `TASK_ROUTING`'s eight hand-written buckets and the hardcoded `FALLBACK_CHAIN` in `modelRouter.cjs`. |
+| 132 | Role-based routing — what Rāma needs a model FOR | done | Section 112. Builds row 131's next step and row 130's item 5. **WHAT IT REPLACES:** `TASK_ROUTING`'s eight hand-written buckets plus a seven-id `FALLBACK_CHAIN` ending at `primaryModel`, so any task not matching a bucket fell to the first available entry — **the mechanism by which a 397B cloud model parses a date**, and by which a model that cannot do tool calling does tool calling, because a chain has no concept of *unfit*. **Nine roles declared with a label, a reason master can read, and hard requirements:** `extraction`, `tool-calling`, `code`, `reasoning`, `long-context`, `multilingual`, `embedding`, `vision`, `narration`. **TWO KINDS OF EVIDENCE, NEVER CONFLATED — `measured`** (the daemon and its fetched library: what is installed, its size, its parameter count, whether weights are on this disk) **and `published`** (leaderboards: function-calling collapses below ~7B, reasoning wants 14B+). Published evidence is about the FAMILY, not this machine, and every requirement records which kind it is so **a leaderboard can never be presented as a local measurement** — the same discipline as `{value, source, measured}` and `ctxVerified`. **DECISION: a role is a REQUIREMENT, not a preference** — a failed requirement EXCLUDES with a reason rather than ranking lower, because down-ranking lets an unfit model win whenever nothing better is present. **DECISION: no silent substitution and no silent absence** — `fit` is `declared` / `substitute` / `none`; a substitute is allowed (capability is never removed) but **labelled with what is unverified**; `none` reports the absence and how many candidates failed rather than handing the work onward. **DECISION: an unverified claim is a substitute, never a declared fit** — Ollama truncates to `num_ctx` whatever the family supports, so a 128K window is a claim; `multilingual` is a substitute BY CONSTRUCTION because Rāma has no local test, stated rather than implied. **DECISION: sensitivity is a gate, not a ranking** — `narration` names master's real holdings, so a non-private model is **refused outright**; a prompt that has left this machine cannot be recalled. Asserted: a 397B cloud model does not win narration by being large, and appears in `excluded` so the choice is auditable; any caller may raise `requirePrivate`. **Embedding and chat are a hard split both directions**, with mirror-image reasons. **DECISION: cheapest sufficient, not best available** — fit → privacy → cost → `fast` → capability, and for a role with a floor **the smallest model clearing it wins**; an unknown cost sorts LAST, because unknown must never look like free. Retired models are never candidates, with the replacement named. **THE DEFECT FOUND BY RUNNING IT: `Number(null)` is `0`** — a model with no parameter count was excluded as *"0B is below the 7B floor"* and a model with no reported size **silently CLEARED the disk budget**; unknown was read as zero and **zero passes or fails a threshold confidently.** Fixed with one `num()` returning `null` for absent, applied to parameters, context, size and cost. **Worth hunting for wherever else a threshold meets an optional field.** **THE RESEARCH HALF:** `researchPlan()` names, per unfilled or substituted role, what would fill it with the requirement in words — **from the FETCHED catalogue only**, because a list produced from memory is the Section 94 fabrication; with none loaded it reports `blocked` naming `models:refresh-catalog`, since *nothing to recommend* and *never looked* read alike and mean opposites. **WIRING — role selection is tried FIRST and the old path is the fallback, not the reverse:** `TASK_ROUTING` and `FALLBACK_CHAIN` are untouched so nothing that routes today changes, but a declared role is decided on fitness and only an unfilled role falls through — capability kept, silent default ended. `models:route` returns `role`/`roleFit`/`roleWhy`/`roleExcluded`; new reads `models:roles` and `models:role-research` gated on `models.use`, because being told a role is unfilled should not need elevated rights. **No capability decision — fitness is not authorisation**; no Electron, nothing persisted, no network. **VERIFIED: `npm run verify` 21 suites; `verifyModelRoles` 87 assertions; audit clean at 139 bridge calls / 72 files / 355 channels; `vite build` succeeds.** **NOT VERIFIED: no Ollama daemon was running, so every model record in the suite is a FIXTURE — the table has never been drawn against a real install.** **NEXT: the renderer surface.** `models:roles` and `models:role-research` have no UI, so master cannot see the table or the gaps, which is the point of building it — it belongs on the MODELS screen beside the existing suggestions list. |
 
 ### Resume checklist for a cold session
 
@@ -11823,4 +11824,122 @@ citation after the full stop detaching from the claim it cites, and the predicti
 
 **Not verified:** no shell launched. The gate is exercised entirely through its own suite; nothing has been
 seen on screen, and no real model output has passed through it yet.
+
+---
+
+## SECTION 112 — Role-based routing: what Rāma needs a model FOR
+
+Section 110's second design decision: *the base model is a replaceable part; the durable asset is the
+harness*. This builds its missing piece — `electron/lib/modelRoles.cjs`, 87 assertions in
+`scripts/verifyModelRoles.cjs`, wired into `models:route` and `models:chat`.
+
+### What was there, and why it was not enough
+
+`modelRouter` routed on two hand-written structures:
+
+- `TASK_ROUTING` — eight buckets (`general`, `code`, `long`, `fast`, `vision`, `analysis`, `offline`,
+  `stock`) mapping onto a capability list.
+- `FALLBACK_CHAIN` — seven model ids in a fixed order, ending at `primaryModel`.
+
+Any task that did not match a bucket fell to the first available entry in that chain. **That is the
+mechanism by which a 397B cloud model ends up parsing a date** — and it is also the mechanism by which
+a model that cannot do tool calling does tool calling, because the chain has no concept of *unfit*.
+
+### The roles, declared rather than inferred
+
+`extraction`, `tool-calling`, `code`, `reasoning`, `long-context`, `multilingual`, `embedding`,
+`vision`, `narration`. Each carries a label, a reason master can read, and its hard requirements.
+
+### Two kinds of evidence, never conflated
+
+| kind | source | example |
+|---|---|---|
+| **measured** | the Ollama daemon and its fetched library | what is installed, its size, its parameter count, whether the weights are on this disk |
+| **published** | leaderboards and release notes | function-calling reliability collapses below roughly 7B; reasoning wants 14B+ |
+
+Published evidence is real evidence, but it is about the *family* and not about *this machine*. Every
+requirement records which kind it is, so **a recommendation can never present a leaderboard as a local
+measurement.** This is the same discipline as `{value, source, measured}` and the
+`ctxVerified: false` flag `ollamaCatalog` already sets.
+
+### The decisions
+
+**A role is a requirement, not a preference.** A model that fails a hard requirement is **excluded with
+a reason**, never ranked lower. Down-ranking lets an unfit model win whenever nothing better is present,
+which is precisely the failure being removed.
+
+**No silent substitution, and no silent absence.** Selection returns `fit` of `declared`, `substitute`
+or `none`. A substitute is *allowed* — capability is never removed — but it is **labelled with what is
+unverified about it**. `none` reports the absence and names how many candidates failed. It does not hand
+the work to whatever is available.
+
+**An unverified claim is a substitute, never a declared fit.** Ollama truncates to `num_ctx` whatever
+the family supports, so a 128K window is a *claim*. It can carry `long-context` as a substitute; it
+cannot be called fit. `multilingual` is a substitute **by construction** — Rāma has no local test for
+it, and that is stated rather than implied.
+
+**Sensitivity is a gate, not a ranking.** `narration` writes the why/book text that names master's real
+holdings. A non-private model is **refused outright**, because a prompt that has left this machine
+cannot be recalled. Verified: a 397B cloud model does not win narration by being large, and it appears
+in `excluded` so the choice is auditable. Any caller can raise `requirePrivate` on a role that is not
+sensitive by default.
+
+**Embedding and chat are a hard split, both directions.** A chat model cannot produce vectors and an
+embedding model cannot generate text. Asserted in both directions, with mirror-image reasons.
+
+**Cheapest sufficient, not best available.** Ranking is fit → privacy → cost → `fast` where the role
+asked → capability. For a role with a floor, **the smallest model that clears it wins**, because size is
+a cost master pays in disk. An unknown cost sorts *last*: unknown must never look like free.
+
+**Retired models are never candidates**, whatever else they satisfy, with the replacement named from
+`ollamaCatalog`.
+
+### The defect found by running it: `Number(null)` is `0`
+
+A model with no reported parameter count was excluded as *"0B is below the 7B floor"*, and a model with
+no reported size **silently cleared the disk budget**. Unknown was being read as zero, and **zero passes
+or fails a threshold confidently.** Fixed with one `num()` reader that returns `null` for absent, applied
+to every threshold comparison — parameters, context, size and cost. The same coercion is worth looking
+for anywhere else a threshold meets an optional field.
+
+### The research half
+
+`researchPlan()` answers master's *"do extensive research or give capability to do research on various
+models"* — for each unfilled or substituted role, what would fill it, **with the requirement stated in
+words.**
+
+**DECISION: recommendations come from the FETCHED catalogue only.** Rāma does not know about models from
+memory, and a list produced without the catalogue would be exactly the fabrication Section 94 removed.
+With no catalogue loaded it reports `blocked` naming `models:refresh-catalog` as the remedy — because
+*nothing to recommend* and *never looked* read the same and mean opposite things. A role the catalogue
+cannot fill says so rather than returning an empty array, which would read as *"nothing needed"*.
+
+### Wiring
+
+**DECISION: role selection is tried first and the old path is the fallback, not the reverse.**
+`TASK_ROUTING` and `FALLBACK_CHAIN` are untouched, so nothing that routes today changes. When a caller
+names a declared role, fitness decides; only if no install is fit does the old chain answer. That keeps
+the capability while ending the silent default, which is the additive rule.
+
+`models:route` now returns `role`, `roleFit`, `roleWhy` and `roleExcluded` alongside the model, so a
+substitute is legible as one. Two new read handlers, both gated on `models.use` because being told a
+role is unfilled should not need elevated rights:
+
+- `models:roles` — the whole table, plus each role's requirement in words.
+- `models:role-research` — the gaps and what would fill them, with catalogue provenance attached.
+
+`modelRoles` makes **no capability decision** — fitness is not authorisation — requires no Electron,
+persists nothing, and reaches no network: it selects over what was already discovered.
+
+### Verified
+
+`npm run verify` **21 suites**, all green; `verifyModelRoles` **87 assertions**; audit clean at **139
+bridge calls / 72 files / 355 IPC channels**; `vite build` succeeds.
+
+**Not verified:** no shell launched, and no Ollama daemon was running, so every model record in the suite
+is a fixture. The table has never been drawn against a real install.
+
+**Next:** the renderer surface. `models:roles` and `models:role-research` have no UI yet — master cannot
+see the table or the gaps, which is the point of building it. That belongs on the MODELS screen beside
+the existing suggestions list.
 
