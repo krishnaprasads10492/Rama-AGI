@@ -1,18 +1,12 @@
 /**
- * positionMath.js — the arithmetic behind closing a position, and the arithmetic behind risk.
+ * positionMath.js — the arithmetic shown next to a real-money commit button (Section 102).
  *
- * WHY THIS IS ITS OWN MODULE (spec Section 102). Closing a position used `window.prompt`. A native
- * prompt on a real-money action is the worst control in this module: it accepts any string, shows no
- * consequence, offers no quantity so a partial exit was impossible, no date, no fees, and no
- * confirmation of what master is about to realise. He could type `24.50` meaning 2450 and find out
- * afterwards.
+ * Closing a position used `window.prompt`: any string accepted, no consequence shown, no quantity so no
+ * partial exit, no date, no fees. Typing `24.50` for `2450` recorded a loss silently. The replacement
+ * previews what an exit realises, and a preview beside a Close button that is wrong converts caution
+ * into false confidence — so the maths lives here, pure and tested, touching no React, IPC or DOM.
  *
- * Replacing it means computing a PREVIEW — what this exit realises, net of fees, against his own
- * recorded stop and target — and a preview shown next to a commit button must be right. So the
- * maths lives here, pure, and is tested. Nothing in this file touches React, IPC or the DOM.
- *
- * Everything returns `null` rather than 0 for "cannot say". A zero P&L preview beside a Close button
- * would read as "this trade breaks even", which is a claim; `null` renders as "—", which is not.
+ * `null`, never 0, for "cannot say". A zero P&L preview reads as "this breaks even", which is a claim.
  */
 
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);

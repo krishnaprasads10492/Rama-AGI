@@ -1,32 +1,20 @@
 /**
- * timeframes.js — the one place that knows which (interval, range) pairs a provider can serve.
+ * timeframes.js — which (interval, window) pairs a provider can actually serve (Sections 101, 105, 107).
  *
- * WHY THIS EXISTS (spec Section 101). The chart offered two intervals, `1d` and `60m`, beside a
- * free-text bar count. Master asked for "1 minute to 1 month/6 months/1 year". The engine could
- * already do it — `store.INTRADAY_INTERVALS` holds nine intervals, `providers.INTRADAY_RANGE`
- * holds measured per-interval caps, and the daily branch passes any interval straight through —
- * so the limit was entirely in the dropdown.
+ * A timeframe is a PAIR: the bar interval and how far back to look. Section 74 locked that unit for
+ * horizons; this applies it to the chart. Interval alone cannot say whether master wants three days of
+ * 5m bars or a month of them.
  *
- * But interval and lookback are NOT independent. Yahoo caps intraday windows server-side and
- * answers an over-deep request with HTTP 422, which arrives at the UI as "no bars" — the same
- * thing a misspelt symbol produces. So "1m over 3 years", which is a reasonable sentence in
- * English, must not be an offerable combination: it would promise depth no free provider serves
- * and then fail in a way that looks like a broken symbol.
+ * DUPLICATED FROM `providers.py` INTRADAY_RANGE, deliberately. Serving the matrix from the engine would
+ * make the control unrenderable exactly when the engine is down — which is when master most needs to
+ * see what is on offer. `scripts/verifyTimeframes.mjs` parses the Python and fails on drift.
  *
- * A timeframe is therefore a PAIR — the bar interval and how far back to look — which is the same
- * unit Section 74 locked for horizons, applied to the chart.
- *
- * THIS TABLE IS A DUPLICATE OF `ai_backend/engine/providers.py` `INTRADAY_RANGE`, DELIBERATELY.
- * Two alternatives were rejected. Serving the matrix from the engine makes the control unrenderable
- * exactly when the engine is down, which is when master most needs to see what is on offer. Leaving
- * the renderer permissive and letting the 422 teach it turns a provider limit into an unexplained
- * empty chart. The duplication is real, so `scripts/verifyTimeframes.mjs` parses the Python and
- * fails the suite if the two ever disagree.
+ * Master overrode the original "only offer servable pairs" rule (Section 107): every window is now
+ * selectable, `allRangesFor` marks the unservable ones, and `shortfallNote` reports what arrived.
  */
 
-// One NSE/BSE session is 09:15–15:30 = 375 minutes. Every bar span below is expressed in SESSION
-// minutes rather than wall-clock minutes, which is what makes one division work for every
-// interval: a daily bar spans one session, a weekly bar five, a monthly bar twenty-one.
+// One NSE/BSE session is 09:15–15:30 = 375 minutes. Spans below are in SESSION minutes, not wall-clock,
+// so one division works for every interval: daily spans one session, weekly five, monthly twenty-one.
 export const SESSION_MINUTES = 375;
 
 export const INTERVALS = [
@@ -57,12 +45,9 @@ export const RANGES = [
 ];
 
 /**
- * The deepest window each interval can actually be served over, in trading sessions.
- *
- * Measured, not assumed — these are Section 73's figures, restated here in sessions so they can be
- * compared against `RANGES`:
+ * Deepest window per interval, in trading sessions. Measured (Section 73), not assumed:
  *   1m, 2m -> 5d | 5m, 15m, 30m -> 1mo | 60m -> 2y | 1d and coarser -> whatever exists
- * `null` means no provider-side cap; the real limit is then how much history the instrument has.
+ * `null` = no provider cap; the limit is then the instrument's own history.
  */
 export const PROVIDER_CAP_SESSIONS = {
   '1m': 5, '2m': 5, '5m': 21, '15m': 21, '30m': 21, '60m': 504,
@@ -75,15 +60,12 @@ export const PROVIDER_RANGE_STRING = {
   '1m': '5d', '2m': '5d', '5m': '1mo', '15m': '1mo', '30m': '1mo', '60m': '2y',
 };
 
-// Below this, a chart is a table with axes. This is a DISPLAY floor and is deliberately lower than
-// the engine's 20-bar floor for computation (`ohlcv_to_df`, `providers.fetch_history`): master asked
-// to see a year of monthly bars, which is twelve, and refusing to draw twelve candles because a
-// model could not be fitted on them would confuse two different questions.
+// A DISPLAY floor, deliberately below the engine's 20-bar computation floor: a year of monthly bars is
+// twelve, and refusing to draw twelve candles because a model could not be fitted confuses two questions.
 export const MIN_USEFUL_BARS = 10;
 
-// MAX is unbounded at the provider but not over IPC: every bar crosses a process boundary and then
-// becomes a canvas point. NIFTY's full daily history is ~4,650 bars, so this is roughly four times
-// the deepest series that exists and still bounds the payload.
+// MAX is unbounded at the provider but not over IPC — every bar becomes a canvas point. NIFTY's full
+// daily history is ~4,650 bars, so this bounds the payload without ever truncating a real series.
 export const MAX_BARS = 20000;
 
 const byId = (list, id) => list.find((x) => x.id === id) || null;
@@ -117,27 +99,15 @@ export function capBarsFor(intervalId) {
 }
 
 /**
- * The ranges worth offering for an interval: deep enough to draw, shallow enough to be served.
- *
- * Both ends matter. `1mo` bars over `1D` is one bar — technically valid, visually nothing. `1m`
- * bars over `1Y` is 94,500 bars Yahoo will refuse with a 422 that reads as an empty symbol.
+ * Ranges deep enough to draw and shallow enough to be served. Both ends matter: `1mo` over `1D` is one
+ * bar, and `1m` over `1Y` is 94,500 bars Yahoo refuses with a 422 that reads as an empty symbol.
  */
 /**
- * EVERY range, with what is true about each one — master's override of my earlier design.
+ * EVERY range, flagged. Master's override of Section 101, which offered only servable pairs: the control
+ * was refusing on his behalf. The honesty requirement moved rather than vanished — unservable windows
+ * are MARKED and selectable, and `shortfallNote` reports what actually arrived.
  *
- * Master: *"there shouldn't be any limitations of time when a timeframe is selected… but no limitation
- * can be selected. (click on selected — removes the filter)"*
- *
- * Section 101 offered only the servable pairs, on the reasoning that an unservable one fails as "no
- * bars" and reads like a bad symbol. Master is overriding that, and he is entitled to: the control was
- * refusing on his behalf. **The honesty requirement does not go away, it moves.** Every window is now
- * selectable; the ones past the provider cap are MARKED, and when the provider serves less than was
- * asked for, the chart says so instead of presenting a short answer as a complete one.
- *
- * `rangesFor` is unchanged and still returns the servable set — it is what `reconcileRange` and the
- * suite are built on, and "what can actually be served" remains a real question worth answering.
- *
- * @returns {Array<{...range, beyondCap: boolean, tooFew: boolean, bars: number}>}
+ * @returns {Array<{...range, beyondCap: boolean, capIsMax: boolean, tooFew: boolean, bars: number}>}
  */
 export function allRangesFor(intervalId) {
   const iv = interval(intervalId);
@@ -210,10 +180,8 @@ export function defaultRangeFor(intervalId) {
 }
 
 /**
- * Keep a range valid across an interval change, without silently jumping somewhere unrelated.
- *
- * Switching 1d/1Y to 5m cannot keep 1Y. It falls to the deepest range 5m can serve rather than to
- * that interval's cosmetic default, because master's expressed intent was "as much as possible".
+ * Keep a range valid across an interval change. 1d/1Y switched to 5m falls to the deepest 5m serves,
+ * not to that interval's cosmetic default — master's intent was "as much as possible".
  */
 export function reconcileRange(intervalId, currentRangeId) {
   const allowed = rangesFor(intervalId);
@@ -228,11 +196,7 @@ export function reconcileRange(intervalId, currentRangeId) {
   return (deeperWanted[deeperWanted.length - 1] || allowed[0]).id;
 }
 
-/**
- * The sentence printed under the control, so a missing range reads as a provider limit rather than
- * as something Rāma declined to do.
- * @returns {string|null} null when there is nothing to explain.
- */
+/** So a missing range reads as a provider limit, not as something Rāma declined. Null when there is none. */
 export function describeLimit(intervalId) {
   const iv = interval(intervalId);
   if (!iv) return null;
@@ -245,21 +209,15 @@ export function describeLimit(intervalId) {
 }
 
 /**
- * A window preset expressed as the dates it covers (spec Section 105).
+ * A preset as the dates it covers (Section 105). The bar count was removed because it was interval ×
+ * window restated, and three controls for two facts invited them to disagree.
  *
- * WHY DATES REPLACED A BAR COUNT. Master: *"why is there a field-count of bars? they are calculated
- * based on timeframe and time interval — remove it and also add a date picker."* He is right: a count
- * is a CONSEQUENCE of interval and window, not a third independent choice, so having all three on
- * screen invited them to disagree. A window is now the dates it actually covers, and the presets set
- * those dates rather than a count.
- *
- * Calendar days, not trading days, because a date picker deals in calendar dates. The session figures
- * in `RANGES` stay as they are — they are what the provider caps are expressed in — so the conversion
- * uses the ~252-sessions-per-365-days ratio.
+ * Calendar days out, trading sessions in — `RANGES` is in sessions because the provider caps are, so
+ * the conversion uses the ~252-per-365 ratio plus three days of slack for weekends.
  *
  * @param {string} rangeId
- * @param {Date} [now] injectable, so the conversion is testable without freezing the clock
- * @returns {{from: string, to: string}|null} `YYYY-MM-DD`, or null for MAX which has no start
+ * @param {Date} [now] injectable, so expiry is testable without freezing the clock
+ * @returns {{from: string, to: string}|null} `YYYY-MM-DD`; `from` is null for MAX
  */
 export function datesForRange(rangeId, now = new Date()) {
   const rg = range(rangeId);
@@ -283,10 +241,9 @@ export function toYmd(d) {
 }
 
 /**
- * Which preset, if any, a pair of dates corresponds to — so the button row can stay in sync with a
- * range master typed by hand instead of silently highlighting the wrong one.
- *
- * @returns {string|null} a range id, or null when the dates match no preset ("custom")
+ * Which preset a pair of dates corresponds to, so a hand-typed range shows "custom" rather than leaving
+ * a button lit that no longer describes the chart.
+ * @returns {string|null} a range id, or null for custom
  */
 export function rangeForDates(intervalId, from, to, now = new Date()) {
   if (!from && !to) return null;
@@ -298,12 +255,7 @@ export function rangeForDates(intervalId, from, to, now = new Date()) {
   return null;
 }
 
-/**
- * The payload ceiling for a date window, so a ten-year daily request cannot ask for an unbounded page.
- *
- * Derived from the span rather than typed, which is the whole point of removing the field: the number
- * still exists, master just no longer has to maintain it.
- */
+/** Payload ceiling for a date window. The count still exists; master no longer maintains it. */
 export function limitForDates(intervalId, from, to) {
   const iv = interval(intervalId);
   if (!iv) return MAX_BARS;
@@ -330,13 +282,8 @@ export function showsClock(intervalId) {
  * @returns {Array<{group: string, items: Array}>}
  */
 /**
- * Bar intervals grouped for a segmented control.
- *
- * GROUPED BY WHAT THEY ARE FOR, NOT BY THEIR UNIT (spec Section 104). "Minutes / hours / days" is a
- * fact about arithmetic; "intraday / swing / long term" is the distinction a trader is actually making
- * when he reaches for the control, and it is how every trading platform's own documentation describes
- * the same three clusters.
- *
+ * Grouped by PURPOSE, not unit (Section 104). "Minutes/hours/days" is arithmetic; "intraday/swing/long
+ * term" is the distinction a trader is making, and is how the platforms' own docs describe the clusters.
  * @returns {Array<{group: string, label: string, items: Array}>}
  */
 export function intervalGroups() {

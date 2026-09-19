@@ -1,30 +1,16 @@
 /**
- * indicators.js — overlays the chart is allowed to compute for itself.
+ * indicators.js — overlays the chart may compute for itself (Section 101).
  *
- * WHERE THE LINE IS (spec Section 101). `PriceChart`'s standing rule is that everything drawn comes
- * from the engine, because "a chart that draws a level the engine did not emit is a lie with axes on
- * it". That rule was written about SIGNAL LEVELS and PROJECTIONS — claims about what will happen or
- * what to do — and it still holds absolutely for those.
+ * THE LINE: the renderer may draw any PURE FUNCTION OF THE VISIBLE BARS. Anything forward-looking,
+ * model-derived or advisory must come from the engine. A moving average asserts nothing the bars do not
+ * already contain; a projection or a signal level does. The cone and the levels stay engine-only, and
+ * this is written down because the temptation later is to compute "a signal" here since the maths is
+ * nearby.
  *
- * A moving average is a different kind of object. It is a deterministic function of the bars already
- * on the screen and asserts nothing the bars do not already contain; recomputing it in the engine
- * and shipping it over IPC would produce identical numbers, one round trip later, and would make
- * every overlay toggle a network request. So the rule is refined rather than broken:
+ * WARM-UP IS DROPPED, NEVER FILLED. A partial average drawn as an average is a wrong number that looks
+ * right — the same failure class as Section 88's unmeasured fields.
  *
- *   The renderer may draw any PURE FUNCTION OF THE VISIBLE BARS.
- *   Anything forward-looking, model-derived, or advisory MUST come from the engine.
- *
- * The projection cone, the signal levels and master's own thesis therefore stay engine-only. The
- * temptation later will be to compute "a signal" here because the maths is nearby; that is the line,
- * and it is written down so crossing it has to be deliberate.
- *
- * WARM-UP IS DROPPED, NEVER FILLED. A 200-period average has no value on bar 1. Every function below
- * omits those points rather than emitting `null`, `0`, or a partial average, because a partial
- * average drawn as an average is a wrong number that looks right — the same failure class as
- * Section 88's unmeasured fields.
- *
- * All functions take `bars` as `[{ time, open, high, low, close, volume }]` already in chart order
- * and return `[{ time, value }]` (or a shaped object) ready for `setData`.
+ * In: `[{time, open, high, low, close, volume}]` in chart order. Out: `[{time, value}]` for `setData`.
  */
 
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -63,11 +49,8 @@ export function sma(bars, period) {
 }
 
 /**
- * Exponential moving average, seeded on the first `period` bars' SMA.
- *
- * Seeding on the first CLOSE instead is the common shortcut and it biases the whole early series
- * toward that single bar; seeding on the SMA is what every charting platform does and is why the
- * first emitted point is at index `period - 1`, not 0.
+ * EMA, seeded on the first `period` bars' SMA — which is why the first point is at index `period - 1`.
+ * Seeding on the first close is the common shortcut and biases the whole early series toward one bar.
  */
 export function ema(bars, period) {
   const p = Math.floor(period);
@@ -86,11 +69,8 @@ export function ema(bars, period) {
 }
 
 /**
- * Bollinger bands: an SMA with a POPULATION standard deviation either side.
- *
- * Population, not sample: the window is the whole thing being described, not a draw from a larger
- * set, and the two differ by enough at period 20 to move the band visibly.
- *
+ * Bollinger bands: SMA ± POPULATION standard deviation. Population, not sample — the window IS the thing
+ * described, not a draw from a larger set, and at period 20 the two differ enough to move the band.
  * @returns {{middle: Array, upper: Array, lower: Array}}
  */
 export function bollinger(bars, period = 20, mult = 2) {
@@ -119,14 +99,9 @@ export function bollinger(bars, period = 20, mult = 2) {
 }
 
 /**
- * Relative Strength Index, Wilder's smoothing.
- *
- * Wilder's, not a simple mean of gains and losses: the simple version is a different indicator that
- * happens to share the name, and its values differ by several points — enough to move an
- * overbought reading across the 70 line.
- *
- * A window with no losses is RSI 100 by definition, which is handled explicitly rather than reached
- * by dividing by zero.
+ * RSI with Wilder's smoothing — not a simple mean of gains and losses, which is a different indicator
+ * sharing the name and differs by enough to move a reading across the 70 line. No losses is 100 by
+ * definition, handled explicitly rather than by dividing by zero.
  */
 export function rsi(bars, period = 14) {
   const p = Math.floor(period);
@@ -156,12 +131,9 @@ export function rsi(bars, period = 14) {
 }
 
 /**
- * MACD: fast EMA − slow EMA, its signal EMA, and the histogram between them.
- *
- * The signal line is an EMA OF THE MACD LINE, so it is seeded on the MACD series rather than on
- * closes — and the histogram only exists where both lines do, which is why all three are aligned
- * here instead of being zipped by index at the call site.
- *
+ * MACD. The signal line is an EMA OF THE MACD LINE, seeded on that series rather than on closes, and the
+ * histogram exists only where both do — which is why all three are aligned here by TIME rather than
+ * zipped by index at the call site.
  * @returns {{macd: Array, signal: Array, histogram: Array}}
  */
 export function macd(bars, fast = 12, slow = 26, signalPeriod = 9) {
@@ -190,17 +162,12 @@ export function macd(bars, fast = 12, slow = 26, signalPeriod = 9) {
 }
 
 /**
- * Volume-weighted average price, anchored to the start of each session.
+ * VWAP, anchored to each session — which is the whole point and why it is intraday-only. Run across days
+ * it drifts from price and stops being the indicator the name means, so a daily series returns nothing
+ * rather than a plausible wrong line.
  *
- * ANCHORING IS THE WHOLE POINT, AND IT IS WHY THIS IS INTRADAY-ONLY. VWAP means "the average price
- * paid so far today". Running it across a multi-day series produces a number that is not the
- * indicator anyone means by the name — it drifts further from price every day and stops being
- * interpretable. So a session boundary resets it, and a series with no intraday times returns
- * nothing rather than a plausible-looking wrong line.
- *
- * Bar times are UTC epoch seconds for intraday series (see `PriceChart.toChartTime`), so a session
- * is identified by UTC calendar day. NSE's 03:45–10:00 UTC window sits inside one UTC day, so this
- * does not split a session in two.
+ * Intraday times are UTC epoch seconds, so a session is a UTC calendar day. NSE's 03:45–10:00 UTC window
+ * sits inside one, so this does not split a session in two.
  */
 export function vwap(bars) {
   const src = asBars(bars).filter((b) => typeof b?.time === 'number'
@@ -222,11 +189,8 @@ export function vwap(bars) {
 }
 
 /**
- * The overlays offered on the control, and what each one is.
- *
- * `pane` says where it belongs: `price` draws over the candles, `oscillator` needs its own pane with
- * its own scale. Putting RSI on the price scale is a classic chart bug — a 0–100 series on a
- * 24,000-point index scale renders as a flat line along the bottom.
+ * The overlay catalogue. `pane: 'oscillator'` needs its own scale — a 0–100 series on a 24,000-point
+ * index axis renders as a flat line along the bottom, which is a classic chart bug.
  */
 export const OVERLAY_DEFS = [
   { id: 'sma20',  label: 'SMA 20',  pane: 'price', kind: 'line', make: (b) => sma(b, 20) },
@@ -242,12 +206,7 @@ export const OVERLAY_DEFS = [
 
 export const overlayById = (id) => OVERLAY_DEFS.find((o) => o.id === id) || null;
 
-/**
- * Which overlays make sense for a bar interval.
- *
- * VWAP is excluded on daily and coarser rather than drawn wrong. Hiding it is better than showing a
- * line that carries a well-known name and does not mean what the name means.
- */
+/** VWAP is withheld on daily rather than drawn wrong — a well-known name that does not mean what it says. */
 export function overlaysFor(intradayInterval) {
   return OVERLAY_DEFS.filter((o) => !o.intradayOnly || intradayInterval);
 }

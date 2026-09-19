@@ -1526,6 +1526,32 @@ ipcMain.on('updater:install-now', () => {
 // drift out of step with the main one.
 const popouts = new Map();   // panel id → BrowserWindow
 
+const popoutGrant = require('./lib/popoutGrant.cjs');
+
+// Which main-window webContents asked for a pop-out, so docking back can reach it.
+let popoutOpener = null;
+
+/**
+ * Redeem a pop-out ticket for the opener's session (Section 109). Single use; the ticket is burned
+ * whatever the outcome, and capabilities are still re-checked per call by each gated channel.
+ */
+ipcMain.handle('popout:redeem', async (e, { grant } = {}) => {
+  const res = popoutGrant.redeem(grant, e.sender?.id);
+  return res.ok ? { ok: true, user: res.user, panel: res.panel } : { ok: false, error: res.reason };
+});
+
+/** Send a panel back to the workspace board and close its window. */
+ipcMain.handle('popout:dock', async (e, { panel } = {}) => {
+  const id = String(panel || '').trim();
+  if (!id) return { ok: false, error: 'no panel' };
+  popoutGrant.revokeForPanel(id);
+  if (popoutOpener && !popoutOpener.isDestroyed()) popoutOpener.send('popout:docked', { panel: id });
+  const win = popouts.get(id);
+  if (win && !win.isDestroyed()) win.destroy();
+  popouts.delete(id);
+  return { ok: true };
+});
+
 ipcMain.handle('window:popout', async (_e, { panel, title, params = {} } = {}) => {
   const id = String(panel || '').trim();
   // An allowlist shape rather than free text: this value is concatenated into a URL, and a panel id
@@ -1539,8 +1565,7 @@ ipcMain.handle('window:popout', async (_e, { panel, title, params = {} } = {}) =
   //
   // Allowlisted by key AND by shape, because every one is interpolated into a URL. Passing the whole
   // object through would let a renderer bug put arbitrary text into the address the window opens.
-  // `range` joined the list with Section 101: a timeframe is the pair (interval, window), so passing
-  // only the interval would leave a popped-out chart guessing how much history to fetch.
+  // A timeframe is the pair (interval, window), so `range` travels with the interval.
   const ALLOWED = {
     symbol: /^[A-Z0-9._-]{1,24}$/i, exchange: /^[A-Z]{2,8}$/i,
     interval: /^[0-9a-z]{1,6}$/i, range: /^[0-9A-Z]{1,4}$/i,
@@ -1550,6 +1575,12 @@ ipcMain.handle('window:popout', async (_e, { panel, title, params = {} } = {}) =
     const v = params[k];
     if (typeof v === 'string' && re.test(v)) query[k] = v;
   }
+
+  // A single-use ticket so the new window can adopt this one's session (Section 109). `user` comes from
+  // the renderer, which already passes it to every gated channel, so nothing new is trusted here.
+  const grant = popoutGrant.mint({ user: params.user, panel: id });
+  if (grant) query.grant = grant;
+  popoutOpener = _e?.sender || popoutOpener;
 
   // Re-focus rather than opening a second copy of the same panel.
   const existing = popouts.get(id);
@@ -1578,7 +1609,11 @@ ipcMain.handle('window:popout', async (_e, { panel, title, params = {} } = {}) =
 
   win.setMenuBarVisibility(false);
   popouts.set(id, win);
-  win.on('closed', () => popouts.delete(id));
+  win.on('closed', () => {
+    popouts.delete(id);
+    // An unredeemed ticket must not outlive the window it was minted for.
+    popoutGrant.revokeForPanel(id);
+  });
 
   try {
     if (isDev) {

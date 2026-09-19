@@ -1,34 +1,20 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 /**
- * PanelBoard — draggable, resizable, poppable panels (spec Section 97).
+ * PanelBoard — draggable, resizable, poppable panels (Sections 97, 109).
  *
- * Master asked StockMind to become a multi-window showcase: draggable charts, pop-out screens, a more
- * futuristic feel. This is the substrate. It is a general component rather than StockMind-specific,
- * because the same thing is wanted for Resources and the IDE later.
+ * Hand-written rather than `react-grid-layout`: a few hundred lines of pointer maths against a
+ * dependency, and disk has been master's binding constraint throughout.
  *
- * WRITTEN RATHER THAN INSTALLED. `react-grid-layout` and friends would each add a dependency for
- * behaviour that is a few hundred lines of pointer maths, and master's binding constraint through
- * this whole project has been disk. It also keeps I12's exact-pin discipline from growing another
- * entry that would then need its own upgrade review.
- *
- * ── ERGONOMIC DECISIONS, each guarding against a way floating windows go wrong ──
- *
- * DRAG BY THE HEADER ONLY. Dragging by the whole panel makes its contents unusable: every attempt to
- * select text or scroll a table becomes a window move.
- *
- * PANELS CANNOT BE LOST. Position is clamped so a panel always keeps a grabbable strip on screen. A
- * floating layout where a panel can be dragged past the edge and never retrieved is a trap, and
- * resizing the window must not strand panels outside the new bounds either.
- *
- * KEYBOARD MOVES AND RESIZES. A drag-only surface excludes anyone not using a mouse, and is painful
- * on a trackpad. Focus a header and the arrow keys move it; with shift they resize it.
- *
- * THE LAYOUT PERSISTS, AND CAN BE RESET. Persistence is the point of arranging panels, but a layout
- * that ends up broken is unrecoverable without an escape hatch.
- *
- * MOTION RESPECTS `prefers-reduced-motion`. The futuristic treatment is decoration; it must not make
- * the interface unusable for someone who cannot tolerate movement.
+ * Ergonomics, each guarding a specific failure mode:
+ *   - DRAG BY THE HEADER ONLY — dragging by the body makes selecting text or scrolling a table a move.
+ *   - PANELS CANNOT BE LOST — position is clamped to keep a grabbable strip on screen, including after
+ *     a window resize.
+ *   - KEYBOARD MOVES AND RESIZES — arrows on a focused header, shift to resize. Drag-only excludes
+ *     anyone without a mouse.
+ *   - THE LAYOUT PERSISTS AND CAN BE RESET — persistence is the point, but a broken layout needs an
+ *     escape hatch.
+ *   - MOTION RESPECTS `prefers-reduced-motion` — the styling is decoration and must not cost usability.
  */
 
 const GRID = 8;                 // snap step: enough to align, small enough not to fight the user
@@ -378,8 +364,22 @@ export default function PanelBoard({ panels: initial, storageKey = null, onPopOu
     });
   }, [initial, storageKey, bounds]);
 
-  const open = initial.filter(p => !geo[p.id]?.closed);
-  const hidden = initial.filter(p => geo[p.id]?.closed);
+  // A popped-out panel leaves the board, and docking brings it back (Section 109). Without this the
+  // same panel would be visible in two places, and closing one would look like it did nothing.
+  const [poppedOut, setPoppedOut] = useState(() => new Set());
+
+  useEffect(() => {
+    const off = window.rama?.popout?.onDocked?.(({ panel }) => {
+      setPoppedOut(s => { const n = new Set(s); n.delete(panel); return n; });
+      setGeo(g => (g[panel] ? { ...g, [panel]: { ...g[panel], closed: false } } : g));
+      focus(panel);
+    });
+    return () => off?.();
+  }, [focus]);
+
+  const open = initial.filter(p => !geo[p.id]?.closed && !poppedOut.has(p.id));
+  const hidden = initial.filter(p => geo[p.id]?.closed && !poppedOut.has(p.id));
+  const away = initial.filter(p => poppedOut.has(p.id));
 
   return (
     // `flex: 1` AND `minWidth: 0` AND `width: '100%'`, all three (Section 105).
@@ -407,6 +407,15 @@ export default function PanelBoard({ panels: initial, storageKey = null, onPopOu
             + {p.title}
           </button>
         ))}
+        {/* Panels in their own window, and the way to get them back without hunting for the window. */}
+        {away.map(p => (
+          <button key={p.id} type="button" className="btn btn-sm"
+            onClick={() => window.rama?.popout?.dock?.({ panel: p.id })}
+            title={`${p.title} is in its own window — click to dock it back here`}
+            style={{ fontSize: 11.5, borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+            ⇤ {p.title}
+          </button>
+        ))}
         <span style={{ flex: 1 }} />
         <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
           drag headers · shift+arrows resize
@@ -429,7 +438,12 @@ export default function PanelBoard({ panels: initial, storageKey = null, onPopOu
             onCollapse={(id) => toggle(id, 'collapsed')}
             onMaximise={(id) => toggle(id, 'maximised')}
             onClose={open.length > 1 ? ((id) => toggle(id, 'closed')) : null}
-            onPopOut={onPopOut ? (() => onPopOut(p)) : null}
+            onPopOut={onPopOut ? (async () => {
+              const res = await onPopOut(p);
+              // Only leave the board if the window actually opened — otherwise the panel would vanish
+              // with nowhere to be.
+              if (res !== false) setPoppedOut(s => new Set(s).add(p.id));
+            }) : null}
           >
             {p.render()}
           </Panel>

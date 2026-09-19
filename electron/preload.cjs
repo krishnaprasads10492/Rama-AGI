@@ -245,6 +245,14 @@ const RAMA_API = {
   popout: {
     open: (opts) => ipcRenderer.invoke('window:popout', opts),
     list: ()     => ipcRenderer.invoke('window:popouts'),
+    // Adopt the opener's session (Section 109). Single use — a second call always fails.
+    redeem: (opts) => ipcRenderer.invoke('popout:redeem', opts),
+    dock:   (opts) => ipcRenderer.invoke('popout:dock', opts),
+    onDocked: (fn) => {
+      const h = (_e, payload) => fn(payload);
+      ipcRenderer.on('popout:docked', h);
+      return () => ipcRenderer.removeListener('popout:docked', h);
+    },
   },
 
   // ── Background schedule and upgrade review (Section 96) ───────────────────

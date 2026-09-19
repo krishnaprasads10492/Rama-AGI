@@ -807,17 +807,19 @@ far as the provider allows, which for intraday is a few days to two years.">
           <div style={{ flex: 1, minHeight: 640, minWidth: 0, display: 'flex' }}>
             <PanelBoard
               storageKey="rama.stockmind.workspace"
-              onPopOut={(p) => {
-                // `inElectron` is this file's guard; `isElectron` is another page's name for it and
-                // was a free variable here — caught by the scope check before it ever rendered.
-                if (!inElectron || !window.rama?.popout) return;
-                // The new window is a separate renderer and cannot see the bars loaded here, so it
-                // is told what to fetch for itself.
-                window.rama.popout.open({
+              onPopOut={async (p) => {
+                if (!inElectron || !window.rama?.popout) return false;
+                // A separate renderer sees neither these bars nor this login, so it is told what to
+                // fetch and given a single-use ticket for the session (Section 109).
+                const res = await window.rama.popout.open({
                   panel: p.id,
                   title: p.title,
-                  params: { symbol, exchange, interval: barInterval, range: barRange },
+                  params: {
+                    symbol, exchange, interval: barInterval, range: barRange || undefined,
+                    user: currentUser,
+                  },
                 });
+                return res?.ok !== false;
               }}
               panels={[
                 {

@@ -13,30 +13,17 @@ import {
 import InfoTip from './InfoTip.jsx';
 
 /**
- * PriceChart — candlesticks, master's own fills, his levels, and the projection cone.
+ * PriceChart — candles, master's own fills, his levels, and the projection cone.
  *
- * WHY THIS REPLACED THE INLINE SVG (spec Section 79). The previous chart rendered
- * `viewBox="0 0 900 h"` with `preserveAspectRatio="none"` at `width: 100%`, which stretches the
- * whole drawing horizontally to fit the container. At any width other than exactly 900px — that
- * is, always — glyphs distorted, `strokeWidth="1"` stopped being one pixel, and candle bodies
- * widened independently of their height. It also had no zoom or pan, so the 4,649 daily bars in
- * the store rendered as a smear at 0.19px per slot, and it mounted one React mouse handler per
- * candle.
+ * Built on `lightweight-charts`, which supersedes Section 71's case against recharts on its own terms:
+ * recharts has no candlestick primitive, so it meant hand-writing SVG anyway. The hand-written SVG it
+ * replaced (Section 79) stretched at any width but 900px and had no zoom, so 4,649 bars were a smear.
  *
- * Section 71's decision was against RECHARTS, and it still holds: recharts has no candlestick
- * primitive, so using it means writing the custom SVG anyway. That reasoning was about recharts.
- * `lightweight-charts` is TradingView's charting core — candles, panes, price lines, markers,
- * zoom and crosshair are what it is made of. Section 71 is superseded on its own terms.
+ * THE RULE (Sections 101, 103): the renderer may draw any pure function of the visible bars; anything
+ * forward-looking, model-derived or advisory comes from the engine. Indicators are arithmetic on what is
+ * already on screen; the cone and the signal levels are claims. See `indicators.js`.
  *
- * WHAT SECTION 101 CHANGED, and the rule it had to refine. The standing rule was "everything drawn
- * comes from the engine; a chart that draws a level the engine did not emit is a lie with axes on
- * it." That was written about signal levels and projections — claims — and for those it is absolute.
- * A moving average is a different object: a pure function of the bars already on screen, asserting
- * nothing they do not contain. So the rule now reads: **the renderer may draw any pure function of
- * the visible bars; anything forward-looking, model-derived or advisory must come from the engine.**
- * The cone, the signal levels and master's thesis stay engine-only. See `indicators.js`.
- *
- * The other Section 101 changes, each closing a specific defect:
+ * Defects closed here and worth not reintroducing:
  *   - the timeframe control offered 2 of 9 intervals while the engine supported all of them
  *   - `fitContent()` ran on every data change, so every poll threw away master's zoom
  *   - volume rode an overlay price scale instead of its own pane, costing price a quarter of the height
@@ -250,22 +237,15 @@ export default function PriceChart({
 
   // ── Create once. Recreating per render would throw away master's zoom on every poll. ────────
   //
-  // THE HOLDER IS ALWAYS RENDERED, AND THAT IS LOAD-BEARING (spec Section 107).
+  // THE HOLDER IS ALWAYS MOUNTED, AND THAT IS LOAD-BEARING (Section 107). The empty state used to
+  // REPLACE it, so mounting with no bars left `holder.current` null, this effect returned, and no chart
+  // was ever created — and the deps below do not change when data arrives, so nothing tried again. It
+  // broke on only one of two mount orders, which is why the workspace widget worked and the CHART tab,
+  // which mounts before its bars, did not.
   //
-  // Master: "able to see bars in workspace widget but not in the chart tab." The empty state used to
-  // REPLACE the holder div, so when this component mounted with no bars yet — which the CHART tab does
-  // on every load, and does far more often since Section 105 started clearing bars on a symbol change —
-  // `holder.current` was null, this effect returned immediately, and NO CHART WAS EVER CREATED. Bars
-  // arriving later only re-ran the data effect, which found `priceRef.current` null and gave up. The
-  // deps here are `[showVolume, chartType]`, neither of which changes when data arrives, so nothing
-  // ever tried again. The workspace widget worked only because it happened to mount after bars existed.
-  //
-  // The empty state is now an OVERLAY over a holder that always exists. A regression of mine, and the
-  // kind that only shows on one of two mount orders.
-  // `height` and `interval` are NOT in the dependency list. Both used to be, so switching interval
-  // destroyed and rebuilt the chart — and entering fullscreen did too. `applyOptions` sets the
-  // height and the axis clock on a live chart, so neither needs a teardown. `chartType` IS here,
-  // because the price series changes class; the visible range is carried across by hand below.
+  // `height` and `interval` are deliberately NOT deps: `applyOptions` sets both on a live chart, and
+  // having them here rebuilt it on every interval change and on fullscreen. `chartType` IS a dep because
+  // the price series changes class; the visible range is carried across by hand below.
   useEffect(() => {
     if (!holder.current) return undefined;
     const theme = readTheme(holder.current);
@@ -413,10 +393,8 @@ export default function PriceChart({
 
   // ── Bars ──────────────────────────────────────────────────────────────────
   //
-  // FITTING IS NOT AUTOMATIC ANY MORE. `fitContent()` used to run on every data change, so a poll
-  // that appended one bar reset the zoom master had just set — the single most annoying thing a
-  // chart can do. It now fits only when the series IDENTITY changes (symbol, interval, or window),
-  // which is the only time the old view is meaningless.
+  // FITTING IS NOT AUTOMATIC. `fitContent()` on every data change reset the zoom master had just set.
+  // It now fits only when the series IDENTITY changes — symbol, interval or window.
   useEffect(() => {
     const price = priceRef.current;
     const chart = chartRef.current;

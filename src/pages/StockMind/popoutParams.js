@@ -27,9 +27,10 @@ export function readPopoutParams(search) {
     panel,
     symbol: q.get('symbol') || 'NIFTY50',
     exchange: q.get('exchange') || 'NSE',
-    interval: q.get('interval') || '1d',
-    // The lookback window (Section 101). A timeframe is the pair, so passing only the interval
-    // would leave a popped-out chart guessing how much history master was looking at.
-    range: q.get('range') || '1Y',
+    interval: q.get('interval') || '30m',
+    // A timeframe is the pair, so the window travels with the interval.
+    range: q.get('range') || null,
+    // Single-use session ticket (Section 109). Absent means this window stays unauthenticated.
+    grant: q.get('grant') || null,
   };
 }
