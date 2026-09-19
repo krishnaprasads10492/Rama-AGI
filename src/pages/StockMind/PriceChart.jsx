@@ -37,6 +37,10 @@ const ATTRIBUTION_URL = 'https://www.tradingview.com';
 
 const PREFS_KEY = 'rama.stockmind.chart';
 
+// Pixels per candle at the default zoom. Below ~6 a body stops being readable; above ~12 a deep
+// history needs too much scrolling to be useful. 8 is legible and still shows a few months of daily.
+const TARGET_BAR_PX = 8;
+
 const SIGNAL_LEVELS = [
   { key: 'stopLoss',   label: 'SL',    varName: '--red',    style: LineStyle.Dashed },
   { key: 'entryPrice', label: 'ENTRY', varName: '--accent', style: LineStyle.Solid },
@@ -90,6 +94,12 @@ function toChartTime(raw) {
 }
 
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
+
+const todayYmd = () => {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
 
 function readTheme(el) {
   const cs = getComputedStyle(el);
@@ -156,6 +166,7 @@ export default function PriceChart({
   fromDate = null,          // the window as dates (Section 105) — the bar count was removed
   toDate = null,
   onDates = null,           // (from, to) => void; omit to hide the date pickers
+  coverage = null,          // {first, last} stored bar dates, so the picker has real bounds
   chartId = 'chart',        // so two charts on one screen do not share input ids
   basePrice = null,         // master's average cost, for the baseline chart's zero line
 }) {
@@ -414,19 +425,40 @@ export default function PriceChart({
     }
 
     if (candles.length === 0) return;
-    // The DATES are part of the series identity, not just the preset name. With a hand-typed window
-    // `rangeId` is null, so a key built from the preset alone would not change and the chart would keep
-    // master's old zoom over a completely different span (Section 105).
+
+    /**
+     * ZOOM TO LEGIBLE CANDLES, NOT TO EVERY BAR (Section 110).
+     *
+     * `fitContent()` squeezes the whole series into the pane, so a deep history arrives as a smear —
+     * 4,649 bars in 900px is 0.19px per candle, the exact defect Section 79 replaced the old SVG over,
+     * reintroduced by the fit call itself. This shows the newest bars at a readable width and leaves the
+     * rest to scrolling, which is what a trading platform does on open.
+     */
+    const fitLegible = () => {
+      const width = holder.current?.clientWidth || 900;
+      const want = Math.max(40, Math.min(candles.length, Math.floor(width / TARGET_BAR_PX)));
+      try {
+        chart.timeScale().setVisibleLogicalRange({
+          from: Math.max(0, candles.length - want),
+          to: candles.length + 2,
+        });
+      } catch {
+        chart.timeScale().fitContent();
+      }
+    };
+
+    // The DATES are part of the series identity, not just the preset name: with a hand-typed window
+    // `rangeId` is null, so a key from the preset alone would keep the old zoom over a different span.
     const fitKey = `${symbol}|${interval}|${rangeId || ''}|${fromDate || ''}|${toDate || ''}`;
     if (fitKeyRef.current !== fitKey) {
       fitKeyRef.current = fitKey;
       savedRangeRef.current = null;
-      chart.timeScale().fitContent();
+      fitLegible();
       return;
     }
     if (savedRangeRef.current) {
       try { chart.timeScale().setVisibleLogicalRange(savedRangeRef.current); }
-      catch { chart.timeScale().fitContent(); }
+      catch { fitLegible(); }
       savedRangeRef.current = null;
     }
   }, [candles, volumes, chartType, symbol, interval, rangeId, fromDate, toDate]);
@@ -643,7 +675,18 @@ export default function PriceChart({
   const toggleOverlay = (id) => setEnabled((s) => (s.includes(id)
     ? s.filter((x) => x !== id) : s.concat(id)));
 
+  // Two different things, so both are offered: back to a readable zoom, or truly everything.
   const resetZoom = useCallback(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const n = candles.length;
+    const width = holder.current?.clientWidth || 900;
+    const want = Math.max(40, Math.min(n, Math.floor(width / TARGET_BAR_PX)));
+    try { chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - want), to: n + 2 }); }
+    catch { chart.timeScale().fitContent(); }
+  }, [candles.length]);
+
+  const zoomAll = useCallback(() => {
     try { chartRef.current?.timeScale().fitContent(); } catch { /* no chart yet */ }
   }, []);
 
@@ -762,7 +805,9 @@ export default function PriceChart({
         {busy && <span style={{ color: 'var(--accent)' }}>loading…</span>}
         <span style={{ flex: 1 }} />
         <button type="button" onClick={resetZoom} style={chip(false)}
-                title="Fit every bar in the window back into view (r)">reset zoom</button>
+                title="Back to a readable candle width (r)">reset zoom</button>
+        <button type="button" onClick={zoomAll} style={chip(false)}
+                title="Squeeze the entire loaded history into view">fit all</button>
         <button type="button" onClick={() => setFull((v) => !v)} style={chip(full)}
                 aria-pressed={full}
                 title={full ? 'Leave fullscreen (f or Escape)' : 'Fill the window (f)'}>
@@ -837,24 +882,60 @@ export default function PriceChart({
                   span. The presets SET these fields, so the two can never disagree — and a typed date
                   un-highlights the presets rather than leaving a button lit that no longer describes
                   what is on screen. */}
-              {onDates && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px',
-                  marginLeft: '10px' }}>
-                  <label htmlFor={`${chartId}-from`} style={{ fontSize: '12px',
-                    color: 'var(--muted)' }}>from</label>
-                  <input id={`${chartId}-from`} className="input" type="date" value={fromDate || ''}
-                         max={toDate || undefined}
-                         onChange={(e) => onDates(e.target.value, toDate)}
-                         style={{ width: '132px', fontSize: '12px', padding: '2px 5px' }} />
-                  <label htmlFor={`${chartId}-to`} style={{ fontSize: '12px',
-                    color: 'var(--muted)' }}>to</label>
-                  <input id={`${chartId}-to`} className="input" type="date" value={toDate || ''}
-                         min={fromDate || undefined}
-                         onChange={(e) => onDates(fromDate, e.target.value)}
-                         style={{ width: '132px', fontSize: '12px', padding: '2px 5px' }} />
-                  {!rangeId && (
-                    <span style={{ fontSize: '12px', color: 'var(--accent)' }}>custom</span>
-                  )}
+            </div>
+          )}
+
+          {/* ── DATES: their own row, and an independent filter (Section 110) ───────────────────
+              Master: "based on time interval and time frame can be individually selected, like
+              individual filters not dependent on each other." So the interval no longer reconciles
+              the window and the window no longer constrains the interval — they are two filters over
+              one series. `coverage` gives the picker real bounds, so master can see what exists rather
+              than guessing, and "beginning" is one click instead of a date he has to know. */}
+          {onDates && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', fontSize: '12px',
+                color: 'var(--muted)', minWidth: '44px' }}>
+                DATES<InfoTip id="window" />
+              </span>
+              <input id={`${chartId}-from`} className="input" type="date" value={fromDate || ''}
+                     aria-label="From date"
+                     min={coverage?.first || undefined}
+                     max={toDate || coverage?.last || undefined}
+                     onChange={(e) => onDates(e.target.value, toDate)}
+                     style={{ width: '138px', fontSize: '12px', padding: '2px 5px' }} />
+              <span style={{ fontSize: '12px', color: 'var(--muted)' }}>→</span>
+              <input id={`${chartId}-to`} className="input" type="date" value={toDate || ''}
+                     aria-label="To date"
+                     min={fromDate || coverage?.first || undefined}
+                     onChange={(e) => onDates(fromDate, e.target.value)}
+                     style={{ width: '138px', fontSize: '12px', padding: '2px 5px' }} />
+
+              {coverage?.first && (
+                <button type="button" style={seg(false)}
+                        onClick={() => onDates(coverage.first, toDate)}
+                        title={`Earliest stored bar: ${coverage.first}`}>⇤ beginning</button>
+              )}
+              <button type="button" style={seg(false)}
+                      onClick={() => onDates(fromDate, todayYmd())}
+                      title="Bring the end of the window up to today">today ⇥</button>
+              {(fromDate || toDate) && (
+                <button type="button" style={seg(false)} onClick={() => onDates('', '')}
+                        title="Remove the date filter — every bar Rāma holds for this interval">
+                  ✕ clear
+                </button>
+              )}
+
+              {(fromDate || toDate) && !rangeId && (
+                <span style={{ fontSize: '12px', color: 'var(--accent)' }}>custom</span>
+              )}
+              {!fromDate && !toDate && (
+                <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                  no date filter · everything stored
+                </span>
+              )}
+              {coverage?.first && (
+                <span style={{ fontSize: '12px', color: 'var(--muted)', marginLeft: 'auto' }}>
+                  stored {coverage.first} → {coverage.last || 'now'}
                 </span>
               )}
 

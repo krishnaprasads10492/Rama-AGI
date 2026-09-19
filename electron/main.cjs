@@ -1357,6 +1357,16 @@ function createMainWindow() {
     badgeWindow.setStatus('paused');
   });
 
+  // Closing hides to the tray, so reopening used to land on whatever page was open when master closed
+  // it. He asked for Home instead — told on hide rather than on show, so the navigation has happened by
+  // the time the window is visible and he never sees the old page flash (Section 110).
+  mainWindow.on('hide', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    // Reuses the existing tray channel rather than adding one — `TrayNavListener` is already wired,
+    // and a second channel for the same act would be a second thing to keep in step.
+    mainWindow.webContents.send('nav:goto', '/');
+  });
+
   mainWindow.on('close', (e) => {
     if (!app.isQuiting) {
       e.preventDefault();

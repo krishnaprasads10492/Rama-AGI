@@ -1790,6 +1790,8 @@ authenticated **Master session**, not merely an open store.
 
 | 129 | Pop-outs carry a session and dock back; comments cut | done | Section 109. Master: *"concise the comments overall"* and *"do the above mentioned as best possible"*. Day 1 of the Section 108 plan is his machine, so this takes the highest-value row finishable here — **pop-out windows that carry a session and dock back** (plan days 12–13), asked for twice. `electron/lib/popoutGrant.cjs` mints a **single-use ticket**: 32 random bytes bound to `(user, panel)`, main-process memory only, 30s expiry, burned on first redemption whatever the outcome. **DECISION: the ticket, not the token** — a real session token on a URL leaves a long-lived credential in histories, logs and crash reports; a ticket that dies on first use is worthless to any later reader and worthless before redemption to anything that is not that window. **DECISION: it creates NO new authority** — the renderer already passes `user` to every gated channel, so handing that object to another window adds nothing it could not already do; `popoutGrant` makes **no capability decision at all** and every channel still checks against `shared/capabilities.json` per call (I1, I2, I8), asserted by grepping the module for capability logic. **Docking back needs no ticket:** `popout:dock` revokes any unredeemed grant, tells the opener to restore the panel, destroys the window; `PanelBoard` removes a popped-out panel from the board and shows it as a `⇤ TITLE` button, so a panel is never in two places at once and the way back does not mean hunting for a window. A pop-out only leaves the board if the window actually opened, or the panel would vanish with nowhere to be. **VERIFIED: 39 assertions**, mostly about what must NOT work — replay from the same and a different window, expiry at the boundary, a grant with no user or no id (it would redeem into a session that looks authenticated and is not), a mutation of the live user object after minting, a bounded map so renderer-triggered minting cannot exhaust memory, revocation on window close, `__proto__` as a ticket — plus three source-level checks: nothing persisted, no capability decision here, token from a CSPRNG. `npm run verify` **19 suites**; audit clean; `vite build` succeeds. **COMMENT PASS:** `timeframes.js` 148→96 comment lines, `indicators.js` 103→74, `positionMath.js` 67→58, `PriceChart`/`PanelBoard` headers roughly halved. **The rule applied: a comment earns its length by recording a decision, a measurement, or a defect that will otherwise be reintroduced — not by restating the code or narrating the change.** Nothing a verify script greps for was removed; `verifyGlossary` and `verifyEngineDiagnosis` both assert on source text and both still pass. **NOT VERIFIED: no shell launched** — the hand-off is reasoned from the IPC path, and the first real test is master popping a panel out and seeing the book render instead of "not signed in". |
 
+| 130 | Legible zoom, independent filters, Home on reopen; Rāma as a harness | 1–3 done, 4–5 designed | Section 110. **(1) Default zoom.** `fitContent()` squeezed the whole series into the pane — 4,649 bars in 900px is 0.19px per candle, the exact defect Section 79 replaced the hand-written SVG over, **reintroduced by the fit call itself.** Default is now 8px per candle on the newest bars with the rest left to scrolling; `reset zoom` returns to that and a separate **`fit all`** does what `fitContent` used to, because "readable" and "everything" are different requests. **(2) Interval and dates are INDEPENDENT.** Changing interval used to *reconcile* the window, so picking 5m silently rewrote a window master had chosen — the control editing his input. Now two filters over one series, with `shortfallNote` reporting when the provider serves less rather than the control preventing it. **A new instrument opens unfiltered** (30m, earliest stored bar → today), because a window chosen for the last symbol says nothing about this one. **Date picker upgraded:** own row; `min`/`max` bound by **actual stored coverage** so master picks inside what exists; `⇤ beginning` (he should not have to know the date); `today ⇥`; `✕ clear`; and a plain statement of state — *custom* or *no date filter · everything stored* — with coverage printed at the row end. **(3) Reopening lands on Home.** Closing hides to tray, so reopening showed the last page. The `hide` event now sends the existing `nav:goto` `/` — **on hide, not on show**, so the old page never flashes; reuses the tray channel rather than adding a second thing to keep in step. **(4) DESIGN — Rāma is a HARNESS, and "no hallucination" is a property a SYSTEM enforces.** Research decides the form: HALO (arXiv 2607.17883) — *"zero hallucination is not a property a model possesses but a property a system enforces"*, treating it as **containable** rather than eliminable; hallucination as **output-boundary misclassification**, a completion emitted *as if* grounded (arXiv 2604.06195); and multi-model comparison letting *"consistently hallucinating models be out-voted"* (arXiv 2510.19507). Also: *"an agent is a model and a harness — with a local model the harness matters more."* **So the honest statement of master's requirement: Rāma cannot stop a base model confabulating, and it CAN refuse to pass an unattributed claim through its own boundary.** Much of HALO's stack already exists scattered under other names — `vetSources` (grounded generation), tier-0 reflexes (deterministic execution), deflated Sharpe against trial count (multi-signal verification), the acceptance gate and `{value, source, measured}` with `null` + `why` (calibrated abstention), NOT BACKTESTABLE badges (refusing to score the unmeasurable). **DECISION: the next real piece is a CLAIM GATE, not a better model** — one module at the output boundary classifying every claim as `grounded` / `reflex` / `unattributed` and refusing to emit the third as fact, turning scattered honesty into one enforced rule. **It must NOT become a confidence score:** a number on a sentence is the "emitted as if grounded" failure with extra decimals. Output is a class and a source, or a refusal. **(5) DESIGN — evolve by assimilation.** Measured landscape: open weights are within single digits of frontier on reasoning and coding and **at parity on extraction, classification and tool calling**, which is most of what a harness needs; Qwen holds ~10 of 13 BFCL slots, GLM and Kimi lead agentic work, DeepSeek leads agentic coding, Qwen3.5 spans 0.8B–397B with a 27B fitting 24GB at Q4_K_M. **The base model is a replaceable part; the durable asset is the harness** — capability gates, provenance discipline, the store, the genome, the loyalty core — and that cannot be downloaded. Sections 92/93 already built discovery, evidence-based classification and retirement-aware migration; **the missing piece is role-based routing**: declare what a model is needed FOR and select per role against measured capability, cost and disk, rather than one "best model" for everything — which is how a 397B cloud model ends up parsing a date. **And the invariant: capability compounds, autonomy does not.** A new model is a new tool, never a new authority over master's capital or identity (I15, I16) — which is why swapping the base model cannot introduce order placement. **VERIFIED: 19 suites; audit clean at 139 bridge calls / 72 files / 355 channels; `vite build` succeeds. Nothing seen on screen** — zoom, picker and Home-on-reopen are reasoned from the code path. **Next: the claim gate, then role-based routing.** |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -11563,3 +11565,123 @@ The rule applied: a comment earns its length by recording a decision, a measurem
 will otherwise be reintroduced. It does not earn it by restating the code or by narrating the change.
 Nothing that a verify script greps for was removed — `verifyGlossary` and `verifyEngineDiagnosis` both
 assert on source text, and both still pass.
+
+---
+
+## SECTION 110 — Legible candles, independent filters, Home on reopen, and Rāma as a harness
+
+Master, five items. Three are chart and shell fixes, shipped. Two are the architecture: *"Rāma itself is
+a model sitting on top of other models which is ever learning with no allowance for hallucinations"*,
+and *"Rāma can develop its capability by utilising existing models efficiently but the basic model should
+evolve without compromising loyalty to master. It's not smart to start from scratch."*
+
+### 1. The chart zooms to legible candles
+
+`fitContent()` squeezes the whole series into the pane — 4,649 bars in 900px is 0.19px per candle, which
+is the exact defect Section 79 replaced the hand-written SVG over, reintroduced by the fit call itself.
+
+The default zoom now shows the newest bars at **8px per candle** and leaves the rest to scrolling, which
+is what a trading platform does on open. `reset zoom` returns to that; a separate **`fit all`** does what
+`fitContent` used to, because "readable" and "everything" are two different requests.
+
+### 2. Interval and dates are independent filters
+
+Master: *"based on time interval and time frame can be individually selected, like individual filters not
+dependent on each other."*
+
+Changing the interval no longer touches the dates. It used to *reconcile* them, so picking 5m silently
+rewrote a window master had chosen — the control editing his input. They are now two filters over one
+series, and when the provider serves less than the pair asks for, `shortfallNote` reports it rather than
+the control preventing it.
+
+**A new instrument opens unfiltered** — 30m bars, earliest stored bar to today — because a window chosen
+for the last symbol says nothing about this one.
+
+**The date picker, upgraded.** Its own row rather than crowded onto the window buttons; `min`/`max` bound
+by the **actual stored coverage**, so master picks inside what exists instead of guessing; a `⇤ beginning`
+button that jumps to the earliest stored bar (he should not have to know the date); `today ⇥`; `✕ clear`;
+and a plain statement of which state it is in — *custom*, or *no date filter · everything stored* — with
+the coverage printed at the end of the row.
+
+### 3. Reopening lands on Home
+
+Closing hides to the tray, so reopening showed whatever page was open when master closed it. The window's
+`hide` event now sends the existing `nav:goto` `/`. **On hide, not on show**, so the navigation has
+happened before the window is visible and the old page never flashes. It reuses the tray channel rather
+than adding one — `TrayNavListener` is already wired, and a second channel for the same act is a second
+thing to keep in step.
+
+### 4. Rāma is a harness, and "no hallucination" is a property a SYSTEM enforces
+
+Master's framing is right, and the research backs the exact form of it. Two findings that decide the
+design:
+
+> *"'Zero hallucination' is not a property a model possesses but a property a system enforces."*
+> — HALO, arXiv 2607.17883, which treats hallucination as a **containable** failure mode rather than an
+> eliminable one.
+
+> *"An agent is a model and a harness. With a local model, the harness matters more. Small context
+> windows and weaker tool calling expose every design flaw."* — MarkTechPost, Sept 2026.
+
+And the mechanism: hallucination is best modelled as **output-boundary misclassification** — an
+internally generated completion emitted *as if* grounded in evidence (arXiv 2604.06195). Combining
+several different models *"allows consistently hallucinating models to be out-voted"* (arXiv 2510.19507).
+
+**So the honest statement of master's requirement is: Rāma cannot stop a base model from confabulating,
+and it can refuse to pass an unattributed claim through its own boundary.** That is achievable, testable,
+and it is most of what he actually wants.
+
+**The remarkable part is how much of this Rāma already does, scattered.** The layers HALO names are
+already present under other names:
+
+| HALO layer | Already in Rāma |
+|---|---|
+| grounded generation over approved content | `vetSources` — a fabricated source was found and removed (S94) |
+| constrained deterministic execution | tier-0 reflexes: 9 skills answered with no model at all |
+| multi-signal verification | `strategy_eval`'s deflated Sharpe against the trial count |
+| calibrated abstention | the acceptance gate; `{value, source, measured}` with `null` + a `why` (S88) |
+| provenance on every claim | `probabilityBasis`, `specHash`, the generated-Python header |
+| refusing to score the unmeasurable | NOT BACKTESTABLE on news and on model probability |
+
+**DECISION: the next real piece is a CLAIM GATE, not a better model.** One module at the output boundary
+that every model answer passes through, classifying each claim as `grounded` (a citation or a computed
+value), `reflex` (deterministic), or `unattributed` — and **refusing to emit the third as fact.** It
+would make the existing scattered honesty into one enforced rule, and it is the thing that makes "no
+allowance for hallucinations" a property of the system rather than a hope about the model.
+
+**What that gate must not become:** a confidence score. A number between 0 and 1 attached to a sentence
+is exactly the "emitted as if grounded" failure with extra decimals. The output is a class and a source,
+or a refusal.
+
+### 5. Evolving by assimilation, not from scratch
+
+Master is right that starting from scratch is not smart, and the measured landscape says so plainly.
+Open-weight models now match hosted frontier systems within single digits on reasoning and coding, and
+**at parity on extraction, classification and tool calling** — which is most of what a harness actually
+needs. As of late 2026, Qwen holds roughly 10 of 13 slots on the Berkeley Function-Calling Leaderboard;
+GLM and Kimi lead heavier agentic work; DeepSeek leads agentic coding; Qwen3.5 ships 0.8B through 397B
+with a 27B variant that fits a 24GB card at Q4_K_M.
+
+**What this means for Rāma, concretely:** the base model is a *replaceable part*. The durable asset is
+the harness — the capability gates, the provenance discipline, the store, the genome, the loyalty core —
+and that is precisely what cannot be downloaded. Sections 92 and 93 already built discovery,
+evidence-based classification and retirement-aware migration planning for Ollama; **the missing piece is
+role-based routing**: declaring what Rāma needs a model FOR (extraction, tool-calling, code, multilingual,
+embedding) and selecting per role against measured capability, cost and disk — rather than one "best
+model" for everything, which is how a 397B cloud model gets used to parse a date.
+
+**And the one thing that does not evolve.** Capability compounds; autonomy does not. The loyalty core is
+sealed in its own envelope with its own key, no accessor returns it, a non-conforming core cannot be
+encrypted and therefore cannot be persisted, and tampering already on disk is reverted on unseal
+(I15, I16). A new model is a new *tool* Rāma may use. It is never a new *authority* over master's capital
+or identity — which is why there is no order placement, and why swapping the base model cannot introduce
+one.
+
+### Verified
+
+`npm run verify` **19 suites**; audit clean at **139 bridge calls / 72 files / 355 channels**; `vite build`
+succeeds. Items 1–3 are shipped; items 4–5 are design, with the claim gate and role-based routing as the
+next two concrete pieces.
+
+**Not verified:** nothing seen on screen. The zoom, the picker and the Home-on-reopen behaviour are all
+reasoned from the code path, and master's next run is the test.

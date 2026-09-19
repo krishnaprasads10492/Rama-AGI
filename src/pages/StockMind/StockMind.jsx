@@ -22,22 +22,17 @@ import {
  * happening. It is also well inside the provider's one-month cap for 30m, so the default can always be
  * served.
  */
+/**
+ * WHAT THE CHART OPENS ON (Sections 107, 110).
+ *
+ * 30-minute bars, and NO date filter — so a newly-selected instrument shows everything stored, from its
+ * earliest bar to today, at a legible zoom rather than squeezed to fit. Master asked for both halves:
+ * 30m by default, and "from the beginning date to till date".
+ *
+ * Free 30m data caps at about a month, so "everything" is bounded by the provider rather than by a
+ * filter Rāma imposes.
+ */
 const OPEN_INTERVAL = '30m';
-const OPEN_SESSIONS = 4;
-
-function openingDates(sessions = OPEN_SESSIONS) {
-  const to = new Date();
-  const from = new Date(to.getTime());
-  // Calendar days, with slack for a weekend: four SESSIONS back from a Monday is the previous Tuesday.
-  from.setDate(from.getDate() - (sessions + 3));
-  return { from: toYmd(from), to: toYmd(to) };
-}
-
-/** The from/to a fresh interval starts on, so the two states are never seeded inconsistently. */
-function defaultDates(intervalId) {
-  const d = datesForRange(defaultRangeFor(intervalId)) || { from: null, to: '' };
-  return { from: d.from || '', to: d.to || '' };
-}
 import { riskBudget, whyCannotPredict } from './positionMath.js';
 
 /**
@@ -164,8 +159,8 @@ export default function StockMind() {
   // based on timeframe and time interval." Correct — a count is a consequence of the other two, and
   // three controls for two facts invited them to disagree. The window is now the dates it covers, and
   // the request's payload ceiling is derived from those dates.
-  const [fromDate, setFromDate] = useState(() => openingDates().from);
-  const [toDate, setToDate] = useState(() => openingDates().to);
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
 
   const [status, setStatus]   = useState('idle');
   const [result, setResult]   = useState(null);
@@ -250,19 +245,12 @@ export default function StockMind() {
   // Changing interval RECONCILES the window rather than resetting it: switching 1d/1Y to 5m cannot
   // keep a year, so it falls to the deepest window 5m can serve. Silently keeping "1Y" selected
   // while fetching one month would make the control lie about what is on screen.
-  const pickInterval = useCallback((id) => {
-    setBarInterval(id);
-    // NO RECONCILING WHEN THERE IS NO FILTER (Section 107). Reconciling a null range would silently
-    // impose one, which is the opposite of what clearing it meant. And a window master chose is kept
-    // as chosen now rather than pulled back to what the provider serves — the shortfall is reported
-    // instead of prevented.
-    if (!barRange) return;
-    const next = reconcileRange(id, barRange) || barRange;
-    const d = datesForRange(next) || { from: null, to: '' };
-    setBarRange(next);
-    setFromDate(d.from || '');
-    setToDate(d.to || '');
-  }, [barRange]);
+  // INDEPENDENT FILTERS (Section 110). Master: "based on time interval and time frame can be
+  // individually selected, like individual filters not dependent on each other." So changing the
+  // interval touches the dates not at all — it used to reconcile them, which meant picking 5m silently
+  // rewrote the window master had chosen. Two filters over one series; a shortfall is reported rather
+  // than prevented.
+  const pickInterval = useCallback((id) => setBarInterval(id), []);
 
   // `null` means REMOVE THE FILTER — every bar Rāma holds for this interval. That is what clicking an
   // already-selected preset does, at master's instruction: a preset is a convenience, not a constraint
@@ -378,6 +366,11 @@ export default function StockMind() {
     setBarsMeta(null);
     setResult(null);
     setSelected(null);
+    // A new instrument starts unfiltered — beginning to today — because a window chosen for the last
+    // symbol says nothing about this one (Section 110).
+    setBarRange(null);
+    setFromDate('');
+    setToDate('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sym, exchange]);
 
@@ -921,6 +914,8 @@ far as the provider allows, which for intraday is a few days to two years.">
               fromDate={fromDate}
               toDate={toDate}
               onDates={setDates}
+              coverage={barsMeta ? { first: barsMeta.storedFirstBar, last: barsMeta.storedLastBar }
+                : null}
               chartId="sm-chart"
               busy={barsBusy}
               onFetch={() => loadBars(true)}
