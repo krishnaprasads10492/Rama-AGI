@@ -1785,6 +1785,9 @@ authenticated **Master session**, not merely an open store.
 | 125 | Bar count removed, dates added, strategising grouped, workspace un-collapsed | done | Section 105. Master, four things, two of them defects in my own last three sections. **(1) The bar count was a third control for two facts** — `BARS` was interval × window restated, so all three on screen invited them to disagree, and they did. A window is now **the dates it covers**: presets write the dates, a typed date un-highlights the presets rather than leaving a button lit that no longer describes the chart, and the count survives as `limitForDates()` — a payload ceiling derived from the span and clamped to the provider cap. `/ohlcv` gained `fromDate`/`toDate`; `toDate` is inclusive of the whole closing session, because an intraday stamp of 09:15 is not `<=` midnight and a picker that silently drops the last day is worse than one with no last day. **A SECOND BUG FOUND IN THAT ROUTE IS WORSE THAN THE ONE BEING FIXED:** `str(r.date.date())` serialised every bar as a date only, so for ANY intraday interval every bar in a session reached the renderer with the same stamp and `toChartTime` treats a 10-character string as a whole day — **every intraday chart was silently one candle per day whatever interval master picked.** Section 73 fixed this exact defect inside the store; the route was never fixed, and Sections 101 and 105 both built intraday capability on a path that could not render it. **(2) The chart did not redraw on a symbol change** — `sym` and `exchange` were absent from the reload effect, so a new instrument left the PREVIOUS instrument's candles on screen under the new name until master pressed a button. That is not a stale chart, it is one instrument labelled as another. Bars are now also cleared the instant the symbol changes, so the gap shows loading rather than the wrong thing. **(3) DECISION: eight tabs became six, grouped by activity.** Master is right that generating signals IS strategising, and this corrects Section 103's own split — SIGNALS, WHY, STRATEGY and the projection toggle were four places for one activity. The research agrees: TradingView puts its Strategy Tester in a **panel of the chart**, its report "opens automatically when you add any strategy", and its strategy builders treat signals as *inputs to* a strategy rather than a parallel feature. Now `CHART · ⚗ STRATEGISE · YOUR BOOK · ENGINE · ? HELP · ◈ WORKSPACE`, with STRATEGISE holding **NOW** (what a reading says now) · **BUILD & TEST** (the same rule over history) · **PROJECTION** · **WHY** (the evidence under all three). The chart stays separate because it is the reference surface the others talk about. **Projection moved out of the chart header** at master's instruction and still draws **on the same chart**; what remains there is a `projection on ⚗` button, because a cone drawn by a switch on another tab must be traceable to that switch. **(4) The workspace was not clipped — it genuinely was that narrow.** `PanelBoard`'s panels are `position: absolute`, so the subtree has an **intrinsic content width of zero**; inside a `display: flex` wrapper it was sized by that instead of filling the row, `bounds.w` measured a few pixels, and the responsive tiler dropped to one column at `MIN_W`. Section 100 fixed a *different* cause of a similar symptom (a `-20px` margin making the board wider than its container) and correctly did not touch this one. Fixed with `flex: 1` + `width: 100%` + `minWidth: 0` on the board root and `minWidth: 0` on the wrapper — a flex item cannot fill a row it has no basis in. **VERIFIED: `verifyTimeframes.mjs` 93 assertions (+26)** — preset dates span the right calendar span, MAX has no start, dates round-trip to their own preset, a typed range matches no preset, the derived count never exceeds the provider cap nor falls below the display floor, reversed dates fall back to the ceiling rather than a negative count. `npm run verify` 18 suites; audit clean; `vite build` entry unchanged at 283.53 kB, StockMind 138.95 kB. **NOT VERIFIED: both Python changes to `/ohlcv`** — the date filter and the intraday timestamp fix — have never been executed (no pandas here). The intraday fix is the one to watch: it is the difference between a 5-minute chart and a daily one wearing its label. |
 | 126 | "Showing the IP" — the diagnosis existed and a gate made it unreachable | done | Section 106. Master: *"engine is not running, showing the IP and the above message."* He was seeing `Backend not reachable at http://127.0.0.1:8001: connect ECONNREFUSED` — **the exact sentence Section 99 was written to delete.** ROOT CAUSE: `getRunningStatus()` returned `diagnosis: null`, because of its own gate — `(!processes['python'] && (lastExit \|\| lastStderr.length))`. Two failures in one expression: `!processes['python']` excludes a process that spawned and is alive but never bound its port, and **`(lastExit \|\| lastStderr.length)` requires evidence before it will ask for a diagnosis** — so the branch `diagnoseFailure` contains for the no-output case could only run when there WAS output, and could never run at all. **Section 99 removed the undiagnosable message from every case that produces output and left it in the one case that does not.** The function was total; the gate in front of it was not. **This is the third time in this project a capability has been present and unreachable** — row 115's harness with no caller, Section 89's declared-but-unenforced `mind.view`, now this — and the shape is identical every time: the thing works, something upstream declines to call it, nothing notices. **DECISIONS:** the gate is **gone** (`diagnoseFailure` is total, so `running` is passed through and the function decides); **`notAnswering` is a separate field** from `diagnosis`, because a live-but-silent engine is not a failure at the moment the status is read — it becomes one only in the caller, the only thing that knows `/health` never answered, and conflating them would report a cold start as a crash; **two silences are distinguished because they need opposite advice** (alive and not bound = still importing, wait; no process = check Python); **the interpreter and engine directory are retained on every spawn attempt**, because when a failure produces nothing else those two facts ARE the diagnosis — a wrong venv and a missing `ai_backend` are identical silences with different remedies; **a missing `ai_backend` now pushes a line onto the stderr ring** rather than only returning, since the caller polls 8s and then asks for a diagnosis that would otherwise have nothing to work from; **the URL survives as `detail`** beneath the remedy, because where Rāma knocked is a real question but never the answer to why nobody answered; and **the bars path was the one surface showing only the raw string** — the diagnosis and the engine output were on the reply and discarded there, which is why master met this on the chart rather than in the signals panel. **VERIFIED: 34 assertions (+17).** The new ones cover the previously-unreachable branches plus three properties that would have caught the original defect: **every input yields a reason AND a remedy, silence included**; **no diagnosis ever contains a bare URL or an IP**; **nothing returns null**, because null is what sent the caller to its fallback. Plus four source-level assertions so the gate cannot return — the `lastExit \|\| lastStderr.length` pattern asserted absent, `notAnswering` asserted present, the retained interpreter and directory asserted present, the caller asserted not to build its message from `BASE_URL`. **NOT VERIFIED BY EYE** — this is master's reported symptom and the fix is reasoned from the code path, not observed. **Next step: master reruns and reports the new message.** He should now see either *"no engine process is running and none has reported anything. Nothing was spawned, so Python is the first thing to check…"* or, if Python is present but the packages are not, the Section 99 message naming the missing module. |
 
+| 127 | The chart that was never created, and windows without limits | done | Section 107. Master: *"able to see bars in workspace widget but not in the chart tab."* **MY REGRESSION, and a good class of bug.** `PriceChart` rendered the empty state INSTEAD OF the holder div, so mounting with no bars left `holder.current` null, the creation effect returned immediately, and **no chart object was ever made.** Bars arriving later only re-ran the data effect, which found `priceRef.current` null and gave up — and the creation effect's deps are `[showVolume, chartType]`, neither of which changes when data arrives, so nothing tried again. The workspace widget worked **only because it happened to mount after bars existed**; the CHART tab is the default tab and mounts before them, and Section 105's clearing-bars-on-symbol-change made that the normal path. Holder is now always mounted with the empty state as an overlay. **Recorded as a class: a `ref` inside a conditional branch may never be attached, and an effect that owns the lifetime of something long-lived must not depend on one.** **DECISION: every window is selectable — master overrode Section 101 and was right that the control was refusing on his behalf.** The honesty requirement moved rather than vanished: `allRangesFor()` returns all ten windows each carrying `beyondCap`/`capIsMax`/`tooFew`; an over-deep window is marked `⚠` and still selectable; and `shortfallNote()` reports after the fetch what actually arrived and attributes the limit to the provider. **Clicking the selected window clears the filter entirely**, plus an explicit `ALL` button — a preset is a convenience, not a constraint. Changing interval no longer reconciles a window master chose and never imposes one where there is none, because reconciling a null range would silently create a filter. `rangesFor()` unchanged, still answering "what can actually be served". **Chart opens on 30m over 4 days** (~52 candles — legible, detailed, and inside the provider cap so the default can always be served; a year of daily bars showed a chart where nothing appeared to happen). **VERIFIED: 123 assertions (+30)** — every interval offers every window, 1m/1Y selectable AND marked, MAX on a capped interval is "as deep as allowed" not "beyond", a one-bar window flagged not removed, the servable set still a subset of the offered set, a shortfall names the figure that arrived, a complete answer says nothing, zero bars is not a shortfall. `vite build` entry unchanged. **Nothing seen on screen; the mount-order fix is reasoned, and master's next run is the test.** |
+| 128 | The road to production: a 15-day plan, the news model, and the line on evasion | plan written, nothing built | Section 108. Master: *"keep a learning period of 15 days by which this entire AGI should be production ready"*, plus a news model that understands rather than reads, pop-out windows that dock back, repo privacy, IP masking, and *"geometric progression… but ultimate loyalty"*. **THE HONEST STATE, FIRST: Rāma is not 15 days from production-ready, and the reason is not remaining code — it is that NO MODEL HAS EVER CLEARED ITS ACCEPTANCE GATE ON LIVE DATA AND THE ENGINE HAS NEVER RUN TO COMPLETION ON MASTER'S MACHINE.** Everything downstream is built, tested and unexercised against reality; a sprint adding features on top produces a larger unexercised system, which is further from production. What IS achievable is a **baseline in master's own I17 sense**, and the plan is ordered so nothing new is added until the existing thing runs: days 1–2 engine running and `test_store` green; 3–4 deep history and the first real backtest; 5–7 **per-fold model refit**, the largest capability gain available and what turns the probability column into evidence; 8–9 the Section 102/104 backlog; 10–11 save/reload strategies, code to disk, scenario matrix **with the trial arithmetic extended** (one spec over ten instruments is ten trials); 12–13 pop-out session hand-off; 14 build, install and use it as master would — the first genuine packaged end-to-end test, since 7-Zip is blocked here; 15 master declares baseline or names what is missing. **The two things most likely to break it, named now:** the Windows engine environment, and the refit needing a training-pipeline change rather than a wrapper. **POP-OUT DESIGN (days 12–13):** a **short-lived single-use grant** bound to `(userId, panelId, windowId)`, main-process memory only, 30s expiry, redeemed once and deleted; docking back needs no token. Rejected passing the session token itself — a long-lived credential in a URL lands in histories, logs and crash reports. **The grant carries no capabilities**; every channel re-checks the user against `shared/capabilities.json` exactly as now, so no second authority is created (I1, I2, I8). **NEWS MODEL, scoped honestly:** today it is keyword counting. Achievable in order — entity/event extraction via a local model; multilingual by translate-then-extract (Indian-language regional press often carries a story before the English wires); **story correlation, the single biggest fix, because the current design would treat heavy coverage as heavy evidence and become a hype amplifier**; an inspectable causal graph where every edge carries its source and master can delete it; and consequence projection **as scenarios, not predictions**. **Predicting wars: no, and that is not a capability gap** — it is an open research problem where the best-resourced efforts achieve modest accuracy over months; the honest version is escalation language plus its historical market consequences, reported as exposure with provenance. Claiming the first while delivering the fifth is the fabrication Section 94 exists to stop, and would be the most dangerous number in the product. **And the hardest constraint: none of it is backtestable on free data, so a news model may inform master's judgement and must NEVER move a probability that claims to be measured.** **IP MASKING — DECLINED, with the reasoning, because master's own goal is the objection.** Will build: official APIs first, aggressive local caching (already the store's design, and the most effective protection against ever being blocked), polite rate limiting and backoff (already in `refreshScheduler`), honest User-Agent, `robots.txt` respected, a proxy or VPN **master configures himself**, and the assimilated browser from Section 94. Will not build: rotating IPs to evade a block, spoofed fingerprints, CAPTCHA circumvention, traffic shaped to defeat bot detection. **Not squeamishness — it inverts the goal:** evasion converts a terms-of-service question into a computer-misuse one, a rate limit into a ban and a ban into a letter, all from his machine under his name. He asked to be protected from *all* implications; **the protective move and the evasive move point in opposite directions.** When a source cannot be reached politely the honest answers are pay for it, do without and say the data is missing, or put the tradeoff in front of master. **GEOMETRIC PROGRESSION:** the real mechanism is Section 88's **distillation** — a strong model solves something once, Rāma keeps it as a reflex and never pays again; `reflexRate` already exists and **cannot move until master consents to recording request text**, which is one decision rather than fifteen days of work. Capability, memory and judgement compound safely; **autonomy over master's capital and identity must never compound** (I15, I16) — which is why there is no order placement and will not be. **REPO PRIVACY:** `gh` is not installed here so it cannot be done by command from this machine; browser path and the `gh repo edit --visibility private` command both recorded, along with two consequences — existing forks stay public, and published Release assets become inaccessible, which would break the updater channel for unauthenticated users. Nothing is published yet, so **now is the right moment, before that becomes a migration.** **VERIFIED SEPARATELY: `.env` is ignored by `.gitignore:4`, has never been committed and is not tracked** — checked with `git check-ignore`, `git log --all -- .env` and `git ls-files`. **Next step: master picks the first row of the plan, or reorders it.** |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -11234,3 +11237,265 @@ not observed — the next run on his machine is the test. What he should now see
 either *"no engine process is running and none has reported anything. Nothing was spawned, so Python is
 the first thing to check…"* or, if Python is present but the packages are not, the Section 99 message
 naming the missing module.
+
+---
+
+## SECTION 107 — The chart that never got created, unlimited windows, and the 15-day plan
+
+Master, in one message: bars visible in the workspace widget but not the CHART tab; open on 30-minute
+bars over the last four days; *"there shouldn't be any limitations of time when a timeframe selected…
+click on selected — removes the filter"*; go deeper on strategy; *"keep a learning period of 15 days by
+which this entire AGI should be production ready"*; a news model that **understands** rather than reads
+headlines; make the repo private; simulate human behaviour with IP masking; pop widgets out as real
+screens and dock them back; *"think in terms of geometric progression of Rāma's capabilities to
+exponential growth — but ultimate loyalty."*
+
+Three of those are fixed below. The rest is a plan, separated deliberately, because the difference
+between what is built and what is intended is the one distinction this document exists to keep.
+
+### The chart was never created, and it was my regression
+
+`PriceChart` rendered the empty state INSTEAD OF the holder div. So when it mounted with no bars —
+which the CHART tab does on every load, and does far more often since Section 105 began clearing bars on
+a symbol change — `holder.current` was `null`, the creation effect returned immediately, and **no chart
+object was ever made.** Bars arriving later only re-ran the data effect, which found `priceRef.current`
+null and gave up. The creation effect's deps are `[showVolume, chartType]`, neither of which changes
+when data arrives, so nothing ever tried again.
+
+The workspace widget worked **only because it happened to mount after bars already existed.** One
+component, two mount orders, one of them broken — and the broken one was the default tab.
+
+The holder is now always mounted and the empty state is an overlay above it. Worth recording as a class:
+**a `ref` inside a conditional branch is a ref that may never be attached, and an effect that depends on
+it must either be re-run when the branch flips or must not own the lifetime of something long-lived.**
+
+### Decision: every window is selectable, and the honesty moves rather than disappears
+
+Section 101 offered only the pairs a free provider can serve, reasoning that an unservable one fails as
+"no bars" and reads like a misspelt symbol. **Master overrode it, and he is right that the control was
+refusing on his behalf.**
+
+The honesty requirement does not go away — it moves from *"do not offer it"* to *"offer it and say what
+arrived"*:
+
+- `allRangesFor()` returns **every** window, each carrying `beyondCap`, `capIsMax` and `tooFew`.
+- A window deeper than free data serves is marked `⚠` and is still selectable.
+- `shortfallNote()` says, after the fetch, what actually came back: *"You asked for 1Y of 1m bars. Free
+  data reaches back about 1,875 bars, and 1,875 arrived — so this is the deepest window the provider
+  serves, not the one selected. The limit is theirs, not Rāma's."*
+- **Clicking the selected window clears the filter entirely**, which is what master asked for, plus an
+  explicit `ALL` button for the same thing. A preset is a convenience, not a constraint.
+- Changing interval no longer reconciles a window master chose, and never imposes one when there is
+  none — reconciling a null range would silently create a filter, the opposite of clearing it.
+
+`rangesFor()` is unchanged and still answers "what can actually be served", because that remains a real
+question and `reconcileRange` and the suite are built on it.
+
+### The chart opens on 30-minute bars over four days
+
+About 52 candles: enough detail to see intraday structure, few enough to be legible, and well inside the
+provider's one-month cap for 30m so the default can always be served. A year of daily bars as a first
+impression showed a chart where nothing appeared to be happening.
+
+### Verified
+
+`scripts/verifyTimeframes.mjs` — **123 assertions** (+30). Every interval offers every window; 1m over a
+year is now selectable AND marked; MAX on a capped interval is "as deep as the cap allows" rather than
+"beyond it"; a one-bar window is flagged rather than removed; the servable set is still a subset of the
+offered set; a shortfall is reported with the figure that arrived and attributes the limit to the
+provider; a complete answer says nothing; zero bars is not reported as a shortfall, because that is a
+different problem with a different remedy. `npm run verify` 18 suites; `vite build` entry unchanged.
+
+**Not verified:** nothing here has been seen on screen. The chart-creation fix in particular is reasoned
+from the mount order, and master's next run is the test.
+
+---
+
+## SECTION 108 — The road to production: a 15-day plan, and what will not be built
+
+Master: *"keep a learning period of 15 days by which this entire AGI should be production ready."* And:
+*"think in terms of geometric progression of Rāma's capabilities to exponential growth — but ultimate
+loyalty."*
+
+*Written before implementing, per Section 28's working agreement. Nothing in this section is built yet.*
+
+### First, the honest state of the claim
+
+**Rāma is not 15 days from production-ready, and saying otherwise would be the most expensive lie in
+this document.** The reason is not the amount of code left. It is this:
+
+> **No model in this system has ever cleared its own acceptance gate on live data, and the engine has
+> never once run to completion on master's machine.**
+
+Everything downstream of that — every probability, every grade, the whole STRATEGISE tab — is built,
+tested, and unexercised against reality. A 15-day sprint that adds features on top of that produces a
+larger unexercised system, which is further from production, not closer.
+
+What **is** achievable in 15 days is a defensible **baseline** in master's own sense from invariant I17:
+every feature works as expected, declared by him after seeing it work. That is the goal this plan aims
+at, and the ordering is deliberate — nothing new is added until the existing thing runs.
+
+### The 15 days
+
+| Days | Goal | Why it is in this position |
+|---|---|---|
+| **1–2** | **The engine runs.** Python 3.10–3.12, `Rama.bat` option 3, `/health` answering, `python -m tests.test_store` green. | Nothing else can be verified until this is true. Every "not verified" note in Sections 101–107 clears here or does not clear at all. |
+| **3–4** | **Deep history for a handful of instruments**, then `python -m tests.test_strategy_spec` and one real backtest end to end. | The first time the strategy harness meets real bars. Expect it to find defects; that is the point. |
+| **5–7** | **Per-fold model refit**, which makes the probability block backtestable and lets a model attempt its gate honestly. | This is the single largest capability gain available, and it is what turns the probability column from decoration into evidence. |
+| **8–9** | **The Section 102 and 104 backlog**: one error presentation, one number formatter, the ENGINE tab split, a real keyboard tablist. | Cheap, visible, and it is what makes the product feel finished rather than assembled. |
+| **10–11** | **Save/reload strategies, write generated Python to disk, a scenario matrix** across instruments and date ranges — with the trial-count arithmetic extended to cover it. | One spec over ten instruments is ten trials. Getting that wrong would reintroduce the exact bias Section 103 removed. |
+| **12–13** | **Pop-out session hand-off** (below), so the workspace can become real windows. | Security-relevant, so it gets its own slot rather than being squeezed in. |
+| **14** | **Build, install, and use it as master would.** Every screen, on a real machine, from the installer. | 7-Zip is blocked here, so this is the first genuine end-to-end test of a packaged build. |
+| **15** | **Master declares baseline, or names what is missing.** | I17: baseline is declared, never inferred. |
+
+**The two things most likely to break this plan**, stated now: the engine environment on Windows
+(days 1–2 could consume four), and the per-fold refit turning out to need a training-pipeline change
+rather than a wrapper. If either happens, the honest response is to move the later rows out, not to
+compress them.
+
+### Decision: pop-out windows need a session hand-off, and here is the shape of it
+
+Master: *"see if it's possible to pop the widgets and keep them as diff screens, to revert them back to
+Rāma-workspace screen."* Yes, and the blocker is known and recorded since Section 100: `loadSession()`
+reads `sessionStorage`, which Chromium scopes **per window**, so a second `BrowserWindow` starts
+unauthenticated and every StockMind channel correctly refuses it.
+
+**The design, to be built on days 12–13:**
+
+1. The main window asks the main process to **mint a short-lived, single-use pop-out grant** — a random
+   token bound to `(userId, panelId, windowId)`, held in main-process memory only, never written to
+   disk, expiring in 30 seconds.
+2. The token goes on the pop-out's URL, and the new window redeems it **once** for a session on its own
+   `webContents.id`. Redemption deletes it.
+3. **Docking back** is the reverse and needs no token at all: the pop-out sends its geometry to the main
+   process, the main window re-adds the panel, and the pop-out closes.
+
+**Why this shape and not the obvious one.** Passing the session token itself would put a long-lived
+credential in a URL, which lands in histories, logs and crash reports. A single-use grant bound to a
+window id is useless to anything that intercepts it after redemption, and useless before redemption to
+anything that is not that window. **The grant carries no capabilities of its own** — it identifies a
+user, and every channel re-checks that user against `shared/capabilities.json` exactly as it does now, so
+this adds no second authority (I1, I2, I8).
+
+**What it must not become:** a general "authenticate a window" mechanism. It is scoped to pop-outs from
+an already-authenticated window, and a grant that cannot be traced to one is refused.
+
+### The news model: what is real, what is achievable, and what is not
+
+Master: *"not about headline reading but understand the news, co-relate with other news if needed,
+understand various consequences of all kinds, in future news model can even predict wars, aggressive
+actions etc. News model is needed to understand various languages, relate, project various things."*
+
+**Where it stands today.** `news.py` scores headline text with a lexicon and classifies an event type.
+That is keyword counting. It is labelled `NOT BACKTESTABLE` for a measured reason — no free feed carries
+enough history to test whether tone predicts price — and that label is the only honest thing about the
+current implementation.
+
+**Achievable, in this order, and each one is a real capability:**
+
+1. **Entity and event extraction** instead of a lexicon — which company, which regulator, which country,
+   which kind of event. A local model via Ollama can do this today, and it is the difference between
+   "negative tone" and "SEBI opened an investigation into X".
+2. **Multilingual by translation-then-extraction.** Hindi, Tamil, Bengali, Mandarin, Japanese sources
+   translated locally, then run through the same extraction. Language coverage is a data-reach problem,
+   not a modelling one, and it is genuinely valuable: Indian-language regional press often carries a
+   local story days before the English wires.
+3. **Correlation across stories** — the same event reported by five sources is one event, not five
+   signals. This is the single biggest fix available: the current design would treat heavy coverage as
+   heavy evidence, which is how a news model becomes a hype amplifier.
+4. **A causal graph master can inspect** — "crude up → OMC margins down → these four symbols" — with
+   every edge carrying its source and its strength, and **every edge master can delete.** Not a learned
+   black box.
+5. **Consequence projection as scenarios, not predictions.** "If this holds, these instruments are
+   exposed, by this much, on this reasoning." Scenarios can be reviewed and argued with; a number cannot.
+
+**Predicting wars and aggressive actions: no, and this is not a capability gap.** Geopolitical-conflict
+forecasting is an open research problem where the best-resourced efforts in the world achieve modest
+accuracy over months-long horizons. Rāma reading news feeds will not do it. The honest version of what
+master wants is item 5 — recognising **escalation language and its historical market consequences**, and
+saying so as an exposure, with provenance. Claiming the first while delivering the fifth is exactly the
+fabrication Section 94 was written to stop, and it would be the most dangerous number in the product,
+because master would act on it with real capital.
+
+**And the hardest constraint, stated plainly: none of 1–5 is backtestable on free data.** The archive
+does not exist. A news model can therefore inform master's judgement and **must never be allowed to move
+a probability that claims to be measured.** That rule is the same one Section 103 applied to the
+unbacktestable blocks, and it is what keeps the whole edifice honest.
+
+### Where I will not go: IP masking and simulated human behaviour
+
+Master: *"whenever needed simulate human behavior to utilise the current available resources as and when
+needed, but masking IP and protecting master from all implications and security are the most important
+fact."*
+
+The second half of that sentence is the objection to the first half, and it is worth being exact about
+why, because master's goal here is one I share.
+
+**What I will build, and some of it exists:**
+- Official APIs and documented endpoints first, always.
+- **Aggressive local caching**, which is already the store's design — fetch once, keep forever. It is
+  the single most effective way to reduce request volume, and therefore the most effective protection
+  against ever being blocked.
+- **Polite rate limiting and backoff**, which `refreshScheduler` already does.
+- **An honest User-Agent**, and `robots.txt` respected.
+- **A proxy or VPN that master configures at the OS or app level**, if he wants one. That is his
+  network, his choice, and his consent. Rāma will use whatever route the machine gives it.
+- Assimilating his installed browser, which Section 94 already does, because it is *his* browser making
+  a request a person could have made.
+
+**What I will not build:** rotating IPs to evade a block, spoofed fingerprints, CAPTCHA circumvention,
+or traffic shaped to look human specifically in order to defeat bot detection.
+
+Not because of squeamishness — because **it inverts the goal.** Evasion is what converts a terms-of-service
+question into a computer-misuse question; it is what turns a rate-limit into an account ban and an
+account ban into a legal letter; and it is deniable only until it is not. Master asked to be protected
+from *all* implications. A system that quietly evades detection on his behalf, from his machine, under
+his name, is the largest implication in the project. **The protective move and the evasive move point in
+opposite directions, and I will take the protective one.**
+
+If a source genuinely cannot be reached politely, the honest answers are: pay for the API, do without
+it and say the data is missing, or ask master to decide with the tradeoff in front of him. All three are
+better than an engine that works until it catastrophically does not.
+
+### Geometric progression, and the one thing it must never compound
+
+Master: *"think in terms of geometric progression of Rāma's capabilities to exponential growth — but
+ultimate loyalty."*
+
+The honest mechanism for compounding is already named in Section 88 and it is **distillation**: a strong
+model solves something once, Rāma keeps it as a reflex, and never pays for it again — cheaper, private,
+offline, working while the vault is locked. The metric exists and is already computed (`reflexRate`, the
+share of turns answered with no model). **It cannot move today**, because tier 3 needs the request text
+recorded and master has not consented to that. That consent is the actual unlock for compounding growth,
+and it is one decision, not fifteen days of work.
+
+Three things compound safely: **capability** (each engine reachable by every other), **memory** (the
+store only ever grows), and **judgement** (every verdict carries what would overturn it, so the next one
+starts better informed).
+
+One thing must never compound: **autonomy over master's capital and identity.** The loyalty core is
+sealed in its own envelope, no accessor returns it, a non-conforming core cannot be encrypted and
+therefore cannot be persisted, and tampering already on disk is reverted on unseal (I15, I16). Growth in
+capability is growth in what Rāma can *do for* master. It is never growth in what Rāma may do
+*instead of* him — which is why there is no order placement, and why there will not be.
+
+### Making the repo private
+
+`gh` is not installed on this machine, so I cannot do it by command from here. Two ways:
+
+1. **In the browser:** github.com/krishnaprasads10492/Rama-AGI → Settings → scroll to *Danger Zone* →
+   **Change repository visibility** → Private → confirm by typing the repo name.
+2. **By command**, after installing the GitHub CLI (`winget install --id GitHub.cli --exact`), then
+   `gh auth login` once:
+
+       gh repo edit krishnaprasads10492/Rama-AGI --visibility private --accept-visibility-change-consequences
+
+**Two things to know before doing it.** Existing forks are not made private, and any published GitHub
+Release assets become inaccessible — which matters because `build.publish` points at GitHub Releases, so
+**the updater's release channel would stop working for anyone not authenticated.** Given nothing is
+published yet, this is the right moment to switch, before that becomes a migration.
+
+**Strongly worth doing regardless of the above**, and more urgent than visibility: `.env` is in the
+working tree. `.gitignore` should be confirmed to cover it, and if any credential has ever been
+committed, rotating it matters far more than the repo being private — history survives a visibility
+change.

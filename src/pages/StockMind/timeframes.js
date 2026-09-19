@@ -122,6 +122,59 @@ export function capBarsFor(intervalId) {
  * Both ends matter. `1mo` bars over `1D` is one bar — technically valid, visually nothing. `1m`
  * bars over `1Y` is 94,500 bars Yahoo will refuse with a 422 that reads as an empty symbol.
  */
+/**
+ * EVERY range, with what is true about each one — master's override of my earlier design.
+ *
+ * Master: *"there shouldn't be any limitations of time when a timeframe is selected… but no limitation
+ * can be selected. (click on selected — removes the filter)"*
+ *
+ * Section 101 offered only the servable pairs, on the reasoning that an unservable one fails as "no
+ * bars" and reads like a bad symbol. Master is overriding that, and he is entitled to: the control was
+ * refusing on his behalf. **The honesty requirement does not go away, it moves.** Every window is now
+ * selectable; the ones past the provider cap are MARKED, and when the provider serves less than was
+ * asked for, the chart says so instead of presenting a short answer as a complete one.
+ *
+ * `rangesFor` is unchanged and still returns the servable set — it is what `reconcileRange` and the
+ * suite are built on, and "what can actually be served" remains a real question worth answering.
+ *
+ * @returns {Array<{...range, beyondCap: boolean, tooFew: boolean, bars: number}>}
+ */
+export function allRangesFor(intervalId) {
+  const iv = interval(intervalId);
+  if (!iv) return [];
+  const capSessions = PROVIDER_CAP_SESSIONS[intervalId];
+  return RANGES.map((rg) => {
+    const bars = barsFor(intervalId, rg.id);
+    return {
+      ...rg,
+      bars,
+      // MAX on a capped interval is not "beyond the cap", it is "as much as the cap allows" — which is
+      // exactly what master asked to be able to select.
+      beyondCap: capSessions != null && rg.sessions !== null && rg.sessions > capSessions,
+      capIsMax: capSessions != null && rg.sessions === null,
+      tooFew: rg.sessions !== null && bars < MIN_USEFUL_BARS,
+    };
+  });
+}
+
+/**
+ * What to tell master when the provider served less than he asked for.
+ *
+ * @returns {string|null} null when the answer was complete enough to say nothing.
+ */
+export function shortfallNote(intervalId, requestedRangeId, barsReturned) {
+  const iv = interval(intervalId);
+  const rg = range(requestedRangeId);
+  if (!iv || !rg || !Number.isFinite(barsReturned) || barsReturned <= 0) return null;
+  const cap = capBarsFor(intervalId);
+  if (cap == null) return null;
+  const wanted = rg.sessions === null ? cap : barsFor(intervalId, requestedRangeId);
+  if (wanted <= cap) return null;
+  return `You asked for ${rg.label} of ${iv.label} bars. Free data for ${iv.label} reaches back about `
+    + `${cap.toLocaleString()} bars, and ${barsReturned.toLocaleString()} arrived — so this is the `
+    + 'deepest window the provider serves, not the one selected. The limit is theirs, not Rāma\'s.';
+}
+
 export function rangesFor(intervalId) {
   const iv = interval(intervalId);
   if (!iv) return [];

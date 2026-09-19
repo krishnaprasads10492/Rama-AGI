@@ -166,6 +166,55 @@ check('the explanation names the window Yahoo is actually sent', note1m.includes
 check('the explanation says the limit is not Rama\'s', /not by R/.test(note1m), note1m);
 check('an uncapped interval has nothing to explain', tf.describeLimit('1d') === null);
 check('an unknown interval has nothing to explain', tf.describeLimit('nope') === null);
+// ── Every window selectable, with the truth attached (Section 107) ────────────
+//
+// Master overrode the Section 101 design: the control was refusing on his behalf. The honesty
+// requirement did not go away, it MOVED — from "do not offer it" to "offer it and say what arrived".
+console.log('\n--- every window is offered; the unservable ones are marked, not hidden ---');
+
+for (const iv of tf.INTERVALS) {
+  eq(`${iv.id} offers every window`, tf.allRangesFor(iv.id).length, tf.RANGES.length);
+}
+check('1m over a year is now selectable',
+  tf.allRangesFor('1m').some((r) => r.id === '1Y'));
+check('and it is marked as beyond what free data serves',
+  tf.allRangesFor('1m').find((r) => r.id === '1Y').beyondCap === true);
+check('a window inside the cap is not marked',
+  tf.allRangesFor('1m').find((r) => r.id === '5D').beyondCap === false);
+check('nothing is marked beyond-cap on an uncapped interval',
+  tf.allRangesFor('1d').every((r) => r.beyondCap === false));
+check('MAX on a capped interval is "as deep as the cap allows", not beyond it',
+  tf.allRangesFor('5m').find((r) => r.id === 'MAX').beyondCap === false
+  && tf.allRangesFor('5m').find((r) => r.id === 'MAX').capIsMax === true);
+check('a one-bar window is flagged as too few rather than removed',
+  tf.allRangesFor('1mo').find((r) => r.id === '1D').tooFew === true);
+check('every entry carries a bar estimate',
+  tf.INTERVALS.every((iv) => tf.allRangesFor(iv.id).every((r) => Number.isFinite(r.bars) && r.bars > 0)));
+eq('an unknown interval still offers nothing', tf.allRangesFor('nope').length, 0);
+check('the servable set is still available and is a subset of the offered set',
+  tf.INTERVALS.every((iv) => {
+    const all = new Set(tf.allRangesFor(iv.id).map((r) => r.id));
+    return tf.rangesFor(iv.id).every((r) => all.has(r.id));
+  }));
+
+console.log('\n--- when the provider serves less than was asked for, it says so ---');
+const short1m = tf.shortfallNote('1m', '1Y', 1875);
+check('an over-deep request explains what actually arrived',
+  typeof short1m === 'string' && /1,875/.test(short1m), String(short1m));
+check('and says the limit is the provider\'s', /not R/.test(short1m), String(short1m));
+check('a request inside the cap says nothing', tf.shortfallNote('1m', '5D', 1800) === null);
+check('an uncapped interval never reports a shortfall',
+  tf.shortfallNote('1d', 'MAX', 4649) === null);
+check('zero bars is not reported as a shortfall — that is a different problem',
+  tf.shortfallNote('1m', '1Y', 0) === null);
+check('an unknown interval or range says nothing',
+  tf.shortfallNote('nope', '1Y', 100) === null && tf.shortfallNote('1m', 'nope', 100) === null);
+for (const bad of [null, undefined, 0, {}, [], 'x']) {
+  let threw = null;
+  try { tf.allRangesFor(bad); tf.shortfallNote(bad, bad, bad); } catch (e) { threw = e.message; }
+  check(`offered-window helpers handle ${JSON.stringify(bad)}`, threw === null, threw);
+}
+
 // ── Dates, which replaced the bar-count field (Section 105) ───────────────────
 console.log('\n--- a window is the dates it covers ---');
 

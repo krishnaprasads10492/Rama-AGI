@@ -7,7 +7,8 @@ import {
   overlaysFor, overlayById, overlayShortfall,
 } from './indicators';
 import {
-  intervalGroups, rangesFor, describeLimit, showsClock, barsFor, interval as intervalDef,
+  intervalGroups, allRangesFor, shortfallNote, describeLimit, showsClock,
+  interval as intervalDef,
 } from './timeframes';
 import InfoTip from './InfoTip.jsx';
 
@@ -249,6 +250,18 @@ export default function PriceChart({
 
   // ── Create once. Recreating per render would throw away master's zoom on every poll. ────────
   //
+  // THE HOLDER IS ALWAYS RENDERED, AND THAT IS LOAD-BEARING (spec Section 107).
+  //
+  // Master: "able to see bars in workspace widget but not in the chart tab." The empty state used to
+  // REPLACE the holder div, so when this component mounted with no bars yet — which the CHART tab does
+  // on every load, and does far more often since Section 105 started clearing bars on a symbol change —
+  // `holder.current` was null, this effect returned immediately, and NO CHART WAS EVER CREATED. Bars
+  // arriving later only re-ran the data effect, which found `priceRef.current` null and gave up. The
+  // deps here are `[showVolume, chartType]`, neither of which changes when data arrives, so nothing
+  // ever tried again. The workspace widget worked only because it happened to mount after bars existed.
+  //
+  // The empty state is now an OVERLAY over a holder that always exists. A regression of mine, and the
+  // kind that only shows on one of two mount orders.
   // `height` and `interval` are NOT in the dependency list. Both used to be, so switching interval
   // destroyed and rebuilt the chart — and entering fullscreen did too. `applyOptions` sets the
   // height and the axis clock on a live chart, so neither needs a teardown. `chartType` IS here,
@@ -711,7 +724,13 @@ export default function PriceChart({
     fontVariantNumeric: 'tabular-nums',
   });
 
-  const allowedRanges = useMemo(() => rangesFor(interval), [interval]);
+  // EVERY window, not only the servable ones (Section 107). Master overrode the earlier design: the
+  // control was refusing on his behalf. The ones past the provider cap are marked rather than hidden.
+  const allowedRanges = useMemo(() => allRangesFor(interval), [interval]);
+  const shortfall = useMemo(
+    () => (rangeId ? shortfallNote(interval, rangeId, candles.length) : null),
+    [interval, rangeId, candles.length],
+  );
   const limitNote = useMemo(() => describeLimit(interval), [interval]);
   const shortfalls = useMemo(() => active
     .map((id) => overlayShortfall(id, candles.length, isIntraday))
@@ -811,15 +830,29 @@ export default function PriceChart({
                 color: 'var(--muted)', paddingRight: '4px' }}>
                 BACK<InfoTip id="window" />
               </span>
+              {/* CLICKING THE SELECTED WINDOW CLEARS IT (Section 107), at master's instruction — the
+                  filter comes off entirely and the chart shows everything stored. A preset is a
+                  convenience, not a constraint. `⚠` marks a window deeper than free data serves; it is
+                  still selectable, and the note below says what actually arrived. */}
               {allowedRanges.map((rg) => (
                 <button key={rg.id} type="button" style={seg(rg.id === rangeId)}
                         aria-pressed={rg.id === rangeId}
-                        onClick={() => onRange(rg.id)}
-                        title={`${rg.id} of ${intervalDef(interval)?.label || interval} bars — `
-                          + `about ${barsFor(interval, rg.id).toLocaleString()} bars`}>
-                  {rg.label}
+                        onClick={() => onRange(rg.id === rangeId ? null : rg.id)}
+                        title={rg.id === rangeId
+                          ? 'Selected — click again to remove the date filter and show everything stored'
+                          : `${rg.id} of ${intervalDef(interval)?.label || interval} bars — about `
+                            + `${rg.bars.toLocaleString()} bars`
+                            + (rg.beyondCap ? '. Deeper than free data serves; Rāma will request it and '
+                              + 'report what actually arrived.' : '')}>
+                  {rg.label}{rg.beyondCap && <span style={{ color: 'var(--amber)' }}> ⚠</span>}
                 </button>
               ))}
+              <button type="button" style={seg(!rangeId && !fromDate && !toDate)}
+                      aria-pressed={!rangeId && !fromDate && !toDate}
+                      onClick={() => onRange(null)}
+                      title="No date filter at all — every bar Rāma holds for this interval">
+                ALL
+              </button>
 
               {/* THE DATE PICKER (Section 105). Master asked for one, and it is also the trading-app
                   convention: preset buttons for the common windows, plus manual entry for a specific
@@ -982,37 +1015,40 @@ export default function PriceChart({
         )}
       </div>
 
-      {/* ── The canvas, or an honest account of why there is none ── */}
-      {empty ? (
-        <div style={{
-          height: effectiveHeight, display: 'flex', flexDirection: 'column', gap: '10px',
-          alignItems: 'center', justifyContent: 'center',
-          color: 'var(--muted)', fontSize: '12.5px', border: '1px dashed var(--border)',
-          borderRadius: 'var(--radius)', textAlign: 'center', padding: '0 16px',
-        }} aria-live="polite">
-          {busy ? (
-            // The old empty state said "fetch price history first" whether or not a fetch was
-            // already running — advice to do the thing in flight.
-            <span>Fetching {intervalDef(interval)?.label || interval} bars for{' '}
-              {symbol || 'this symbol'}…</span>
-          ) : (
-            <>
-              <span>
-                No {intervalDef(interval)?.label || interval} bars stored for{' '}
-                {symbol || 'this symbol'}
-                {rangeId ? ` over ${rangeId}` : ''}.
-              </span>
-              {onFetch && (
-                <button type="button" className="btn" onClick={() => onFetch()}>
-                  ⇩ Fetch &amp; store them
-                </button>
-              )}
-              {limitNote && <span style={{ maxWidth: '44ch', lineHeight: 1.5 }}>{limitNote}</span>}
-            </>
-          )}
-        </div>
-      ) : (
-        <div style={{ position: 'relative' }}>
+      {/* ── The canvas. ALWAYS MOUNTED; the empty state sits over it (Section 107). ── */}
+      <div style={{ position: 'relative' }}>
+        {empty && (
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 5,
+            display: 'flex', flexDirection: 'column', gap: '10px',
+            alignItems: 'center', justifyContent: 'center',
+            color: 'var(--muted)', fontSize: '12.5px', border: '1px dashed var(--border)',
+            borderRadius: 'var(--radius)', textAlign: 'center', padding: '0 16px',
+            background: 'var(--panel, #131722)',
+          }} aria-live="polite">
+            {busy ? (
+              // The old empty state said "fetch price history first" whether or not a fetch was
+              // already running — advice to do the thing in flight.
+              <span>Fetching {intervalDef(interval)?.label || interval} bars for{' '}
+                {symbol || 'this symbol'}…</span>
+            ) : (
+              <>
+                <span>
+                  No {intervalDef(interval)?.label || interval} bars stored for{' '}
+                  {symbol || 'this symbol'}
+                  {rangeId ? ` over ${rangeId}` : ''}.
+                </span>
+                {onFetch && (
+                  <button type="button" className="btn" onClick={() => onFetch()}>
+                    ⇩ Fetch &amp; store them
+                  </button>
+                )}
+                {limitNote && <span style={{ maxWidth: '44ch', lineHeight: 1.5 }}>{limitNote}</span>}
+              </>
+            )}
+          </div>
+        )}
+        <>
           <div ref={holder} style={{ width: '100%', height: effectiveHeight }}
                role="img"
                aria-label={`${CHART_TYPES.find((t) => t.id === chartType)?.label || 'Candlestick'}`
@@ -1067,8 +1103,8 @@ export default function PriceChart({
               </span>
             )}
           </div>
-        </div>
-      )}
+        </>
+      </div>
 
       {/* The values again, in text, because the legend above is inside an aria-hidden overlay on a
           canvas and a canvas is not readable by assistive technology. */}
@@ -1094,6 +1130,14 @@ export default function PriceChart({
           </span>
         )}
       </div>
+
+      {/* The provider served less than was asked for. Said plainly, because master can now select a
+          window deeper than free data reaches and a short answer must not pass as a complete one. */}
+      {shortfall && (
+        <div style={{ fontSize: '12px', color: 'var(--amber)', padding: '2px', lineHeight: 1.6 }}>
+          {shortfall}
+        </div>
+      )}
 
       {/* An overlay that drew nothing says so. A toggle that turns on and changes nothing visible is
           indistinguishable from a broken toggle. */}

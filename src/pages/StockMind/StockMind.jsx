@@ -9,8 +9,29 @@ import StrategyBuilder from './StrategyBuilder.jsx';
 import HelpPanel from './HelpPanel.jsx';
 import InfoTip from './InfoTip.jsx';
 import {
-  defaultRangeFor, reconcileRange, capBarsFor, datesForRange, limitForDates, rangeForDates,
+  defaultRangeFor, reconcileRange, capBarsFor, datesForRange, limitForDates, rangeForDates, toYmd,
 } from './timeframes.js';
+
+/**
+ * WHAT THE CHART OPENS ON (spec Section 107).
+ *
+ * Master: "whenever chart tab opened, by default open in 30 min timeframe and for last 4 days."
+ *
+ * 30-minute bars over four sessions is about 52 candles — a legible chart with enough detail to see
+ * intraday structure, which is a better first impression than a year of daily bars where nothing is
+ * happening. It is also well inside the provider's one-month cap for 30m, so the default can always be
+ * served.
+ */
+const OPEN_INTERVAL = '30m';
+const OPEN_SESSIONS = 4;
+
+function openingDates(sessions = OPEN_SESSIONS) {
+  const to = new Date();
+  const from = new Date(to.getTime());
+  // Calendar days, with slack for a weekend: four SESSIONS back from a Monday is the previous Tuesday.
+  from.setDate(from.getDate() - (sessions + 3));
+  return { from: toYmd(from), to: toYmd(to) };
+}
 
 /** The from/to a fresh interval starts on, so the two states are never seeded inconsistently. */
 function defaultDates(intervalId) {
@@ -143,8 +164,8 @@ export default function StockMind() {
   // based on timeframe and time interval." Correct — a count is a consequence of the other two, and
   // three controls for two facts invited them to disagree. The window is now the dates it covers, and
   // the request's payload ceiling is derived from those dates.
-  const [fromDate, setFromDate] = useState(() => defaultDates('1d').from);
-  const [toDate, setToDate] = useState(() => defaultDates('1d').to);
+  const [fromDate, setFromDate] = useState(() => openingDates().from);
+  const [toDate, setToDate] = useState(() => openingDates().to);
 
   const [status, setStatus]   = useState('idle');
   const [result, setResult]   = useState(null);
@@ -173,10 +194,11 @@ export default function StockMind() {
   const [strat, setStrat] = useState('now');
   // NOT named `interval`/`setInterval`: that shadows the global `setInterval` inside this
   // component, and the failure would look like a mystery rather than a name collision.
-  const [barInterval, setBarInterval] = useState('1d');
+  const [barInterval, setBarInterval] = useState(OPEN_INTERVAL);
   // The lookback window (Section 101). A timeframe is the PAIR — interval alone cannot say whether
-  // master wants three days of 5m bars or a month of them.
-  const [barRange, setBarRange] = useState(() => defaultRangeFor('1d'));
+  // master wants three days of 5m bars or a month of them. `null` means NO date filter at all, which is
+  // what clicking the selected preset produces (Section 107).
+  const [barRange, setBarRange] = useState(null);
   // Every symbol Rāma actually holds, so the picker can mark the no-network choices.
   const [inventory, setInventory] = useState([]);
   const [cone, setCone] = useState(null);
@@ -229,15 +251,29 @@ export default function StockMind() {
   // keep a year, so it falls to the deepest window 5m can serve. Silently keeping "1Y" selected
   // while fetching one month would make the control lie about what is on screen.
   const pickInterval = useCallback((id) => {
-    const next = reconcileRange(id, barRange);
-    const d = datesForRange(next) || { from: null, to: '' };
     setBarInterval(id);
+    // NO RECONCILING WHEN THERE IS NO FILTER (Section 107). Reconciling a null range would silently
+    // impose one, which is the opposite of what clearing it meant. And a window master chose is kept
+    // as chosen now rather than pulled back to what the provider serves — the shortfall is reported
+    // instead of prevented.
+    if (!barRange) return;
+    const next = reconcileRange(id, barRange) || barRange;
+    const d = datesForRange(next) || { from: null, to: '' };
     setBarRange(next);
     setFromDate(d.from || '');
     setToDate(d.to || '');
   }, [barRange]);
 
+  // `null` means REMOVE THE FILTER — every bar Rāma holds for this interval. That is what clicking an
+  // already-selected preset does, at master's instruction: a preset is a convenience, not a constraint
+  // (Section 107).
   const pickRange = useCallback((id) => {
+    if (!id) {
+      setBarRange(null);
+      setFromDate('');
+      setToDate('');
+      return;
+    }
     const d = datesForRange(id) || { from: null, to: '' };
     setBarRange(id);
     setFromDate(d.from || '');
