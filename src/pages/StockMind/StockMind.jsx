@@ -8,7 +8,15 @@ import SymbolSearch from './SymbolSearch.jsx';
 import StrategyBuilder from './StrategyBuilder.jsx';
 import HelpPanel from './HelpPanel.jsx';
 import InfoTip from './InfoTip.jsx';
-import { barsFor, defaultRangeFor, reconcileRange, capBarsFor } from './timeframes.js';
+import {
+  defaultRangeFor, reconcileRange, capBarsFor, datesForRange, limitForDates, rangeForDates,
+} from './timeframes.js';
+
+/** The from/to a fresh interval starts on, so the two states are never seeded inconsistently. */
+function defaultDates(intervalId) {
+  const d = datesForRange(defaultRangeFor(intervalId)) || { from: null, to: '' };
+  return { from: d.from || '', to: d.to || '' };
+}
 import { riskBudget, whyCannotPredict } from './positionMath.js';
 
 /**
@@ -131,13 +139,20 @@ export default function StockMind() {
   const [capital,  setCapital]  = useState('100000');
   const [riskPct,  setRiskPct]  = useState('1.5');
   const [direction, setDirection] = useState('both');
-  const [barCount, setBarCount] = useState('180');
+  // `barCount` is GONE (Section 105). Master: "why is there a field-count of bars? they are calculated
+  // based on timeframe and time interval." Correct — a count is a consequence of the other two, and
+  // three controls for two facts invited them to disagree. The window is now the dates it covers, and
+  // the request's payload ceiling is derived from those dates.
+  const [fromDate, setFromDate] = useState(() => defaultDates('1d').from);
+  const [toDate, setToDate] = useState(() => defaultDates('1d').to);
 
   const [status, setStatus]   = useState('idle');
   const [result, setResult]   = useState(null);
   const [error,  setError]    = useState(null);
   // The engine's last stderr lines when a request failed because the engine did (Section 99).
   const [engineTail, setEngineTail] = useState([]);
+  // Where Rāma knocked and with what, kept as a secondary line rather than as the message (Section 106).
+  const [engineDetail, setEngineDetail] = useState(null);
   const [selected, setSelected] = useState(null);
 
   const [bars, setBars]       = useState([]);
@@ -153,6 +168,9 @@ export default function StockMind() {
   // Tabs rather than one long scroll (Section 79). Seven stacked cards was the cramming; the
   // chart is the primary surface and everything else is a deliberate visit.
   const [tab, setTab] = useState('chart');
+  // The four faces of one activity (Section 105): what a rule says NOW, the same rule over history,
+  // the forward range, and the evidence under all three.
+  const [strat, setStrat] = useState('now');
   // NOT named `interval`/`setInterval`: that shadows the global `setInterval` inside this
   // component, and the failure would look like a mystery rather than a name collision.
   const [barInterval, setBarInterval] = useState('1d');
@@ -179,25 +197,31 @@ export default function StockMind() {
     if (!inElectron || !sym) return;
     setBarsBusy(true);
     setBarsNote(null);
-    // The limit is clamped to what the provider can actually serve for this interval. Asking Yahoo
-    // for a year of 1m bars returns HTTP 422, which arrives here as zero bars — indistinguishable
-    // from a misspelt symbol, so the request is kept inside the window instead (Section 101).
-    const cap = capBarsFor(barInterval);
-    const wanted = parseInt(barCount, 10) || barsFor(barInterval, barRange);
-    const limit = cap == null ? wanted : Math.min(wanted, cap);
+    // The window is a DATE RANGE; the limit is only a payload ceiling derived from it, and it is
+    // clamped to what the provider can serve for this interval. Asking Yahoo for a year of 1m bars
+    // returns HTTP 422, which arrives here as zero bars — indistinguishable from a misspelt symbol
+    // (Sections 101, 105).
+    const limit = limitForDates(barInterval, fromDate, toDate);
     const res = await window.rama.marketIntel.ohlcv({
       user: currentUser, symbol: sym, exchange,
       interval: barInterval, limit, sync: doSync,
+      fromDate: fromDate || null, toDate: toDate || null,
     });
     setBarsBusy(false);
     if (res?.ok === false) {
+      // The bars path is where master met this, and it was the ONE surface that showed only the raw
+      // string — the diagnosis and the engine's own output were on the reply and discarded here
+      // (Section 106).
       setBarsNote(res.error || 'Could not load price history');
+      setEngineTail(Array.isArray(res.stderrTail) ? res.stderrTail : []);
+      setEngineDetail(res.detail || null);
       return;
     }
+    setEngineDetail(null);
     setBars(res.data?.bars || []);
     setBarsMeta(res.data || null);
     if (res.data?.note) setBarsNote(res.data.note);
-  }, [sym, exchange, barCount, barRange, currentUser, barInterval]);
+  }, [sym, exchange, fromDate, toDate, currentUser, barInterval]);
 
   // ── The timeframe pair (Section 101) ────────────────────────────────────────
   //
@@ -206,14 +230,27 @@ export default function StockMind() {
   // while fetching one month would make the control lie about what is on screen.
   const pickInterval = useCallback((id) => {
     const next = reconcileRange(id, barRange);
+    const d = datesForRange(next) || { from: null, to: '' };
     setBarInterval(id);
     setBarRange(next);
-    setBarCount(String(barsFor(id, next)));
+    setFromDate(d.from || '');
+    setToDate(d.to || '');
   }, [barRange]);
 
   const pickRange = useCallback((id) => {
+    const d = datesForRange(id) || { from: null, to: '' };
     setBarRange(id);
-    setBarCount(String(barsFor(barInterval, id)));
+    setFromDate(d.from || '');
+    setToDate(d.to || '');
+  }, []);
+
+  // A hand-typed date makes the preset row show "custom" rather than keep a button lit that no longer
+  // describes what is on screen — a highlighted preset that disagrees with the dates is worse than no
+  // highlight, because it is a claim.
+  const setDates = useCallback((nextFrom, nextTo) => {
+    setFromDate(nextFrom);
+    setToDate(nextTo);
+    setBarRange(rangeForDates(barInterval, nextFrom || null, nextTo || null));
   }, [barInterval]);
 
   // What Rāma already holds, so the symbol picker can mark the choices that need no network.
@@ -287,12 +324,26 @@ export default function StockMind() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Re-read bars when either half of the timeframe changes. Both, not just the interval: the range
-  // buttons would otherwise be decorative until master pressed Load history.
+  // ── THE CHART REDRAWS ON EVERY FILTER, INCLUDING THE SYMBOL (Section 105) ──
+  //
+  // Master: "charts should show the bars automatically whenever stock/item is selected — based on other
+  // filters." It did not. `sym` and `exchange` were absent from this list, so choosing a new instrument
+  // left the PREVIOUS instrument's candles on screen under the new symbol's name until master pressed
+  // a button — which is not a stale chart, it is a chart showing one instrument labelled as another.
   useEffect(() => {
     if (inElectron && canView) loadBars(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [barInterval, barRange]);
+  }, [sym, exchange, barInterval, fromDate, toDate]);
+
+  // Clear the old instrument's bars the instant the symbol changes, so the gap between the change and
+  // the fetch shows a loading state rather than the wrong instrument.
+  useEffect(() => {
+    setBars([]);
+    setBarsMeta(null);
+    setResult(null);
+    setSelected(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sym, exchange]);
 
   // A new exchange means a different instrument universe, so the picker is refreshed with it.
   useEffect(() => {
@@ -337,10 +388,12 @@ export default function StockMind() {
       setError(res.error || 'Prediction request failed');
       // The engine's own last lines, when the failure was an engine failure (Section 99).
       setEngineTail(Array.isArray(res.stderrTail) ? res.stderrTail : []);
+      setEngineDetail(res.detail || null);
       setStatus('error');
       return;
     }
     setEngineTail([]);
+    setEngineDetail(null);
     setResult(res.data);
     setSelected((res.data?.signals || [])[0] || null);
     setStatus('done');
@@ -405,15 +458,23 @@ export default function StockMind() {
         display: 'flex', gap: '2px', padding: '0 20px', background: 'var(--surface)',
         borderBottom: '1px solid var(--border)', flexShrink: 0,
       }} role="tablist">
+        {/* ── SIX TABS, GROUPED BY ACTIVITY (Section 105) ───────────────────────────────────────
+            Master: "generating signals does mean to strategise… projection should be part of strategy,
+            of course utilising the same charts."
+
+            He is right, and it corrects Section 103's own split. SIGNALS, WHY, STRATEGY and the
+            projection toggle were four separate places for one activity: deciding what to do about an
+            instrument. A signal is what a rule emits NOW, a backtest is the same rule over history, a
+            projection is the forward range, and WHY is the evidence under all of them. The research
+            agrees — TradingView puts its Strategy Tester in a panel of the chart rather than on a
+            separate screen, and the report "opens automatically when you add any strategy".
+
+            So eight tabs became six, and the four strategy surfaces became sub-tabs of one. The chart
+            stays separate because it is the reference surface every other tab talks about. */}
         {[
           ['chart', 'CHART'],
-          ['signals', 'SIGNALS'],
+          ['strategise', '⚗ STRATEGISE'],
           ['book', 'YOUR BOOK'],
-          ['why', 'WHY'],
-          // Composable strategies (Section 103). Its own tab rather than a card inside SIGNALS: a
-          // signal is one reading now, a strategy is a rule tested over history, and mixing them
-          // would blur the one distinction this module most needs master to keep.
-          ['strategy', '⚗ STRATEGY'],
           ['engine', 'ENGINE'],
           // HELP last in the strip and first in the answer to "what is this" (Section 104). A module
           // whose every screen needs a glossary should carry the glossary, not assume master will find
@@ -630,30 +691,38 @@ far as the provider allows, which for intraday is a few days to two years.">
                   <option value="short">Short only</option>
                 </select>
               </div>
-              {/* The interval and window buttons live ON THE CHART (Section 101), which is where a
-                  trading platform puts them and which gives the pop-out and workspace panels the same
-                  control for free. This box remains as the exact-bar override: the window buttons SET
-                  it, and master can still type a count the presets do not offer. */}
-              <div>
-                <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px',
-                  display: 'flex', alignItems: 'center' }}>
-                  <label htmlFor="stockmind-bars">BARS</label>
-                  <InfoTip id="barsOverride" />
-                </div>
-                <input className="input" id="stockmind-bars" type="number" min="10" max="20000"
-                       step="10" style={{ width: '100px' }}
-                       value={barCount} onChange={e => setBarCount(e.target.value)} />
-              </div>
-              <span style={{ fontSize: '12px', color: 'var(--muted)', paddingBottom: '6px' }}>
-                set by the window buttons on the chart · currently {barInterval} · {barRange}
+              <span style={{ fontSize: '12px', color: 'var(--muted)', paddingBottom: '6px',
+                maxWidth: '52ch', lineHeight: 1.6 }}>
+                The bar count is gone — it was only interval × window restated, and a third control for
+                two facts invited them to disagree. Interval and dates live on the chart.
                 {capBarsFor(barInterval) != null
-                  && ` · provider limit ${capBarsFor(barInterval).toLocaleString()}`}
+                  && ` Free ${barInterval} data reaches back about `
+                    + `${capBarsFor(barInterval).toLocaleString()} bars.`}
               </span>
             </div>
           </details>
 
           {barsNote && (
-            <div style={{ fontSize: '12.5px', color: 'var(--amber)' }}>{barsNote}</div>
+            <div style={{ fontSize: '12.5px', color: 'var(--amber)', lineHeight: 1.7 }}>
+              {barsNote}
+              {engineTail.length > 0 && (
+                <details style={{ marginTop: 6 }}>
+                  <summary style={{ cursor: 'pointer', color: 'var(--text-dim)', fontSize: '12px' }}>
+                    engine output
+                  </summary>
+                  <pre style={{
+                    margin: '6px 0 0', padding: '8px 10px', maxHeight: 140, overflow: 'auto',
+                    background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)',
+                    fontSize: '11.5px', color: 'var(--text-dim)', whiteSpace: 'pre-wrap',
+                  }}>{engineTail.join('\n')}</pre>
+                </details>
+              )}
+              {engineDetail && (
+                <div style={{ color: 'var(--text-dim)', fontSize: '12px', marginTop: '4px' }}>
+                  {engineDetail}
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -677,10 +746,12 @@ far as the provider allows, which for intraday is a few days to two years.">
                 }}>{engineTail.join('\n')}</pre>
               </details>
             )}
-            {engineTail.length === 0 && String(error).includes('not reachable') && (
-              <div style={{ marginTop: '6px', color: 'var(--text-dim)', fontSize: '12.5px' }}>
-                The engine may still be starting — the model ensemble takes a few seconds to load.
-                If this persists, run Rama.bat option 2 to check the Python runtime.
+            {/* The URL, demoted to a detail (Section 106). Master saw it as the whole message; it is
+                worth keeping, because "which port did Rāma knock on" is a real question — but it is
+                never the answer to "why is the engine not running". */}
+            {engineDetail && (
+              <div style={{ marginTop: '6px', color: 'var(--text-dim)', fontSize: '12px' }}>
+                {engineDetail}
               </div>
             )}
           </div>
@@ -694,7 +765,10 @@ far as the provider allows, which for intraday is a few days to two years.">
             padding, which made the board 40px WIDER than its container — and with `overflow: hidden`
             on the board, panels near the right edge were clipped rather than contained (Section 100). */}
         {tab === 'workspace' && (
-          <div style={{ flex: 1, minHeight: 520, display: 'flex' }}>
+          // `minWidth: 0` on the flex wrapper as well, and a real minimum height. The board's children
+          // are absolutely positioned, so without these it is sized by an intrinsic width of zero
+          // (Section 105).
+          <div style={{ flex: 1, minHeight: 640, minWidth: 0, display: 'flex' }}>
             <PanelBoard
               storageKey="rama.stockmind.workspace"
               onPopOut={(p) => {
@@ -720,6 +794,8 @@ far as the provider allows, which for intraday is a few days to two years.">
                   render: () => <PriceChart bars={bars} signal={selected} symbol={sym}
                                             interval={barInterval} rangeId={barRange}
                                             onInterval={pickInterval} onRange={pickRange}
+                                            fromDate={fromDate} toDate={toDate} onDates={setDates}
+                                            chartId="sm-ws-chart"
                                             busy={barsBusy} onFetch={() => loadBars(true)}
                                             basePrice={held?.avgCost ?? null}
                                             height={260}
@@ -784,13 +860,17 @@ far as the provider allows, which for intraday is a few days to two years.">
                   overlay: {selected.variant || `#${selected.rank}`} ({String(selected.type || '').toUpperCase()})
                 </span>
               )}
-              <label style={{ fontSize: '12px', color: 'var(--muted)', display: 'flex',
-                gap: '4px', alignItems: 'center' }}
-                     title="Draw the range this instrument's own volatility calls ordinary over the horizon">
-                <input type="checkbox" checked={coneOn}
-                       onChange={e => setConeOn(e.target.checked)} />
-                projection
-              </label>
+              {/* The projection TOGGLE moved to STRATEGISE → PROJECTION (Section 105) — it is a
+                  forward view, so it is a strategy question rather than a chart setting. What stays
+                  here is a statement that it is on, and the way back to its controls, because a cone
+                  drawn by a switch on another tab must be traceable to that switch. */}
+              {coneOn && (
+                <button type="button" className="btn btn-sm"
+                        onClick={() => { setTab('strategise'); setStrat('projection'); }}
+                        title="The projection is drawn from STRATEGISE → PROJECTION">
+                  projection on ⚗
+                </button>
+              )}
             </div>
             <PriceChart
               bars={bars}
@@ -800,6 +880,10 @@ far as the provider allows, which for intraday is a few days to two years.">
               rangeId={barRange}
               onInterval={pickInterval}
               onRange={pickRange}
+              fromDate={fromDate}
+              toDate={toDate}
+              onDates={setDates}
+              chartId="sm-chart"
               busy={barsBusy}
               onFetch={() => loadBars(true)}
               basePrice={held?.avgCost ?? null}
@@ -827,23 +911,119 @@ far as the provider allows, which for intraday is a few days to two years.">
                      onPickSymbol={(s) => { setSymbol(s); setTab('chart'); }} />
         )}
 
-        {tab === 'why' && (
-          <WhyPanel currentUser={currentUser} symbol={sym} exchange={exchange}
-                    thesis={held?.thesis || null} />
-        )}
 
         {tab === 'help' && <HelpPanel />}
 
-        {tab === 'strategy' && (
+        {/* ── STRATEGISE: one activity, four faces ─────────────────────────────────────────────── */}
+        {tab === 'strategise' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}
+               role="tablist" aria-label="Strategise">
+            {[
+              ['now', 'NOW', 'What a reading of this instrument says at this moment'],
+              ['build', 'BUILD & TEST', 'A rule, judged over history the search never saw'],
+              ['projection', 'PROJECTION', 'The range this instrument\'s own volatility calls ordinary'],
+              ['why', 'WHY', 'The evidence under all three'],
+            ].map(([id, label, hint]) => (
+              <button key={id} type="button" role="tab" aria-selected={strat === id}
+                      onClick={() => setStrat(id)} title={hint}
+                      style={{
+                        padding: '5px 12px', fontSize: '12.5px', cursor: 'pointer',
+                        borderRadius: '4px', letterSpacing: '0.06em',
+                        border: `1px solid ${strat === id ? 'var(--magenta)' : 'var(--border)'}`,
+                        background: strat === id
+                          ? 'color-mix(in srgb, var(--magenta) 16%, transparent)' : 'transparent',
+                        color: strat === id ? 'var(--text)' : 'var(--muted)',
+                        fontWeight: strat === id ? 700 : 400,
+                      }}>
+                {label}
+              </button>
+            ))}
+            <span style={{ flex: 1 }} />
+            <span style={{ fontSize: '12px', color: 'var(--muted)', maxWidth: '46ch',
+              lineHeight: 1.6 }}>
+              A signal is what a rule says now; a backtest is the same rule over years. Both are
+              strategising.
+            </span>
+          </div>
+        )}
+
+        {tab === 'strategise' && strat === 'build' && (
           <StrategyBuilder currentUser={currentUser} canRequest={canRequest}
                            symbol={sym} exchange={exchange} interval={barInterval}
                            capital={capital} riskPct={riskPct} />
         )}
 
+        {tab === 'strategise' && strat === 'why' && (
+          <WhyPanel currentUser={currentUser} symbol={sym} exchange={exchange}
+                    thesis={held?.thesis || null} />
+        )}
+
+        {/* PROJECTION MOVED HERE FROM THE CHART HEADER (Section 105), at master's instruction. It is a
+            forward view, which makes it a strategy question rather than a chart setting — and it still
+            draws on THE SAME CHART, which is what he asked for: the cone renders under CHART whenever
+            it is switched on here. */}
+        {tab === 'strategise' && strat === 'projection' && (
+          <div className="hud-card" style={{ padding: '16px', display: 'flex',
+            flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <div className="section-label">PROJECTION</div>
+              <InfoTip id="projection" />
+              <span style={{ flex: 1 }} />
+              <label style={{ fontSize: '12.5px', color: 'var(--text)', display: 'flex',
+                gap: '6px', alignItems: 'center', cursor: 'pointer' }}>
+                <input type="checkbox" checked={coneOn}
+                       onChange={e => setConeOn(e.target.checked)} />
+                draw it on the chart
+              </label>
+            </div>
+            <div style={{ fontSize: '12.5px', color: 'var(--text-dim, var(--muted))',
+              lineHeight: 1.75, maxWidth: '80ch' }}>
+              This draws the range {sym}&rsquo;s own volatility calls ordinary over the horizon —
+              <strong> not a forecast of direction</strong>. When no model has cleared the acceptance
+              gate the centre line stays flat and grey, meaning &ldquo;last price extended&rdquo;
+              rather than &ldquo;we expect no change&rdquo;. Switch it on and open the CHART tab: it
+              renders on the same chart rather than a second copy of one.
+            </div>
+            {cone?.error && (
+              <div style={{ fontSize: '12.5px', color: 'var(--amber)' }}>
+                Unavailable: {cone.error}
+              </div>
+            )}
+            {cone && cone.ok === false && (
+              <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
+                Unavailable: {cone.reason}
+              </div>
+            )}
+            {cone?.ok && (
+              <>
+                <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap' }}>
+                  <Stat label="CENTRE" info="coneTilted"
+                        value={cone.tilted ? 'MODEL-TILTED' : 'FLAT'}
+                        color={cone.tilted ? 'var(--accent)' : 'var(--muted)'} />
+                  <Stat label="HORIZON" info="horizon" value={cone.horizon || '—'} />
+                  <Stat label="BARS AHEAD" value={String((cone.points || []).length || '—')} />
+                </div>
+                <div style={{ fontSize: '12.5px', color: 'var(--text-dim, var(--muted))',
+                  lineHeight: 1.7 }}>
+                  {cone.summary?.text}{' '}
+                  <span style={{ color: cone.tilted ? 'var(--accent)' : 'var(--muted)' }}>
+                    {cone.tiltReason}
+                  </span>
+                </div>
+                <div>
+                  <button className="btn btn-sm" onClick={() => setTab('chart')}>
+                    show it on the chart →
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* THE SIGNALS TAB RENDERED NOTHING AT ALL before a request (Section 102): the whole block
             was gated on `result`, so clicking the tab gave master a blank page with no explanation
             and no way to tell it apart from a crash. */}
-        {tab === 'signals' && !result && (
+        {tab === 'strategise' && strat === 'now' && !result && (
           <div className="hud-card" style={{ padding: '20px', display: 'flex',
             flexDirection: 'column', gap: '10px', alignItems: 'flex-start' }}>
             <div className="section-label">SIGNALS</div>
@@ -861,7 +1041,7 @@ far as the provider allows, which for intraday is a few days to two years.">
           </div>
         )}
 
-        {tab === 'signals' && result && (
+        {tab === 'strategise' && strat === 'now' && result && (
           <div className="hud-card" style={{ padding: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', flexWrap: 'wrap' }}>
               <div className="section-label">SIGNALS — {result.symbol} ({result.exchange})</div>

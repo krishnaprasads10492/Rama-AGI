@@ -576,6 +576,7 @@ def news_coverage(symbol: str, exchange: str = "NSE"):
 
 @app.get("/ohlcv/{symbol}")
 def ohlcv(symbol: str, exchange: str = "NSE", interval: str = "1d",
+          fromDate: Optional[str] = None, toDate: Optional[str] = None,
           limit: int = 240, sync: bool = False):
     """
     Stored bars, newest last, for drawing.
@@ -603,10 +604,60 @@ def ohlcv(symbol: str, exchange: str = "NSE", interval: str = "1d",
                     "syncInfo": info}
 
         stored = int(len(df))
-        tail = df.tail(max(10, min(limit, 5000))).copy()
-        tail["date"] = pd.to_datetime(tail["date"], errors="coerce")
+        window = df.copy()
+        window["date"] = pd.to_datetime(window["date"], errors="coerce")
+        window = window.dropna(subset=["date"])
+
+        # ── A DATE RANGE, NOT ONLY A TAIL (spec Section 105) ──────────────────
+        #
+        # Master removed the bar-count field: a count is a consequence of interval and window, not an
+        # independent choice, so the window is now expressed as the dates it actually covers. `limit`
+        # stays as a CEILING on the payload — every bar crosses an IPC boundary and then becomes a
+        # canvas point — but it no longer defines the window.
+        clipped = False
+        if fromDate:
+            try:
+                start = pd.Timestamp(fromDate)
+                before = len(window)
+                window = window[window["date"] >= start]
+                clipped = clipped or len(window) != before
+            except (ValueError, TypeError):
+                pass          # an unparseable date is ignored rather than emptying the chart
+        if toDate:
+            try:
+                # Inclusive of the whole closing day: a `toDate` of 2026-03-31 must include that
+                # session's bars, and an intraday stamp of 2026-03-31 09:15 is NOT <= midnight.
+                end = pd.Timestamp(toDate) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+                before = len(window)
+                window = window[window["date"] <= end]
+                clipped = clipped or len(window) != before
+            except (ValueError, TypeError):
+                pass
+
+        matched = int(len(window))
+        if matched == 0:
+            return {"symbol": sym, "exchange": exchange, "interval": interval,
+                    "bars": [], "count": 0, "stored": stored,
+                    "storedFirstBar": str(pd.Timestamp(df["date"].iloc[0]).date()),
+                    "note": (f"{stored} {interval} bars are stored, but none fall between "
+                             f"{fromDate or 'the start'} and {toDate or 'now'}. Widen the dates, or "
+                             f"fetch more history."),
+                    "meta": store.meta(sym, exchange, interval), "syncInfo": info}
+
+        tail = window.tail(max(10, min(limit, 20000)))
+
+        # ── INTRADAY BARS KEPT THEIR TIME (spec Section 105) ──────────────────
+        #
+        # THIS ROUTE WAS THROWING THE CLOCK AWAY. `str(r.date.date())` serialises 2026-03-31 09:15 as
+        # "2026-03-31", so every bar in a session arrived at the renderer with the same stamp — and
+        # `PriceChart.toChartTime` treats a 10-character string as a whole day, collapsing a session's
+        # bars onto one point. The store was fixed for exactly this in Section 73; the ROUTE was not,
+        # so every intraday chart was silently one candle per day whatever interval master picked.
+        intraday = store.is_intraday(interval)
+        stamp = ((lambda d: d.strftime("%Y-%m-%d %H:%M:%S")) if intraday
+                 else (lambda d: str(d.date())))
         bars = [{
-            "date":   str(r.date.date()),
+            "date":   stamp(r.date),
             "open":   round(float(r.open), 4),
             "high":   round(float(r.high), 4),
             "low":    round(float(r.low), 4),
@@ -617,8 +668,15 @@ def ohlcv(symbol: str, exchange: str = "NSE", interval: str = "1d",
         return {
             "symbol": sym, "exchange": exchange, "interval": interval,
             "bars": bars, "count": len(bars), "stored": stored,
+            "matched": matched,
+            "requestedFrom": fromDate, "requestedTo": toDate,
+            "truncated": len(bars) < matched,
             "firstBar": bars[0]["date"], "lastBar": bars[-1]["date"],
             "storedFirstBar": str(pd.Timestamp(df["date"].iloc[0]).date()),
+            "storedLastBar": str(pd.Timestamp(df["date"].iloc[-1]).date()),
+            "note": (None if len(bars) >= matched else
+                     f"{matched} bars match those dates; the newest {len(bars)} were sent to keep the "
+                     f"payload bounded."),
             "meta": store.meta(sym, exchange, interval),
             "syncInfo": info,
         }

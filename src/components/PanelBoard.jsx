@@ -382,7 +382,18 @@ export default function PanelBoard({ panels: initial, storageKey = null, onPopOu
   const hidden = initial.filter(p => geo[p.id]?.closed);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    // `flex: 1` AND `minWidth: 0` AND `width: '100%'`, all three (Section 105).
+    //
+    // THE BUG MASTER SAW — "workspace layout is only half shown for drag and drop". The board's panels
+    // are `position: absolute`, so this subtree has an INTRINSIC CONTENT WIDTH OF ZERO. Placed inside a
+    // `display: flex` wrapper it was sized by that intrinsic width instead of filling the row, so
+    // `bounds.w` measured a few pixels, the responsive tiler dropped to one column at `MIN_W`, and the
+    // board rendered as a narrow strip down the left. Nothing was clipped — the board genuinely was
+    // that size, which is why the previous fix to `containPanel` did not touch it.
+    <div style={{
+      display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0,
+      flex: 1, width: '100%', minWidth: 0,
+    }}>
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
         padding: '6px 10px', flexShrink: 0,

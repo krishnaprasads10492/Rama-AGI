@@ -191,6 +191,81 @@ export function describeLimit(intervalId) {
     + 'bars. Deeper windows are refused by the provider, not by Rāma.';
 }
 
+/**
+ * A window preset expressed as the dates it covers (spec Section 105).
+ *
+ * WHY DATES REPLACED A BAR COUNT. Master: *"why is there a field-count of bars? they are calculated
+ * based on timeframe and time interval — remove it and also add a date picker."* He is right: a count
+ * is a CONSEQUENCE of interval and window, not a third independent choice, so having all three on
+ * screen invited them to disagree. A window is now the dates it actually covers, and the presets set
+ * those dates rather than a count.
+ *
+ * Calendar days, not trading days, because a date picker deals in calendar dates. The session figures
+ * in `RANGES` stay as they are — they are what the provider caps are expressed in — so the conversion
+ * uses the ~252-sessions-per-365-days ratio.
+ *
+ * @param {string} rangeId
+ * @param {Date} [now] injectable, so the conversion is testable without freezing the clock
+ * @returns {{from: string, to: string}|null} `YYYY-MM-DD`, or null for MAX which has no start
+ */
+export function datesForRange(rangeId, now = new Date()) {
+  const rg = range(rangeId);
+  if (!rg) return null;
+  const to = toYmd(now);
+  if (rg.sessions === null) return { from: null, to };
+  // +3 days of slack so a window ending on a weekend or a holiday still contains the intended number
+  // of sessions rather than falling a bar or two short.
+  const calendarDays = Math.ceil((rg.sessions * 365) / 252) + 3;
+  const start = new Date(now.getTime());
+  start.setDate(start.getDate() - calendarDays);
+  return { from: toYmd(start), to };
+}
+
+/** `YYYY-MM-DD` in local time — what `<input type="date">` expects and returns. */
+export function toYmd(d) {
+  const dt = (d instanceof Date) ? d : new Date(d);
+  if (Number.isNaN(dt.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
+}
+
+/**
+ * Which preset, if any, a pair of dates corresponds to — so the button row can stay in sync with a
+ * range master typed by hand instead of silently highlighting the wrong one.
+ *
+ * @returns {string|null} a range id, or null when the dates match no preset ("custom")
+ */
+export function rangeForDates(intervalId, from, to, now = new Date()) {
+  if (!from && !to) return null;
+  for (const rg of rangesFor(intervalId)) {
+    const d = datesForRange(rg.id, now);
+    if (!d) continue;
+    if (d.from === (from || null) && d.to === (to || d.to)) return rg.id;
+  }
+  return null;
+}
+
+/**
+ * The payload ceiling for a date window, so a ten-year daily request cannot ask for an unbounded page.
+ *
+ * Derived from the span rather than typed, which is the whole point of removing the field: the number
+ * still exists, master just no longer has to maintain it.
+ */
+export function limitForDates(intervalId, from, to) {
+  const iv = interval(intervalId);
+  if (!iv) return MAX_BARS;
+  if (!from) return MAX_BARS;
+  const a = new Date(from);
+  const b = to ? new Date(to) : new Date();
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime()) || b < a) return MAX_BARS;
+  const days = Math.max(1, Math.round((b - a) / 86400000));
+  const sessions = Math.ceil((days * 252) / 365) + 2;
+  const bars = Math.ceil((sessions * SESSION_MINUTES) / iv.span);
+  const cap = capBarsFor(intervalId);
+  const ceiling = cap == null ? MAX_BARS : Math.min(MAX_BARS, cap);
+  return Math.max(MIN_USEFUL_BARS, Math.min(ceiling, bars));
+}
+
 /** Is a bar interval fine enough that the time axis should show a clock? */
 export function showsClock(intervalId) {
   const iv = interval(intervalId);

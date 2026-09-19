@@ -19,6 +19,15 @@ const STDERR_KEEP = 24;
 const lastStderr = [];
 let lastExit = null;
 
+// What was actually chosen and where, recorded on every spawn attempt (spec Section 106).
+//
+// WHY THESE ARE RETAINED. When the engine fails silently there is nothing else to report, and the two
+// most useful facts are which interpreter was tried and which directory was used — a wrong venv and a
+// missing `ai_backend` produce identical silence, and they have completely different remedies. Without
+// these, the only thing a caller could print was the URL it failed to reach, which is what master saw.
+let resolvedInterpreter = null;
+let resolvedBackendDir = null;
+
 let ipcMainRef  = null;
 
 // ─── Register all AI process IPC handlers ────────────────────────────────────
@@ -61,11 +70,18 @@ function register(ipcMain) {
 async function startPythonBackend() {
   const backendPath = resolveBackendPath();
   if (!backendPath) {
+    // Pushed onto the stderr ring as well, not only returned. The caller polls /health for 8s after a
+    // failed start and then asks for a diagnosis; without a trace here that diagnosis would have
+    // nothing to work from and would report silence instead of the actual cause (Section 106).
+    lastStderr.push('ai_backend directory not found — the engine was never spawned. '
+      + 'In a packaged install it belongs at resources/ai_backend.');
     return { ok: false, error: 'ai_backend directory not found' };
   }
+  resolvedBackendDir = backendPath;
 
   const mainScript = path.join(backendPath, 'main.py');
   if (!fs.existsSync(mainScript)) {
+    lastStderr.push(`main.py not found at ${mainScript} — the engine was never spawned.`);
     return { ok: false, error: `main.py not found at ${mainScript}` };
   }
 
@@ -124,6 +140,11 @@ async function startPythonBackend() {
   const python = configured
     || managed
     || (process.platform === 'win32' ? 'python' : 'python3');
+
+  // Recorded BEFORE the spawn, so a failure that produces no output at all can still say what was
+  // attempted (Section 106).
+  resolvedInterpreter = python;
+  resolvedBackendDir = backendPath;
 
   const child = spawn(python, ['-u', mainScript], {
     cwd:   backendPath,
@@ -266,7 +287,8 @@ function stopAll() {
  * a missing package is checked before a generic non-zero exit, because "ModuleNotFoundError: fastapi"
  * has an obvious remedy while "exited with code 1" has none.
  */
-function diagnoseFailure({ stderr = [], exit = null } = {}) {
+function diagnoseFailure({ stderr = [], exit = null, running = false, interpreter = null,
+  backendDir = null } = {}) {
   const text = (Array.isArray(stderr) ? stderr : []).join('\n');
 
   const missing = text.match(/No module named '([^']+)'/);
@@ -310,26 +332,82 @@ function diagnoseFailure({ stderr = [], exit = null } = {}) {
     };
   }
 
-  if (!exit && text.length === 0) {
+  /**
+   * THE SILENT CASES, which are the ones master actually hit (spec Section 106).
+   *
+   * Section 99 wrote a branch for silence and `getRunningStatus` gated the whole diagnosis behind
+   * `lastExit || lastStderr.length` — so the branch written for "no output" could only run when there
+   * WAS output, and could never fire. Every silent failure therefore fell through to the caller's raw
+   * fallback, which printed a connection refusal and a URL. That is precisely the undiagnosable message
+   * Section 99 existed to delete, surviving in the one case it mattered most.
+   *
+   * `running` distinguishes the two silences, and they need different advice: a live process that has
+   * not bound its port is still importing or is stuck, while no process at all never started.
+   */
+  if (running && text.length === 0) {
     return {
-      reason: 'the engine produced no output and never bound its port',
-      remedy: 'Check that Python is installed and that ai_backend/main.py is present.',
+      reason: 'the engine process is alive but has not answered on its port yet',
+      remedy: 'The model ensemble can take a few seconds to import on a cold start — try again in a '
+        + 'moment. If it never answers, Rama.bat option 2 checks the runtime.'
+        + (interpreter ? ` Interpreter: ${interpreter}` : ''),
+      silent: true,
     };
   }
 
-  return { reason: 'the engine started but did not answer', remedy: 'See the ENGINE tab for output.' };
+  if (!exit && text.length === 0) {
+    return {
+      reason: 'no engine process is running and none has reported anything',
+      remedy: 'Nothing was spawned, so Python is the first thing to check. Run Rama.bat option 2 to '
+        + 'test the runtime, then option 3 to create the engine environment and install the '
+        + 'requirements.'
+        + (backendDir ? ` Engine directory: ${backendDir}` : '')
+        + (interpreter ? ` Interpreter: ${interpreter}` : ''),
+      silent: true,
+    };
+  }
+
+  return {
+    reason: 'the engine started but did not answer',
+    remedy: 'The raw output is below, and Rama.bat option 2 checks the runtime.',
+  };
 }
 
 function getRunningStatus() {
+  const running = !!processes['python'] && !processes['python'].killed;
   return {
     python: {
-      running: !!processes['python'] && !processes['python'].killed,
+      running,
       // Surfaced so a caller can explain a failure instead of only reporting one.
       lastStderr: [...lastStderr],
       lastExit,
-      diagnosis: (!processes['python'] && (lastExit || lastStderr.length))
-        ? diagnoseFailure({ stderr: lastStderr, exit: lastExit })
-        : null,
+      /**
+       * A DIAGNOSIS IS ALWAYS AVAILABLE WHEN THE ENGINE IS NOT RUNNING (spec Section 106).
+       *
+       * This was gated on `!processes['python'] && (lastExit || lastStderr.length)`, which had two
+       * consequences master hit directly. A process that had spawned and was alive but not answering
+       * produced `null`, and so did a failure that reported nothing at all — and `null` sends the
+       * caller to its raw fallback, which prints a connection refusal and a URL.
+       *
+       * `diagnoseFailure` is total: it returns a sentence for every input, including silence. Gating it
+       * behind evidence meant the branch written for the no-evidence case could never run. So the gate
+       * is gone; `running` is passed through instead, and the function decides.
+       */
+      diagnosis: running ? null : diagnoseFailure({
+        stderr: lastStderr,
+        exit: lastExit,
+        running: false,
+        interpreter: lastExit?.interpreter ?? resolvedInterpreter ?? null,
+        backendDir: resolvedBackendDir ?? null,
+      }),
+      // A live-but-silent engine is not a failure yet, so it gets its own field rather than being
+      // reported as one. The caller, which is the only thing that knows whether /health answered,
+      // decides when to promote it.
+      notAnswering: running ? diagnoseFailure({
+        stderr: lastStderr, exit: null, running: true,
+        interpreter: resolvedInterpreter ?? null,
+      }) : null,
+      interpreter: resolvedInterpreter ?? null,
+      backendDir: resolvedBackendDir ?? null,
       pid:     processes['python']?.pid ?? null,
     },
   };

@@ -44,7 +44,14 @@ async function ensureBackendRunning() {
   if (!alreadyRunning) {
     const started = await aiProcess.startPythonBackendPublic?.();
     if (started && started.ok === false) {
-      return { ok: false, error: started.error || 'Could not start ai_backend' };
+      // A start that failed outright is the clearest signal there is — report it immediately rather
+      // than polling a port for 8s that nothing is listening on (Section 106).
+      return {
+        ok: false,
+        error: `StockMind's engine could not be started: ${started.error || 'unknown reason'}`,
+        diagnosis: { reason: started.error || 'the engine could not be started', remedy: '' },
+        stderrTail: [],
+      };
     }
   }
 
@@ -66,21 +73,60 @@ async function ensureBackendRunning() {
    * "Backend not reachable" was undiagnosable: an ImportError from missing packages and a wrong Python
    * version produced exactly the same sentence.
    */
+  /**
+   * THE URL IS NEVER THE HEADLINE ANY MORE (spec Section 106).
+   *
+   * Master's report: *"engine is not running, showing the IP and the above message."* That was this
+   * fallback firing, and it fired because `getRunningStatus` returned `diagnosis: null` for every
+   * SILENT failure — it gated the diagnosis behind `lastExit || lastStderr.length`, so the branch
+   * `diagnoseFailure` contains for the no-output case could not be reached. Section 99 removed the
+   * undiagnosable message from the cases that produce output and left it in the case that does not.
+   *
+   * `diagnoseFailure` is total: every input yields a sentence, silence included. So it is called
+   * directly here when the status object has nothing, and `http://127.0.0.1:8001` is demoted to a
+   * detail field the ENGINE tab can show. A URL tells master where Rāma knocked; it never tells him
+   * why nobody answered.
+   */
   let diagnosis = null;
   let tail = [];
+  let detail = `no answer from ${BASE_URL} after 8s: ${lastError}`;
   try {
     const st = await aiProcess.getRunningStatus?.();
-    diagnosis = st?.python?.diagnosis ?? null;
-    tail = Array.isArray(st?.python?.lastStderr) ? st.python.lastStderr.slice(-4) : [];
-  } catch { /* the connection error below still stands on its own */ }
+    const py = st?.python || {};
+    tail = Array.isArray(py.lastStderr) ? py.lastStderr.slice(-4) : [];
+    // A live-but-silent engine reports under `notAnswering`, because at the moment the status is read
+    // it is not yet a failure — it becomes one here, where we know /health never answered.
+    diagnosis = py.diagnosis || py.notAnswering || null;
+    if (!diagnosis && typeof aiProcess.diagnoseFailure === 'function') {
+      diagnosis = aiProcess.diagnoseFailure({
+        stderr: py.lastStderr || [],
+        exit: py.lastExit || null,
+        running: !!py.running,
+        interpreter: py.interpreter || null,
+        backendDir: py.backendDir || null,
+      });
+    }
+    if (py.interpreter) detail += ` · interpreter ${py.interpreter}`;
+    if (py.backendDir) detail += ` · engine dir ${py.backendDir}`;
+  } catch { /* a diagnosis is still produced below */ }
+
+  // Last resort, and it must still not be a bare URL. Reaching here means `aiProcess` itself could not
+  // be questioned, which is a different fault again.
+  if (!diagnosis) {
+    diagnosis = {
+      reason: 'the engine is not answering and its process could not be questioned',
+      remedy: 'Run Rama.bat option 2 to check the Python runtime, then option 3 to create the engine '
+        + 'environment and install its packages.',
+    };
+  }
 
   return {
     ok: false,
-    error: diagnosis
-      ? `StockMind's engine is not running: ${diagnosis.reason}. ${diagnosis.remedy}`
-      : `Backend not reachable at ${BASE_URL}: ${lastError}`,
+    error: `StockMind's engine is not running: ${diagnosis.reason}.`
+      + (diagnosis.remedy ? ` ${diagnosis.remedy}` : ''),
     // Kept separate from the message so the UI can show the raw output without burying the remedy.
     diagnosis,
+    detail,
     stderrTail: tail,
   };
 }
@@ -153,9 +199,18 @@ async function postPath(path, body, { timeout = 120000 } = {}) {
 
 const sym = (s) => encodeURIComponent(String(s || '').trim().toUpperCase());
 
-async function ohlcv({ symbol, exchange = 'NSE', interval = '1d', limit = 240, sync = false } = {}) {
+async function ohlcv({ symbol, exchange = 'NSE', interval = '1d', limit = 240, sync = false,
+  fromDate = null, toDate = null } = {}) {
+  // Dates are optional and validated by shape here rather than trusted: they are interpolated into a
+  // query string, and a malformed value should reach the engine as nothing rather than as garbage
+  // (Section 105).
+  const ymd = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
+  const f = ymd(fromDate);
+  const t = ymd(toDate);
   return getPath(`/ohlcv/${sym(symbol)}?exchange=${encodeURIComponent(exchange)}`
     + `&interval=${encodeURIComponent(interval)}&limit=${Number(limit) || 240}`
+    + (f ? `&fromDate=${f}` : '')
+    + (t ? `&toDate=${t}` : '')
     // A sync reaches out to the provider chain, so it needs a longer budget than a read.
     + `&sync=${sync ? 'true' : 'false'}`, { timeout: sync ? 90000 : 20000 });
 }

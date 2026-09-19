@@ -162,9 +162,13 @@ export default function PriceChart({
   // ── Added by Section 101, all optional so every existing call site keeps working (I11) ──
   busy = false,             // a fetch is in flight; distinct from "there is nothing"
   onFetch = null,           // lets the empty state perform the fix it names
-  rangeId = null,           // the lookback window, when the parent manages one
-  onInterval = null,        // supplying these two renders the timeframe strip on the chart
+  rangeId = null,           // the lookback preset, or null when the dates are custom
+  onInterval = null,        // supplying these renders the timeframe strip on the chart
   onRange = null,
+  fromDate = null,          // the window as dates (Section 105) — the bar count was removed
+  toDate = null,
+  onDates = null,           // (from, to) => void; omit to hide the date pickers
+  chartId = 'chart',        // so two charts on one screen do not share input ids
   basePrice = null,         // master's average cost, for the baseline chart's zero line
 }) {
   const holder = useRef(null);
@@ -419,7 +423,10 @@ export default function PriceChart({
     }
 
     if (candles.length === 0) return;
-    const fitKey = `${symbol}|${interval}|${rangeId || ''}`;
+    // The DATES are part of the series identity, not just the preset name. With a hand-typed window
+    // `rangeId` is null, so a key built from the preset alone would not change and the chart would keep
+    // master's old zoom over a completely different span (Section 105).
+    const fitKey = `${symbol}|${interval}|${rangeId || ''}|${fromDate || ''}|${toDate || ''}`;
     if (fitKeyRef.current !== fitKey) {
       fitKeyRef.current = fitKey;
       savedRangeRef.current = null;
@@ -431,7 +438,7 @@ export default function PriceChart({
       catch { chart.timeScale().fitContent(); }
       savedRangeRef.current = null;
     }
-  }, [candles, volumes, chartType, symbol, interval, rangeId]);
+  }, [candles, volumes, chartType, symbol, interval, rangeId, fromDate, toDate]);
 
   // ── Overlays: pure functions of the bars on screen (Section 101) ───────────
   useEffect(() => {
@@ -813,6 +820,33 @@ export default function PriceChart({
                   {rg.label}
                 </button>
               ))}
+
+              {/* THE DATE PICKER (Section 105). Master asked for one, and it is also the trading-app
+                  convention: preset buttons for the common windows, plus manual entry for a specific
+                  span. The presets SET these fields, so the two can never disagree — and a typed date
+                  un-highlights the presets rather than leaving a button lit that no longer describes
+                  what is on screen. */}
+              {onDates && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px',
+                  marginLeft: '10px' }}>
+                  <label htmlFor={`${chartId}-from`} style={{ fontSize: '12px',
+                    color: 'var(--muted)' }}>from</label>
+                  <input id={`${chartId}-from`} className="input" type="date" value={fromDate || ''}
+                         max={toDate || undefined}
+                         onChange={(e) => onDates(e.target.value, toDate)}
+                         style={{ width: '132px', fontSize: '12px', padding: '2px 5px' }} />
+                  <label htmlFor={`${chartId}-to`} style={{ fontSize: '12px',
+                    color: 'var(--muted)' }}>to</label>
+                  <input id={`${chartId}-to`} className="input" type="date" value={toDate || ''}
+                         min={fromDate || undefined}
+                         onChange={(e) => onDates(fromDate, e.target.value)}
+                         style={{ width: '132px', fontSize: '12px', padding: '2px 5px' }} />
+                  {!rangeId && (
+                    <span style={{ fontSize: '12px', color: 'var(--accent)' }}>custom</span>
+                  )}
+                </span>
+              )}
+
               {limitNote && (
                 <span style={{ fontSize: '12px', color: 'var(--muted)', marginLeft: '8px' }}
                       title={limitNote}>

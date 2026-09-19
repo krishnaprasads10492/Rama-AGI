@@ -15,8 +15,13 @@
 
 // Required by path, because `electron/ipc/aiProcess.cjs` requires `electron` at module scope and this
 // suite must run under plain node. Only the pure function is needed.
+const fs = require('fs');
 const path = require('path');
 const Module = require('module');
+
+// The Section 106 checks read both source files, because the defect was not in `diagnoseFailure` — it
+// was in the GATE in front of it, and a gate is only visible in the source that guards the call.
+const ROOT = path.join(__dirname, '..');
 
 const target = path.join(__dirname, '..', 'electron', 'ipc', 'aiProcess.cjs');
 
@@ -104,8 +109,10 @@ console.log('\n  silence is its own answer');
 {
   const silent = diagnoseFailure({ stderr: [], exit: null });
   check('no output and no exit is reported as exactly that',
-    /produced no output/.test(silent.reason), silent.reason);
+    /no engine process is running/.test(silent.reason), silent.reason);
   check('and still carries a next step', silent.remedy.length > 10);
+  check('and it points at the Python runtime, which is the thing to check',
+    /Rama\.bat option 2/.test(silent.remedy), silent.remedy);
 
   const started = diagnoseFailure({ stderr: ['INFO: Started server process'], exit: null });
   // Started but unanswering is a different situation from crashed, and must not be conflated.
@@ -121,6 +128,84 @@ console.log('\n  silence is its own answer');
         return typeof d.reason === 'string' && d.reason
           && typeof d.remedy === 'string' && d.remedy;
       }));
+}
+
+// ── THE CASE MASTER ACTUALLY HIT (spec Section 106) ───────────────────────────
+//
+// He reported: "engine is not running, showing the IP and the above message." That was the caller's raw
+// fallback, and it fired because `getRunningStatus` gated the whole diagnosis behind
+// `lastExit || lastStderr.length` — so the branch written for silence could only run when there WAS
+// output, and could never run. Section 99 deleted the undiagnosable message from every case that
+// produces output and left it in the one case that does not.
+console.log('\n  the silent cases, which were unreachable before');
+{
+  const alive = diagnoseFailure({ stderr: [], exit: null, running: true, interpreter: 'C:/py/python.exe' });
+  check('an alive-but-silent engine says it is still starting rather than broken',
+    /alive but has not answered/.test(alive.reason), alive.reason);
+  check('and suggests waiting, because a cold import genuinely takes seconds',
+    /try again/i.test(alive.remedy), alive.remedy);
+  check('and names the interpreter it is running under',
+    /python\.exe/.test(alive.remedy), alive.remedy);
+  check('it is marked as silent so a caller can treat it differently', alive.silent === true);
+
+  const dead = diagnoseFailure({
+    stderr: [], exit: null, running: false,
+    interpreter: 'python', backendDir: 'C:/app/resources/ai_backend',
+  });
+  check('a never-spawned engine is distinguished from an alive one',
+    dead.reason !== alive.reason, `${dead.reason} vs ${alive.reason}`);
+  check('and names the engine directory, because a missing one looks identical otherwise',
+    /ai_backend/.test(dead.remedy), dead.remedy);
+
+  // The property that matters: the function is TOTAL. Gating it behind evidence is what broke it, so
+  // the fix is only safe if every input — including no input — yields something master can act on.
+  const inputs = [
+    {}, { stderr: [] }, { stderr: [], exit: null, running: false },
+    { stderr: [], exit: null, running: true }, { stderr: [''], exit: null },
+    { stderr: null, exit: null }, { exit: { code: null } }, { running: true },
+    { stderr: ['ok'], exit: { code: 0 } },
+  ];
+  check('every input yields a reason AND a remedy, silence included',
+    inputs.every((i) => {
+      const d = diagnoseFailure(i);
+      return d && typeof d.reason === 'string' && d.reason.length > 10
+        && typeof d.remedy === 'string' && d.remedy.length > 10;
+    }),
+    JSON.stringify(inputs.filter((i) => {
+      const d = diagnoseFailure(i);
+      return !(d && d.reason?.length > 10 && d.remedy?.length > 10);
+    })));
+  check('no diagnosis ever contains a bare URL or an IP, which is what master was shown',
+    inputs.every((i) => {
+      const d = diagnoseFailure(i);
+      return !/\d+\.\d+\.\d+\.\d+|https?:\/\//.test(`${d.reason} ${d.remedy}`);
+    }));
+  check('nothing returns null, because null is what sent the caller to its raw fallback',
+    inputs.every((i) => diagnoseFailure(i) !== null && diagnoseFailure(i) !== undefined));
+}
+
+// ── The gate that made the above unreachable must not come back ───────────────
+console.log('\n  the status object always offers a diagnosis when the engine is down');
+{
+  const src = fs.readFileSync(path.join(ROOT, 'electron', 'ipc', 'aiProcess.cjs'), 'utf8');
+  check('the evidence gate is gone from getRunningStatus',
+    !/diagnosis:\s*\(!processes\['python'\]\s*&&\s*\(lastExit\s*\|\|\s*lastStderr\.length\)\)/.test(src),
+    'the `lastExit || lastStderr.length` gate is back — it makes the silent branch unreachable');
+  check('a live-but-silent engine is reported separately from a failed one',
+    /notAnswering:/.test(src));
+  check('the interpreter and engine directory are retained for a silent failure',
+    /resolvedInterpreter/.test(src) && /resolvedBackendDir/.test(src));
+  check('a missing ai_backend leaves a trace on the stderr ring rather than only returning',
+    /lastStderr\.push\([\s\S]{0,80}ai_backend directory not found/.test(src));
+
+  const mi = fs.readFileSync(path.join(ROOT, 'electron', 'ipc', 'marketIntel.cjs'), 'utf8');
+  check('the caller no longer makes the URL its headline',
+    !/error:\s*diagnosis\s*\n?\s*\?/.test(mi) && !/Backend not reachable at \$\{BASE_URL\}/.test(mi),
+    'the raw `Backend not reachable at <url>` fallback is back');
+  check('the caller falls back to diagnoseFailure rather than to a connection string',
+    /aiProcess\.diagnoseFailure\(/.test(mi));
+  check('the URL survives as a detail field, because where Rama knocked is still worth recording',
+    /detail\b/.test(mi) && /BASE_URL/.test(mi));
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);

@@ -1782,6 +1782,9 @@ authenticated **Master session**, not merely an open store.
 
 | 124 | Does StockMind explain itself? No — a glossary, a help screen, and grouped forms | done | Section 104. Master, five parts, the third being the one that mattered: *"does the StockMind screen give any info on each and every field so that user can understand it??"* **THE ANSWER IS NO, COUNTED RATHER THAN ESTIMATED:** of roughly 80 labelled fields, badges and columns, **about a third carried a hover `title` and the rest carried nothing** — and the ones carrying nothing included `ABSORBED ENGINE` (provenance, nothing actionable), `DONE` (of *what*), `0 trained · contract aligned`, `UNCERTAINTY 0.031`, `AGREEMENT 0.82`, and `DAYS 14` beside `INTRADAY` — **the most expensive mistake in the book, with nothing saying so.** A second failure no per-field tooltip could fix: **nothing anywhere explained what StockMind is for**, so the signal-versus-strategy distinction — the single most important idea in the module — existed only in this document. **DECISION: one glossary, two readers.** Rejected `title` attributes everywhere for three reasons, the third deciding: unreachable by keyboard, wraps badly at the needed length, and **invisible until hovered, so master cannot SEE that an explanation exists.** A visible `?` is the affordance; `title` is kept on the button as well. The deeper problem is drift — hand-written help across five files diverges until one term means two things — so **105 terms are defined once in `glossary.js`**, the `?` reads `short`, the help screen reads `long`, and each entry says what to DO where that matters, because a definition leaving master no better able to act is a dictionary entry rather than help. **DECISION: the layout maps are SCHEMATICS, not screen captures**, stated in the panel itself: a capture needs a running window and a permission; **it goes stale on the next restyle and then actively misleads with nothing able to notice**; and a schematic can carry **numbered callouts that link to glossary terms**, which a capture cannot without being re-annotated by hand. **The callout text lives in `screenMapData.js`, a plain module** — an earlier version kept it in the `.jsx` and the suite scraped it by regex, which could not tell a pin's term id from an SVG column heading, so it reported `GRADE` and `TCS` as broken references and missed real ones: **data that needs checking must not be embedded in something the checker cannot parse.** **RESEARCH → TWO CHANGES.** Trading-platform layout is consistent (top toolbar: symbol, timeframe, type, indicators; left edge: drawing tools; bottom: positions) and Section 101's toolbar already matched the order — with one finding worth adopting: **every platform's own documentation groups intervals by PURPOSE, not unit**, so `MINUTES/HOURS/DAYS` became **`intraday / swing / long term`** printed beside each cluster. *Not adopted:* a left drawing-tool rail — there are no drawing tools, and an empty rail matching a convention while doing nothing is worse than its absence. Progressive disclosure (four decades of evidence: novices err less, experts pay one click) restructured the request form from **one undifferentiated grid of six fields over a flat row of four equally-weighted buttons** into three numbered groups — WHAT ARE YOU LOOKING AT / HOW MUCH ARE YOU RISKING / WHAT DO YOU WANT — with the direction filter and exact bar count in a collapsed ADVANCED row. **Nothing removed**, which is what separates this from simplification by deletion. **THE HELP TAB HAS FOUR LAYERS:** start here (five numbered steps, plus signal-versus-strategy side by side) · screen by screen (four annotated maps) · glossary (searchable, grouped, cross-referenced) · what it will not do. **Layer 4 is separate on purpose** — the limits are necessarily scattered across the product and a user who has met one deserves to find the rest without hunting; it states the four permanent refusals: no order placement ever, no advice, no broker connection, no live stream. **VERIFIED: `scripts/verifyGlossary.mjs`, 48 assertions, mostly REFERENTIAL INTEGRITY ACROSS FILES**, because help text rots silently — a `?` opening onto nothing neither breaks a build nor shows in a diff, and costs more trust than no help at all. Every `InfoTip id=`/`info=` resolves; every `seeAlso` resolves; every callout resolves; **every term is reachable from somewhere**, so a definition nobody links to cannot sit going stale; none is circular; every `short` fits a popover and every `long` says more than it. **And the suite asserts the help screen's own promises against the code** — it greps the bridge and preload for order-placement channels, the generated Python for its no-orders line, the news panel for its badge, the disclaimer for its text: **if the code ever gains that ability the help becomes a false promise, which is worse than silence.** **One real defect found while writing it:** `InfoTip` had `return null` above a `useEffect`, changing the hook count between renders — React treats that as a corrupted component, and it would only have broken once a term id went missing. `npm run verify` **18 suites**; audit clean at **135 bridge calls / 72 files / 353 channels**; `vite build` entry **unchanged at 283.53 kB**, StockMind 93.79→135.04 kB and PriceChart 218→266.88 kB (the glossary is ~40 kB of prose in the shared lazy chunk — startup cost unchanged, stated rather than glossed). **NOT DONE:** the Section 102 backlog still stands (one error presentation, one number formatter, splitting the ENGINE tab's three unrelated things) — the glossary makes those survivable, not fixed; the tabs are still not a keyboard tablist, and the help screen's own section tabs share that gap; real screen captures once a shell has been run, as a supplement rather than a replacement, since the callouts carry the explanation. **Nothing seen on screen — the maps are asserted to mirror the components by reading both, which is exactly the kind of claim that needs master's eye.** |
 
+| 125 | Bar count removed, dates added, strategising grouped, workspace un-collapsed | done | Section 105. Master, four things, two of them defects in my own last three sections. **(1) The bar count was a third control for two facts** — `BARS` was interval × window restated, so all three on screen invited them to disagree, and they did. A window is now **the dates it covers**: presets write the dates, a typed date un-highlights the presets rather than leaving a button lit that no longer describes the chart, and the count survives as `limitForDates()` — a payload ceiling derived from the span and clamped to the provider cap. `/ohlcv` gained `fromDate`/`toDate`; `toDate` is inclusive of the whole closing session, because an intraday stamp of 09:15 is not `<=` midnight and a picker that silently drops the last day is worse than one with no last day. **A SECOND BUG FOUND IN THAT ROUTE IS WORSE THAN THE ONE BEING FIXED:** `str(r.date.date())` serialised every bar as a date only, so for ANY intraday interval every bar in a session reached the renderer with the same stamp and `toChartTime` treats a 10-character string as a whole day — **every intraday chart was silently one candle per day whatever interval master picked.** Section 73 fixed this exact defect inside the store; the route was never fixed, and Sections 101 and 105 both built intraday capability on a path that could not render it. **(2) The chart did not redraw on a symbol change** — `sym` and `exchange` were absent from the reload effect, so a new instrument left the PREVIOUS instrument's candles on screen under the new name until master pressed a button. That is not a stale chart, it is one instrument labelled as another. Bars are now also cleared the instant the symbol changes, so the gap shows loading rather than the wrong thing. **(3) DECISION: eight tabs became six, grouped by activity.** Master is right that generating signals IS strategising, and this corrects Section 103's own split — SIGNALS, WHY, STRATEGY and the projection toggle were four places for one activity. The research agrees: TradingView puts its Strategy Tester in a **panel of the chart**, its report "opens automatically when you add any strategy", and its strategy builders treat signals as *inputs to* a strategy rather than a parallel feature. Now `CHART · ⚗ STRATEGISE · YOUR BOOK · ENGINE · ? HELP · ◈ WORKSPACE`, with STRATEGISE holding **NOW** (what a reading says now) · **BUILD & TEST** (the same rule over history) · **PROJECTION** · **WHY** (the evidence under all three). The chart stays separate because it is the reference surface the others talk about. **Projection moved out of the chart header** at master's instruction and still draws **on the same chart**; what remains there is a `projection on ⚗` button, because a cone drawn by a switch on another tab must be traceable to that switch. **(4) The workspace was not clipped — it genuinely was that narrow.** `PanelBoard`'s panels are `position: absolute`, so the subtree has an **intrinsic content width of zero**; inside a `display: flex` wrapper it was sized by that instead of filling the row, `bounds.w` measured a few pixels, and the responsive tiler dropped to one column at `MIN_W`. Section 100 fixed a *different* cause of a similar symptom (a `-20px` margin making the board wider than its container) and correctly did not touch this one. Fixed with `flex: 1` + `width: 100%` + `minWidth: 0` on the board root and `minWidth: 0` on the wrapper — a flex item cannot fill a row it has no basis in. **VERIFIED: `verifyTimeframes.mjs` 93 assertions (+26)** — preset dates span the right calendar span, MAX has no start, dates round-trip to their own preset, a typed range matches no preset, the derived count never exceeds the provider cap nor falls below the display floor, reversed dates fall back to the ceiling rather than a negative count. `npm run verify` 18 suites; audit clean; `vite build` entry unchanged at 283.53 kB, StockMind 138.95 kB. **NOT VERIFIED: both Python changes to `/ohlcv`** — the date filter and the intraday timestamp fix — have never been executed (no pandas here). The intraday fix is the one to watch: it is the difference between a 5-minute chart and a daily one wearing its label. |
+| 126 | "Showing the IP" — the diagnosis existed and a gate made it unreachable | done | Section 106. Master: *"engine is not running, showing the IP and the above message."* He was seeing `Backend not reachable at http://127.0.0.1:8001: connect ECONNREFUSED` — **the exact sentence Section 99 was written to delete.** ROOT CAUSE: `getRunningStatus()` returned `diagnosis: null`, because of its own gate — `(!processes['python'] && (lastExit \|\| lastStderr.length))`. Two failures in one expression: `!processes['python']` excludes a process that spawned and is alive but never bound its port, and **`(lastExit \|\| lastStderr.length)` requires evidence before it will ask for a diagnosis** — so the branch `diagnoseFailure` contains for the no-output case could only run when there WAS output, and could never run at all. **Section 99 removed the undiagnosable message from every case that produces output and left it in the one case that does not.** The function was total; the gate in front of it was not. **This is the third time in this project a capability has been present and unreachable** — row 115's harness with no caller, Section 89's declared-but-unenforced `mind.view`, now this — and the shape is identical every time: the thing works, something upstream declines to call it, nothing notices. **DECISIONS:** the gate is **gone** (`diagnoseFailure` is total, so `running` is passed through and the function decides); **`notAnswering` is a separate field** from `diagnosis`, because a live-but-silent engine is not a failure at the moment the status is read — it becomes one only in the caller, the only thing that knows `/health` never answered, and conflating them would report a cold start as a crash; **two silences are distinguished because they need opposite advice** (alive and not bound = still importing, wait; no process = check Python); **the interpreter and engine directory are retained on every spawn attempt**, because when a failure produces nothing else those two facts ARE the diagnosis — a wrong venv and a missing `ai_backend` are identical silences with different remedies; **a missing `ai_backend` now pushes a line onto the stderr ring** rather than only returning, since the caller polls 8s and then asks for a diagnosis that would otherwise have nothing to work from; **the URL survives as `detail`** beneath the remedy, because where Rāma knocked is a real question but never the answer to why nobody answered; and **the bars path was the one surface showing only the raw string** — the diagnosis and the engine output were on the reply and discarded there, which is why master met this on the chart rather than in the signals panel. **VERIFIED: 34 assertions (+17).** The new ones cover the previously-unreachable branches plus three properties that would have caught the original defect: **every input yields a reason AND a remedy, silence included**; **no diagnosis ever contains a bare URL or an IP**; **nothing returns null**, because null is what sent the caller to its fallback. Plus four source-level assertions so the gate cannot return — the `lastExit \|\| lastStderr.length` pattern asserted absent, `notAnswering` asserted present, the retained interpreter and directory asserted present, the caller asserted not to build its message from `BASE_URL`. **NOT VERIFIED BY EYE** — this is master's reported symptom and the fix is reasoned from the code path, not observed. **Next step: master reruns and reports the new message.** He should now see either *"no engine process is running and none has reported anything. Nothing was spawned, so Python is the first thing to check…"* or, if Python is present but the packages are not, the Section 99 message naming the missing module. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -11064,3 +11067,170 @@ no order placement ever, no financial advice, no broker connection, no live pric
    replacement — the callouts are the part that carries the explanation.
 4. **Nothing in this section has been seen on screen.** No shell was launched. The maps are asserted to
    mirror the components by reading both, which is exactly the kind of claim that needs master's eye.
+
+---
+
+## SECTION 105 — The bar count removed, dates added, strategising grouped, and the workspace un-collapsed
+
+Master, four things: *"why is there a field-count of bars?? they are calculated based on timeframe and
+time interval — remove it and also add a date picker to select the interval"*; *"charts should show the
+bars automatically whenever stock/item is selected — based on other filters"*; *"projection should be
+part of strategy, of course utilising the same charts. Generating signals does mean to strategise, do
+thorough research on how to group things related to strategise"*; *"workspace layout is only half shown
+for drag and drop"*.
+
+All four are correct, and two of them are defects in work from the previous three sections.
+
+### The bar count was a third control for two facts
+
+`BARS` was interval × window restated. Having all three on screen invited them to disagree, and they
+did: the window buttons wrote a count, master could type over it, and nothing reconciled them
+afterwards. **A window is now the dates it covers.** The presets write the dates, a typed date
+un-highlights the presets rather than leaving a button lit that no longer describes the chart, and the
+bar count still exists — as `limitForDates()`, a payload ceiling derived from the span and clamped to
+the provider cap. Master no longer maintains it.
+
+`/ohlcv` gained `fromDate` and `toDate`. `limit` remains, demoted to a ceiling: every bar crosses an IPC
+boundary and becomes a canvas point, so the payload stays bounded, but it no longer defines the window.
+`toDate` is inclusive of the whole closing session, because an intraday stamp of `09:15` is not `<=`
+midnight and a date picker that silently drops the last day is worse than one that has no last day.
+
+**A second bug was found in that route while editing it, and it is worse than the thing being fixed.**
+`"date": str(r.date.date())` serialised every bar as a date only — so for any intraday interval every
+bar in a session arrived at the renderer with the same stamp, and `PriceChart.toChartTime` treats a
+10-character string as a whole day. **Every intraday chart was silently one candle per day, whatever
+interval master picked.** Section 73 fixed exactly this defect inside the store; the route was never
+fixed, and Sections 101 and 105 both added intraday capability on top of a path that could not render
+it.
+
+### The chart did not redraw when the symbol changed
+
+`sym` and `exchange` were absent from the reload effect. Choosing a new instrument left the **previous
+instrument's candles on screen under the new symbol's name** until master pressed a button. That is not
+a stale chart — it is one instrument labelled as another, which is the worst form a chart bug can take.
+Both are now in the dependency list, and the bars are cleared the instant the symbol changes so the gap
+shows a loading state rather than the wrong instrument.
+
+### Decision: eight tabs became six, grouped by activity
+
+Master is right that generating signals *is* strategising, and this corrects Section 103's own split.
+SIGNALS, WHY, STRATEGY and the projection toggle were four separate places for one activity: deciding
+what to do about an instrument.
+
+The research agrees. TradingView puts its Strategy Tester in a **panel of the chart**, not on a separate
+screen, and its report "opens automatically when you add any strategy" — the strategy and its evidence
+are one surface. Strategy builders in that ecosystem let a user "connect multiple external signals,
+chain them in sequences, and run backtests": signals are *inputs to* a strategy, not a parallel feature.
+
+    CHART · ⚗ STRATEGISE · YOUR BOOK · ENGINE · ? HELP · ◈ WORKSPACE
+
+with STRATEGISE holding four sub-tabs that are four faces of one question:
+
+| Sub-tab | The question it answers |
+|---|---|
+| **NOW** | what a reading says at this moment — the former SIGNALS |
+| **BUILD & TEST** | the same kind of rule, judged over history the search never saw |
+| **PROJECTION** | the forward range this instrument's own volatility calls ordinary |
+| **WHY** | the evidence under all three |
+
+The chart stays its own tab because it is the reference surface every other tab talks about.
+**Projection moved out of the chart header** at master's instruction — it is a forward view, so it is a
+strategy question rather than a chart setting — and it still draws **on the same chart**, which is what
+he asked for. What remains in the chart header is a `projection on ⚗` button: a cone drawn by a switch
+on another tab must be traceable back to that switch.
+
+### The workspace was not clipped — it genuinely was that narrow
+
+`PanelBoard`'s panels are `position: absolute`, so **the subtree has an intrinsic content width of
+zero.** Placed inside a `display: flex` wrapper it was sized by that intrinsic width instead of filling
+the row, so `bounds.w` measured a few pixels, the responsive tiler dropped to one column at `MIN_W`, and
+the board rendered as a strip down the left — exactly "only half shown".
+
+Section 100 had already looked at this and fixed a different cause (a `-20px` margin making the board
+wider than its container). That fix was correct and did not touch this one, because the two produce a
+similar symptom from opposite directions. **`flex: 1`, `width: 100%` and `minWidth: 0` on the board
+root, and `minWidth: 0` on the wrapper**; a flex item cannot fill a row it has no basis in.
+
+### Verified
+
+- `scripts/verifyTimeframes.mjs` — **93 assertions** (+26) for the date layer: a preset's dates span
+  the right number of calendar days; MAX has no start; dates round-trip back to their own preset; a
+  hand-typed range matches no preset so nothing is falsely highlighted; the derived bar count never
+  exceeds the provider cap nor falls below the display floor; reversed dates fall back to the ceiling
+  rather than producing a negative count.
+- `npm run verify` **18 suites**; audit clean; `vite build` entry **unchanged at 283.53 kB**, StockMind
+  138.95 kB.
+- **Not verified:** the two Python changes to `/ohlcv` — the date filter and the intraday timestamp fix
+  — have not been executed, because this machine has no pandas. The intraday fix in particular is the
+  one to watch: it is the difference between a 5-minute chart and a daily one wearing its label.
+
+---
+
+## SECTION 106 — "Showing the IP": the diagnosis existed and a gate made it unreachable
+
+Master: *"engine is not running, showing the IP and the above message."*
+
+### What he was looking at
+
+    Backend not reachable at http://127.0.0.1:8001: connect ECONNREFUSED 127.0.0.1:8001
+
+That is the raw fallback in `ensureBackendRunning`, and **Section 99 was written specifically to delete
+this sentence.** It fired because `getRunningStatus()` returned `diagnosis: null`, and it returned null
+because of its own gate:
+
+    diagnosis: (!processes['python'] && (lastExit || lastStderr.length))
+      ? diagnoseFailure({ stderr: lastStderr, exit: lastExit })
+      : null,
+
+Two failures in one expression. `!processes['python']` excludes a process that spawned and is alive but
+has not bound its port. And `(lastExit || lastStderr.length)` **requires evidence before it will ask for
+a diagnosis** — so the branch `diagnoseFailure` contains for the no-output case could only ever run when
+there *was* output, and could never run at all.
+
+**Section 99 removed the undiagnosable message from every case that produces output, and left it in the
+one case that does not.** The function was total; the gate in front of it was not. This is the third
+time in this project that a capability has been present and unreachable — row 115's harness with no
+caller, Section 89's declared-but-unenforced `mind.view`, and now this — and the shape is identical
+every time: the thing works, something upstream decides not to call it, and nothing notices.
+
+### Decision: the diagnosis is never gated, and the URL is never the headline
+
+- **The gate is gone.** `diagnoseFailure` is total, so `getRunningStatus` calls it whenever the engine is
+  not running and passes `running` through instead of deciding for it.
+- **`notAnswering` is a separate field** from `diagnosis`. A live-but-silent engine is not a failure at
+  the moment the status is read — it becomes one only in the caller, which is the only thing that knows
+  `/health` never answered. Conflating the two would report a cold start as a crash.
+- **Two silences are distinguished, because they need opposite advice.** A live process that has not
+  bound its port is still importing the ensemble: wait. No process at all never started: check Python.
+- **The interpreter and engine directory are retained on every spawn attempt.** When a failure produces
+  nothing else, those two facts are the whole diagnosis — a wrong venv and a missing `ai_backend` are
+  identical silences with completely different remedies.
+- **A missing `ai_backend` now pushes a line onto the stderr ring** rather than only returning an error.
+  The caller polls for 8s and then asks for a diagnosis; with no trace it would have reported silence
+  instead of the actual cause.
+- **The URL survives as `detail`**, shown beneath the remedy. Where Rāma knocked is a real question; it
+  is never the answer to why nobody answered.
+- **The bars path was the one surface that showed only the raw string.** The diagnosis and the engine's
+  own output were on the reply and discarded there, which is why master met this on the chart rather
+  than in the signals panel. Both are now rendered.
+
+### Verified
+
+`scripts/verifyEngineDiagnosis.cjs` — **34 assertions** (+17). The new ones cover the branches that
+were unreachable: an alive-but-silent engine says it is still starting and names its interpreter; a
+never-spawned one names the engine directory; and three properties that would have caught the original
+defect —
+
+- **every input yields a reason AND a remedy, silence included** (the function is total);
+- **no diagnosis ever contains a bare URL or an IP**, which is what master was shown;
+- **nothing returns null**, because null is what sent the caller to its raw fallback.
+
+Plus four source-level assertions so the gate cannot come back: the `lastExit || lastStderr.length`
+pattern is asserted absent, `notAnswering` asserted present, the retained interpreter and directory
+asserted present, and the caller asserted not to build its message from `BASE_URL`.
+
+**Not verified by eye.** This is master's reported symptom and the fix is reasoned from the code path,
+not observed — the next run on his machine is the test. What he should now see instead of an IP is
+either *"no engine process is running and none has reported anything. Nothing was spawned, so Python is
+the first thing to check…"* or, if Python is present but the packages are not, the Section 99 message
+naming the missing module.

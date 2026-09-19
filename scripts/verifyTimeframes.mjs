@@ -166,6 +166,84 @@ check('the explanation names the window Yahoo is actually sent', note1m.includes
 check('the explanation says the limit is not Rama\'s', /not by R/.test(note1m), note1m);
 check('an uncapped interval has nothing to explain', tf.describeLimit('1d') === null);
 check('an unknown interval has nothing to explain', tf.describeLimit('nope') === null);
+// ── Dates, which replaced the bar-count field (Section 105) ───────────────────
+console.log('\n--- a window is the dates it covers ---');
+
+const NOW = new Date('2026-06-15T12:00:00');
+eq('the window ends today', tf.datesForRange('1Y', NOW).to, '2026-06-15');
+check('a year back is about a year of calendar days',
+  (() => {
+    const d = tf.datesForRange('1Y', NOW);
+    const days = Math.round((new Date(d.to) - new Date(d.from)) / 86400000);
+    return days >= 363 && days <= 375;
+  })(), JSON.stringify(tf.datesForRange('1Y', NOW)));
+check('five sessions is about a calendar week, not five calendar days',
+  (() => {
+    const d = tf.datesForRange('5D', NOW);
+    const days = Math.round((new Date(d.to) - new Date(d.from)) / 86400000);
+    return days >= 7 && days <= 12;
+  })(), JSON.stringify(tf.datesForRange('5D', NOW)));
+eq('MAX has no start date, because there is no start to name',
+  tf.datesForRange('MAX', NOW).from, null);
+eq('an unknown range yields no dates', tf.datesForRange('42Y', NOW), null);
+check('deeper presets start earlier',
+  new Date(tf.datesForRange('5Y', NOW).from) < new Date(tf.datesForRange('1Y', NOW).from));
+check('every offered preset produces usable dates for its interval',
+  tf.INTERVALS.every((iv) => tf.rangesFor(iv.id).every((rg) => {
+    const d = tf.datesForRange(rg.id, NOW);
+    return d && /^\d{4}-\d{2}-\d{2}$/.test(d.to) && (d.from === null || /^\d{4}-\d{2}-\d{2}$/.test(d.from));
+  })));
+
+eq('a date formatter pads single digits', tf.toYmd(new Date('2026-01-05T00:00:00')), '2026-01-05');
+eq('junk formats to empty rather than to "NaN-NaN-NaN"', tf.toYmd('not a date'), '');
+
+eq('dates round-trip back to their own preset', tf.rangeForDates('1d', ...(() => {
+  const d = tf.datesForRange('1Y', NOW);
+  return [d.from, d.to];
+})(), NOW), '1Y');
+eq('a hand-typed range matches no preset, so nothing is falsely highlighted',
+  tf.rangeForDates('1d', '2021-03-07', '2023-08-19', NOW), null);
+eq('no dates at all matches no preset', tf.rangeForDates('1d', null, null, NOW), null);
+
+console.log('\n--- the bar count still exists, it is just derived ---');
+check('a year of daily bars is about 252',
+  (() => {
+    const d = tf.datesForRange('1Y', NOW);
+    const n = tf.limitForDates('1d', d.from, d.to);
+    return n >= 250 && n <= 262;
+  })(), String(tf.limitForDates('1d', tf.datesForRange('1Y', NOW).from, '2026-06-15')));
+check('the derived count never exceeds the provider cap',
+  tf.INTERVALS.every((iv) => {
+    const cap = tf.capBarsFor(iv.id);
+    if (cap == null) return true;
+    return tf.limitForDates(iv.id, '2000-01-01', '2026-06-15') <= cap;
+  }),
+  tf.INTERVALS.filter((iv) => {
+    const cap = tf.capBarsFor(iv.id);
+    return cap != null && tf.limitForDates(iv.id, '2000-01-01', '2026-06-15') > cap;
+  }).map((i) => i.id).join(','));
+check('the derived count is never below the display floor',
+  tf.limitForDates('1d', '2026-06-14', '2026-06-15') >= tf.MIN_USEFUL_BARS);
+eq('no start date means the payload ceiling', tf.limitForDates('1d', null, null), tf.MAX_BARS);
+eq('reversed dates fall back to the ceiling rather than a negative count',
+  tf.limitForDates('1d', '2026-06-15', '2020-01-01'), tf.MAX_BARS);
+eq('an unknown interval falls back to the ceiling', tf.limitForDates('nope', '2020-01-01', '2026-01-01'),
+  tf.MAX_BARS);
+check('a finer interval derives more bars over the same dates',
+  tf.limitForDates('5m', '2026-06-01', '2026-06-15')
+  > tf.limitForDates('60m', '2026-06-01', '2026-06-15'));
+
+for (const bad of [null, undefined, 0, '', {}, [], 'x']) {
+  let threw = null;
+  try {
+    tf.datesForRange(bad, bad);
+    tf.toYmd(bad);
+    tf.rangeForDates(bad, bad, bad, bad);
+    tf.limitForDates(bad, bad, bad);
+  } catch (e) { threw = e.message; }
+  check(`date helpers handle ${JSON.stringify(bad)}`, threw === null, threw);
+}
+
 check('the clock shows for intraday and not for daily',
   tf.showsClock('1m') && tf.showsClock('60m') && !tf.showsClock('1d') && !tf.showsClock('1mo'));
 check('an unknown interval does not claim a clock', !tf.showsClock('nope'));
