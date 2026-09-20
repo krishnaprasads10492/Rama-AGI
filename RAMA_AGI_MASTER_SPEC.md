@@ -1792,6 +1792,7 @@ authenticated **Master session**, not merely an open store.
 
 | 130 | Legible zoom, independent filters, Home on reopen; Rāma as a harness | 1–3 done, 4–5 designed | Section 110. **(1) Default zoom.** `fitContent()` squeezed the whole series into the pane — 4,649 bars in 900px is 0.19px per candle, the exact defect Section 79 replaced the hand-written SVG over, **reintroduced by the fit call itself.** Default is now 8px per candle on the newest bars with the rest left to scrolling; `reset zoom` returns to that and a separate **`fit all`** does what `fitContent` used to, because "readable" and "everything" are different requests. **(2) Interval and dates are INDEPENDENT.** Changing interval used to *reconcile* the window, so picking 5m silently rewrote a window master had chosen — the control editing his input. Now two filters over one series, with `shortfallNote` reporting when the provider serves less rather than the control preventing it. **A new instrument opens unfiltered** (30m, earliest stored bar → today), because a window chosen for the last symbol says nothing about this one. **Date picker upgraded:** own row; `min`/`max` bound by **actual stored coverage** so master picks inside what exists; `⇤ beginning` (he should not have to know the date); `today ⇥`; `✕ clear`; and a plain statement of state — *custom* or *no date filter · everything stored* — with coverage printed at the row end. **(3) Reopening lands on Home.** Closing hides to tray, so reopening showed the last page. The `hide` event now sends the existing `nav:goto` `/` — **on hide, not on show**, so the old page never flashes; reuses the tray channel rather than adding a second thing to keep in step. **(4) DESIGN — Rāma is a HARNESS, and "no hallucination" is a property a SYSTEM enforces.** Research decides the form: HALO (arXiv 2607.17883) — *"zero hallucination is not a property a model possesses but a property a system enforces"*, treating it as **containable** rather than eliminable; hallucination as **output-boundary misclassification**, a completion emitted *as if* grounded (arXiv 2604.06195); and multi-model comparison letting *"consistently hallucinating models be out-voted"* (arXiv 2510.19507). Also: *"an agent is a model and a harness — with a local model the harness matters more."* **So the honest statement of master's requirement: Rāma cannot stop a base model confabulating, and it CAN refuse to pass an unattributed claim through its own boundary.** Much of HALO's stack already exists scattered under other names — `vetSources` (grounded generation), tier-0 reflexes (deterministic execution), deflated Sharpe against trial count (multi-signal verification), the acceptance gate and `{value, source, measured}` with `null` + `why` (calibrated abstention), NOT BACKTESTABLE badges (refusing to score the unmeasurable). **DECISION: the next real piece is a CLAIM GATE, not a better model** — one module at the output boundary classifying every claim as `grounded` / `reflex` / `unattributed` and refusing to emit the third as fact, turning scattered honesty into one enforced rule. **It must NOT become a confidence score:** a number on a sentence is the "emitted as if grounded" failure with extra decimals. Output is a class and a source, or a refusal. **(5) DESIGN — evolve by assimilation.** Measured landscape: open weights are within single digits of frontier on reasoning and coding and **at parity on extraction, classification and tool calling**, which is most of what a harness needs; Qwen holds ~10 of 13 BFCL slots, GLM and Kimi lead agentic work, DeepSeek leads agentic coding, Qwen3.5 spans 0.8B–397B with a 27B fitting 24GB at Q4_K_M. **The base model is a replaceable part; the durable asset is the harness** — capability gates, provenance discipline, the store, the genome, the loyalty core — and that cannot be downloaded. Sections 92/93 already built discovery, evidence-based classification and retirement-aware migration; **the missing piece is role-based routing**: declare what a model is needed FOR and select per role against measured capability, cost and disk, rather than one "best model" for everything — which is how a 397B cloud model ends up parsing a date. **And the invariant: capability compounds, autonomy does not.** A new model is a new tool, never a new authority over master's capital or identity (I15, I16) — which is why swapping the base model cannot introduce order placement. **VERIFIED: 19 suites; audit clean at 139 bridge calls / 72 files / 355 channels; `vite build` succeeds. Nothing seen on screen** — zoom, picker and Home-on-reopen are reasoned from the code path. **Next: the claim gate, then role-based routing.** |
 | 131 | The claim gate — Rāma's output boundary | done | Section 111. Builds the piece row 130 decided on: `electron/lib/claimGate.cjs`, four classes — `grounded` / `reflex` / `prose` / `unattributed` — and the fourth is **not emitted**. **THE THING IT REPLACES:** `intelligenceEngine.buildOutput` already ships `overallConfidence: 78.4`, a letter `grade`, and *"78.4% confidence means ~21.6% chance of being wrong"* — computed in `extractTruth` from **average domain credibility** plus keyword overlap, with **nothing measuring whether any finding answers the question**, so five reputable domains that address nothing still grade A. That is the "emitted as if grounded" failure (arXiv 2604.06195) with decimals attached, which is exactly what row 130 forbade the gate from becoming. **DECISION: a class and a source, or a refusal — never a number.** Asserted two ways: no output object carries a key matching `confidence\|probability\|certainty\|score\|grade\|likelihood`, and the module source computes none. **What it decides is ATTRIBUTION, not truth** — entailment needs a model and the model is the thing being contained. The cited id must exist in the evidence **actually supplied** (catches a fabricated citation) and every checkable token must appear in that source (catches an invented figure). **Evidence is re-vetted here rather than trusted from the caller**, because `vetSources` dropping fallbacks is defeated by one caller that forgets — Section 94's defect exactly; a `fallback` marker, an empty document, or one id over two documents is refused **with its reason retained**. **DECISION: figures canonicalised on both sides** (`1,402.55` = `1402.55` = `1402.550`) or the gate would withhold true claims until callers stopped using it; `%` stripped, a disclosed loosening. **DECISION: a sentence-initial capital is grammar, not a name — unless ticker-shaped**, so `RELIANCE` and `NIFTY50` are still checked but *"Earnings"* is not demanded against a source saying *"profit"*. **THE DEFECT FOUND BY RUNNING IT: `Profit will double next year.` has no digit and no ticker, so it passed as prose** — the most damaging confabulation in a market context, emitted unchallenged. **DECISION: predictive and absolute modality is checkable by definition, and a retrieved document CANNOT ground the future** — a modal claim is groundable only by a `reflex` projection record with a method; citing a prediction to a news article is `unsourceable-prediction`. First-person abstention (`I do not know`, `no data`, `not backtestable`) is exempt and always emitted — **Rāma saying it does not know is the goal state.** **DISCLOSED HOLES:** a fact written in words (*"twelve percent"*) escapes the figure check, which is why structured `claims:[{text,cite}]` is preferred; and `prose` can still be wrong — the gate bounds factual assertion, not helpfulness. It refuses to gate connective language because a gate that breaks its callers gets bypassed. **`body` is asserted never to contain withheld text**; `notice` counts refusals **by reason in words**, not one by one (*"don't dump info on master"*); an empty body **says** nothing survived attribution rather than reading as "no answer"; `attest()` omits the text, because keeping the confabulation beside the account of refusing it defeats the record. **WIRED at `models:chat`** — the report is **always** attached, `requireAttribution` decides whether `content` is replaced, and it **defaults false. DECISION: callers flipped on one at a time** — enforcing everywhere at once would withhold ordinary prose from screens never run, and the first output of a broken gate is a caller that stops using it; a throwing gate returns the answer with `attributionError` set so it never reads as a clean pass. **FLIP LIST in order of exposure: StockMind `why`/`book` narration → market-intel news summaries → strategy `meaning`/`risks`/`would_change` → general chat.** **No capability decision here — attribution is not authorisation** (grep-asserted, as `popoutGrant` is); no Electron, nothing persisted. **VERIFIED: `npm run verify` 20 suites; `verifyClaimGate` 98 assertions; audit clean at 139 bridge calls / 72 files / 355 channels; `vite build` succeeds. Seven defects found by running and fixed.** **NOT VERIFIED: no real model output has passed through it, and nothing seen on screen.** **NEXT: role-based model routing** — declare the roles (extraction, tool-calling, code, multilingual, embedding) and select per role on measured capability/cost/disk, building on `ollamaCatalog.cjs` / `ollamaLibrary.cjs` / `registrySources.cjs`, replacing `TASK_ROUTING`'s eight hand-written buckets and the hardcoded `FALLBACK_CHAIN` in `modelRouter.cjs`. |
+| 133 | The literature, the charges, and why 80% is the wrong target | done | Section 113. Master: *"refer various popular and high rated trading books and Authors suggestions and record them… long term, short term strategies… combos with success % near to 80 and above with min risk… including trading charges for no. of trades."* **THE REQUEST CONTAINS ONE INSTRUCTION THAT WOULD DO REAL HARM, and it is raised rather than quietly implemented: a minimum win rate must NEVER be a filter.** Four reasons, the fourth arithmetic: a high win rate is cheap to buy (take profits early, hold losers, or sell premium); screening on it selects the small-frequent-wins / rare-huge-loss SHAPE, which is the shape that ends accounts; a high win rate means few losses so the loss side is the LEAST-observed part of the record; and searching enough combinations always yields some above 80%, which is the Section 95 overfitting problem reintroduced. **The numbers, now asserted:** 40 wins of 1% against 10 losses of 5% is an **80% win rate with −0.20% expectancy** and a break-even requirement of **83%** — three points ABOVE what it achieves; 12 wins of 9% against 38 losses of 2% is a **24% win rate with +0.64% expectancy** and a break-even of 18%. **The 80% strategy loses money; the 24% one makes it.** Counterexample that settles it: Taleb's tail hedge wins almost nothing and can still be correct, so any minimum-win-rate filter rejects it. **DECISION: always reported, never filtered.** `Verdict` gained `avg_win_pct`, `avg_loss_pct`, `payoff_ratio`, `profit_factor`, `worst_trade_pct`, `cvar5_pct`, `breakeven_win_rate`, `win_rate_caveat` — the caveat firing on the premium-seller signature (win ≥70%, payoff <1), on one loss erasing ≥3 average wins, and on fewer than ten losses — and it rides in `risks`, **because a PASSING verdict is where a flattering win rate does its damage** (asserted on a 90%-win verdict that passes). What master actually wants — *"min risk implies most profit"* — is expectancy after costs with a bounded tail, and that is what is computed; the two halves of his sentence were in tension and this is the half that survives. **`strategy_library.py` — A BOOK IS A HYPOTHESIS, NOT EVIDENCE.** Nine templates, all validating against the existing catalogue, each with author, work, where it is free, the claim, the mechanism and **what would disconfirm it**, labelled `published` never `measured` (Section 112's vocabulary): Lefèvre/Livermore 1923 (Gutenberg 60979, public domain), Wyckoff 1910, Hamilton 1922, Moskowitz-Ooi-Pedersen 2012 (AQR, free), Schabacker 1932, Bollinger, Wilder 1978, Kaufman, plus a short-side template that admits it fights the long-run drift. **Win rate and payoff are inversely related in EVERY ONE**, so the library teaches the point better than a warning: the Bollinger template is the only one in the 80% band and the only one with a payoff below 1 — **and `validate_spec`, written months earlier and knowing nothing of this library, independently flags its reward-to-risk geometry.** **DECISION: sweeps are theory-driven, never grids** — max trial count across the whole library is **3**, values being the authors' own alternatives (Donchian's 20/55, the paper's 9/12 months); `include_sweep=False` gives trials=1, the strongest form of this evidence. **FIVE STRATEGIES RECORDED AND REFUSED with the exact missing capability** — Sinclair variance premium and Natenberg delta-neutral (no IV, no greeks, no leg model; `derivatives.py` computes no IV *deliberately* since no bhavcopy carries one), Taleb tail hedge (recorded BECAUSE it is the win-rate-screen counterexample), Jegadeesh-Titman cross-sectional (needs a universe and a portfolio model; `simulate` is one instrument, one position), and **OI positioning — the smallest real gap: `pcr_oi`/`max_pain_dist`/`fut_basis_pct`/`rollover_pct` are ALREADY ON DISK per day going back years, but every block recomputes from OHLCV and nothing can read a second series, so "PCR above 1.3" is unexpressible while its own backtest data sits in the store. ONE NEW BLOCK SHAPE CLOSES IT.** Sinclair's own statement that premium-selling win rates reflect payoff shape rather than edge is recorded — the same conclusion from the author master would cite. Method claims (Tharp, López de Prado, Bailey, Lo) kept separate, each naming where it is already applied in code. **`costs.py` — WHY A PERCENTAGE COULD NOT ANSWER IT.** `CostModel` is percentages off a percent return and `evaluate` never sees notional or quantity, but **brokerage is ₹20 PER ORDER** — 0.40% of a ₹5,000 trade and 0.004% of a ₹5,00,000 one, **so the flat model flatters small trades by exactly the amount that kills them**; STT is side-dependent and on PREMIUM for options; stamp duty is buy-side only; DP is flat rupees on a delivery sell; GST is 18% on brokerage+exchange+SEBI+IPFT and **not** on STT or stamp duty. So: rupees, per order, four instruments. **Hand-computed and asserted: a ₹1,000 delivery trade pays 1.99% round trip** (the flat ₹15 depository fee, not the rates); intraday ₹1,00,000 pays 0.083%; **options pay almost the same RUPEES as equity and six times the PERCENTAGE** because the same flat brokerage sits on a smaller notional; on futures **STT is >90% of the sell-side charge**, and the futures percentage is LOWER than intraday's despite costing 13x the rupees. **DECISION: `effective_round_trip_pct` requires a notional and reports the notional it assumed** — the question is unanswerable without one. **DECISION: the exit leg is priced at the EXIT price**, since futures STT is 0.05% of sell turnover and pricing both legs at entry would understate every winning trade, a bias growing with exactly the trades a backtest likes most. **DECISION: every rate carries its source and effective date; the table reports its own staleness.** Budget 2026 raised futures STT 0.02%→0.05% and options STT 0.10%→0.15% of premium effective 2026-04-01, cross-confirmed across three publishers; `TABLE_AS_OF` records when rates TOOK EFFECT, not when someone looked, because the latter cannot distinguish *current* from *unchanged since nobody checked*. **Master's contract note is the authority** — brokerage varies tenfold, so the assumption is printed; unmodelled charges are listed, since an unlisted charge reads as zero. **ROUTED IMMEDIATELY** (`/strategy/library`, `/strategy/library/{id}`, `/costs/registry`, `/costs/quote`, four `market:` channels, four bridge methods, all reads on `stockmind.view`), because Section 95's lesson is that `strategy_eval` shipped with 64 assertions **reachable from nothing**. `/costs/quote` takes a `trades` count — master's *"no. of trades suggested and actually taken"*. **DECISION: a template returns a SPEC judged by the existing backtest route**, never its own scoring path, which would be a second definition of "passed". **VERIFIED: test_costs 82 assertions with every rupee figure hand-computed from published rates rather than read back out of the code; test_strategy_library 149; test_strategy_eval 64→102; test_strategy_spec 220 unchanged; 21 JS suites; audit clean at 139 bridge calls / 72 files / 359 channels; `vite build` succeeds.** **NOT VERIFIED: NO TEMPLATE HAS BEEN BACKTESTED AGAINST REAL BARS** — the engine has still never completed a run on master's machine, so every figure is hand-computed arithmetic or a published claim, and the library's own point is that its templates are unproven until they clear the harness on master's data. **NEXT, in order: (1) a block that reads the `deriv1d` series — smallest gap, data already on disk; (2) instrument type + lot size + product in the spec so `costs.py` applies per trade; (3) a macro factor series (crude, USD/INR, US 10y, India VIX) stored like `deriv1d`, because master's political-transmission chain becomes backtestable where it touches a PRICE and a headline is not; (4) the multi-leg payoff and margin model the F&O combos need.** |
 | 132 | Role-based routing — what Rāma needs a model FOR | done | Section 112. Builds row 131's next step and row 130's item 5. **WHAT IT REPLACES:** `TASK_ROUTING`'s eight hand-written buckets plus a seven-id `FALLBACK_CHAIN` ending at `primaryModel`, so any task not matching a bucket fell to the first available entry — **the mechanism by which a 397B cloud model parses a date**, and by which a model that cannot do tool calling does tool calling, because a chain has no concept of *unfit*. **Nine roles declared with a label, a reason master can read, and hard requirements:** `extraction`, `tool-calling`, `code`, `reasoning`, `long-context`, `multilingual`, `embedding`, `vision`, `narration`. **TWO KINDS OF EVIDENCE, NEVER CONFLATED — `measured`** (the daemon and its fetched library: what is installed, its size, its parameter count, whether weights are on this disk) **and `published`** (leaderboards: function-calling collapses below ~7B, reasoning wants 14B+). Published evidence is about the FAMILY, not this machine, and every requirement records which kind it is so **a leaderboard can never be presented as a local measurement** — the same discipline as `{value, source, measured}` and `ctxVerified`. **DECISION: a role is a REQUIREMENT, not a preference** — a failed requirement EXCLUDES with a reason rather than ranking lower, because down-ranking lets an unfit model win whenever nothing better is present. **DECISION: no silent substitution and no silent absence** — `fit` is `declared` / `substitute` / `none`; a substitute is allowed (capability is never removed) but **labelled with what is unverified**; `none` reports the absence and how many candidates failed rather than handing the work onward. **DECISION: an unverified claim is a substitute, never a declared fit** — Ollama truncates to `num_ctx` whatever the family supports, so a 128K window is a claim; `multilingual` is a substitute BY CONSTRUCTION because Rāma has no local test, stated rather than implied. **DECISION: sensitivity is a gate, not a ranking** — `narration` names master's real holdings, so a non-private model is **refused outright**; a prompt that has left this machine cannot be recalled. Asserted: a 397B cloud model does not win narration by being large, and appears in `excluded` so the choice is auditable; any caller may raise `requirePrivate`. **Embedding and chat are a hard split both directions**, with mirror-image reasons. **DECISION: cheapest sufficient, not best available** — fit → privacy → cost → `fast` → capability, and for a role with a floor **the smallest model clearing it wins**; an unknown cost sorts LAST, because unknown must never look like free. Retired models are never candidates, with the replacement named. **THE DEFECT FOUND BY RUNNING IT: `Number(null)` is `0`** — a model with no parameter count was excluded as *"0B is below the 7B floor"* and a model with no reported size **silently CLEARED the disk budget**; unknown was read as zero and **zero passes or fails a threshold confidently.** Fixed with one `num()` returning `null` for absent, applied to parameters, context, size and cost. **Worth hunting for wherever else a threshold meets an optional field.** **THE RESEARCH HALF:** `researchPlan()` names, per unfilled or substituted role, what would fill it with the requirement in words — **from the FETCHED catalogue only**, because a list produced from memory is the Section 94 fabrication; with none loaded it reports `blocked` naming `models:refresh-catalog`, since *nothing to recommend* and *never looked* read alike and mean opposites. **WIRING — role selection is tried FIRST and the old path is the fallback, not the reverse:** `TASK_ROUTING` and `FALLBACK_CHAIN` are untouched so nothing that routes today changes, but a declared role is decided on fitness and only an unfilled role falls through — capability kept, silent default ended. `models:route` returns `role`/`roleFit`/`roleWhy`/`roleExcluded`; new reads `models:roles` and `models:role-research` gated on `models.use`, because being told a role is unfilled should not need elevated rights. **No capability decision — fitness is not authorisation**; no Electron, nothing persisted, no network. **VERIFIED: `npm run verify` 21 suites; `verifyModelRoles` 87 assertions; audit clean at 139 bridge calls / 72 files / 355 channels; `vite build` succeeds.** **NOT VERIFIED: no Ollama daemon was running, so every model record in the suite is a FIXTURE — the table has never been drawn against a real install.** **NEXT: the renderer surface.** `models:roles` and `models:role-research` have no UI, so master cannot see the table or the gaps, which is the point of building it — it belongs on the MODELS screen beside the existing suggestions list. |
 
 ### Resume checklist for a cold session
@@ -11942,4 +11943,221 @@ is a fixture. The table has never been drawn against a real install.
 **Next:** the renderer surface. `models:roles` and `models:role-research` have no UI yet — master cannot
 see the table or the gaps, which is the point of building it. That belongs on the MODELS screen beside
 the existing suggestions list.
+
+---
+
+## SECTION 113 — "Strategy": the literature, the charges, and why 80% is the wrong target
+
+Master: *"Understand the word 'strategy'… for 'StockMind' it will be trading strategy. Refer various
+popular and high rated trading/StockMarket books and Authors suggestions and record them… formulate long
+term, short term strategies and backtest them… create strategies for various combos with success % near
+to 80 and above with min risk calculation implies most profit… including trading charges for no. of
+trades suggested and actually taken."*
+
+### The word
+
+A strategy is a plan for allocating a resource under opposition. The opposition is what changes with the
+domain: a political strategy contends with voters and rivals, a business strategy with competitors and
+customers. A **trading strategy** contends with a market that prices in whatever is widely known — so the
+defining property is that *the strategy's own success erodes its edge*, which is true of no other sense
+of the word. That is why a trading strategy must be stated falsifiably and re-measured, and why
+`strategy_spec` holds a declaration rather than a description.
+
+### The part of master's request that is wrong, and why it matters most
+
+**A minimum win rate must never be a filter.** Master asked for "success % near to 80 and above". Four
+independent reasons, and the fourth is arithmetic rather than opinion:
+
+1. **A high win rate is cheap to buy.** Take profits early and hold losers, or sell option premium, and
+   80–90% of trades win. Six of the nine templates now in the library are *designed* to lose most of
+   their trades.
+2. **Screening on it selects the shape, not the quality** — small frequent wins with rare large losses.
+   That is the shape that ends accounts, so a win-rate screen preferentially surfaces the most dangerous
+   strategies available.
+3. **A high win rate means few losses**, so the loss side is the *least observed* part of the record. The
+   more impressive the win rate, the less is actually known about what a loss costs.
+4. **Searching enough combinations always produces some above 80%.** With enough trials that is a
+   property of the search, which is exactly what the deflated Sharpe against trial count measures. A
+   win-rate filter reintroduces the overfitting Section 95 was built to defeat.
+
+The arithmetic, now asserted in the suite:
+
+| | wins | avg win | avg loss | win rate | payoff | break-even win rate | expectancy |
+|---|---|---|---|---|---|---|---|
+| premium-seller shape | 40/50 | 1.0% | 5.0% | **80%** | 0.20 | **83%** | **−0.20%** |
+| breakout shape | 12/50 | 9.0% | 2.0% | **24%** | 4.50 | **18%** | **+0.64%** |
+
+**The 80% strategy loses money and the 24% strategy makes it.** At a payoff of 0.20, 80% wins is not an
+achievement — it is 3 points *below* break-even. That is the whole case, and it is now a test.
+
+**DECISION: the win rate is always reported and never filtered on.** `Verdict` gained `avg_win_pct`,
+`avg_loss_pct`, `payoff_ratio`, `profit_factor`, `worst_trade_pct`, `cvar5_pct`, `breakeven_win_rate` and
+`win_rate_caveat`. The caveat fires on the premium-seller signature (win rate ≥ 70% with payoff < 1),
+when one worst-case loss erases three or more average wins, and when there are fewer than ten losses —
+and it rides in `risks`, not only in the numbers, **because a PASSING verdict is exactly where a
+flattering win rate does its damage.**
+
+**The counterexample that settles it:** Taleb's tail hedge wins almost no trades and can still be
+correct. Any minimum-win-rate filter rejects it. That is the filter being wrong.
+
+What master actually asked for — *"min risk calculation implies most profit"* — is **expectancy after
+costs with a bounded tail**, and that is what is now computed. The two halves of his sentence were in
+tension and this is the half that survives.
+
+### The literature, recorded as hypotheses
+
+`ai_backend/engine/strategy_library.py`. **DECISION: a book is a hypothesis, not evidence.** Every entry
+carries the author, the work, where it can be read free, the claim, the proposed mechanism, and **what
+would disconfirm it**. Every entry is labelled `published`, never `measured` — the same two-kinds-of-
+evidence vocabulary as Section 112. A template becomes evidence about master's instrument only by
+clearing `strategy_eval` on master's own data.
+
+**Nine templates, all validating against the existing block catalogue:**
+
+| template | source | free? | horizon | expected shape |
+|---|---|---|---|---|
+| Line of least resistance | Lefèvre, *Reminiscences of a Stock Operator* (1923) | Gutenberg 60979, public domain | short | <50% wins, payoff ≥3 |
+| Breakout confirmed by volume | Wyckoff, *Studies in Tape Reading* (1910) | archive.org, public domain | short | 45–55%, payoff ≥2 |
+| Primary trend | Hamilton, *The Stock Market Barometer* (1922) | archive.org, public domain | **long** | 40–55%, payoff ≥2 |
+| Time-series momentum 12m | Moskowitz, Ooi & Pedersen (2012) | AQR + SSRN, free | **long** | 35–50%, payoff ≥3 |
+| Trendline break | Schabacker (1932) | archive.org | short | 40–50%, payoff ≥2 |
+| Band touch reversion | Bollinger (2001) | rules published free | short | **65–80%, payoff <1** |
+| Oversold inside an uptrend | Wilder (1978) | formulas free | short | 55–70%, payoff ≈1 |
+| Volatility expansion breakout | Kaufman (1978) | ratio free | short | 40–50%, payoff ≥2.5 |
+| Breakdown in a failing structure | Lefèvre (1923), short side | public domain | short | <50%, payoff ≥2.5 |
+
+**Win rate and payoff are inversely related in every single one.** The library therefore teaches master's
+point better than a warning could: the Bollinger template is the only one in the 80% band, and it is the
+one with a payoff below 1. **The validator, written months earlier and knowing nothing about this
+library, independently flags that template's reward-to-risk geometry** — an unplanned confirmation, now
+asserted.
+
+**DECISION: sweeps are theory-driven, never grids.** Maximum trial count across the whole library is
+**3**, and the values are the authors' own alternatives — Donchian's 20 and 55, the momentum paper's 9
+and 12 months of trading days. A library shipping wide sweeps would make its own templates unprovable,
+since the noise benchmark rises with the count. `include_sweep=False` gives a trial count of 1, which is
+the strongest form of this evidence: parameters fixed in advance rather than selected.
+
+### Five strategies recorded and REFUSED, with the exact missing capability
+
+Offered and refused, same rule `strategy_spec` applies to model probability and news sentiment — a
+library that silently omitted these would read as *"the literature contains nothing else"*.
+
+- **Short variance / premium selling (Sinclair).** Needs implied volatility, greeks, a multi-leg model,
+  per-strike history, margin. `derivatives.py` computes **no IV deliberately**: neither bhavcopy carries
+  one and back-solving Black-Scholes over 21 years needs assumed rate and dividend curves, so
+  `straddle_pct` is used because it assumes nothing. **Sinclair's own point is recorded here: the high
+  win rate of premium selling is a property of its payoff shape, not evidence of edge** — the same
+  conclusion as the section above, from the author master would be citing.
+- **Delta-neutral volatility (Natenberg).** No greeks, no hedging loop.
+- **Convex tail hedging (Taleb).** Recorded *because* it is the counterexample to a win-rate screen.
+- **Cross-sectional momentum (Jegadeesh & Titman 1993).** Needs a universe ranked against itself and
+  simultaneous positions. `simulate()` is one instrument, one position, and the return series
+  `strategy_eval` judges assumes independent round trips. A real, well-evidenced strategy Rāma **cannot
+  currently express.**
+- **Open-interest positioning (PCR, max pain, basis, rollover).** **THE SMALLEST REAL GAP.** The history
+  is *already on disk* — `DERIV_COLUMNS` holds `pcr_oi`, `max_pain_dist`, `fut_basis_pct`,
+  `rollover_pct` per day, back years. But every block recomputes its indicator from OHLCV and **nothing
+  can read a second series**, so "PCR above 1.3" is unexpressible while the data to backtest it sits in
+  the store. **One new block shape closes this, and it is the next thing to build.**
+
+**Method claims are kept separate from strategy claims** — Tharp (expectancy, position sizing), López de
+Prado (backtest overfitting, purging), Bailey & López de Prado (deflated Sharpe), Lo (Sharpe standard
+errors under non-normality). Each records *where it is already applied in the engine*, so a citation is a
+pointer to code rather than a reading list.
+
+### What a trade actually costs
+
+`ai_backend/engine/costs.py`. **Why the existing model could not answer master's question:**
+`CostModel` is three percentages subtracted from a percent return, and `evaluate()` only ever sees
+`returns[]` — no notional, no quantity. Indian charges do not have that shape.
+
+**Brokerage is ₹20 per order.** That is 0.40% of a ₹5,000 trade and 0.004% of a ₹5,00,000 trade — a
+hundredfold difference no single percentage can express, **and the flat model flatters small trades by
+exactly the amount that kills them.** STT is side-dependent and charged on *premium* for options, not
+contract value. Stamp duty is buy-side only. DP charges are a flat rupee amount on delivery sells
+regardless of size. GST at 18% applies to brokerage, exchange, SEBI and IPFT — and **not** to STT or
+stamp duty, so applying it to everything overstates and to nothing understates.
+
+So the module works in **rupees, per order, per instrument** (`EQUITY_DELIVERY`, `EQUITY_INTRADAY`,
+`FUTURES`, `OPTIONS`). Measured results, all hand-computed in the suite:
+
+| trade | round trip | as % of notional |
+|---|---|---|
+| 10 shares at ₹100, delivery (₹1,000) | ₹19.92 | **1.99%** |
+| 100 shares at ₹1,000, intraday (₹1,00,000) | ₹82.68 | 0.083% |
+| 75 units at ₹200 premium, options (₹15,000) | ₹82.76 | **0.552%** |
+| 75 units at ₹25,000, futures (₹18,75,000) | ₹1,107.60 | 0.059% |
+
+**A ₹1,000 delivery trade pays about 2% round trip** — the flat ₹15 depository fee, not the rates. The
+options round trip costs almost the same rupees as the equity one and **six times the percentage**,
+because the same flat brokerage sits on a smaller notional. On futures, **STT is over 90% of the sell-side
+charge.** And the futures percentage is *lower* than the intraday one despite costing thirteen times as
+much in rupees — which is why *"what does trading cost as a percentage"* is unanswerable until someone
+states the size.
+
+**DECISION: `effective_round_trip_pct` requires a notional and reports the notional it assumed.** It is
+the only bridge to the percent-based judge, and returning the assumption alongside the figure is what
+stops it being quoted as universal. It also states plainly that it prices the exit at the *entry* price,
+which understates a winning trade.
+
+**DECISION: the exit leg is priced at the exit price in `round_trip_charges`.** STT on a futures sell is
+0.05% of the *sell* turnover, so a trade that ran pays more — and pricing both legs at entry would
+understate every winning trade's cost, a bias that grows with exactly the trades a backtest is most
+pleased about.
+
+**DECISION: every rate carries its source and effective date, and the table reports its own staleness.**
+Rates move at every Union Budget — Budget 2026 raised futures STT from 0.02% to 0.05% and options STT
+from 0.10% to 0.15% of premium, effective 2026-04-01, cross-confirmed across three independent
+publishers. `TABLE_AS_OF` records when the rates *took effect*, not when someone last looked, because a
+timestamp of the latter cannot distinguish *current* from *unchanged since nobody checked*. Past one
+budget cycle `staleness()` says so and names where to re-check. **Master's own contract note is the
+authority; this is a model of his broker's charges, not a quotation from them** — and brokerage is the
+one component that varies tenfold, so `registry()` prints the assumption. Unmodelled charges are
+**listed**, because an unlisted charge reads as one that does not exist.
+
+### Reachable, immediately
+
+Section 95's recorded lesson is that `strategy_eval` shipped with 64 assertions and was **reachable from
+nothing** — no route, no IPC, no caller. So: `GET /strategy/library`, `GET /strategy/library/{id}`,
+`GET /costs/registry`, `POST /costs/quote`, four `market:` channels, four bridge methods, all reads on
+`stockmind.view`. `POST /costs/quote` takes a `trades` count, which is master's *"charges for no. of
+trades suggested and actually taken"*.
+
+**DECISION: a template returns a SPEC, and is backtested by the existing route.** The library has no
+private scoring path, because that would be a second definition of "passed".
+
+### What master asked for that is NOT built, named precisely
+
+**Derivatives combinations** — *"based on selection of various futures & options at any level… strategies
+for various combos"*. Genuinely multi-session, and the gaps are specific: the spec has **no instrument
+discriminator** (`EQUITY|FUTURES|OPTIONS`), **no lot size**, **no product type**; `simulate()` holds one
+leg of one instrument with a percent stop on spot; there is **no payoff model, no margin model, no
+expiry-roll logic, no greeks and no IV**. Order of work: (1) instrument type + lot size in the spec so
+`costs.py` can be applied per trade, (2) a block that can read the `deriv1d` series, (3) a leg model, (4)
+payoff and margin.
+
+**News → macro → sector → stock** — master's point that *"political moves by major/super power countries
+can impact other countries/commodities prices which inturn impact buisiness and related stock prices"* is
+correct and is a transmission chain, not a sentiment score. What exists: `news.py` classifies events
+against `EVENT_PATTERNS`, which already includes a `macro` pattern (gdp, inflation, cpi, repo, fed, fomc,
+tariff, budget, monsoon, crude, rupee, bond yield), and GDELT gives ~9 years of tone and volume. What does
+**not** exist: any macro **series**, any regime state, and any link from news to a backtestable strategy —
+`sentiment_level` and `news_volume_spike` are catalogue entries with `fn: None` and make `run_spec` refuse
+the whole spec. The honest next step is a **macro factor series** (crude, USD/INR, US 10-year, India VIX)
+stored like `deriv1d`, because those are *prices* with real history, and the transmission chain becomes
+backtestable at the point where it touches a price. A headline is not.
+
+### Verified
+
+`test_costs.py` **82 assertions**, every expected rupee figure hand-computed from published rates rather
+than read back out of the code. `test_strategy_library.py` **149 assertions**, including that every
+template validates and every block and parameter it names really exists. `test_strategy_eval.py`
+**64 → 102**. `test_strategy_spec.py` **220**, unchanged. Audit clean at **139 bridge calls / 72 files /
+359 IPC channels** (four new).
+
+**Not verified:** nothing on screen, and **no template has been backtested against real bars** — the
+engine has still never completed a run on master's machine. Every figure above is either hand-computed
+arithmetic or a published claim. The library's whole point is that its templates are unproven until they
+clear the harness on master's own data, and none has.
 

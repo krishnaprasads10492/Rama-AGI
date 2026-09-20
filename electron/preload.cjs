@@ -186,6 +186,12 @@ const RAMA_API = {
     strategyValidate: (opts) => ipcRenderer.invoke('market:strategy-validate', opts),
     strategyBacktest: (opts) => ipcRenderer.invoke('market:strategy-backtest', opts),
     strategyCode:     (opts) => ipcRenderer.invoke('market:strategy-code', opts),
+    // The literature and the charge model (Section 113). Reads: a catalogue, a template completed into
+    // a spec, and arithmetic over published rates. A verdict still comes only from strategyBacktest.
+    strategyLibrary:  (opts) => ipcRenderer.invoke('market:strategy-library', opts),
+    strategyTemplate: (opts) => ipcRenderer.invoke('market:strategy-template', opts),
+    costsRegistry:    (opts) => ipcRenderer.invoke('market:costs-registry', opts),
+    costsQuote:       (opts) => ipcRenderer.invoke('market:costs-quote', opts),
     news:            (opts) => ipcRenderer.invoke('market:news', opts),
     newsCoverage:    (opts) => ipcRenderer.invoke('market:news-coverage', opts),
     derivatives:     (opts) => ipcRenderer.invoke('market:derivatives', opts),

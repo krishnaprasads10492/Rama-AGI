@@ -244,6 +244,34 @@ async function strategyCode({ spec, verdict = null, trials = 1 } = {}) {
   return postPath('/strategy/code', { spec: spec || {}, verdict, trials });
 }
 
+// The literature and the charge model (Section 113). All three are READS on `stockmind.view`: a
+// catalogue, a template completed into a spec, and arithmetic over published rates. None spends engine
+// time and none produces a verdict — `strategyBacktest` remains the only way to get one, so a library
+// template is judged by exactly the same harness as a hand-built strategy.
+
+async function strategyLibrary() {
+  return getPath('/strategy/library');
+}
+
+async function strategyTemplate({ id, symbol, exchange = 'NSE', interval = '1d',
+                                  capital = 100000, riskPct = 1, includeSweep = true } = {}) {
+  if (!id || !symbol) return { ok: false, reason: 'a template id and a symbol are both required' };
+  const q = new URLSearchParams({
+    symbol, exchange, interval,
+    capital: String(capital), riskPct: String(riskPct), includeSweep: String(!!includeSweep),
+  });
+  return getPath(`/strategy/library/${encodeURIComponent(id)}?${q}`);
+}
+
+async function costsRegistry() {
+  return getPath('/costs/registry');
+}
+
+async function costsQuote({ instrument, entryPrice, exitPrice = null, quantity,
+                            side = 'long', trades = 1 } = {}) {
+  return postPath('/costs/quote', { instrument, entryPrice, exitPrice, quantity, side, trades });
+}
+
 /**
  * Search the provider for an instrument (spec Section 102).
  *
@@ -469,6 +497,10 @@ function register(ipcMain) {
     'market:symbol-search':   symbolSearch,
     'market:strategy-blocks': strategyBlocks,
     'market:strategy-validate': strategyValidate,
+    'market:strategy-library': strategyLibrary,
+    'market:strategy-template': strategyTemplate,
+    'market:costs-registry':  costsRegistry,
+    'market:costs-quote':     costsQuote,
     'market:news':            news,
     'market:news-coverage':   newsCoverage,
     'market:derivatives':     derivatives,

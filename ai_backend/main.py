@@ -852,6 +852,110 @@ def strategy_code(req: StrategyCodeRequest):
         return {"ok": False, "reason": str(e), "code": None}
 
 
+# ── The literature, and what a trade really costs (spec Section 113) ──────────
+#
+# ROUTED IMMEDIATELY, not later. Section 95's recorded lesson is that `strategy_eval.py` was built with
+# 64 assertions and was reachable from nothing — no route, no IPC, no caller — so the harness that
+# decides whether a strategy found an edge sat outside the product from the day it was written. A
+# library nobody can open is the same defect with a different module name.
+
+@app.get("/strategy/library")
+def strategy_library_catalogue():
+    """
+    Book- and paper-derived strategies, what each author claimed, and what would disprove it.
+
+    Carries `winRateWarning` deliberately: master asked for strategies at "80% and above", and the
+    honest answer travels with the thing he asked for rather than being filed elsewhere.
+    """
+    from engine import strategy_library
+    return strategy_library.catalogue()
+
+
+@app.get("/strategy/library/{template_id}")
+def strategy_library_build(template_id: str, symbol: str, exchange: str = "NSE",
+                           interval: str = "1d", capital: float = 100000.0,
+                           riskPct: float = 1.0, includeSweep: bool = True):
+    """
+    One template completed into a spec, validated, with its provenance and expected shape.
+
+    Returns a spec for `/strategy/backtest` rather than backtesting here, so a template goes through
+    exactly the same judge as a hand-built strategy. A library with its own private scoring path would
+    be a second definition of "passed".
+    """
+    try:
+        from engine import strategy_library, strategy_spec
+        spec = strategy_library.build(
+            template_id, symbol=symbol, exchange=exchange, interval=interval,
+            capital=capital, risk_pct=riskPct, include_sweep=includeSweep,
+        )
+        v = strategy_spec.validate_spec(spec)
+        return {
+            "ok": v["ok"],
+            "spec": v["spec"],
+            "trials": v["trials"],
+            "warnings": v["warnings"],
+            "errors": v["errors"],
+            "provenance": strategy_library.provenance(template_id),
+            "expectedShape": strategy_library.expected_shape(template_id),
+            # Said on the way out as well as in the catalogue: the author's claim is not a result.
+            "note": ("This is the author's strategy as stated, not a verdict. Backtest it to find out "
+                     "whether it works on this instrument."),
+        }
+    except KeyError as e:
+        return {"ok": False, "reason": str(e)}
+    except Exception as e:
+        logger.error(f"Strategy library build failed: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e)}
+
+
+@app.get("/costs/registry")
+def costs_registry():
+    """Which instruments Rāma can price, at what rates, from which source — and what it does not model."""
+    from engine import costs
+    return costs.registry()
+
+
+class CostQuoteRequest(BaseModel):
+    instrument:   str
+    entryPrice:   float = Field(gt=0)
+    exitPrice:    Optional[float] = None
+    quantity:     float = Field(gt=0)
+    side:         str = "long"
+    trades:       int = Field(default=1, ge=1)
+
+
+@app.post("/costs/quote")
+def costs_quote(req: CostQuoteRequest):
+    """
+    What a round trip costs in rupees, and what that is across a number of trades.
+
+    `trades` answers master's *"charges for no. of trades suggested and actually taken"* — the same
+    round trip repeated, because a strategy's cost is per trade and a hundred trades is a hundred times
+    the drag. Reported as a total AND as a share of capital, since the second is what decides whether an
+    edge survives.
+    """
+    try:
+        from engine import costs
+        rt = costs.round_trip_charges(
+            req.instrument, req.entryPrice, req.exitPrice or req.entryPrice,
+            req.quantity, side=req.side,
+        )
+        if not rt.get("ok"):
+            return rt
+        notional = req.entryPrice * req.quantity
+        return {
+            **rt,
+            "trades": req.trades,
+            "totalAcrossTrades": rt["total"] * req.trades,
+            "pctAcrossTrades": (rt["total"] * req.trades / notional * 100.0) if notional > 0 else None,
+            "notional": notional,
+            "provenance": costs.provenance(),
+        }
+    except Exception as e:
+        logger.error(f"Cost quote failed: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e)}
+
+
 @app.get("/symbols/search")
 def symbols_search(q: str, limit: int = 12):
     """

@@ -163,6 +163,87 @@ def sharpe(returns: Sequence[float], periods_per_year: int = 252) -> Optional[fl
     return (mean / sd) * math.sqrt(periods_per_year)
 
 
+def _shape(net: Sequence[float]) -> dict:
+    """
+    The distribution behind a win rate — and the caveat when the win rate is flattering it.
+
+    WHY THIS EXISTS. Master asked for a success rate "near to 80 and above". Two things make that
+    target actively harmful, and both are visible only in these numbers:
+
+      1. A high win rate is CHEAP TO BUY. Sell option premium, or take profits early and hold losers,
+         and 80–90% of trades win. The wins are small and the losses are not, so the strategy loses
+         money while looking excellent. `payoff_ratio` and `worst_trade_pct` are where that shows.
+      2. A high win rate means FEW LOSSES, which means the loss distribution is the part of the record
+         with the least data. So the more impressive the win rate, the less is actually known about
+         what a loss costs — the opposite of the reassurance it reads as.
+
+    `breakeven_win_rate` is the honest counterweight: at a payoff ratio of 0.25, a strategy needs 80%
+    wins simply to break even, so 80% is not an achievement there — it is the floor.
+
+    Returns a dict, so `evaluate` can splat it into every Verdict including the early refusals.
+    """
+    vals = [float(r) for r in net]
+    n = len(vals)
+    out: dict = {
+        "avg_win_pct": None, "avg_loss_pct": None, "payoff_ratio": None, "profit_factor": None,
+        "worst_trade_pct": None, "cvar5_pct": None, "breakeven_win_rate": None,
+        "win_rate_caveat": None,
+    }
+    if n == 0:
+        return out
+
+    wins = [v for v in vals if v > 0]
+    losses = [v for v in vals if v < 0]
+    out["worst_trade_pct"] = min(vals)
+
+    # The worst 5%, at least one trade — a tail statistic over zero observations is not a statistic.
+    k = max(1, int(round(n * 0.05)))
+    worst = sorted(vals)[:k]
+    out["cvar5_pct"] = sum(worst) / len(worst)
+
+    if wins:
+        out["avg_win_pct"] = sum(wins) / len(wins)
+    if losses:
+        out["avg_loss_pct"] = abs(sum(losses)) / len(losses)
+
+    aw, al = out["avg_win_pct"], out["avg_loss_pct"]
+    if aw is not None and al is not None and al > 0:
+        out["payoff_ratio"] = aw / al
+        out["breakeven_win_rate"] = 1.0 / (1.0 + out["payoff_ratio"])
+    if losses and wins:
+        gross_loss = abs(sum(losses))
+        if gross_loss > 0:
+            out["profit_factor"] = sum(wins) / gross_loss
+
+    win_rate = len(wins) / n
+    payoff = out["payoff_ratio"]
+    notes = []
+
+    # The premium-seller signature: wins often, wins small. Named explicitly because this is the exact
+    # shape master's "80% and above" request would select for if the win rate were a filter.
+    if win_rate >= 0.70 and payoff is not None and payoff < 1.0:
+        notes.append(
+            f"{win_rate * 100:.0f}% of trades win, but the average win is only "
+            f"{payoff:.2f}x the average loss. This is the shape of a premium-selling or "
+            f"cut-winners-early strategy: it wins often and loses more when it loses. At this payoff "
+            f"ratio it needs {out['breakeven_win_rate'] * 100:.0f}% wins just to break even, so the "
+            f"win rate is closer to a requirement than to an achievement."
+        )
+    if aw is not None and out["worst_trade_pct"] is not None and aw > 0:
+        erases = abs(out["worst_trade_pct"]) / aw
+        if erases >= 3.0:
+            notes.append(f"One worst-case loss erases about {erases:.0f} average wins.")
+    if len(losses) < 10 and n >= MIN_TRADES:
+        # A high win rate is exactly the condition under which the loss side is least observed.
+        notes.append(
+            f"Only {len(losses)} losing trades, so what a loss actually costs is the least-measured "
+            f"part of this record — and a high win rate is precisely what makes it so."
+        )
+
+    out["win_rate_caveat"] = " ".join(notes) if notes else None
+    return out
+
+
 def _moments(returns: Sequence[float]) -> tuple[float, float]:
     """Skewness and kurtosis, needed because the deflation depends on non-normality."""
     vals = [float(r) for r in returns]
@@ -274,6 +355,20 @@ class Verdict:
     expectancy_pct: Optional[float] = None
     max_drawdown: Optional[float] = None
     cost_drag_pct: Optional[float] = None
+    # ── The numbers that make a win rate mean something (Section 113) ─────────
+    #
+    # Master asked for strategies with "success % near to 80 and above". A win rate reported ALONE is
+    # the reason that target is dangerous: an 80% win rate is trivially manufactured by selling option
+    # premium or by cutting winners early and letting losers run, and both lose money. So the win rate
+    # is now never reported without the four figures that say whether it is earned or bought.
+    avg_win_pct: Optional[float] = None
+    avg_loss_pct: Optional[float] = None       # positive magnitude
+    payoff_ratio: Optional[float] = None       # avg win / avg loss
+    profit_factor: Optional[float] = None      # gross wins / gross losses
+    worst_trade_pct: Optional[float] = None
+    cvar5_pct: Optional[float] = None          # mean of the worst 5% of trades
+    breakeven_win_rate: Optional[float] = None  # the win rate this payoff needs just to break even
+    win_rate_caveat: Optional[str] = None      # set when the win rate is flattering the strategy
     confidence: str = "none"          # none | provisional | measured
     provenance: dict = field(default_factory=dict)
     meaning: str = ""
@@ -318,6 +413,7 @@ def evaluate(
     wins = sum(1 for r in net if r > 0)
     win_rate = wins / n
     expectancy = sum(net) / n
+    shape = _shape(net)
 
     equity = []
     acc = 100.0
@@ -336,7 +432,7 @@ def evaluate(
     base = dict(
         trades=n, n_trials=n_trials, gross_sharpe=gs, net_sharpe=ns, deflated=dsr,
         benchmark_sharpe=bench, win_rate=win_rate, expectancy_pct=expectancy,
-        max_drawdown=dd, cost_drag_pct=drag, provenance=prov,
+        max_drawdown=dd, cost_drag_pct=drag, provenance=prov, **shape,
     )
 
     # ── The evidence floor comes first, before any metric is believed ─────────
@@ -409,7 +505,7 @@ def evaluate(
             risks=[
                 "This is the shape of result that backtests well and loses money live.",
                 f"The more variants are tried, the higher {bench:.2f} climbs.",
-            ],
+            ] + ([shape["win_rate_caveat"]] if shape["win_rate_caveat"] else []),
             would_change=[
                 "A larger margin over the noise benchmark, not a longer search.",
                 "Testing far fewer, theory-driven variants instead of many arbitrary ones.",
@@ -432,6 +528,9 @@ def evaluate(
             f"Worst peak-to-trough fall was {dd * 100:.1f}%; master must be able to sit through that.",
             "A backtested win rate is not a forward-looking probability.",
         ]
+        # The caveat rides in `risks`, not only in the numbers, because a verdict that PASSED is
+        # exactly where a flattering win rate does its damage.
+        + ([shape["win_rate_caveat"]] if shape["win_rate_caveat"] else [])
         + ([] if is_holdout else
            ["Measured on the search window, so it is not yet an out-of-sample result."]),
         would_change=[

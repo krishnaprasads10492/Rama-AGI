@@ -334,6 +334,101 @@ def test_search_guards() -> None:
           holdout_call == (700, 1000) and len(search_calls) == 5, str(seen))
 
 
+def test_win_rate_is_legible():
+    """
+    A win rate never travels alone (Section 113).
+
+    Master asked for strategies with a success rate "near to 80 and above". The 80% shape is trivially
+    manufactured, so the verdict now carries the four figures that say whether such a win rate is earned
+    or bought — and a caveat in words when they disagree with it.
+    """
+    print("\n  a win rate never travels alone")
+    free = CostModel(commission_pct=0.0, slippage_pct=0.0, spread_pct=0.0)
+
+    # The premium-seller shape: 40 small wins, 10 larger losses. 80% win rate, and it LOSES money.
+    seller = [1.0] * 40 + [-5.0] * 10
+    v = _se.evaluate(seller, n_trials=1, cost_model=free)
+    check("an 80% win rate is reported as asked", abs(v.win_rate - 0.80) < 1e-9, v.win_rate)
+    check("average win is reported beside it", abs(v.avg_win_pct - 1.0) < 1e-9, v.avg_win_pct)
+    check("average loss as a positive magnitude", abs(v.avg_loss_pct - 5.0) < 1e-9, v.avg_loss_pct)
+    check("payoff ratio is 0.20", abs(v.payoff_ratio - 0.2) < 1e-9, v.payoff_ratio)
+    check("break-even win rate at that payoff is 83%",
+           abs(v.breakeven_win_rate - (1.0 / 1.2)) < 1e-9, v.breakeven_win_rate)
+    check("SO 80% IS BELOW BREAK-EVEN - the win rate master asked for loses money here",
+           v.win_rate < v.breakeven_win_rate)
+    check("and expectancy is negative, which is the fact that matters",
+           v.expectancy_pct < 0, v.expectancy_pct)
+    check("profit factor is below 1", v.profit_factor < 1.0, v.profit_factor)
+    check("worst trade is reported", abs(v.worst_trade_pct - (-5.0)) < 1e-9)
+    check("the worst 5% is reported as a tail statistic", v.cvar5_pct is not None)
+    check("a caveat is raised in words, not left to the numbers", v.win_rate_caveat is not None)
+    check("it names the premium-selling shape",
+           "premium-selling" in v.win_rate_caveat, v.win_rate_caveat)
+    check("it states the break-even win rate the payoff requires",
+           "83%" in v.win_rate_caveat, v.win_rate_caveat)
+    check("it says the win rate is a requirement rather than an achievement",
+           "requirement" in v.win_rate_caveat)
+    check("and this verdict does NOT pass", v.passed is False)
+
+    # The breakout shape: 12 large wins, 38 small losses. 24% win rate, and it MAKES money.
+    breakout = [9.0] * 12 + [-2.0] * 38
+    b = _se.evaluate(breakout, n_trials=1, cost_model=free)
+    check("a 24% win rate is reported without alarm", abs(b.win_rate - 0.24) < 1e-9, b.win_rate)
+    check("payoff ratio is 4.5", abs(b.payoff_ratio - 4.5) < 1e-9, b.payoff_ratio)
+    check("break-even win rate is only 18%", abs(b.breakeven_win_rate - (1.0 / 5.5)) < 1e-9)
+    check("24% CLEARS IT - the lower win rate is the profitable strategy",
+           b.win_rate > b.breakeven_win_rate)
+    check("expectancy is positive", b.expectancy_pct > 0, b.expectancy_pct)
+    check("profit factor is above 1", b.profit_factor > 1.0, b.profit_factor)
+    check("and NO caveat is raised, because the win rate is not flattering anything",
+           b.win_rate_caveat is None, b.win_rate_caveat)
+
+    # A high win rate with a good payoff is genuinely good, and must not be warned about.
+    good = [4.0] * 40 + [-2.0] * 10
+    g = _se.evaluate(good, n_trials=1, cost_model=free)
+    check("80% wins AND a payoff of 2 raises no premium-selling caveat",
+           g.payoff_ratio == 2.0 and (g.win_rate_caveat is None
+                                      or "premium-selling" not in g.win_rate_caveat),
+           g.win_rate_caveat)
+
+    print("\n  the least-observed part of the record")
+    thin = [1.0] * 47 + [-3.0] * 3
+    t = _se.evaluate(thin, n_trials=1, cost_model=free)
+    check("three losing trades is flagged as thin evidence about losses",
+           "least-measured" in (t.win_rate_caveat or ""), t.win_rate_caveat)
+    check("and it says the high win rate is WHY it is thin",
+           "precisely what makes it so" in (t.win_rate_caveat or ""))
+    check("one worst-case loss erasing several average wins is stated",
+           "erases about" in (t.win_rate_caveat or ""), t.win_rate_caveat)
+
+    print("\n  shape metrics survive the edge cases")
+    allwin = _se.evaluate([1.0] * 40, n_trials=1, cost_model=free)
+    check("all winners: no average loss to report, and it is None not 0",
+           allwin.avg_loss_pct is None)
+    check("so no payoff ratio is invented", allwin.payoff_ratio is None)
+    check("and no break-even win rate either", allwin.breakeven_win_rate is None)
+    allloss = _se.evaluate([-1.0] * 40, n_trials=1, cost_model=free)
+    check("all losers: no average win, reported as None", allloss.avg_win_pct is None)
+    check("worst trade is still reported", allloss.worst_trade_pct is not None)
+    check("no trades at all: every shape metric is None, none is zero",
+           _se.evaluate([], n_trials=1).payoff_ratio is None)
+    # A PASSING verdict is exactly where a flattering win rate does its damage, so the caveat has to
+    # reach `risks` and not sit only in the numbers underneath.
+    passing = _se.evaluate([1.0] * 45 + [-1.5] * 5, n_trials=1, cost_model=free)
+    check("a 90% win rate with a 0.67 payoff can still pass on Sharpe", passing.passed is True,
+          passing.reason)
+    check("BUT THE CAVEAT IS IN ITS RISKS, not only in the numbers",
+          any("premium-selling" in r for r in passing.risks), passing.risks)
+    check("and the thin-loss-evidence note reaches master too",
+          any("least-measured" in r for r in passing.risks))
+    shape = _se._shape([2.0] * 8 + [-1.0] * 2)
+    check("the tail window is at least one trade even on a short series",
+           _se._shape([1.0, -1.0])["cvar5_pct"] is not None)
+    check("payoff on a clean 2:1 is exactly 2", abs(shape["payoff_ratio"] - 2.0) < 1e-9)
+    check("the verdict still serialises with the new fields",
+           "payoff_ratio" in v.to_dict() and "win_rate_caveat" in v.to_dict())
+
+
 def main() -> int:
     print("\nstrategy_eval — refusing noise, finding real edges\n")
     test_splits()
@@ -345,6 +440,7 @@ def main() -> int:
     test_finds_planted_edge()
     test_communication_shape()
     test_search_guards()
+    test_win_rate_is_legible()
     print(f"\n  {_pass} passed, {_fail} failed\n")
     return 1 if _fail else 0
 
