@@ -15,8 +15,10 @@
  * Run: node scripts/verifyChartTime.mjs   (or npm run verify:chart-time)
  */
 
-import { toChartTime, timeTypesMatch, sessionStarts, markerTime }
-  from '../src/pages/StockMind/chartTime.js';
+import {
+  toChartTime, timeTypesMatch, sessionStarts, markerTime,
+  formatStamp, zoneLabel, makeTickFormatter, makeTimeFormatter, TICK,
+} from '../src/pages/StockMind/chartTime.js';
 
 let pass = 0;
 let fail = 0;
@@ -108,6 +110,80 @@ check('a missing map does not throw', markerTime('2026-09-19', null) === '2026-0
 check('a longer ISO fill date is truncated to the session key',
   markerTime('2026-09-19T00:00:00', starts) !== null);
 
+// ── Display in master's own time (Section 118) ────────────────────────────────
+//
+// Every assertion passes an EXPLICIT timeZone. Relying on the machine's zone would make this suite
+// pass here and fail on master's machine, which is the opposite of what a test is for.
+console.log('\n  the screen shows master\'s clock, not UTC');
+const openUTC = toChartTime('2026-09-18 03:45:00');   // the 09:15 IST open, as the store keeps it
+check('the stored stamp is 03:45 in UTC',
+  formatStamp(openUTC, { timeZone: 'UTC' }).includes('03:45'),
+  formatStamp(openUTC, { timeZone: 'UTC' }));
+check('AND 09:15 IN IST — which is the NSE open master actually sees',
+  formatStamp(openUTC, { timeZone: 'Asia/Kolkata' }).includes('09:15'),
+  formatStamp(openUTC, { timeZone: 'Asia/Kolkata' }));
+check('the date is carried too, not just the time',
+  formatStamp(openUTC, { timeZone: 'Asia/Kolkata' }).includes('2026'));
+check('a zone west of UTC moves it the other way',
+  formatStamp(openUTC, { timeZone: 'America/New_York' }).includes('23:45'),
+  formatStamp(openUTC, { timeZone: 'America/New_York' }));
+check('and onto the previous day, correctly',
+  formatStamp(openUTC, { timeZone: 'America/New_York' }).includes('17'),
+  formatStamp(openUTC, { timeZone: 'America/New_York' }));
+check('withTime false gives a date alone',
+  !formatStamp(openUTC, { timeZone: 'Asia/Kolkata', withTime: false }).includes(':'));
+
+console.log('\n  a DAILY bar is never zone-converted');
+check('a date string passes through untouched in IST',
+  formatStamp('2026-09-18', { timeZone: 'Asia/Kolkata' }) === '2026-09-18');
+check('and untouched in a zone that would have moved it back a day',
+  formatStamp('2026-09-18', { timeZone: 'America/New_York' }) === '2026-09-18');
+check('which is the point: a daily bar is a calendar date, not an instant',
+  formatStamp('2026-09-18', { timeZone: 'Pacific/Kiritimati' }) === '2026-09-18');
+check('null formats to empty, never to an epoch', formatStamp(null) === '');
+check('undefined formats to empty', formatStamp(undefined) === '');
+check('NaN formats to empty rather than "Invalid Date"', formatStamp(NaN) === '');
+check('an invalid zone does not throw, it returns empty',
+  formatStamp(openUTC, { timeZone: 'Not/AZone' }) === '');
+
+console.log('\n  the zone is named, because a bare time is ambiguous');
+check('IST is labelled', zoneLabel('Asia/Kolkata') === 'GMT+5:30', zoneLabel('Asia/Kolkata'));
+check('UTC is labelled', zoneLabel('UTC').length > 0, zoneLabel('UTC'));
+check('an invalid zone yields an empty label rather than throwing', zoneLabel('Not/AZone') === '');
+check('no argument yields the machine\'s own zone label', typeof zoneLabel() === 'string');
+
+console.log('\n  the axis respects what the library asked for');
+const tick = makeTickFormatter('Asia/Kolkata');
+check('a Time tick is just the time, in IST', tick(openUTC, TICK.Time) === '09:15', tick(openUTC, TICK.Time));
+check('a DayOfMonth tick is a day, not a wall of text',
+  tick(openUTC, TICK.DayOfMonth) === '18 Sept', tick(openUTC, TICK.DayOfMonth));
+check('a Month tick is a month', tick(openUTC, TICK.Month) === 'Sept', tick(openUTC, TICK.Month));
+check('a Year tick is a year', tick(openUTC, TICK.Year) === '2026');
+check('TimeWithSeconds includes seconds',
+  tick(openUTC, TICK.TimeWithSeconds).split(':').length === 3,
+  tick(openUTC, TICK.TimeWithSeconds));
+check('an unknown tick type falls back to a time rather than empty',
+  tick(openUTC, 99) === '09:15');
+check('a daily business-day string is returned unshifted',
+  tick('2026-09-18', TICK.DayOfMonth) === '2026-09-18');
+check('a non-finite time is empty, not "Invalid Date"', tick(NaN, TICK.Time) === '');
+check('the tick enum values match the library\'s public enum',
+  TICK.Year === 0 && TICK.Month === 1 && TICK.DayOfMonth === 2
+  && TICK.Time === 3 && TICK.TimeWithSeconds === 4);
+
+console.log('\n  the crosshair formatter');
+const cf = makeTimeFormatter('Asia/Kolkata');
+check('gives the full stamp in IST', cf(openUTC).includes('09:15'));
+check('and leaves a daily date alone', cf('2026-09-18') === '2026-09-18');
+
+console.log('\n  the underlying value is NOT mutated to fix a label');
+check('the epoch is still true UTC after formatting',
+  toChartTime('2026-09-18 03:45:00') === openUTC);
+check('so the session-start lookup still keys on the UTC date',
+  sessionStarts([{ time: openUTC }]).has('2026-09-18'));
+check('which is why shifting timestamps by the offset was the wrong fix',
+  openUTC === Math.floor(Date.parse('2026-09-18T03:45:00Z') / 1000));
+
 // ── The guarantee, asserted against the source ────────────────────────────────
 console.log('\n  the rule stays in one place');
 const fs = await import('node:fs');
@@ -139,6 +215,17 @@ check('and the mismatch is reported rather than borrowed silently',
   /intervalMismatch/.test(py));
 check('the response says which interval was actually measured',
   /measuredInterval/.test(py));
+
+console.log('\n  the chart is wired to the local formatters');
+check('the time axis uses the local tick formatter', /tickMarkFormatter: makeTickFormatter\(\)/.test(chart));
+check('the crosshair uses the local time formatter',
+  /localization: \{ timeFormatter: makeTimeFormatter\(\) \}/.test(chart));
+check('the legend shows the time', /formatStamp\(readout\.time\)/.test(chart));
+check('and names the zone beside it, so the reading is unambiguous',
+  /zoneLabel\(\)/.test(chart));
+check('no timestamp is shifted to fake a local rendering',
+  !/getTimezoneOffset/.test(chart) && !/getTimezoneOffset/.test(
+    fs.readFileSync('src/pages/StockMind/chartTime.js', 'utf8')));
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 if (fail > 0) process.exit(1);

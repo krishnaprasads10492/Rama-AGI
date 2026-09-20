@@ -10,7 +10,10 @@ import {
   intervalGroups, allRangesFor, shortfallNote, describeLimit, showsClock,
   interval as intervalDef,
 } from './timeframes';
-import { toChartTime, sessionStarts, markerTime, timeTypesMatch } from './chartTime.js';
+import {
+  toChartTime, sessionStarts, markerTime, timeTypesMatch,
+  makeTickFormatter, makeTimeFormatter, formatStamp, zoneLabel,
+} from './chartTime.js';
 import InfoTip from './InfoTip.jsx';
 
 /**
@@ -271,7 +274,13 @@ export default function PriceChart({
         rightOffset: 6,
         timeVisible: showsClock(interval),
         secondsVisible: false,
+        // THE AXIS READS IN MASTER'S OWN TIME (Section 118). The library renders a UTCTimestamp in UTC,
+        // so the 09:15 IST open was labelled 03:45 — a chart in a timezone he does not trade in. The
+        // stored values stay true UTC; only the label is converted.
+        tickMarkFormatter: makeTickFormatter(),
       },
+      // The crosshair's own time label, same conversion.
+      localization: { timeFormatter: makeTimeFormatter() },
       crosshair: { mode: CrosshairMode.Normal },
       handleScroll: true,
       handleScale: true,
@@ -1150,8 +1159,16 @@ export default function PriceChart({
             fontSize: '12px', lineHeight: 1.6, fontVariantNumeric: 'tabular-nums',
             color: 'var(--text)', textShadow: '0 1px 3px rgba(0,0,0,0.75)',
           }} aria-hidden="true">
+            {/* THE TIME IS NAMED WITH ITS ZONE (Section 118). The legend previously showed no time at
+                all, so the only times on screen were the axis labels — which the library renders in
+                UTC. A bare "09:15" is ambiguous between IST and UTC, and that ambiguity is what made
+                Section 117's defect hard to see, so the zone travels with the reading. */}
             {readout ? (
               <>
+                <div style={{ color: 'var(--text-dim, var(--muted))', marginBottom: '2px' }}>
+                  {formatStamp(readout.time)}
+                  {showsClock(interval) && zoneLabel() ? ` ${zoneLabel()}` : ''}
+                </div>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   <span style={{ color: 'var(--muted)' }}>O</span>{numberFmt(readout.open)}
                   <span style={{ color: 'var(--muted)' }}>H</span>{numberFmt(readout.high)}
@@ -1194,6 +1211,10 @@ export default function PriceChart({
       }}>
         {readout ? (
           <>
+            {/* The accessible readout carries the time too, and names the zone — a screen reader
+                cannot infer it from an axis label. */}
+            <span>{formatStamp(readout.time)}
+              {showsClock(interval) && zoneLabel() ? ` ${zoneLabel()}` : ''}</span>
             <span>O {numberFmt(readout.open)}</span>
             <span>H {numberFmt(readout.high)}</span>
             <span>L {numberFmt(readout.low)}</span>
