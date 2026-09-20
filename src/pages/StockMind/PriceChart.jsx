@@ -14,6 +14,7 @@ import {
   toChartTime, sessionStarts, markerTime, timeTypesMatch,
   makeTickFormatter, makeTimeFormatter, formatStamp, zoneLabel,
 } from './chartTime.js';
+import { zoomPlan } from './chartZoom.js';
 import InfoTip from './InfoTip.jsx';
 
 /**
@@ -41,9 +42,27 @@ const ATTRIBUTION_URL = 'https://www.tradingview.com';
 
 const PREFS_KEY = 'rama.stockmind.chart';
 
-// Pixels per candle at the default zoom. Below ~6 a body stops being readable; above ~12 a deep
-// history needs too much scrolling to be useful. 8 is legible and still shows a few months of daily.
-const TARGET_BAR_PX = 8;
+/**
+ * Apply the default zoom. The DECISION lives in `chartZoom.js`, tested; this only carries it out.
+ *
+ * ONE DEFINITION — the data effect and the `reset zoom` button both call this. Two copies of the
+ * arithmetic is how they drift apart, and Section 110 had two.
+ */
+function applyLegibleZoom(chart, count, holderEl) {
+  if (!chart) return;
+  const plan = zoomPlan(count, holderEl?.clientWidth || 0);
+  if (plan.mode === 'none') return;
+  const ts = chart.timeScale();
+  try {
+    if (plan.mode === 'fit') { ts.fitContent(); return; }
+    // `barSpacing` is the library's own unit for pixels per candle, so it cannot be knocked out of
+    // shape by a width that has not settled — which is what went wrong in Section 110.
+    ts.applyOptions({ barSpacing: plan.barSpacing });
+    ts.scrollToRealTime();
+  } catch {
+    try { ts.fitContent(); } catch { /* no chart yet */ }
+  }
+}
 
 const SIGNAL_LEVELS = [
   { key: 'stopLoss',   label: 'SL',    varName: '--red',    style: LineStyle.Dashed },
@@ -424,26 +443,10 @@ export default function PriceChart({
 
     if (candles.length === 0) return;
 
-    /**
-     * ZOOM TO LEGIBLE CANDLES, NOT TO EVERY BAR (Section 110).
-     *
-     * `fitContent()` squeezes the whole series into the pane, so a deep history arrives as a smear —
-     * 4,649 bars in 900px is 0.19px per candle, the exact defect Section 79 replaced the old SVG over,
-     * reintroduced by the fit call itself. This shows the newest bars at a readable width and leaves the
-     * rest to scrolling, which is what a trading platform does on open.
-     */
-    const fitLegible = () => {
-      const width = holder.current?.clientWidth || 900;
-      const want = Math.max(40, Math.min(candles.length, Math.floor(width / TARGET_BAR_PX)));
-      try {
-        chart.timeScale().setVisibleLogicalRange({
-          from: Math.max(0, candles.length - want),
-          to: candles.length + 2,
-        });
-      } catch {
-        chart.timeScale().fitContent();
-      }
-    };
+    // ZOOM TO LEGIBLE CANDLES, NOT TO EVERY BAR (Section 110), as bar spacing rather than a
+    // width-derived range (Section 119). `applyLegibleZoom` above holds the reasoning and the only copy
+    // of the arithmetic.
+    const fitLegible = () => applyLegibleZoom(chart, candles.length, holder.current);
 
     // The DATES are part of the series identity, not just the preset name: with a hand-typed window
     // `rangeId` is null, so a key from the preset alone would keep the old zoom over a different span.
@@ -708,11 +711,7 @@ export default function PriceChart({
   const resetZoom = useCallback(() => {
     const chart = chartRef.current;
     if (!chart) return;
-    const n = candles.length;
-    const width = holder.current?.clientWidth || 900;
-    const want = Math.max(40, Math.min(n, Math.floor(width / TARGET_BAR_PX)));
-    try { chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - want), to: n + 2 }); }
-    catch { chart.timeScale().fitContent(); }
+    applyLegibleZoom(chart, candles.length, holder.current);
   }, [candles.length]);
 
   const zoomAll = useCallback(() => {

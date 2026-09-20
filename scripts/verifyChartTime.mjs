@@ -19,6 +19,7 @@ import {
   toChartTime, timeTypesMatch, sessionStarts, markerTime,
   formatStamp, zoneLabel, makeTickFormatter, makeTimeFormatter, TICK,
 } from '../src/pages/StockMind/chartTime.js';
+import { zoomPlan, visibleBars, TARGET_BAR_PX } from '../src/pages/StockMind/chartZoom.js';
 
 let pass = 0;
 let fail = 0;
@@ -184,6 +185,49 @@ check('so the session-start lookup still keys on the UTC date',
 check('which is why shifting timestamps by the offset was the wrong fix',
   openUTC === Math.floor(Date.parse('2026-09-18T03:45:00Z') / 1000));
 
+// ── The default zoom (Section 119) ────────────────────────────────────────────
+console.log('\n  candles are legible on open');
+check('the target is at least 10px per candle, or the body is not readable',
+  TARGET_BAR_PX >= 10, TARGET_BAR_PX);
+check('and no more than 20, or a deep history is all scrolling', TARGET_BAR_PX <= 20);
+
+const deep = zoomPlan(4649, 900);
+check('a deep series sets BAR SPACING rather than a bar count', deep.mode === 'spacing');
+check('at the target width', deep.barSpacing === TARGET_BAR_PX);
+check('and says the rest is scrolling', /scrolling/.test(deep.reason));
+check('4,649 bars are NOT squeezed into the pane — that was the Section 79 smear',
+  deep.mode !== 'fit');
+check('about 75 bars are on screen at 900px, not 4,649',
+  visibleBars(deep, 900) === 75, visibleBars(deep, 900));
+check('a wider pane shows more bars at the SAME candle width',
+  visibleBars(deep, 1800) === 150 && deep.barSpacing === TARGET_BAR_PX);
+
+console.log('\n  a short series fills the pane instead of hiding in a corner');
+const tiny = zoomPlan(20, 900);
+check('20 bars in 900px are shown whole', tiny.mode === 'fit');
+check('with no bar spacing to apply', tiny.barSpacing === null);
+check('and the reason gives both numbers', /20 bars/.test(tiny.reason) && /900/.test(tiny.reason));
+check('the boundary sits where the series stops fitting',
+  zoomPlan(Math.ceil((900 * 0.9) / TARGET_BAR_PX), 900).mode === 'spacing');
+check('just under it still fits',
+  zoomPlan(Math.floor((900 * 0.9) / TARGET_BAR_PX) - 1, 900).mode === 'fit');
+
+console.log('\n  an unsettled width cannot distort the candle width');
+check('an unknown width still sets the target spacing',
+  zoomPlan(500, 0).barSpacing === TARGET_BAR_PX);
+check('and does not guess a pane size', zoomPlan(500, 0).mode === 'spacing');
+check('a missing width behaves the same', zoomPlan(500).mode === 'spacing');
+check('THE SAME SERIES GIVES THE SAME CANDLE WIDTH AT 600px AND AT 900px — which is the defect',
+  zoomPlan(500, 600).barSpacing === zoomPlan(500, 900).barSpacing);
+check('no bars is no zoom, not a fit of nothing', zoomPlan(0, 900).mode === 'none');
+check('a negative count is refused', zoomPlan(-5, 900).mode === 'none');
+check('NaN is refused', zoomPlan(NaN, 900).mode === 'none');
+check('and visibleBars reports null rather than 0 for nothing to show',
+  visibleBars(zoomPlan(0, 900), 900) === null);
+check('visibleBars is null for a fit, because the answer is the whole series',
+  visibleBars(tiny, 900) === null);
+check('visibleBars needs a width', visibleBars(deep, 0) === null);
+
 // ── The guarantee, asserted against the source ────────────────────────────────
 console.log('\n  the rule stays in one place');
 const fs = await import('node:fs');
@@ -226,6 +270,22 @@ check('and names the zone beside it, so the reading is unambiguous',
 check('no timestamp is shifted to fake a local rendering',
   !/getTimezoneOffset/.test(chart) && !/getTimezoneOffset/.test(
     fs.readFileSync('src/pages/StockMind/chartTime.js', 'utf8')));
+
+console.log('\n  the zoom decision lives in one place');
+check('PriceChart imports the plan rather than recomputing it',
+  /from '\.\/chartZoom\.js'/.test(chart));
+check('and holds no copy of the target width', !/TARGET_BAR_PX/.test(chart));
+check('the default zoom is applied as barSpacing', /barSpacing: plan\.barSpacing/.test(chart));
+check('NOT as a width-derived logical range — that was the defect',
+  !/setVisibleLogicalRange\(\{\s*$/m.test(chart)
+  && !/Math\.floor\(width \/ TARGET_BAR_PX\)/.test(chart));
+check('the newest bars are scrolled into view', /scrollToRealTime\(\)/.test(chart));
+check('there is exactly one application of the plan',
+  (chart.match(/function applyLegibleZoom/g) || []).length === 1);
+check('both the data effect and reset zoom call it',
+  (chart.match(/applyLegibleZoom\(chart, candles\.length, holder\.current\)/g) || []).length === 2);
+check('the 900px width fallback that disagreed with the chart\'s own 600 is gone',
+  !/clientWidth \|\| 900/.test(chart));
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 if (fail > 0) process.exit(1);
