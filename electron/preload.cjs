@@ -193,6 +193,9 @@ const RAMA_API = {
     strategyLibrary:  (opts) => ipcRenderer.invoke('market:strategy-library', opts),
     strategyTemplate: (opts) => ipcRenderer.invoke('market:strategy-template', opts),
     costsRegistry:    (opts) => ipcRenderer.invoke('market:costs-registry', opts),
+    // Dated rates, and the news trigger that proposes a change without ever applying one (Section 116).
+    costsRates:       (opts) => ipcRenderer.invoke('market:costs-rates', opts),
+    costsWatch:       (opts) => ipcRenderer.invoke('market:costs-watch', opts),
     costsQuote:       (opts) => ipcRenderer.invoke('market:costs-quote', opts),
     // Macro transmission (Section 114). `sync` reaches the network, so it is a request, not a read.
     macroRegistry:    (opts) => ipcRenderer.invoke('market:macro-registry', opts),

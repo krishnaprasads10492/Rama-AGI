@@ -271,6 +271,22 @@ async function costsRegistry() {
   return getPath('/costs/registry');
 }
 
+// The dated rate history (Section 116). A read: it reaches no network and writes nothing.
+async function costsRates({ on = null } = {}) {
+  return getPath(`/costs/rates${on ? `?on=${encodeURIComponent(on)}` : ''}`);
+}
+
+/**
+ * Has the news changed trading charges? Master's trigger rather than a schedule.
+ *
+ * Returns a PROPOSAL. Nothing here applies a rate — `applied` is always false — so this is safe to call
+ * whenever a news batch arrives. Gated on `stockmind.request` below because `fetch` reaches the network.
+ */
+async function costsWatch({ items = null, query = undefined, fetch = false } = {}) {
+  return postPath('/costs/watch', { items, ...(query ? { query } : {}), fetch },
+    { timeout: 120000 });
+}
+
 async function costsQuote({ instrument, entryPrice, exitPrice = null, quantity,
                             side = 'long', trades = 1 } = {}) {
   return postPath('/costs/quote', { instrument, entryPrice, exitPrice, quantity, side, trades });
@@ -493,6 +509,15 @@ function register(ipcMain) {
   });
   // Fetching a dozen twelve-year series reaches the network repeatedly, so it sits on the request gate
   // beside the other fetches rather than on the read gate the measurement uses (Section 114).
+  // Reaches the news, and optionally the rate pages, so it is a request rather than a read. It still
+  // cannot change a rate: the route returns a proposal with `applied: false` (Section 116).
+  ipcMain.handle('market:costs-watch', async (_e, { user, ...body } = {}) => {
+    const denied = denyUnless(user, 'stockmind.request');
+    if (denied) return denied;
+    try { return await costsWatch(body); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+
   ipcMain.handle('market:macro-sync', async (_e, { user, ...body } = {}) => {
     const denied = denyUnless(user, 'stockmind.request');
     if (denied) return denied;
@@ -534,6 +559,7 @@ function register(ipcMain) {
     'market:strategy-library': strategyLibrary,
     'market:strategy-template': strategyTemplate,
     'market:costs-registry':  costsRegistry,
+    'market:costs-rates':     costsRates,
     'market:costs-quote':     costsQuote,
     'market:macro-registry':  macroRegistry,
     'market:macro-measure':   macroMeasure,

@@ -62,6 +62,105 @@ INSTRUMENT_LABELS = {
 
 TABLE_AS_OF = "2026-04-01"
 
+# ── Rates have a HISTORY, because they change (Section 116) ───────────────────
+#
+# Master: *"Rama should have the ability to fetch latest charges info based on any news of price changes.
+# not every day or some thing like that."*
+#
+# THE DEFECT THAT REQUIREMENT EXPOSED. A single current table means a backtest over 2023-2026 prices
+# every trade at today's rates. Options STT went 0.0625% -> 0.10% -> 0.15% of premium across two changes,
+# so a three-year options backtest was overstating early costs by more than double — and a cost error in
+# EITHER direction invalidates a verdict, because `strategy_eval` refuses anything whose edge is smaller
+# than its costs. Rates that change on news are rates with a history, and a backtest must price each
+# trade at the rate that was in force.
+#
+# EACH ENTRY IS COMPLETE, not a partial overlay on its predecessor. Duplication is the point: with a
+# partial overlay, a key someone forgot to restate silently inherits a rate from a different era, and
+# that is invisible in review.
+#
+# BEFORE THE EARLIEST ENTRY, RATES ARE DECLARED UNKNOWN rather than guessed backwards. Pre-October-2024
+# Indian rates are recoverable but this session could not source them to the precision the rest of this
+# table holds, and inventing them would be the fabrication Section 94 removed — with the added harm that
+# a plausible wrong rate is worth less than an admitted gap.
+
+EARLIEST_KNOWN = "2024-10-01"
+
+RATE_HISTORY = [
+    {
+        "from": "2024-10-01",
+        "source": ("SEBI 'true to label' circular effective 2024-10-01: options STT raised to 0.10% "
+                   "from 0.0625% and the options transaction charge cut to 0.035% from 0.0495%; futures "
+                   "STT raised to 0.02%. Corroborated by the Budget-2026 coverage, which describes the "
+                   "2026 rise as being FROM these values."),
+        "stt": {
+            EQUITY_DELIVERY: {"pct": 0.100, "side": "both", "basis": "turnover"},
+            EQUITY_INTRADAY: {"pct": 0.025, "side": "sell", "basis": "turnover"},
+            FUTURES:         {"pct": 0.020, "side": "sell", "basis": "turnover"},
+            OPTIONS:         {"pct": 0.100, "side": "sell", "basis": "premium"},
+        },
+        "exchangeTxn": {EQUITY_DELIVERY: 0.00297, EQUITY_INTRADAY: 0.00297,
+                        FUTURES: 0.00173, OPTIONS: 0.03503},
+        "stampDuty": {EQUITY_DELIVERY: 0.015, EQUITY_INTRADAY: 0.003,
+                      FUTURES: 0.002, OPTIONS: 0.003},
+        "ipft": {EQUITY_DELIVERY: 0.0001, EQUITY_INTRADAY: 0.0001,
+                 FUTURES: 0.0001, OPTIONS: 0.0005},
+        "sebiTurnoverPct": 0.0001,
+        "gstPct": 18.0,
+        "dpChargeInr": 15.0,
+    },
+    {
+        "from": "2026-04-01",
+        "source": ("Union Budget 2026, effective 2026-04-01: STT on futures raised to 0.05% from 0.02% "
+                   "and on options premium to 0.15% from 0.10%, both sell side. Cross-confirmed across "
+                   "three independent publishers."),
+        "stt": {
+            EQUITY_DELIVERY: {"pct": 0.100, "side": "both", "basis": "turnover"},
+            EQUITY_INTRADAY: {"pct": 0.025, "side": "sell", "basis": "turnover"},
+            FUTURES:         {"pct": 0.050, "side": "sell", "basis": "turnover"},
+            OPTIONS:         {"pct": 0.150, "side": "sell", "basis": "premium"},
+        },
+        "exchangeTxn": {EQUITY_DELIVERY: 0.00297, EQUITY_INTRADAY: 0.00297,
+                        FUTURES: 0.00173, OPTIONS: 0.03503},
+        "stampDuty": {EQUITY_DELIVERY: 0.015, EQUITY_INTRADAY: 0.003,
+                      FUTURES: 0.002, OPTIONS: 0.003},
+        "ipft": {EQUITY_DELIVERY: 0.0001, EQUITY_INTRADAY: 0.0001,
+                 FUTURES: 0.0001, OPTIONS: 0.0005},
+        "sebiTurnoverPct": 0.0001,
+        "gstPct": 18.0,
+        "dpChargeInr": 15.0,
+    },
+]
+
+
+def rates_on(on_date: Optional[str] = None) -> dict:
+    """
+    The rates in force on a date. `None` means the latest.
+
+    @returns the matching history entry plus `resolvedFrom`, and `unknownEra: True` when the date falls
+             before anything this table can vouch for.
+    """
+    if not on_date:
+        entry = RATE_HISTORY[-1]
+        return {**entry, "resolvedFrom": entry["from"], "unknownEra": False, "requested": None}
+    d = str(on_date)[:10]
+    chosen = None
+    for entry in RATE_HISTORY:
+        if entry["from"] <= d:
+            chosen = entry
+    if chosen is None:
+        # Not silently priced at the earliest known rates: flagged, so a verdict built on a period this
+        # table cannot vouch for says so instead of reading as measured.
+        first = RATE_HISTORY[0]
+        return {
+            **first, "resolvedFrom": first["from"], "requested": d, "unknownEra": True,
+            "warning": (f"{d} is before {EARLIEST_KNOWN}, the earliest rates this table can source. The "
+                        f"{EARLIEST_KNOWN} rates were used, and they are very likely wrong for that "
+                        f"period — Indian STT has been raised twice since 2024. Treat any cost figure "
+                        f"over that span as unverified rather than measured."),
+        }
+    return {**chosen, "resolvedFrom": chosen["from"], "requested": d, "unknownEra": False}
+
+
 SOURCES = (
     "Union Budget 2026 (effective 2026-04-01): STT on futures raised to 0.05% and on options premium "
     "to 0.15%, both sell side.",
@@ -73,49 +172,27 @@ SOURCES = (
 
 VERIFY_AT = "https://zerodha.com/charges/ and master's own contract note"
 
-# STT / CTT. `pct` is of turnover, except options where it is of PREMIUM.
-# `side`: which leg pays it.
-STT = {
-    EQUITY_DELIVERY: {"pct": 0.100, "side": "both", "basis": "turnover"},
-    EQUITY_INTRADAY: {"pct": 0.025, "side": "sell", "basis": "turnover"},
-    FUTURES:         {"pct": 0.050, "side": "sell", "basis": "turnover"},
-    OPTIONS:         {"pct": 0.150, "side": "sell", "basis": "premium"},
-}
-
-# NSE exchange transaction charges, percent of turnover (premium for options).
-EXCHANGE_TXN = {
-    EQUITY_DELIVERY: 0.00297,
-    EQUITY_INTRADAY: 0.00297,
-    FUTURES:         0.00173,
-    OPTIONS:         0.03503,
-}
-
-# SEBI turnover fee: Rs 10 per crore = 0.0001% of turnover, every instrument, every side.
-SEBI_TURNOVER_PCT = 0.0001
-
-# Investor Protection Fund Trust, percent of turnover. Small, and included precisely because omitting a
-# small real charge is a silent understatement rather than a simplification.
-IPFT_PCT = {
-    EQUITY_DELIVERY: 0.0001,
-    EQUITY_INTRADAY: 0.0001,
-    FUTURES:         0.0001,
-    OPTIONS:         0.0005,
-}
-
-# Stamp duty — BUY SIDE ONLY, uniform across states since the 2019-20 Finance Bill.
-STAMP_DUTY_PCT = {
-    EQUITY_DELIVERY: 0.015,
-    EQUITY_INTRADAY: 0.003,
-    FUTURES:         0.002,
-    OPTIONS:         0.003,
-}
-
-GST_PCT = 18.0
+# ── The current rates, as aliases onto the newest history entry ───────────────
+#
+# Derived rather than restated, so there is exactly one place a rate is written down. A second literal
+# copy of "the current rates" is a second answer waiting to disagree with the first.
+#
+# STT `pct` is of turnover, except options where it is of PREMIUM. `side` is which leg pays it.
+# Stamp duty is BUY SIDE ONLY, uniform across states since the 2019-20 Finance Bill.
+# SEBI turnover fee is Rs 10 per crore. IPFT is small and included because omitting a small real charge
+# is a silent understatement rather than a simplification.
+_CURRENT = RATE_HISTORY[-1]
+STT = _CURRENT["stt"]
+EXCHANGE_TXN = _CURRENT["exchangeTxn"]
+SEBI_TURNOVER_PCT = _CURRENT["sebiTurnoverPct"]
+IPFT_PCT = _CURRENT["ipft"]
+STAMP_DUTY_PCT = _CURRENT["stampDuty"]
+GST_PCT = _CURRENT["gstPct"]
 # GST applies to these components only. STT and stamp duty are outside GST.
 GST_APPLIES_TO = ("brokerage", "exchangeTxn", "sebiTurnover", "ipft")
 
 # Depository charge on a delivery SELL, flat per scrip regardless of quantity.
-DP_CHARGE_INR = 15.0
+DP_CHARGE_INR = _CURRENT["dpChargeInr"]
 
 
 @dataclass(frozen=True)
@@ -179,7 +256,7 @@ def _validate(instrument: str, price: float, quantity: float) -> Optional[str]:
 
 
 def order_charges(instrument: str, side: str, price: float, quantity: float,
-                  *, plan: Optional[BrokerPlan] = None) -> dict:
+                  *, plan: Optional[BrokerPlan] = None, on_date: Optional[str] = None) -> dict:
     """
     Every charge on ONE order, in rupees.
 
@@ -200,26 +277,30 @@ def order_charges(instrument: str, side: str, price: float, quantity: float,
     p = plan or DEFAULT_PLAN
     turnover = float(price) * float(quantity)
 
+    # Priced at the rates in force ON THE TRADE DATE, not today's. `on_date=None` keeps the current
+    # rates, so every existing caller is unchanged.
+    era = rates_on(on_date)
+
     brokerage = p.brokerage(instrument, turnover)
 
-    stt_spec = STT[instrument]
+    stt_spec = era["stt"][instrument]
     stt = turnover * stt_spec["pct"] / 100.0 if stt_spec["side"] in ("both", s) else 0.0
 
-    exchange = turnover * EXCHANGE_TXN[instrument] / 100.0
-    sebi = turnover * SEBI_TURNOVER_PCT / 100.0
-    ipft = turnover * IPFT_PCT[instrument] / 100.0
+    exchange = turnover * era["exchangeTxn"][instrument] / 100.0
+    sebi = turnover * era["sebiTurnoverPct"] / 100.0
+    ipft = turnover * era["ipft"][instrument] / 100.0
 
     # Buy side only. A round trip pays it once, which is why it cannot be folded into a per-side rate.
-    stamp = turnover * STAMP_DUTY_PCT[instrument] / 100.0 if s == "buy" else 0.0
+    stamp = turnover * era["stampDuty"][instrument] / 100.0 if s == "buy" else 0.0
 
     # Flat, per scrip, on a delivery sell — so it is the charge that makes a small delivery trade
     # uneconomic no matter how good the signal was.
     dp = p.dp_charge_inr if (instrument == EQUITY_DELIVERY and s == "sell") else 0.0
 
     gst_base = brokerage + exchange + sebi + ipft
-    gst = gst_base * GST_PCT / 100.0
+    gst = gst_base * era["gstPct"] / 100.0
     # DP charges attract GST too, and it is levied on the depository fee itself.
-    gst += dp * GST_PCT / 100.0
+    gst += dp * era["gstPct"] / 100.0
 
     total = brokerage + stt + exchange + sebi + ipft + stamp + dp + gst
     return {
@@ -237,6 +318,10 @@ def order_charges(instrument: str, side: str, price: float, quantity: float,
         "gst": gst,
         "total": total,
         "totalPct": total / turnover * 100.0 if turnover > 0 else None,
+        # Which rate era priced this, so a figure can always be traced to a dated source.
+        "ratesFrom": era["resolvedFrom"],
+        "ratesUnknownEra": era["unknownEra"],
+        **({"ratesWarning": era["warning"]} if era.get("warning") else {}),
         # Ordered largest first, because the useful question is which charge dominates — and for a
         # small trade the answer is brokerage, which is the one master can change by changing broker.
         "breakdown": sorted(
@@ -250,7 +335,8 @@ def order_charges(instrument: str, side: str, price: float, quantity: float,
 
 
 def round_trip_charges(instrument: str, entry_price: float, exit_price: float, quantity: float,
-                       *, plan: Optional[BrokerPlan] = None, side: str = "long") -> dict:
+                       *, plan: Optional[BrokerPlan] = None, side: str = "long",
+                       entry_date: Optional[str] = None, exit_date: Optional[str] = None) -> dict:
     """
     Both legs of one trade.
 
@@ -264,10 +350,15 @@ def round_trip_charges(instrument: str, entry_price: float, exit_price: float, q
     long_side = str(side).lower() != "short"
     open_side, close_side = ("buy", "sell") if long_side else ("sell", "buy")
 
-    a = order_charges(instrument, open_side, entry_price, quantity, plan=plan)
+    # EACH LEG IS PRICED AT ITS OWN DATE. A trade opened before a rate change and closed after it pays
+    # the old rate on the open and the new one on the close — which is exactly what happened to every
+    # position held across 2026-04-01, when futures STT went from 0.02% to 0.05% on the sell side.
+    # Pricing both legs at the entry date would understate precisely those trades.
+    a = order_charges(instrument, open_side, entry_price, quantity, plan=plan, on_date=entry_date)
     if not a.get("ok"):
         return a
-    b = order_charges(instrument, close_side, exit_price, quantity, plan=plan)
+    b = order_charges(instrument, close_side, exit_price, quantity, plan=plan,
+                      on_date=exit_date or entry_date)
     if not b.get("ok"):
         return b
 
@@ -291,6 +382,10 @@ def round_trip_charges(instrument: str, entry_price: float, exit_price: float, q
         "totalPct": total / entry_notional * 100.0 if entry_notional > 0 else None,
         # What the trade must move, in percent, before it is worth taking at all.
         "breakEvenPct": total / entry_notional * 100.0 if entry_notional > 0 else None,
+        "ratesFrom": {"entry": a["ratesFrom"], "exit": b["ratesFrom"]},
+        # Said explicitly rather than left to be noticed by comparing two strings.
+        "ratesChangedMidTrade": a["ratesFrom"] != b["ratesFrom"],
+        "ratesUnknownEra": bool(a["ratesUnknownEra"] or b["ratesUnknownEra"]),
     }
 
 

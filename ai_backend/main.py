@@ -989,6 +989,79 @@ def strategy_library_build(template_id: str, symbol: str, exchange: str = "NSE",
         return {"ok": False, "reason": str(e)}
 
 
+@app.get("/costs/rates")
+def costs_rates(on: Optional[str] = None):
+    """
+    The rates in force on a date, and the whole dated history (Section 116).
+
+    `on` omitted means today's. A date before the earliest sourced entry comes back flagged
+    `unknownEra` with a warning, rather than being priced silently at rates that did not exist yet.
+    """
+    from engine import costs
+    era = costs.rates_on(on)
+    return {
+        "ok": True,
+        "inForce": era,
+        "history": [{"from": e["from"], "source": e["source"]} for e in costs.RATE_HISTORY],
+        "earliestKnown": costs.EARLIEST_KNOWN,
+        "staleness": costs.staleness(),
+    }
+
+
+class ChargeWatchRequest(BaseModel):
+    # Supplied by the caller, or fetched here. Accepting them makes the decision testable against any
+    # news source instead of only the one Rāma happens to use.
+    items: Optional[list] = None
+    query: str = "STT securities transaction tax brokerage charges SEBI circular budget"
+    fetch: bool = False
+
+
+@app.post("/costs/watch")
+def costs_watch(req: ChargeWatchRequest):
+    """
+    Has anything in the news changed trading charges? — master's trigger, not a schedule.
+
+    NOTHING HERE WRITES A RATE. It returns a proposal: what changed, where to verify it, and the date it
+    takes effect. `applied` is always False. Master approves, and an approved change becomes a new dated
+    entry in `RATE_HISTORY` with its source — never an in-place edit of a shipped one.
+
+    `fetch=True` additionally reads the authoritative pages so master can compare without leaving the
+    screen. A page that could not be read is reported as a failure, not as agreement.
+    """
+    try:
+        from engine import charge_watch
+
+        items = req.items
+        source = "supplied by the caller"
+        if items is None:
+            # Rāma's own news, when the caller did not bring any. A failure here is reported rather than
+            # returned as an empty list, because "nothing found" and "could not look" are opposites.
+            try:
+                from engine import news
+                items = news.search(req.query) if hasattr(news, "search") else news.fetch(req.query)
+                source = "Rāma's news feed"
+            except Exception as e:
+                from engine import costs as _c
+                logger.warning(f"Charge watch could not read the news: {e}")
+                # The staleness reading travels even on failure: it is the backstop for exactly this
+                # case, where the trigger could not fire because Rāma could not look.
+                return {"ok": False, "reason": f"could not read the news: {e}",
+                        "note": "This is 'Rāma could not look', not 'nothing has changed'.",
+                        "staleness": _c.staleness()}
+
+        scan = charge_watch.scan(items)
+        fetch_text = None
+        if req.fetch:
+            from engine import providers  # reuses the one HTTP path rather than opening a second
+            fetch_text = getattr(providers, "http_get_text", None)
+        proposal = charge_watch.propose(scan["signals"], fetch_text=fetch_text)
+        return {"ok": True, "itemsFrom": source, "scan": scan, "proposal": proposal,
+                "registry": charge_watch.registry()}
+    except Exception as e:
+        logger.error(f"Charge watch failed: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e)}
+
+
 @app.get("/costs/registry")
 def costs_registry():
     """Which instruments Rāma can price, at what rates, from which source — and what it does not model."""

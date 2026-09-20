@@ -1284,6 +1284,8 @@ def _real_charges(spec: dict, trades: list, flat_drag: float) -> dict:
     notional_total = 0.0
     priced = 0
     unlotted = 0
+    spanned = 0
+    unknown_era = 0
     rows = []
     for t in trades:
         units = position_size(spec, t["entryPrice"])
@@ -1294,7 +1296,10 @@ def _real_charges(spec: dict, trades: list, flat_drag: float) -> dict:
             # be read as a free one.
             unlotted += 1
             continue
-        rt = _costs.round_trip_charges(instrument, t["entryPrice"], t["exitPrice"], tradable, side=side)
+        # Dated, so each leg is priced at the rates in force when it happened (Section 116). A backtest
+        # spanning a rate change was previously pricing every trade at today's rates.
+        rt = _costs.round_trip_charges(instrument, t["entryPrice"], t["exitPrice"], tradable, side=side,
+                                       entry_date=t.get("entryDate"), exit_date=t.get("exitDate"))
         if not rt.get("ok"):
             continue
         priced += 1
@@ -1303,8 +1308,13 @@ def _real_charges(spec: dict, trades: list, flat_drag: float) -> dict:
         # Accumulated in the loop, not zipped afterwards: `rows` skips the trades that could not be
         # lotted, so pairing it back against `trades` by position would line up the wrong entries.
         notional_total += tradable * t["entryPrice"]
+        if rt.get("ratesChangedMidTrade"):
+            spanned += 1
+        if rt.get("ratesUnknownEra"):
+            unknown_era += 1
         rows.append({"entryDate": t["entryDate"], "lots": lots, "units": tradable,
-                     "grossPnl": rt["grossPnl"], "charges": rt["total"], "netPnl": rt["netPnl"]})
+                     "grossPnl": rt["grossPnl"], "charges": rt["total"], "netPnl": rt["netPnl"],
+                     "ratesFrom": rt.get("ratesFrom")})
 
     # The flat figure is the one the CALLER actually applied, passed in rather than recomputed here. Two
     # derivations of the same number are two numbers, and they would disagree the first time a caller
@@ -1323,6 +1333,14 @@ def _real_charges(spec: dict, trades: list, flat_drag: float) -> dict:
     elif real_drag_pct is not None:
         note.append(f"The real round trip is {real_drag_pct:.3f}% against the flat model's "
                     f"{flat_drag:.2f}%, so the percentage figures above overstate the cost.")
+    if spanned:
+        note.append(f"{spanned} trades were open across a rate change, so their two legs were priced at "
+                    f"different rates — which is what actually happened to them.")
+    if unknown_era:
+        # Loudest of the notes on purpose: this is the one that makes a cost figure unverified rather
+        # than merely approximate.
+        note.append(f"{unknown_era} trades fall before the earliest rates Rāma can source, so their "
+                    f"charges are UNVERIFIED rather than measured.")
     note.append("Charges are a model of master's broker, not a quotation. Confirm against the contract "
                 "note.")
 
@@ -1333,6 +1351,8 @@ def _real_charges(spec: dict, trades: list, flat_drag: float) -> dict:
         "lotSize": lot_size,
         "tradesPriced": priced,
         "tradesBelowOneLot": unlotted,
+        "tradesSpanningRateChange": spanned,
+        "tradesInUnknownRateEra": unknown_era,
         "totalCharges": total_charges,
         "grossPnl": gross_rupees,
         "netPnl": gross_rupees - total_charges,
