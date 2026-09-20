@@ -956,6 +956,55 @@ def costs_quote(req: CostQuoteRequest):
         return {"ok": False, "reason": str(e)}
 
 
+# ── Macro transmission (spec Section 114) ─────────────────────────────────────
+
+@app.get("/macro/registry")
+def macro_registry():
+    """
+    The exposure map, the method, and what has no free series — master's transmission chain declared.
+
+    Reads as a set of HYPOTHESES. Every sign and lag is declared here before anything is measured, which
+    is what makes `/macro/measure` a pre-registered test rather than a search.
+    """
+    from engine import macro
+    return macro.registry()
+
+
+@app.post("/macro/sync")
+def macro_sync(keys: Optional[str] = None, years: int = 12):
+    """
+    Fetch and store the macro and sector series through the provider chain already in use.
+
+    Reports which tickers RESOLVED. A ticker written into the registry is not a ticker that works, and
+    "no data" must stay distinguishable from "never fetched".
+    """
+    try:
+        from engine import macro
+        wanted = [k.strip() for k in keys.split(",")] if keys else None
+        return {"ok": True, **macro.sync(wanted, years=years)}
+    except Exception as e:
+        logger.error(f"Macro sync failed: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e)}
+
+
+@app.get("/macro/measure")
+def macro_measure(only: Optional[str] = None):
+    """
+    Measure every declared link against stored history.
+
+    A link measuring opposite to its declared direction comes back `contradicted` and is NOT flipped.
+    The control results travel with the answer: if the positive control fails, nothing else here is
+    believable, and that is stated rather than left for the reader to notice.
+    """
+    try:
+        from engine import macro
+        ids = [k.strip() for k in only.split(",")] if only else None
+        return {"ok": True, **macro.measure_all(macro.load_series, only=ids)}
+    except Exception as e:
+        logger.error(f"Macro measure failed: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e)}
+
+
 @app.get("/symbols/search")
 def symbols_search(q: str, limit: int = 12):
     """

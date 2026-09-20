@@ -272,6 +272,26 @@ async function costsQuote({ instrument, entryPrice, exitPrice = null, quantity,
   return postPath('/costs/quote', { instrument, entryPrice, exitPrice, quantity, side, trades });
 }
 
+// Macro transmission (Section 114). `registry` and `measure` are reads on `stockmind.view`; `sync`
+// reaches the network for a dozen series and sits on `stockmind.request` beside the other fetches.
+
+async function macroRegistry() {
+  return getPath('/macro/registry');
+}
+
+async function macroMeasure({ only = null } = {}) {
+  const q = only ? `?only=${encodeURIComponent(Array.isArray(only) ? only.join(',') : only)}` : '';
+  return getPath(`/macro/measure${q}`);
+}
+
+async function macroSync({ keys = null, years = 12 } = {}) {
+  const q = new URLSearchParams({ years: String(years) });
+  if (keys) q.set('keys', Array.isArray(keys) ? keys.join(',') : keys);
+  // A dozen series of twelve years each is a slow call, so the timeout matches `strategyBacktest`
+  // rather than the default read timeout.
+  return postPath(`/macro/sync?${q}`, {}, { timeout: 300000 });
+}
+
 /**
  * Search the provider for an instrument (spec Section 102).
  *
@@ -467,6 +487,15 @@ function register(ipcMain) {
     try { return await strategyBacktest(body); }
     catch (err) { return { ok: false, error: err.message }; }
   });
+  // Fetching a dozen twelve-year series reaches the network repeatedly, so it sits on the request gate
+  // beside the other fetches rather than on the read gate the measurement uses (Section 114).
+  ipcMain.handle('market:macro-sync', async (_e, { user, ...body } = {}) => {
+    const denied = denyUnless(user, 'stockmind.request');
+    if (denied) return denied;
+    try { return await macroSync(body); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+
   ipcMain.handle('market:strategy-code', async (_e, { user, ...body } = {}) => {
     const denied = denyUnless(user, 'stockmind.request');
     if (denied) return denied;
@@ -501,6 +530,8 @@ function register(ipcMain) {
     'market:strategy-template': strategyTemplate,
     'market:costs-registry':  costsRegistry,
     'market:costs-quote':     costsQuote,
+    'market:macro-registry':  macroRegistry,
+    'market:macro-measure':   macroMeasure,
     'market:news':            news,
     'market:news-coverage':   newsCoverage,
     'market:derivatives':     derivatives,
