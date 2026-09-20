@@ -82,10 +82,18 @@ Usage:
 """
 
 import csv
+import json
 import math
 import sys
 
-SPEC = {spec_json}
+# PARSED, NOT PASTED AS A LITERAL. This was `SPEC = {{...}}` with the JSON written straight into the
+# file, which is valid Python only while the spec contains no booleans and no nulls. It contains both:
+# `stopPct` is `null` for a target-only strategy, and Section 115 added `instrumentDerived`. So EVERY
+# generated script for a strategy without a stop was already a NameError on `null` and nobody had run
+# one. Kept as readable JSON because that is what a human wants to read; parsed at runtime because that
+# is what Python needs. `"""` cannot appear inside JSON - a quote is escaped as \\" - so the raw string
+# cannot be terminated early.
+SPEC = json.loads(r"""{spec_json}""")
 
 '''
 

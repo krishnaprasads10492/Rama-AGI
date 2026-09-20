@@ -33,6 +33,20 @@ import json
 import math
 from typing import Callable, Optional
 
+# The real charge model (Section 113). Imported two ways because this module is loaded as
+# `engine.strategy_spec` in production and as a TOP-LEVEL `strategy_spec` by its own suite — the package
+# `__init__` pulls in numpy, which is the whole reason the tests bypass it. `costs` is stdlib-only, so
+# importing it keeps the stdlib-only guarantee that lets both halves be verified on a machine with no
+# scientific stack. If it cannot be found the real-charge block is OMITTED WITH A REASON rather than
+# silently falling back to the flat model, which would report a flattering number as if it were real.
+try:                                    # pragma: no cover - import shape, not logic
+    from engine import costs as _costs
+except Exception:                       # pragma: no cover
+    try:
+        import costs as _costs
+    except Exception:
+        _costs = None
+
 # ── Series helpers. Plain lists in, plain lists out, `None` for warm-up. ──────
 #
 # `None` rather than 0.0 or a partial average: a partial average drawn as an average is a wrong number
@@ -827,12 +841,36 @@ def validate_spec(spec: dict) -> dict:
         warnings.append(f"{trials} variants is a very wide search. The noise benchmark rises with the "
                         "count, so a wider search makes any result harder to believe, not easier.")
 
+    instrument, lot_size, instrument_derived = _normalise_instrument(
+        s, interval, max_bars, errors, warnings)
+
+    # OFFERED AND REFUSED, the same rule as model probability and news sentiment. Option charges are
+    # levied on PREMIUM, and there is no premium history: master confirmed there is no broker API
+    # (Section 114), and neither NSE bhavcopy feed gives a per-strike series this engine can read. So an
+    # options strategy can be specified and forward-tested and CANNOT be backtested. Refusing is the only
+    # honest answer — simulating spot moves while charging option rates would produce a number that looks
+    # like a result and describes nothing.
+    if instrument == "options":
+        blocked.append({
+            "id": "instrument:options",
+            "label": "Options",
+            # Key is `why`, matching the block-level entries above, so one reader handles both.
+            "why": (
+                "Option charges apply to the premium, and there is no per-strike premium history to "
+                "backtest against — the store holds spot bars only. This strategy can be specified and "
+                "watched forward, but a backtest of it would be simulating the underlying while pricing "
+                "the option, which is not a measurement of anything."),
+        })
+
     clean = {
         "name": str(s.get("name") or "Untitled strategy")[:80],
         "symbol": str(s.get("symbol") or "").upper().strip(),
         "exchange": str(s.get("exchange") or "NSE").upper().strip(),
         "interval": interval,
         "side": side,
+        "instrument": instrument,
+        "instrumentDerived": instrument_derived,
+        "lotSize": lot_size,
         "entry": {"op": combiner, "k": k, "blocks": blocks},
         "exit": {"stopPct": stop, "targetPct": target, "maxBars": max_bars, "blocks": []},
         "sizing": {"capital": capital, "riskPct": risk_pct},
@@ -852,6 +890,83 @@ def validate_spec(spec: dict) -> dict:
         "trials": trials,
         "specHash": spec_hash(clean),
     }
+
+
+INSTRUMENTS = ("equity_delivery", "equity_intraday", "futures", "options")
+
+# Intervals with no clock — a position opened on one of these bars is held overnight by definition.
+_DAILY_OR_LONGER = ("1d", "5d", "1wk", "1mo", "3mo")
+
+
+def _derive_instrument(interval: str) -> str:
+    """
+    Which charge profile a strategy implies when master has not said.
+
+    DERIVED, NOT GUESSED, and reported as derived. Daily-or-longer bars hold overnight, which is
+    delivery; intraday bars are intraday. Defaulting to a fixed value instead would charge delivery STT
+    on both sides of a 5-minute scalp, or — far worse — intraday rates on a position held for weeks,
+    which understates the real cost and flatters the result.
+    """
+    return "equity_delivery" if str(interval) in _DAILY_OR_LONGER else "equity_intraday"
+
+
+def _normalise_instrument(s: dict, interval: str, max_bars: int,
+                          errors: list, warnings: list) -> tuple[str, int, bool]:
+    """
+    @returns (instrument, lotSize, derived) — and appends any fault to `errors`/`warnings` in place.
+    """
+    raw = s.get("instrument")
+    derived = raw in (None, "")
+    instrument = _derive_instrument(interval) if derived else str(raw).strip().lower()
+
+    if instrument not in INSTRUMENTS:
+        errors.append(f"Unknown instrument {raw!r}; use one of {', '.join(INSTRUMENTS)}.")
+        instrument = _derive_instrument(interval)
+        derived = True
+    elif derived:
+        warnings.append(f"No instrument chosen, so charges are computed as {instrument} because "
+                        f"{interval} bars imply it. Set it explicitly if that is wrong — the charge "
+                        f"difference between delivery and intraday is several times over.")
+
+    # THE FLATTERING ERROR, refused. Intraday STT is 0.025% on the sell alone; delivery is 0.1% on BOTH
+    # sides. So charging intraday rates for a position the simulation can hold for weeks understates the
+    # real cost by roughly eightfold — an error that makes a result look better, which is the kind that
+    # survives review.
+    if instrument == "equity_intraday" and interval in _DAILY_OR_LONGER and max_bars != 1:
+        errors.append(
+            f"Intraday charges cannot apply to {interval} bars when the strategy may hold for "
+            f"{max_bars or 'an unlimited number of'} bars: the position is held overnight, which is a "
+            f"delivery trade. Intraday STT is a fraction of delivery STT, so this would understate the "
+            f"real cost several times over. Either set maxBars to 1 or use equity_delivery.")
+
+    if instrument == "futures":
+        warnings.append(
+            "Futures charges are applied, but the bars are the SPOT series — the store holds no futures "
+            "price history, so this treats spot moves as a proxy for the future's. The basis and the "
+            "cost of rolling at expiry are not modelled, and both are real.")
+
+    # `s.get("lotSize") or 1` would turn an explicit 0 into 1 — falsy coercion swallowing a value master
+    # actually typed, the same defect as `Number(null) === 0` in `modelRoles` (Section 112). Absent and
+    # zero are different answers and only one of them is an error.
+    raw_lot = s.get("lotSize")
+    try:
+        lot = 1 if raw_lot in (None, "") else int(raw_lot)
+    except (TypeError, ValueError):
+        errors.append("Lot size must be a whole number of units per contract.")
+        lot = 1
+    if lot < 1:
+        errors.append("Lot size must be at least 1.")
+        lot = 1
+    elif lot > 10000:
+        errors.append("A lot size above 10,000 units is not a contract Rāma knows how to price.")
+        lot = 1
+    if instrument in ("futures", "options") and lot == 1:
+        warnings.append(
+            "Lot size is 1, but futures and options trade in fixed lots — NIFTY is 75 units, and stock "
+            "contracts differ per symbol. With a lot size of 1 the position sizing will report a "
+            "quantity master cannot actually trade.")
+
+    return instrument, lot, derived
 
 
 def _normalise_costs(c: dict) -> dict:
@@ -1121,6 +1236,7 @@ def money_summary(spec: dict, trades: list, round_trip_pct: float) -> dict:
         "netPnl": equity - capital,
         "roiPct": (equity - capital) / capital * 100.0,
         "maxDrawdownPct": worst * 100.0,
+        "realCharges": _real_charges(spec, trades, round_trip_pct),
         "sizedTrades": sized,
         # Reported, not hidden: a strategy with no stop cannot be sized, so its ROI would be zero and
         # look like a flat result rather than an unanswerable question.
@@ -1132,6 +1248,100 @@ def money_summary(spec: dict, trades: list, round_trip_pct: float) -> dict:
                     f" {unsized} trades could not be sized because the strategy has no stop, so they "
                     "contribute nothing to this figure.")),
         "trades": rows,
+    }
+
+
+def _real_charges(spec: dict, trades: list, flat_drag: float) -> dict:
+    """
+    The same trades priced with the ACTUAL Indian charge model, in rupees (Section 115).
+
+    Reported BESIDE the flat-percentage figures rather than replacing them, so the difference between
+    the two is visible. That difference is the point: `costs.py` measured a ₹1,000 delivery round trip at
+    1.99% against a flat default of 0.17%, because a ₹20 brokerage and a ₹15 depository fee do not scale.
+    A cost model that quietly replaced the old number would hide by how much the old one was wrong.
+
+    LOT ROUNDING IS APPLIED HERE AND NOWHERE ELSE. `position_size` is copied verbatim into every
+    generated script by `strategy_codegen`, so it must stay self-contained and is deliberately left
+    alone. But futures and options trade in whole lots: 4 units of a 75-unit NIFTY contract is 0 lots,
+    and a strategy that sizes to 4 units is not tradeable at that capital at all. That is exactly the
+    kind of thing a retail trader discovers with real money, so it is reported rather than rounded past.
+    """
+    if _costs is None:
+        return {"ok": False, "reason": "the charge model could not be imported, so no real-rupee "
+                                       "figure is available — the percentage figures above are the "
+                                       "flat model only"}
+    instrument = spec.get("instrument") or _derive_instrument(spec.get("interval") or "1d")
+    lot_size = max(1, int(spec.get("lotSize") or 1))
+    side = spec.get("side") or "long"
+
+    if instrument == "options":
+        return {"ok": False, "instrument": instrument,
+                "reason": "options are priced on premium and there is no premium history, so a "
+                          "rupee figure here would be arithmetic on the wrong series"}
+
+    total_charges = 0.0
+    gross_rupees = 0.0
+    notional_total = 0.0
+    priced = 0
+    unlotted = 0
+    rows = []
+    for t in trades:
+        units = position_size(spec, t["entryPrice"])
+        lots = units // lot_size
+        tradable = lots * lot_size
+        if tradable <= 0:
+            # Not a zero-cost trade: a trade that cannot be placed. Counted separately so it can never
+            # be read as a free one.
+            unlotted += 1
+            continue
+        rt = _costs.round_trip_charges(instrument, t["entryPrice"], t["exitPrice"], tradable, side=side)
+        if not rt.get("ok"):
+            continue
+        priced += 1
+        total_charges += rt["total"]
+        gross_rupees += rt["grossPnl"]
+        # Accumulated in the loop, not zipped afterwards: `rows` skips the trades that could not be
+        # lotted, so pairing it back against `trades` by position would line up the wrong entries.
+        notional_total += tradable * t["entryPrice"]
+        rows.append({"entryDate": t["entryDate"], "lots": lots, "units": tradable,
+                     "grossPnl": rt["grossPnl"], "charges": rt["total"], "netPnl": rt["netPnl"]})
+
+    # The flat figure is the one the CALLER actually applied, passed in rather than recomputed here. Two
+    # derivations of the same number are two numbers, and they would disagree the first time a caller
+    # used a cost model the spec did not describe.
+    capital = float(spec["sizing"]["capital"])
+    flat_drag = float(flat_drag)
+    real_drag_pct = (total_charges / notional_total * 100.0) if notional_total > 0 else None
+
+    note = [f"Priced as {instrument} with a lot size of {lot_size}."]
+    if unlotted:
+        note.append(f"{unlotted} of {len(trades)} trades could not be placed at all: the risk budget "
+                    f"sized them below one lot of {lot_size} units. They are NOT counted as free trades.")
+    if real_drag_pct is not None and real_drag_pct > flat_drag:
+        note.append(f"The real round trip is {real_drag_pct:.3f}% of notional against the flat model's "
+                    f"{flat_drag:.2f}%, so the percentage figures above UNDERSTATE the cost.")
+    elif real_drag_pct is not None:
+        note.append(f"The real round trip is {real_drag_pct:.3f}% against the flat model's "
+                    f"{flat_drag:.2f}%, so the percentage figures above overstate the cost.")
+    note.append("Charges are a model of master's broker, not a quotation. Confirm against the contract "
+                "note.")
+
+    return {
+        "ok": priced > 0,
+        "reason": None if priced else "no trade could be sized to a whole lot",
+        "instrument": instrument,
+        "lotSize": lot_size,
+        "tradesPriced": priced,
+        "tradesBelowOneLot": unlotted,
+        "totalCharges": total_charges,
+        "grossPnl": gross_rupees,
+        "netPnl": gross_rupees - total_charges,
+        "roiPct": (gross_rupees - total_charges) / capital * 100.0 if capital > 0 else None,
+        "realRoundTripPct": real_drag_pct,
+        "flatModelRoundTripPct": flat_drag,
+        "note": " ".join(note),
+        "provenance": _costs.provenance(),
+        "trades": rows[:200],
     }
 
 

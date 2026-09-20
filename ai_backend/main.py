@@ -776,8 +776,53 @@ def strategy_backtest(req: StrategyBacktestRequest):
         ]
 
         c = clean["costs"]
+
+        # ── The verdict is judged against REAL charges where they can be computed (Section 115) ──
+        #
+        # `CostModel` speaks only in percentages, so the bridge needs a representative notional: the
+        # quantity this strategy would actually take at the last stored price. Without one, a flat ₹20
+        # brokerage cannot be expressed at all, and the flat default flatters small trades by the exact
+        # amount that kills them.
+        #
+        # DECOMPOSITION, stated rather than blended: `costs.py` covers brokerage and every statutory
+        # charge, so it replaces the COMMISSION term. Slippage and spread are NOT broker charges and
+        # `costs.py` does not model them, so master's own estimates for those stand untouched.
+        cost_basis = {"source": "flat", "why": "no instrument on the spec, so the flat percentages stand"}
+        commission = c["commissionPct"]
+        try:
+            from engine import costs as costs_mod
+            instrument = clean.get("instrument")
+            rep_price = float(bars[-1]["close"])
+            raw_qty = strategy_spec.position_size(clean, rep_price)
+            lot = max(1, int(clean.get("lotSize") or 1))
+            rep_qty = (raw_qty // lot) * lot
+            if instrument and instrument != "options" and rep_qty > 0:
+                eff = costs_mod.effective_round_trip_pct(instrument, rep_price, rep_qty)
+                if eff.get("ok"):
+                    commission = eff["pct"] / 2.0     # round_trip = 2*(comm + slip) + spread
+                    cost_basis = {
+                        "source": "measured", "instrument": instrument,
+                        "roundTripPct": eff["pct"],
+                        "assumedPrice": eff["assumedPrice"], "assumedQuantity": eff["assumedQuantity"],
+                        "assumedNotional": eff["assumedNotional"],
+                        "why": ("brokerage and statutory charges computed for this instrument at the "
+                                "quantity the strategy would take; slippage and spread remain master's "
+                                "own estimates because they are not broker charges"),
+                        "provenance": eff["provenance"],
+                    }
+            elif instrument == "options":
+                cost_basis = {"source": "flat", "instrument": instrument,
+                              "why": "options are priced on premium and there is no premium history"}
+            elif instrument and rep_qty <= 0:
+                cost_basis = {"source": "flat", "instrument": instrument,
+                              "why": (f"the risk budget sizes below one lot of {lot} units at "
+                                      f"{rep_price:g}, so there is no quantity to price charges on")}
+        except Exception as e:                       # a charge model fault must not lose the backtest
+            logger.warning(f"Real charge basis unavailable: {e}")
+            cost_basis = {"source": "flat", "why": f"charge model unavailable: {e}"}
+
         costs = strategy_eval.CostModel(
-            commission_pct=c["commissionPct"], slippage_pct=c["slippagePct"],
+            commission_pct=commission, slippage_pct=c["slippagePct"],
             spread_pct=c["spreadPct"],
         )
         variants = strategy_spec.expand_sweep(clean)
@@ -814,6 +859,9 @@ def strategy_backtest(req: StrategyBacktestRequest):
                        "firstBar": bars[0]["date"], "lastBar": bars[-1]["date"]},
             "holdoutTrades": holdout_trades,
             "money": money,
+            # Which cost assumption produced the verdict. A verdict without this is a verdict whose
+            # most consequential input is invisible.
+            "costBasis": cost_basis,
         }
     except Exception as e:
         logger.error(f"Strategy backtest failed: {e}", exc_info=True)
@@ -858,6 +906,39 @@ def strategy_code(req: StrategyCodeRequest):
 # 64 assertions and was reachable from nothing — no route, no IPC, no caller — so the harness that
 # decides whether a strategy found an edge sat outside the product from the day it was written. A
 # library nobody can open is the same defect with a different module name.
+
+@app.get("/strategy/instruments")
+def strategy_instruments():
+    """
+    The instrument types, for master's per-instrument tabs (Section 115).
+
+    Carries `backtestable` per instrument, because a tab that looks identical to the others while being
+    unable to produce a verdict is the worst of the four. Options say so on the tab itself.
+    """
+    from engine import costs, strategy_spec
+    labels = costs.INSTRUMENT_LABELS
+    return {
+        "ok": True,
+        "instruments": [
+            {
+                "id": i,
+                "label": labels.get(i, i),
+                "backtestable": i != "options",
+                "why": (None if i != "options" else
+                        "Option charges apply to the premium and there is no per-strike premium "
+                        "history, so a strategy here can be specified and watched forward but not "
+                        "backtested."),
+                "needsLotSize": i in ("futures", "options"),
+                "sttPct": costs.STT[i]["pct"], "sttSide": costs.STT[i]["side"],
+                "sttBasis": costs.STT[i]["basis"],
+            }
+            for i in strategy_spec.INSTRUMENTS
+        ],
+        "derivation": ("When no instrument is chosen, daily-or-longer bars are priced as delivery and "
+                       "intraday bars as intraday, and the spec records that it was derived."),
+        "provenance": costs.provenance(),
+    }
+
 
 @app.get("/strategy/library")
 def strategy_library_catalogue():

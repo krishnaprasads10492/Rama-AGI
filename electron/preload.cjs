@@ -188,6 +188,8 @@ const RAMA_API = {
     strategyCode:     (opts) => ipcRenderer.invoke('market:strategy-code', opts),
     // The literature and the charge model (Section 113). Reads: a catalogue, a template completed into
     // a spec, and arithmetic over published rates. A verdict still comes only from strategyBacktest.
+    // Instrument types for the per-instrument tabs (Section 115). Carries `backtestable` per type.
+    strategyInstruments: (opts) => ipcRenderer.invoke('market:strategy-instruments', opts),
     strategyLibrary:  (opts) => ipcRenderer.invoke('market:strategy-library', opts),
     strategyTemplate: (opts) => ipcRenderer.invoke('market:strategy-template', opts),
     costsRegistry:    (opts) => ipcRenderer.invoke('market:costs-registry', opts),

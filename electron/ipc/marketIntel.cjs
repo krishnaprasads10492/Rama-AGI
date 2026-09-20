@@ -249,6 +249,10 @@ async function strategyCode({ spec, verdict = null, trials = 1 } = {}) {
 // time and none produces a verdict — `strategyBacktest` remains the only way to get one, so a library
 // template is judged by exactly the same harness as a hand-built strategy.
 
+async function strategyInstruments() {
+  return getPath('/strategy/instruments');
+}
+
 async function strategyLibrary() {
   return getPath('/strategy/library');
 }
@@ -526,6 +530,7 @@ function register(ipcMain) {
     'market:symbol-search':   symbolSearch,
     'market:strategy-blocks': strategyBlocks,
     'market:strategy-validate': strategyValidate,
+    'market:strategy-instruments': strategyInstruments,
     'market:strategy-library': strategyLibrary,
     'market:strategy-template': strategyTemplate,
     'market:costs-registry':  costsRegistry,
