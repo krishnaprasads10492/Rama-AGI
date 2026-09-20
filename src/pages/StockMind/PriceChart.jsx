@@ -15,6 +15,8 @@ import {
   makeTickFormatter, makeTimeFormatter, formatStamp, zoneLabel,
 } from './chartTime.js';
 import { zoomPlan } from './chartZoom.js';
+import * as DRAW from './chartDrawings.js';
+import { createDrawingLayer } from './ChartDrawingLayer.js';
 import InfoTip from './InfoTip.jsx';
 
 /**
@@ -186,6 +188,9 @@ export default function PriceChart({
   coverage = null,          // {first, last} stored bar dates, so the picker has real bounds
   chartId = 'chart',        // so two charts on one screen do not share input ids
   basePrice = null,         // master's average cost, for the baseline chart's zero line
+  // ── Section 121 ──
+  fillHeight = false,       // size to the container instead of the `height` prop — for a resizable panel
+  onDrawingsChange = null,  // notified when master adds or removes a mark, for a count elsewhere
 }) {
   const holder = useRef(null);
   const chartRef = useRef(null);
@@ -197,6 +202,19 @@ export default function PriceChart({
   const linesRef = useRef([]);
   const fitKeyRef = useRef(null);
   const savedRangeRef = useRef(null);
+
+  // ── Drawings (Section 121) ─────────────────────────────────────────────────
+  const shellRef = useRef(null);
+  const layerRef = useRef(null);
+  const drawStateRef = useRef({});
+  const draftRef = useRef(null);
+  const [tool, setTool] = useState(null);            // null means the crosshair, not a tool
+  const [drawings, setDrawings] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const [drawOpen, setDrawOpen] = useState(false);
+  const [measured, setMeasured] = useState(null);
+  const [fitted, setFitted] = useState(0);           // container height when `fillHeight`
 
   const [readout, setReadout] = useState(null);
   const [layers, setLayers] = useState({ fills: true, levels: true, cone: true });
@@ -228,6 +246,45 @@ export default function PriceChart({
   }, [chartType, scaleMode, enabled, volOn]);
 
   const isIntraday = showsClock(interval);
+
+  // ── Drawings: loaded per SYMBOL, so a level survives a timeframe change ────
+  useEffect(() => {
+    const loaded = DRAW.load(symbol);
+    setDrawings(loaded);
+    setSelectedId(null);
+    setDraft(null);
+    setMeasured(null);
+    if (onDrawingsChange) onDrawingsChange(loaded.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol]);
+
+  // Persisted on change rather than on unmount: a crash or a closed window must not lose master's work.
+  useEffect(() => {
+    if (!symbol) return;
+    DRAW.save(symbol, drawings);
+    if (onDrawingsChange) onDrawingsChange(drawings.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawings, symbol]);
+
+  // The layer reads this ref, so a redraw never waits on a React render.
+  useEffect(() => {
+    const el = holder.current;
+    drawStateRef.current = {
+      drawings: drawings.map((d) => DRAW.placed(d, isIntraday)).filter(Boolean),
+      draft: draft ? DRAW.placed(draft, isIntraday) : null,
+      selectedId,
+      intraday: isIntraday,
+      theme: el ? readTheme(el) : {},
+      measureBars: measured?.bars ?? null,
+    };
+    layerRef.current?.redraw();
+  }, [drawings, draft, selectedId, isIntraday, measured]);
+
+  const commit = useCallback((d) => {
+    if (!d) return;
+    if (DRAW.TOOLS[d.tool]?.transient) return;       // a measure is read, never kept
+    setDrawings((list) => DRAW.add(list, d));
+  }, []);
   const available = useMemo(() => overlaysFor(isIntraday), [isIntraday]);
 
   // An overlay that is only meaningful intraday must not stay silently active on a daily chart. It
@@ -266,7 +323,20 @@ export default function PriceChart({
   // first visible close — which turns the chart into "the move since this window opened".
   const baseValue = finite(basePrice) ? basePrice : (candles[0]?.close ?? 0);
 
-  const effectiveHeight = full ? Math.max(360, window.innerHeight - 180) : height;
+  /**
+   * THE CHART CAN NOW FILL ITS CONTAINER (Section 121).
+   *
+   * The workspace panel is 400px tall and passed a hard `height={260}`, so maximising the panel widened
+   * the chart and never heightened it — the chart's own `ResizeObserver` only ever applied width. With
+   * `fillHeight` the shell is a flex column, the canvas holder takes the remaining space, and the
+   * measured container height drives the chart.
+   *
+   * `fitted` is only trusted once it is a usable size: before layout settles it is 0, and falling back to
+   * `height` means a chart that is briefly the wrong size rather than one that is zero pixels tall.
+   */
+  const effectiveHeight = full
+    ? Math.max(360, window.innerHeight - 180)
+    : (fillHeight && fitted > 120 ? fitted : height);
 
   // ── Create once. Recreating per render would throw away master's zoom on every poll. ────────
   //
@@ -368,6 +438,19 @@ export default function PriceChart({
     });
     ro.observe(holder.current);
     chart.applyOptions({ width: holder.current.clientWidth || 600 });
+
+    // THE FIRST PRIMITIVE RĀMA HAS. Section 120 found the whole plugin surface unused; drawings are what
+    // it was for. The layer reads live state on every draw, so nothing here has to be re-attached when
+    // master adds a mark.
+    try {
+      const layer = createDrawingLayer(() => drawStateRef.current);
+      price.attachPrimitive(layer);
+      layerRef.current = layer;
+    } catch (err) {
+      // A chart without drawings is still a chart. Reported rather than silently absent.
+      console.warn(`[PriceChart] drawing layer unavailable: ${err.message}`);
+      layerRef.current = null;
+    }
 
     chart.subscribeCrosshairMove((param) => {
       if (!param?.time || !param.seriesData) { setReadout(null); return; }
@@ -805,6 +888,116 @@ export default function PriceChart({
     }
   }, [symbol, interval]);
 
+  /**
+   * Pointer handling for the drawing tools.
+   *
+   * ON THE HOLDER, NOT THE DOCUMENT, and only while a tool is active — so the chart's own pan and zoom
+   * keep working whenever master is not drawing. `handleScroll`/`handleScale` are switched off for the
+   * duration, because a drag that both draws a line and pans the chart produces neither.
+   *
+   * A one-point tool commits on mouse DOWN; a two-point tool tracks a draft until mouse UP. There is no
+   * click-click mode: a drag is unambiguous, and a two-click tool leaves the chart in a state where the
+   * next click anywhere means something master may not remember arming.
+   */
+  const pointer = useRef(null);
+
+  useEffect(() => {
+    const el = holder.current;
+    const chart = chartRef.current;
+    const layer = layerRef.current;
+    if (!el || !chart || !layer) return undefined;
+
+    // No tool: the chart behaves exactly as it did, and a click selects or deselects a mark.
+    const rect = () => el.getBoundingClientRect();
+
+    const down = (e) => {
+      if (e.button !== 0) return;
+      const r = rect();
+      const x = e.clientX - r.left;
+      const y = e.clientY - r.top;
+
+      if (!tool) {
+        const hit = DRAW.hitTest(drawStateRef.current.drawings, { x, y },
+          (p) => layer.project(p), { tol: 6, width: r.width });
+        setSelectedId(hit ? hit.id : null);
+        return;
+      }
+      const at = layer.unproject(x, y);
+      if (!at) return;                                // off the data: nothing to anchor to
+      const def = DRAW.TOOLS[tool];
+      if (def.points === 1) {
+        const text = tool === 'text'
+          // The only prompt in the chart, and it is unavoidable: a note with no text is not a note. An
+          // inline editor is the better answer and is recorded as the next step.
+          ? (window.prompt('Note:') || '').trim()
+          : null;
+        if (tool === 'text' && !text) { setTool(null); return; }
+        commit(DRAW.makeDrawing(tool, [at], { text }));
+        setTool(null);
+        return;
+      }
+      chart.applyOptions({ handleScroll: false, handleScale: false });
+      pointer.current = { from: at, fromX: x };
+      setDraft(DRAW.makeDrawing(tool, [at, at]));
+    };
+
+    const move = (e) => {
+      if (!pointer.current) return;
+      const r = rect();
+      const x = e.clientX - r.left;
+      const to = layer.unproject(x, e.clientY - r.top);
+      if (!to) return;
+      const d = DRAW.makeDrawing(tool, [pointer.current.from, to]);
+      setDraft(d);
+      if (tool === 'measure' && d) {
+        // Bars from the chart's own logical scale, never from elapsed time — an intraday span crosses
+        // overnight gaps in which no bars exist.
+        const a = layer.logicalAt(pointer.current.fromX);
+        const b = layer.logicalAt(x);
+        const bars = (a !== null && b !== null) ? b - a : null;
+        setMeasured(DRAW.measurement(d.points[0], d.points[1], bars));
+      }
+    };
+
+    const up = () => {
+      if (!pointer.current) return;
+      pointer.current = null;
+      chart.applyOptions({ handleScroll: true, handleScale: true });
+      setDraft((d) => {
+        if (d) commit(d);
+        return null;
+      });
+      // The measure reading survives the drag that produced it, so master can read it after letting go.
+      setTool((t) => (t === 'measure' ? t : null));
+    };
+
+    el.addEventListener('mousedown', down);
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    return () => {
+      el.removeEventListener('mousedown', down);
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, commit, chartType, candles.length]);
+
+  // `fillHeight`: measure the shell and let the chart take what is left below the toolbars.
+  useEffect(() => {
+    if (!fillHeight) return undefined;
+    const el = shellRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => {
+      const h = el.clientHeight;
+      const used = (holder.current?.offsetTop ?? 0) - (el.offsetTop ?? 0);
+      // Whatever the toolbars did not take, minus the notes below the canvas.
+      const avail = Math.floor(h - used - 28);
+      if (avail > 120) setFitted(avail);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fillHeight]);
+
   // A menu that only closes by clicking its own button sits over the chart master is trying to read.
   useEffect(() => {
     if (!menuOpen && !viewOpen) return undefined;
@@ -841,6 +1034,27 @@ export default function PriceChart({
     }
     if (k === 'r') { resetZoom(); e.preventDefault(); return; }
     if (k === 'v') { setVolOn((v) => !v); e.preventDefault(); return; }
+    // Drawing keys. Every one is checked against the chart-type and view keys by the suite, so a tool
+    // shortcut can never silently steal `1`-`6`, `f`, `l`, `r` or `v`.
+    const td = DRAW.TOOL_IDS.find((id) => DRAW.TOOLS[id].key === k);
+    if (td) { setTool((t) => (t === td ? null : td)); e.preventDefault(); return; }
+    if (k === 'delete' || k === 'backspace') {
+      if (selectedId) {
+        setDrawings((l) => DRAW.remove(l, selectedId));
+        setSelectedId(null);
+        e.preventDefault();
+      }
+      return;
+    }
+    if (k === 'z') { setDrawings((l) => DRAW.undo(l)); e.preventDefault(); return; }
+    if (k === 'escape' && (tool || draft)) {
+      // Escape abandons the tool and any half-drawn mark before it reaches fullscreen or a menu.
+      setTool(null);
+      setDraft(null);
+      pointer.current = null;
+      e.preventDefault();
+      return;
+    }
     if (k === 'escape' && full) { setFull(false); e.preventDefault(); }
   };
 
@@ -879,12 +1093,14 @@ export default function PriceChart({
       position: 'fixed', inset: 0, zIndex: 900, background: 'var(--bg, #0b0e14)',
       padding: '12px 16px', overflow: 'auto',
     }
-    : {};
+    // A flex column so the canvas can take what the toolbars leave. `minHeight: 0` is load-bearing: a
+    // flex child without it is sized by its content and the measurement below would never shrink.
+    : (fillHeight ? { height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' } : {});
 
   return (
     // The OUTER div owns the keyboard, not the document. A document-level listener would swallow
     // "l" and "r" while master types a symbol into the field above.
-    <div style={shell} onKeyDown={onKeyDown} tabIndex={0} role="group"
+    <div ref={shellRef} style={shell} onKeyDown={onKeyDown} tabIndex={0} role="group"
          aria-label={`Price chart for ${symbol || 'the selected symbol'}. `
            + 'Press 1 to 6 for chart type, L for log scale, V for volume, R to reset zoom, '
            + 'F for fullscreen.'}>
@@ -933,6 +1149,84 @@ export default function PriceChart({
                 title="Save the chart canvas as a PNG. The toolbars and notes are not in the image.">
           ⤓ png
         </button>
+
+        {/* ── DRAWING TOOLS (Section 121) ──────────────────────────────────────────────────────
+            Master's OWN marks, in one colour that is not any of Rāma's, so his reasoning stays
+            distinguishable from the engine's. Collapsed into a menu for the same reason the appearance
+            controls are: eight more always-visible buttons above a 400px chart is its own defect. */}
+        <div style={{ position: 'relative' }}>
+          <button type="button" style={chip(!!tool || drawings.length > 0)}
+                  aria-expanded={drawOpen} aria-haspopup="true"
+                  onClick={() => { setDrawOpen((v) => !v); setMenuOpen(false); setViewOpen(false); }}
+                  title="Your own lines, zones and notes. Stored per symbol, so they survive an interval change.">
+            ✎ draw{tool ? `: ${DRAW.TOOLS[tool].label}` : ''}
+            {drawings.length > 0 ? ` (${drawings.length})` : ''} ▾
+          </button>
+          {drawOpen && (
+            <div style={{
+              position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: '4px',
+              background: 'var(--panel, #131722)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius, 6px)', padding: '6px', minWidth: '260px',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+            }} role="group" aria-label="Drawing tools">
+              <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '2px 6px 4px' }}>
+                TOOL — click once to arm, drag on the chart
+              </div>
+              {DRAW.TOOL_IDS.map((id) => (
+                <button key={id} type="button"
+                        onClick={() => setTool((t) => (t === id ? null : id))}
+                        aria-pressed={tool === id}
+                        style={{
+                          display: 'block', width: '100%', textAlign: 'left',
+                          padding: '4px 6px', fontSize: '12.5px', cursor: 'pointer',
+                          background: tool === id
+                            ? 'color-mix(in srgb, var(--magenta) 18%, transparent)' : 'transparent',
+                          border: 'none', borderRadius: '4px',
+                          color: tool === id ? 'var(--text)' : 'var(--text-dim, var(--muted))',
+                        }}
+                        title={DRAW.TOOLS[id].hint}>
+                  {DRAW.TOOLS[id].label}
+                  <span style={{ float: 'right', color: 'var(--muted)', fontSize: '12px' }}>
+                    {DRAW.TOOLS[id].key}
+                  </span>
+                </button>
+              ))}
+              <div style={{ display: 'flex', gap: '4px', padding: '6px 4px 2px',
+                borderTop: '1px solid var(--border)', marginTop: '4px' }}>
+                <button type="button" style={seg(false)} onClick={() => setTool(null)}
+                        title="Back to the crosshair (Escape)">✕ done</button>
+                <button type="button" style={seg(false)}
+                        onClick={() => setDrawings((l) => DRAW.undo(l))}
+                        title="Remove the most recent unlocked mark (z)">↶ undo</button>
+                {selectedId && (
+                  <>
+                    <button type="button" style={seg(false)}
+                            onClick={() => { setDrawings((l) => DRAW.remove(l, selectedId));
+                              setSelectedId(null); }}
+                            title="Delete the selected mark (Delete)">🗑 delete</button>
+                    <button type="button" style={seg(false)}
+                            onClick={() => setDrawings((l) => DRAW.toggleLock(l, selectedId))}
+                            title="A locked mark cannot be selected, deleted by undo, or cleared">
+                      🔒 lock
+                    </button>
+                  </>
+                )}
+                {drawings.length > 0 && (
+                  <button type="button" style={seg(false)}
+                          onClick={() => { setDrawings((l) => DRAW.clear(l)); setSelectedId(null); }}
+                          title="Remove every unlocked mark on this symbol. Locked ones survive.">
+                    clear
+                  </button>
+                )}
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '4px 6px 2px',
+                lineHeight: 1.5 }}>
+                Your marks, not Rāma&rsquo;s — stored per symbol and anchored to time and price, so they
+                stay put through a zoom, a window change or a different interval.
+              </div>
+            </div>
+          )}
+        </div>
         <button type="button" onClick={() => setFull((v) => !v)} style={chip(full)}
                 aria-pressed={full}
                 title={full ? 'Leave fullscreen (f or Escape)' : 'Fill the window (f)'}>
@@ -1233,7 +1527,10 @@ export default function PriceChart({
           </div>
         )}
         <>
-          <div ref={holder} style={{ width: '100%', height: effectiveHeight }}
+          {/* The cursor states which mode the chart is in. A chart that draws on drag while still
+              showing a grab cursor is a chart master cannot predict. */}
+          <div ref={holder} style={{ width: '100%', height: effectiveHeight,
+            cursor: tool ? 'crosshair' : undefined }}
                role="img"
                aria-label={`${CHART_TYPES.find((t) => t.id === chartType)?.label || 'Candlestick'}`
                  + ` chart for ${symbol || 'the selected symbol'}, `
@@ -1259,6 +1556,18 @@ export default function PriceChart({
                 all, so the only times on screen were the axis labels — which the library renders in
                 UTC. A bare "09:15" is ambiguous between IST and UTC, and that ambiguity is what made
                 Section 117's defect hard to see, so the zone travels with the reading. */}
+            {tool && (
+              <div style={{ color: 'var(--magenta)', marginBottom: '2px' }}>
+                {DRAW.TOOLS[tool].label}: {DRAW.TOOLS[tool].points === 1
+                  ? 'click to place' : 'drag to draw'} · Escape to cancel
+              </div>
+            )}
+            {measured && (
+              <div style={{ color: measured.up ? 'var(--green)' : 'var(--red)',
+                marginBottom: '2px', fontWeight: 700 }}>
+                {measured.text}
+              </div>
+            )}
             {chartType === 'heikin' && (
               // The warning rides on the chart, not in a tooltip on the menu item that selected it —
               // master will have forgotten the tooltip by the time he reads a level off a body.

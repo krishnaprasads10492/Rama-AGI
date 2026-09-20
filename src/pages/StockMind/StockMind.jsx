@@ -841,6 +841,10 @@ far as the provider allows, which for intraday is a few days to two years.">
                                             chartId="sm-ws-chart"
                                             busy={barsBusy} onFetch={() => loadBars(true)}
                                             basePrice={held?.avgCost ?? null}
+                                            // FILLS THE PANEL instead of a hard 260px (Section 121).
+                                            // The panel is resizable and maximisable; a fixed height
+                                            // meant widening it worked and heightening it did nothing.
+                                            fillHeight
                                             height={260}
                                             cone={coneOn ? cone : null} />,
                 },
