@@ -324,12 +324,25 @@ def assess_levels(symbol: str, exchange: str = "NSE", interval: str = "1d",
 def forecast(symbol: str, exchange: str = "NSE", horizon: str = "swing",
              probability: Optional[float] = None, stop: Optional[float] = None,
              target: Optional[float] = None, entry: Optional[float] = None,
-             lookback: int = DEFAULT_LOOKBACK) -> dict:
+             lookback: int = DEFAULT_LOOKBACK, interval: Optional[str] = None,
+             bars: Optional[int] = None) -> dict:
     """
-    The composed call the chart uses: cone plus risk ruler for one named horizon.
+    The composed call the chart uses: cone plus risk ruler.
 
     Entitlement is read from the training record, not assumed — the same source Section 75 uses,
     so the chart and the alerts cannot disagree about whether a model may speak.
+
+    `interval` OVERRIDES THE HORIZON'S OWN INTERVAL, and it exists because of a real defect
+    (Section 117). Only two intervals are fitted — 60m and 1d — but the chart can display any of
+    nine. The caller used to map ONLY `60m` to the intraday horizon and everything else to swing,
+    so a 30m chart got a cone measured on DAILY bars: the daily cone carries date strings while
+    30m candles carry UTC epoch seconds, and one chart cannot hold both time types. Section 110
+    made 30m the default interval, which turned that latent mismatch into a projection that always
+    failed.
+
+    ENTITLEMENT IS PER FITTED HORIZON, so an interval no horizon was fitted on cannot tilt the
+    centre — reported rather than silently borrowed from a horizon that was fitted on different
+    bars. The WIDTH is still measured on the interval asked for, and that remains a fact.
     """
     from .alerts import model_entitlement
     from . import horizons as _h
@@ -338,15 +351,40 @@ def forecast(symbol: str, exchange: str = "NSE", horizon: str = "swing",
     if h is None:
         return {"ok": False, "reason": f"unknown horizon {horizon!r}",
                 "horizons": list(_h.HORIZONS)}
-    ent = model_entitlement(h.name)
 
-    cone = project(symbol, exchange, h.interval, h.bars, probability,
+    use_interval = str(interval or h.interval).strip() or h.interval
+    use_bars = int(bars or h.bars)
+    fitted = use_interval == h.interval
+
+    ent = model_entitlement(h.name)
+    if not fitted:
+        # Only `entitled` is overridden, and the rest of the record is preserved rather than
+        # rebuilt — its shape belongs to `alerts`, and a second construction of it here would be a
+        # second definition free to drift.
+        ent = {
+            **ent,
+            "entitled": False,
+            "intervalMismatch": {
+                "asked": use_interval,
+                "fittedOn": h.interval,
+                "why": (f"No model is fitted on {use_interval} bars — the fitted horizons use "
+                        f"{', '.join(sorted({x.interval for x in _h.HORIZONS.values()}))} — so the "
+                        f"centre line stays flat. The cone's WIDTH is measured from {use_interval} "
+                        f"bars and is unaffected."),
+            },
+        }
+
+    cone = project(symbol, exchange, use_interval, use_bars, probability,
                    bool(ent.get("entitled")), lookback)
-    ruler = assess_levels(symbol, exchange, h.interval, stop, target, h.bars, entry, lookback)
+    ruler = assess_levels(symbol, exchange, use_interval, stop, target, use_bars, entry, lookback)
 
     return {
         "symbol": str(symbol or "").upper(), "exchange": exchange,
-        "horizon": h.describe(), "entitlement": ent,
+        # The horizon as asked, plus what was ACTUALLY measured. Reporting only the horizon would
+        # describe 1d bars while the numbers came from 30m ones.
+        "horizon": {**h.describe(), "measuredInterval": use_interval,
+                    "measuredBars": use_bars, "fittedOnThisInterval": fitted},
+        "entitlement": ent,
         "cone": cone, "risk": ruler,
         "caveat": (
             "The WIDTH of this cone is measured from this instrument's own volatility and is a "

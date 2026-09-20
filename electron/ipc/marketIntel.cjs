@@ -450,10 +450,21 @@ async function explainCorrelations({ symbol, exchange = 'NSE', against = null,
 
 // ─── Projection cone and risk ruler (Section 78) ─────────────────────────────
 
+/**
+ * `interval` asks for the cone on the bars the chart is actually showing (Section 117).
+ *
+ * Without it the horizon decided the interval, and only `60m` mapped to an intraday horizon — so a
+ * 30m chart received a cone measured on DAILY bars, whose date-string times cannot share a chart with
+ * 30m epoch-second times. Section 110 made 30m the default, which turned that into a projection that
+ * always failed.
+ */
 async function forecast({ symbol, exchange = 'NSE', horizon = 'swing', probability = null,
-  stop = null, target = null, entry = null, lookback = 120 } = {}) {
+  stop = null, target = null, entry = null, lookback = 120,
+  interval = null, bars = null } = {}) {
   const q = [`exchange=${encodeURIComponent(exchange)}`,
     `horizon=${encodeURIComponent(horizon)}`, `lookback=${Number(lookback) || 120}`];
+  if (interval) q.push(`interval=${encodeURIComponent(interval)}`);
+  if (Number.isFinite(Number(bars)) && Number(bars) > 0) q.push(`bars=${Number(bars)}`);
   for (const [k, v] of Object.entries({ probability, stop, target, entry })) {
     if (v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v))) {
       q.push(`${k}=${encodeURIComponent(Number(v))}`);

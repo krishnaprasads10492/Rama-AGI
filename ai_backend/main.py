@@ -1594,7 +1594,8 @@ def explain_correlations(symbol: str, exchange: str = "NSE", against: Optional[s
 def forecast_symbol(symbol: str, exchange: str = "NSE", horizon: str = "swing",
                     probability: Optional[float] = None, stop: Optional[float] = None,
                     target: Optional[float] = None, entry: Optional[float] = None,
-                    lookback: int = 120):
+                    lookback: int = 120, interval: Optional[str] = None,
+                    bars: Optional[int] = None):
     """
     The forward cone and the risk ruler, for drawing on a chart.
 
@@ -1608,8 +1609,11 @@ def forecast_symbol(symbol: str, exchange: str = "NSE", horizon: str = "swing",
     """
     try:
         from engine import projection
+        # `interval` lets the chart ask for a cone on the bars it is actually displaying. Without it
+        # a 30m chart received a cone measured on daily bars, whose date-string times cannot sit on
+        # the same chart as 30m epoch-second times (Section 117).
         return projection.forecast(symbol, exchange, horizon, probability, stop, target,
-                                   entry, lookback)
+                                   entry, lookback, interval, bars)
     except Exception as e:
         logger.error(f"Forecast error for {symbol}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

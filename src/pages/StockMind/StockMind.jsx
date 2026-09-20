@@ -10,6 +10,7 @@ import HelpPanel from './HelpPanel.jsx';
 import InfoTip from './InfoTip.jsx';
 import {
   defaultRangeFor, reconcileRange, capBarsFor, datesForRange, limitForDates, rangeForDates, toYmd,
+  showsClock,
 } from './timeframes.js';
 
 /**
@@ -309,9 +310,20 @@ export default function StockMind() {
 
   const loadCone = useCallback(async (horizonName) => {
     if (!inElectron || !sym) return;
+    // THE CONE IS MEASURED ON THE INTERVAL THE CHART IS SHOWING (Section 117).
+    //
+    // This used to send only a horizon, and only `60m` mapped to the intraday one — so every other
+    // intraday interval got a cone measured on DAILY bars. A daily cone carries 'YYYY-MM-DD' times
+    // while intraday candles carry UTC epoch seconds, and one chart cannot hold both types. Section
+    // 110 made 30m the default interval, so from that point the projection failed every time.
+    //
+    // The horizon still travels, because it is what decides whether a model may TILT the centre.
+    // Nothing is fitted on 30m, so the centre stays flat and says why — which is the correct answer
+    // rather than a missing one.
     const res = await window.rama.marketIntel.forecast({
       user: currentUser, symbol: sym, exchange,
-      horizon: horizonName || (barInterval === '60m' ? 'intraday' : 'swing'),
+      interval: barInterval,
+      horizon: horizonName || (showsClock(barInterval) ? 'intraday' : 'swing'),
       stop: held?.thesis?.stopPrice ?? null,
       target: held?.thesis?.targetPrice ?? null,
     });

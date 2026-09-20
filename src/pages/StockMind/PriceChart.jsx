@@ -10,6 +10,7 @@ import {
   intervalGroups, allRangesFor, shortfallNote, describeLimit, showsClock,
   interval as intervalDef,
 } from './timeframes';
+import { toChartTime, sessionStarts, markerTime, timeTypesMatch } from './chartTime.js';
 import InfoTip from './InfoTip.jsx';
 
 /**
@@ -76,22 +77,10 @@ const SCALE_MODES = [
       + 'its price.' },
 ];
 
-/**
- * INTRADAY STAMPS BECOME UTC EPOCH SECONDS; DAILY STAYS A DATE STRING.
- *
- * lightweight-charts treats a 'YYYY-MM-DD' string as a whole day, so handing it intraday bars as
- * strings collapses every bar in a session onto one point — the same defect class Section 73
- * fixed inside the store. The store keeps intraday stamps in UTC (03:45:00 is the 09:15 IST
- * open), so this is a parse rather than a guess.
- */
-function toChartTime(raw) {
-  const s = String(raw || '').trim();
-  if (!s) return null;
-  if (s.length <= 10) return s.slice(0, 10);
-  const iso = s.includes('T') ? s : s.replace(' ', 'T');
-  const ms = Date.parse(iso.endsWith('Z') ? iso : `${iso}Z`);
-  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
-}
+// INTRADAY STAMPS BECOME UTC EPOCH SECONDS; DAILY STAYS A DATE STRING — and that lives in
+// `chartTime.js` now, tested, because the one function producing two types is what allowed two
+// separate defects: the projection cone and master's fills (Section 117). Redefining it here is
+// precisely what kept the rule implicit.
 
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
 
@@ -558,9 +547,21 @@ export default function PriceChart({
     const price = priceRef.current;
     if (!price || !holder.current) return;
     const theme = readTheme(holder.current);
+    // A FILL CARRIES A DATE; AN INTRADAY CANDLE CARRIES A TIME (Section 117).
+    //
+    // The ledger records `YYYY-MM-DD`, so `toChartTime` returns a STRING for it — which cannot sit on
+    // a chart whose candles are UTC epoch numbers. This is the same defect the cone had, in a second
+    // layer, found while fixing the first.
+    //
+    // RESOLVED BY LOOKING UP THE FIRST BAR OF THAT SESSION, not by inventing a time of day. Master's
+    // ledger genuinely does not know when in the session he filled, so the marker sits at the
+    // session's first stored bar: derived from data on hand rather than guessed. A date with no bar
+    // is skipped, because a marker at a time that has no candle is a marker in empty space.
+    const starts = sessionStarts(candles);
+
     const marks = (layers.fills ? (fills || []) : [])
       .map((f) => {
-        const time = toChartTime(f?.date);
+        const time = markerTime(f?.date, starts);
         if (time === null) return null;
         const buy = String(f.side).toUpperCase() === 'BUY';
         return {
@@ -577,7 +578,9 @@ export default function PriceChart({
     // The markers primitive is bound to a series instance, so a chart type change — which replaces
     // the series — has to rebind rather than reuse the stale handle.
     markersRef.current = createSeriesMarkers(price, marks);
-  }, [fills, layers.fills, chartType]);
+    // `candles` joins the dependencies because the session-start lookup is built from them: on an
+    // intraday chart a fill cannot be placed until the bars it sits among have loaded.
+  }, [fills, layers.fills, chartType, candles]);
 
   // ── Levels: the signal's, and master's own thesis ──────────────────────────
   useEffect(() => {
@@ -643,6 +646,23 @@ export default function PriceChart({
     const anchorPrice = cone.anchor?.price;
     const seed = (finite(anchorPrice) && anchorTime !== null)
       ? [{ time: anchorTime, value: anchorPrice }] : [];
+
+    // ONE CHART HOLDS ONE TIME TYPE. `toChartTime` yields a 'YYYY-MM-DD' string for daily bars and a
+    // UTC epoch NUMBER for intraday ones, and lightweight-charts cannot mix them on one chart.
+    //
+    // This guard exists because the two used to disagree: the cone was requested by horizon, only
+    // `60m` mapped to an intraday horizon, so a 30m chart drew 30m candles (numbers) against a daily
+    // cone (strings) — and Section 110 made 30m the default, so it failed every time. The request is
+    // fixed at the source (Section 117); this refuses to draw rather than throwing if they ever
+    // diverge again, because a silent absence is easier to diagnose than a crashed effect that also
+    // takes the candles down with it.
+    const candleTime = candles[0]?.time;
+    const coneTime = seed[0]?.time ?? toChartTime(points[0]?.time);
+    if (!timeTypesMatch(candleTime, coneTime)) {
+      console.warn('[PriceChart] cone not drawn: the projection is on a different bar interval from '
+        + `the chart (chart time is a ${typeof candleTime}, cone time is a ${typeof coneTime})`);
+      return;
+    }
 
     const build = (field, width, style, color) => {
       const data = seed.concat(points
