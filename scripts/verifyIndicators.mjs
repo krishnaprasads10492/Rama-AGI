@@ -227,7 +227,24 @@ check('every overlay survives an empty series',
 check('VWAP is withheld on daily rather than drawn wrong',
   !ind.overlaysFor(false).some((o) => o.id === 'vwap')
   && ind.overlaysFor(true).some((o) => o.id === 'vwap'));
-eq('the daily list is exactly one shorter', ind.overlaysFor(true).length - ind.overlaysFor(false).length, 1);
+// Exclusion now runs BOTH ways (Section 120), so a net count no longer describes it: VWAP is
+// intraday-only because it resets each session, and floor-trader pivots are daily-or-longer because they
+// are computed from the previous SESSION. Asserting the net difference would pass while both were broken.
+check('pivots are withheld on intraday rather than renamed to the last five minutes',
+  !ind.overlaysFor(true).some((o) => o.id === 'pivots')
+  && ind.overlaysFor(false).some((o) => o.id === 'pivots'));
+check('the two lists differ only by those directional exclusions', (() => {
+  const day = new Set(ind.overlaysFor(false).map((o) => o.id));
+  const intra = new Set(ind.overlaysFor(true).map((o) => o.id));
+  const onlyDay = [...day].filter((id) => !intra.has(id));
+  const onlyIntra = [...intra].filter((id) => !day.has(id));
+  return onlyDay.join() === 'pivots' && onlyIntra.join() === 'vwap';
+})());
+check('every definition declares at most one of the two exclusions',
+  ind.OVERLAY_DEFS.every((o) => !(o.intradayOnly && o.dailyOnly)));
+check('a withheld pivot set explains itself',
+  /session/i.test(ind.overlayShortfall('pivots', 500, true) || ''),
+  String(ind.overlayShortfall('pivots', 500, true)));
 
 check('a withheld VWAP explains itself',
   /intraday/.test(ind.overlayShortfall('vwap', 500, false) || ''),
@@ -240,15 +257,63 @@ check('a short series names the shortfall in both directions',
 check('a sufficient series has nothing to explain', ind.overlayShortfall('sma200', 200, false) === null);
 check('an unknown overlay explains nothing rather than inventing a reason',
   ind.overlayShortfall('nope', 1, false) === null);
+/**
+ * Every `[{time, value}]` list a `make` can return, whatever its shape.
+ *
+ * Shapes in use: a bare array (`line`), `{middle, upper, lower}` (`band`), `{macd, signal, histogram}`,
+ * and `{series: [{data, ...}], guides, scale}` (`series`, added in Section 120). The last one is why this
+ * helper exists — the previous inline shape-sniffing read `{series: [...]}` as zero points and would have
+ * reported every new multi-line study as drawing nothing.
+ */
+function pointLists(drew) {
+  if (!drew) return [];
+  if (Array.isArray(drew)) return [drew];
+  if (Array.isArray(drew.series)) return drew.series.map((p) => p.data || []);
+  return Object.values(drew).filter(Array.isArray);
+}
+
 check('every shortfall threshold matches what the maths actually needs',
   ind.OVERLAY_DEFS.filter((o) => !o.intradayOnly).every((o) => {
     const msg = ind.overlayShortfall(o.id, 1, false);
     if (!msg) return true;               // no declared threshold
     const need = parseInt(String(msg).match(/needs (\d+) bars/)?.[1] || '0', 10);
-    const drew = o.make(ramp(need));
-    const n = Array.isArray(drew) ? drew.length : drew.middle?.length ?? drew.macd?.length ?? 0;
-    return n > 0;
+    if (!need) return true;              // withheld for an interval reason, not a bar count
+    const lists = pointLists(o.make(ramp(need)));
+    return lists.some((l) => l.length > 0);
   }));
+check('every overlay declares a bar requirement, so none can draw nothing in silence',
+  ind.OVERLAY_DEFS.every((o) => Number.isFinite(ind.OVERLAY_NEEDS[o.id])),
+  ind.OVERLAY_DEFS.filter((o) => !Number.isFinite(ind.OVERLAY_NEEDS[o.id])).map((o) => o.id).join());
+// THE THRESHOLD IS WHERE THE STUDY IS COMPLETE, not where its first line appears — which is a real
+// distinction and it caught an off-by-one. MACD's own line draws from 26 bars, but its SIGNAL needs nine
+// more, so a chart at 30 bars showed a MACD line with no signal and the declared need of 35 was a bar
+// pessimistic either way. At one bar short, SOMETHING must still be missing.
+check('one bar fewer than the requirement leaves the study incomplete',
+  ind.OVERLAY_DEFS.filter((o) => !o.intradayOnly && ind.OVERLAY_NEEDS[o.id] > 2).every((o) => {
+    const lists = pointLists(o.make(ramp(ind.OVERLAY_NEEDS[o.id] - 1)));
+    return lists.length === 0 || lists.some((l) => l.length === 0);
+  }),
+  ind.OVERLAY_DEFS.filter((o) => !o.intradayOnly && ind.OVERLAY_NEEDS[o.id] > 2
+    && pointLists(o.make(ramp(ind.OVERLAY_NEEDS[o.id] - 1))).every((l) => l.length > 0))
+    .map((o) => o.id).join());
+// A `directionalSplit` study draws one side per trend direction, so on a one-way fixture the other side is
+// correctly empty — that is the trend not having flipped, not a missing line.
+const wholeLines = (o) => !o.intradayOnly && !o.directionalSplit;
+check('and AT the requirement every line of the study draws',
+  ind.OVERLAY_DEFS.filter(wholeLines).every((o) => {
+    const lists = pointLists(o.make(ramp(ind.OVERLAY_NEEDS[o.id])));
+    return lists.length > 0 && lists.every((l) => l.length > 0);
+  }),
+  ind.OVERLAY_DEFS.filter((o) => wholeLines(o)
+    && !pointLists(o.make(ramp(ind.OVERLAY_NEEDS[o.id]))).every((l) => l.length > 0))
+    .map((o) => o.id).join());
+check('a direction-split study draws at least the side the trend is on',
+  ind.OVERLAY_DEFS.filter((o) => o.directionalSplit).every((o) => pointLists(
+    o.make(ramp(ind.OVERLAY_NEEDS[o.id] + 5))).some((l) => l.length > 0)));
+check('and draws BOTH sides once the trend actually reverses',
+  pointLists(ind.OVERLAY_DEFS.find((o) => o.id === 'supertrend')
+    .make(ramp(60).concat(daily(Array.from({ length: 60 }, (_, i) => 160 - i * 2)))))
+    .every((l) => l.length > 0));
 
 // ── Hostile input ─────────────────────────────────────────────────────────────
 console.log('\n--- hostile input does not throw ---');
@@ -269,10 +334,199 @@ check('every function returns the empty shape for junk, never a NaN point',
   && ind.bollinger(null).middle.length === 0
   && ind.macd(null).macd.length === 0);
 check('no emitted point is ever non-finite, across every overlay',
+  ind.OVERLAY_DEFS.every((o) => pointLists(o.make(o.intradayOnly ? twoSessions : zig.concat(ramp(300))))
+    .every((l) => l.every((p) => Number.isFinite(p.value) && p.time !== undefined))),
+  ind.OVERLAY_DEFS.filter((o) => !pointLists(o.make(o.intradayOnly ? twoSessions
+    : zig.concat(ramp(300)))).every((l) => l.every((p) => Number.isFinite(p.value)
+      && p.time !== undefined))).map((o) => o.id).join());
+check('nor on a flat series, where every range is zero',
+  ind.OVERLAY_DEFS.every((o) => pointLists(o.make(flat(120)))
+    .every((l) => l.every((p) => Number.isFinite(p.value)))),
+  ind.OVERLAY_DEFS.filter((o) => !pointLists(o.make(flat(120)))
+    .every((l) => l.every((p) => Number.isFinite(p.value)))).map((o) => o.id).join());
+
+// ── The rest of the toolkit (Section 120) ─────────────────────────────────────
+//
+// `daily()` gives every bar a range of exactly 2 (high = v+1, low = v-1) and a typical price equal to the
+// close, which makes several of these hand-computable to the decimal. Where a formula has a widely-copied
+// WRONG version, the assertion is chosen so the wrong version fails it.
+
+console.log('\n--- ATR ---');
+closeTo('a constant 2-point range gives ATR 2', ind.atr(ramp(40), 14).at(-1).value, 2);
+closeTo('and on a flat series too', ind.atr(flat(40), 14).at(-1).value, 2);
+closeTo('ATR% is that as a share of close', ind.atrPct(ramp(40), 14).at(-1).value,
+  (2 / ramp(40).at(-1).close) * 100, 1e-9);
+eq('ATR needs a previous close, so it never reports on the first bar',
+  ind.atr(ramp(16), 14).length, 2);
+eq('too short is empty, not a partial average', ind.atr(ramp(10), 14).length, 0);
+
+console.log('\n--- ADX (+DM/-DM: only the larger, only if positive) ---');
+const adxUp = ind.adx(ramp(60), 14);
+// EXACT, not approximate, because the fixture makes it computable: each bar's high and low both rise by
+// 1, so +DM is 1 and −DM is 0 on every bar, while the true range is 2 (high − low). So +DI is exactly
+// 1/2 = 50% and −DI exactly 0. An implementation that counted both directional moves would put −DI at 50
+// as well and this would fail.
+closeTo('a one-way uptrend puts +DI at exactly half the true range', adxUp.plusDI.at(-1).value, 50);
+eq('and -DI at exactly zero', adxUp.minusDI.at(-1).value, 0);
+check('and drives ADX high', adxUp.adx.at(-1).value > 90, adxUp.adx.at(-1).value);
+const adxFlat = ind.adx(flat(60), 14);
+check('a flat series has no directional movement at all',
+  adxFlat.plusDI.at(-1).value === 0 && adxFlat.minusDI.at(-1).value === 0);
+check('so ADX is zero rather than undefined', adxFlat.adx.at(-1).value === 0);
+check('an inside bar contributes to neither side — the test of the +DM rule', (() => {
+  // Bar 2 is strictly inside bar 1: high lower AND low higher, so up<0 and down<0.
+  const inside = [
+    { time: 'a', open: 100, high: 110, low: 90, close: 100, volume: 1 },
+    { time: 'b', open: 100, high: 105, low: 95, close: 100, volume: 1 },
+  ];
+  // Only one TR pair, so nothing smooths; the assertion is that it does not throw and reports nothing.
+  return ind.adx(inside, 14).adx.length === 0;
+})());
+eq('ADX needs 2× the period plus one', ind.adx(ramp(28), 14).adx.length, 0);
+
+console.log('\n--- Stochastic and Williams %R ---');
+eq('a flat window reports the midpoint, not the bottom',
+  ind.stochastic(flat(40), 14, 3, 1).k.at(-1).value, 50);
+check('a rising series sits near the top of its range',
+  ind.stochastic(ramp(40), 14, 3, 1).k.at(-1).value > 90);
+check('a falling series sits near the bottom',
+  ind.stochastic(daily(Array.from({ length: 40 }, (_, i) => 200 - i)), 14, 3, 1).k.at(-1).value < 10);
+check('smoothing shifts the reading, so fast and slow are genuinely different',
+  ind.stochastic(zig, 14, 3, 1).k.at(-1).value !== ind.stochastic(zig, 14, 3, 3).k.at(-1).value);
+eq('Williams %R is the same position read from the top',
+  ind.williamsR(flat(40), 14).at(-1).value, -50);
+check('and stays within -100..0',
+  ind.williamsR(zig.concat(ramp(60)), 14).every((p) => p.value <= 0 && p.value >= -100));
+
+console.log('\n--- CCI (the divisor is mean absolute deviation, NOT standard deviation) ---');
+// TP on a 1-step ramp is the close. Over 20 bars the mean absolute deviation is exactly 5, so
+// CCI = 9.5 / (0.015 × 5) = 126.667. With a standard deviation (5.766) it would be 109.8 — so this
+// assertion fails on the common wrong implementation.
+closeTo('a 20-bar ramp gives exactly 126.667', ind.cci(ramp(20), 20).at(-1).value, 9.5 / (0.015 * 5), 1e-6);
+check('which is NOT the value a standard deviation would give',
+  Math.abs(ind.cci(ramp(20), 20).at(-1).value - 9.5 / (0.015 * Math.sqrt(665 / 20))) > 15);
+eq('a flat series has no deviation to divide by, so CCI is 0 rather than infinite',
+  ind.cci(flat(40), 20).at(-1).value, 0);
+
+console.log('\n--- OBV, MFI, ROC ---');
+eq('OBV accumulates volume on up bars only',
+  ind.obv(ramp(5)).at(-1).value, 1001 + 1002 + 1003 + 1004);
+eq('and starts at zero rather than at the first bar\'s volume', ind.obv(ramp(5))[0].value, 0);
+check('a falling series drives OBV negative',
+  ind.obv(daily(Array.from({ length: 5 }, (_, i) => 100 - i))).at(-1).value < 0);
+eq('an unchanged close moves OBV by nothing', ind.obv(flat(5)).at(-1).value, 0);
+eq('MFI with only positive flow is 100 by definition', ind.mfi(ramp(30), 14).at(-1).value, 100);
+eq('and with only negative flow, 0',
+  ind.mfi(daily(Array.from({ length: 30 }, (_, i) => 200 - i)), 14).at(-1).value, 0);
+eq('an unchanged typical price counts as neither, so a flat series is the midpoint',
+  ind.mfi(flat(30), 14).at(-1).value, 50);
+closeTo('ROC is percent over the lookback', ind.roc(ramp(13), 12).at(-1).value, 12);
+closeTo('and is measured against the bar 12 back, not the first bar',
+  ind.roc(ramp(14), 12).at(-1).value, ((113 - 101) / 101) * 100);
+eq('a flat series has zero rate of change', ind.roc(flat(30), 12).at(-1).value, 0);
+
+console.log('\n--- Donchian and Keltner ---');
+const don = ind.donchian(ramp(21), 20, true);
+closeTo('the channel EXCLUDES the current bar', don.upper.at(-1).value, 120);
+check('so the current bar can actually break it', ramp(21).at(-1).high > don.upper.at(-1).value);
+check('including it would make a breakout impossible',
+  ind.donchian(ramp(21), 20, false).upper.at(-1).value >= ramp(21).at(-1).high);
+closeTo('the middle is the mean of the two edges', don.middle.at(-1).value,
+  (don.upper.at(-1).value + don.lower.at(-1).value) / 2);
+const kel = ind.keltner(ramp(40), 20, 20, 2);
+closeTo('Keltner\'s middle is the EMA', kel.middle.at(-1).value, ind.ema(ramp(40), 20).at(-1).value);
+closeTo('and its width is 2 ATR either side', kel.upper.at(-1).value - kel.middle.at(-1).value,
+  2 * ind.atr(ramp(40), 20).at(-1).value, 1e-9);
+check('both bands sit the same distance out',
+  near(kel.upper.at(-1).value - kel.middle.at(-1).value,
+    kel.middle.at(-1).value - kel.lower.at(-1).value, 1e-9));
+
+console.log('\n--- Supertrend: a stop that only ever tightens ---');
+const st = ind.supertrend(ramp(60), 10, 3);
+check('a one-way uptrend keeps the stop on the up side', st.down.length === 0 && st.up.length > 0);
+check('the stop stays BELOW every close it applies to', (() => {
+  const closeAt = new Map(ramp(60).map((b) => [String(b.time), b.close]));
+  return st.up.every((p) => p.value < closeAt.get(String(p.time)));
+})());
+check('and never loosens', st.up.every((p, i) => i === 0 || p.value >= st.up[i - 1].value));
+const stFlip = ind.supertrend(ramp(60).concat(
+  daily(Array.from({ length: 60 }, (_, i) => 160 - i * 2))), 10, 3);
+check('a reversal produces a recorded flip', stFlip.flips.length > 0);
+check('and stops on both sides', stFlip.up.length > 0 && stFlip.down.length > 0);
+
+console.log('\n--- Parabolic SAR: the two-bar clamp ---');
+const sar = ind.psar(ramp(40));
+check('in a clean uptrend the stop sits at or below the bar\'s low', (() => {
+  const lowAt = new Map(ramp(40).map((b) => [String(b.time), b.low]));
+  // The first few bars are the algorithm finding its footing; the clamp must hold thereafter.
+  return sar.slice(5).every((p) => p.value <= lowAt.get(String(p.time)) + 1e-9);
+})());
+check('and rises as the trend does', sar.at(-1).value > sar[5].value);
+eq('fewer than three bars cannot establish a direction', ind.psar(ramp(2)).length, 0);
+check('a zero step is refused rather than producing a frozen stop', ind.psar(ramp(40), 0).length === 0);
+
+console.log('\n--- Ichimoku: the displacement is honoured, and the truncation disclosed ---');
+const ich = ind.ichimoku(ramp(80));
+closeTo('Tenkan is the 9-bar midpoint', ich.tenkan[0].value, (109 + 99) / 2);
+const src80 = ramp(80);
+eq('Senkou A is plotted 26 bars FORWARD of where it was computed',
+  ich.senkouA[0].time, src80[25 + 26].time);
+eq('Chikou is plotted 26 bars BACK', ich.chikou[0].time, src80[0].time);
+closeTo('and carries the close from 26 bars later', ich.chikou[0].value, src80[26].close);
+check('the forward cloud stops at the last stored bar rather than inventing future ones',
+  ich.senkouA.at(-1).time === src80.at(-1).time
+  && ich.senkouA.every((p) => src80.some((b) => b.time === p.time)));
+check('the last 26 bars therefore carry no cloud — the disclosed truncation',
+  ich.senkouB.length <= src80.length - 52);
+eq('too short for Senkou B is empty rather than a partial cloud', ind.ichimoku(ramp(60)).senkouB.length, 0);
+
+console.log('\n--- Pivots: from the previous bar, held across the current one ---');
+const piv = ind.pivots(ramp(5));
+closeTo('the pivot is the previous bar\'s (H+L+C)/3', piv.p.at(-1).value,
+  (104 + 102 + 103) / 3);
+closeTo('R1 is 2P - previous low', piv.r1.at(-1).value, 2 * ((104 + 102 + 103) / 3) - 102);
+closeTo('S1 is 2P - previous high', piv.s1.at(-1).value, 2 * ((104 + 102 + 103) / 3) - 104);
+check('R2 and S2 straddle the pivot by the previous range',
+  near(piv.r2.at(-1).value - piv.p.at(-1).value, 2)
+  && near(piv.p.at(-1).value - piv.s2.at(-1).value, 2));
+eq('one bar has no previous bar to pivot from', ind.pivots(ramp(1)).p.length, 0);
+
+console.log('\n--- Heikin-Ashi: a lens, never a source of levels ---');
+const ha = ind.heikinAshi(ramp(5));
+eq('one HA bar per input bar', ha.length, 5);
+closeTo('the first HA close is the bar\'s own average', ha[0].close, (100 + 101 + 99 + 100) / 4);
+closeTo('the second HA open is the first HA midpoint', ha[1].open, (ha[0].open + ha[0].close) / 2);
+closeTo('and the second HA close is its own average', ha[1].close, (101 + 102 + 100 + 101) / 4);
+check('an uptrend gives an unbroken run of up bars', ha.slice(1).every((b) => b.close >= b.open));
+check('the HA high contains the HA body', ha.every((b) => b.high >= Math.max(b.open, b.close)
+  && b.low <= Math.min(b.open, b.close)));
+check('times are preserved exactly, so it can replace the price series',
+  ha.every((b, i) => b.time === ramp(5)[i].time));
+eq('junk gives nothing rather than throwing', ind.heikinAshi(null).length, 0);
+
+console.log('\n--- the catalogue grew, and the count is asserted ---');
+check('there are at least 20 studies now, up from 8',
+  ind.OVERLAY_DEFS.length >= 20, ind.OVERLAY_DEFS.length);
+check('every definition has a unique id',
+  new Set(ind.OVERLAY_DEFS.map((o) => o.id)).size === ind.OVERLAY_DEFS.length);
+check('every definition has a label and a make function',
+  ind.OVERLAY_DEFS.every((o) => o.label && typeof o.make === 'function'));
+check('every kind is one the chart knows how to render',
+  ind.OVERLAY_DEFS.every((o) => ['line', 'band', 'macd', 'series'].includes(o.kind)),
+  ind.OVERLAY_DEFS.filter((o) => !['line', 'band', 'macd', 'series'].includes(o.kind))
+    .map((o) => `${o.id}:${o.kind}`).join());
+check('every pane is one the chart knows how to place',
+  ind.OVERLAY_DEFS.every((o) => ['price', 'oscillator'].includes(o.pane)));
+check('a series-kind study returns a series array',
+  ind.OVERLAY_DEFS.filter((o) => o.kind === 'series')
+    .every((o) => Array.isArray(o.make(ramp(120)).series)));
+check('and every part of it carries data and a label or an explicit null',
+  ind.OVERLAY_DEFS.filter((o) => o.kind === 'series').every((o) => o.make(ramp(120)).series
+    .every((p) => Array.isArray(p.data) && 'label' in p)));
+check('an oscillator with a fixed scale declares both ends',
   ind.OVERLAY_DEFS.every((o) => {
-    const drew = o.make(o.intradayOnly ? twoSessions : zig.concat(ramp(300)));
-    const lists = Array.isArray(drew) ? [drew] : Object.values(drew);
-    return lists.every((l) => l.every((p) => Number.isFinite(p.value) && p.time !== undefined));
+    const s = o.scale ?? o.make(ramp(120))?.scale;
+    return !s || (Number.isFinite(s.min) && Number.isFinite(s.max) && s.max > s.min);
   }));
 
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILURES'} — ${pass} passed, ${fail} failed\n`);

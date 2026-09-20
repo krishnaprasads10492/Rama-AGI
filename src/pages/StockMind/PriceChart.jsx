@@ -4,7 +4,7 @@ import {
   HistogramSeries, createSeriesMarkers, CrosshairMode, LineStyle, PriceScaleMode,
 } from 'lightweight-charts';
 import {
-  overlaysFor, overlayById, overlayShortfall,
+  overlaysFor, overlayById, overlayShortfall, heikinAshi,
 } from './indicators';
 import {
   intervalGroups, allRangesFor, shortfallNote, describeLimit, showsClock,
@@ -86,6 +86,12 @@ const CHART_TYPES = [
   { id: 'line',     label: 'Line',     key: '3' },
   { id: 'area',     label: 'Area',     key: '4' },
   { id: 'baseline', label: 'Baseline', key: '5' },
+  // HEIKIN-ASHI IS A LENS, AND THE WARNING IS IN THE TITLE (Section 120). Its open and close are
+  // averages, so they are prices that never traded — excellent for reading whether a trend is intact,
+  // useless as a source of levels. A stop read off an HA body is a stop at a fictional price.
+  { id: 'heikin',   label: 'Heikin-Ashi', key: '6',
+    warn: 'Smoothed: HA open and close are averages, not traded prices. Read direction from it, never '
+      + 'levels — a stop taken off an HA body sits at a price that never existed.' },
 ];
 
 const SCALE_MODES = [
@@ -211,10 +217,15 @@ export default function PriceChart({
     const want = prefs.current?.overlays;
     return Array.isArray(want) ? want.filter((id) => overlayById(id)) : [];
   });
+  // VOLUME IS NOW A TOGGLE (Section 120). It was a prop defaulting to true that no call site ever
+  // passed, so it was permanently on and took 18% of the pane from price whether or not master wanted
+  // it — the one study with no way to switch it off.
+  const [volOn, setVolOn] = useState(() => (typeof prefs.current?.volume === 'boolean'
+    ? prefs.current.volume : showVolume));
 
   useEffect(() => {
-    savePrefs({ chartType, scaleMode, overlays: enabled });
-  }, [chartType, scaleMode, enabled]);
+    savePrefs({ chartType, scaleMode, overlays: enabled, volume: volOn });
+  }, [chartType, scaleMode, enabled, volOn]);
 
   const isIntraday = showsClock(interval);
   const available = useMemo(() => overlaysFor(isIntraday), [isIntraday]);
@@ -334,7 +345,7 @@ export default function PriceChart({
     }
 
     let vol = null;
-    if (showVolume) {
+    if (volOn) {
       // PANE 1, not an overlay price scale. The previous version put volume on the price pane with
       // `scaleMargins: {top: 0.82}`, which is a way of saying "price may only use 74% of its own
       // pane". v5.2's pane API is the mechanism actually meant for this.
@@ -390,7 +401,7 @@ export default function PriceChart({
       linesRef.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showVolume, chartType]);
+  }, [volOn, chartType]);
 
   // Height and the axis clock are applied to the live chart rather than rebuilding it.
   useEffect(() => {
@@ -400,11 +411,11 @@ export default function PriceChart({
       height: effectiveHeight,
       timeScale: { timeVisible: showsClock(interval), secondsVisible: false },
     });
-    if (showVolume) {
+    if (volOn) {
       try { chart.panes()[1]?.setHeight(Math.max(60, Math.round(effectiveHeight * 0.18))); }
       catch { /* cosmetic */ }
     }
-  }, [effectiveHeight, interval, showVolume]);
+  }, [effectiveHeight, interval, volOn]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -429,9 +440,13 @@ export default function PriceChart({
     if (!price || !chart) return;
 
     const forLine = chartType === 'line' || chartType === 'area' || chartType === 'baseline';
+    // Heikin-Ashi is a transform of the SAME bars, not a different series — so it shares every overlay,
+    // marker and level, and the indicators still read the real closes rather than the smoothed ones.
+    // Computing studies on HA values is a well-known way to produce an RSI of a price that never traded.
+    const drawn = chartType === 'heikin' ? heikinAshi(candles) : candles;
     price.setData(forLine
-      ? candles.map((c) => ({ time: c.time, value: c.close }))
-      : candles.map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
+      ? drawn.map((c) => ({ time: c.time, value: c.close }))
+      : drawn.map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
 
     if (volRef.current) {
       const theme = holder.current ? readTheme(holder.current) : null;
@@ -477,7 +492,7 @@ export default function PriceChart({
     const theme = readTheme(holder.current);
     // Oscillators go below price, and below volume when volume is shown, so the panes read
     // top-to-bottom in the order a trader expects.
-    let nextPane = showVolume ? 2 : 1;
+    let nextPane = volOn ? 2 : 1;
     let colorIdx = 0;
 
     const addLine = (data, { color, width = 1, style = LineStyle.Solid, pane = 0, legend = null }) => {
@@ -491,23 +506,43 @@ export default function PriceChart({
       return s;
     };
 
+    /**
+     * THE PANE IS DECIDED FIRST, THEN THE SHAPE — and that order is a bug fix (Section 120).
+     *
+     * This used to branch on `kind` first, and `rsi14` is `{pane: 'oscillator', kind: 'line'}`. So RSI
+     * matched the `kind === 'line'` branch and was drawn on PANE 0, against the price. A 0–100 series on
+     * a 25,000-point index axis renders as a flat line along the floor — which is precisely the "classic
+     * chart bug" `indicators.js` warns about in its own comment, present in the code that quoted it. The
+     * guides and the 0–100 autoscale sat in an unreachable branch.
+     *
+     * `pane` and `kind` are independent properties and are now read independently.
+     */
+    const resolve = (v) => (typeof v === 'string' && v.startsWith('var(')
+      ? (theme[v.slice(6, -1)] ?? null) : v);
+
     for (const id of active) {
       const def = overlayById(id);
       if (!def) continue;
       const color = OVERLAY_COLORS[colorIdx % OVERLAY_COLORS.length];
       colorIdx += 1;
       const computed = def.make(candles);
+      const own = def.pane === 'oscillator';
+      const pane = own ? nextPane : 0;
+      if (own) nextPane += 1;
 
-      if (def.kind === 'line') {
-        addLine(computed, { color, width: 2, pane: 0, legend: def.label });
-      } else if (def.kind === 'band') {
-        addLine(computed.middle, { color, style: LineStyle.Dashed, pane: 0, legend: def.label });
-        addLine(computed.upper, { color: `${color}99`, pane: 0 });
-        addLine(computed.lower, { color: `${color}99`, pane: 0 });
+      // Guides and a fixed scale belong to the study, and `kind: 'series'` may declare them alongside
+      // its lines — so they are read from either place rather than only from the definition.
+      const guides = computed?.guides ?? def.guides;
+      const scale = computed?.scale ?? def.scale;
+      let anchor = null;                    // the series the guides and scale attach to
+
+      if (def.kind === 'band') {
+        anchor = addLine(computed.middle,
+          { color, style: LineStyle.Dashed, pane, legend: def.label });
+        addLine(computed.upper, { color: `${color}99`, pane });
+        addLine(computed.lower, { color: `${color}99`, pane });
       } else if (def.kind === 'macd') {
         if (computed.macd.length === 0) continue;
-        const pane = nextPane;
-        nextPane += 1;
         const hist = computed.histogram.length > 0
           ? chart.addSeries(HistogramSeries, {
             priceLineVisible: false, lastValueVisible: false,
@@ -520,39 +555,59 @@ export default function PriceChart({
           })));
           overlayRefs.current.push({ series: hist, legend: null });
         }
-        addLine(computed.macd, { color, width: 2, pane, legend: 'MACD' });
+        anchor = addLine(computed.macd, { color, width: 2, pane, legend: 'MACD' });
         addLine(computed.signal, { color: theme.amber, pane, legend: 'MACD sig' });
-        try { chart.panes()[pane]?.setHeight(Math.max(60, Math.round(effectiveHeight * 0.22))); }
-        catch { /* cosmetic */ }
-      } else if (def.pane === 'oscillator') {
-        const pane = nextPane;
-        nextPane += 1;
-        const s = addLine(computed, { color, width: 2, pane, legend: def.label });
-        // The 30/70 guides are drawn as price lines on the oscillator's own series so they scale
-        // with it. Drawing them as data would make them part of the series and shift its range.
-        if (s && Array.isArray(def.guides)) {
-          for (const g of def.guides) {
-            try {
-              s.createPriceLine({
-                price: g, color: theme.border, lineWidth: 1,
-                lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: String(g),
-              });
-            } catch { /* a guide is cosmetic */ }
+      } else if (def.kind === 'series') {
+        // GENERIC MULTI-LINE. Ichimoku's five lines, Supertrend's two sides, ADX's three, the pivot
+        // ladder and PSAR's dots all render here, so a study with any number of lines needs no new
+        // branch — which is the only reason the five of them were affordable at once.
+        for (const part of (computed.series || [])) {
+          const s = addLine(part.data, {
+            color: resolve(part.color) || color,
+            width: part.width || 1,
+            style: part.dotted ? LineStyle.Dotted
+              : part.dashed ? LineStyle.Dashed : LineStyle.Solid,
+            pane,
+            legend: part.label,
+          });
+          if (s && part.dots) {
+            // PSAR is a sequence of points, not a path: joining them draws a line through prices the
+            // stop never sat at.
+            try { s.applyOptions({ pointMarkersVisible: true, lineVisible: false }); }
+            catch { /* the line is still readable if the library refuses */ }
           }
+          if (s && !anchor) anchor = s;
         }
-        if (def.scale) {
+      } else {
+        anchor = addLine(computed, { color, width: 2, pane, legend: def.label });
+      }
+
+      if (anchor && Array.isArray(guides)) {
+        // Guides are price lines on the study's own series so they scale WITH it. As data they would
+        // join the series and widen its range, which defeats the purpose of a reference level.
+        for (const g of guides) {
           try {
-            s.applyOptions({ autoscaleInfoProvider: () => ({
-              priceRange: { minValue: def.scale.min, maxValue: def.scale.max },
-            }) });
-          } catch { /* fall back to autoscale */ }
+            anchor.createPriceLine({
+              price: g, color: theme.border, lineWidth: 1,
+              lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: String(g),
+            });
+          } catch { /* a guide is cosmetic */ }
         }
+      }
+      if (anchor && scale) {
+        try {
+          anchor.applyOptions({ autoscaleInfoProvider: () => ({
+            priceRange: { minValue: scale.min, maxValue: scale.max },
+          }) });
+        } catch { /* fall back to autoscale */ }
+      }
+      if (own) {
         try { chart.panes()[pane]?.setHeight(Math.max(60, Math.round(effectiveHeight * 0.22))); }
         catch { /* cosmetic */ }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candles, active, chartType, showVolume]);
+  }, [candles, active, chartType, volOn]);
 
   // ── Master's own fills, as arrows on the bars they happened on ─────────────
   useEffect(() => {
@@ -718,6 +773,38 @@ export default function PriceChart({
     try { chartRef.current?.timeScale().fitContent(); } catch { /* no chart yet */ }
   }, []);
 
+  /**
+   * Save the chart as a PNG (Section 120).
+   *
+   * `takeScreenshot()` is the library's own call and was never used, so there was no way to get a chart
+   * out of Rāma at all — not to a note, not to a message, not into the spec. The filename carries the
+   * symbol, interval and date, because a folder of `chart.png` files is a folder of nothing.
+   *
+   * THE IMAGE IS THE CANVAS ONLY. The toolbars, the readout and the shortfall notes are DOM, so they are
+   * not in it — said here rather than discovered when the saved file is missing the note that mattered.
+   */
+  const saveImage = useCallback(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    try {
+      const canvas = chart.takeScreenshot();
+      const name = `${symbol || 'chart'}-${interval}-${todayYmd()}.png`;
+      const done = (url) => {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        a.click();
+        // Revoked on the next tick rather than immediately: revoking before the click is processed
+        // cancels the download in Chromium.
+        setTimeout(() => { try { URL.revokeObjectURL(url); } catch { /* already gone */ } }, 4000);
+      };
+      if (canvas.toBlob) canvas.toBlob((b) => { if (b) done(URL.createObjectURL(b)); });
+      else done(canvas.toDataURL('image/png'));
+    } catch (err) {
+      console.warn(`[PriceChart] could not save the image: ${err.message}`);
+    }
+  }, [symbol, interval]);
+
   // A menu that only closes by clicking its own button sits over the chart master is trying to read.
   useEffect(() => {
     if (!menuOpen && !viewOpen) return undefined;
@@ -753,6 +840,7 @@ export default function PriceChart({
       return;
     }
     if (k === 'r') { resetZoom(); e.preventDefault(); return; }
+    if (k === 'v') { setVolOn((v) => !v); e.preventDefault(); return; }
     if (k === 'escape' && full) { setFull(false); e.preventDefault(); }
   };
 
@@ -798,7 +886,8 @@ export default function PriceChart({
     // "l" and "r" while master types a symbol into the field above.
     <div style={shell} onKeyDown={onKeyDown} tabIndex={0} role="group"
          aria-label={`Price chart for ${symbol || 'the selected symbol'}. `
-           + 'Press 1 to 5 for chart type, L for log scale, R to reset zoom, F for fullscreen.'}>
+           + 'Press 1 to 6 for chart type, L for log scale, V for volume, R to reset zoom, '
+           + 'F for fullscreen.'}>
 
       {/* ── Identity and last price. Previously the only header was the symbol and the interval
              string, so the number master looks at first was not on the chart at all. ── */}
@@ -836,6 +925,14 @@ export default function PriceChart({
                 title="Back to a readable candle width (r)">reset zoom</button>
         <button type="button" onClick={zoomAll} style={chip(false)}
                 title="Squeeze the entire loaded history into view">fit all</button>
+        <button type="button" onClick={() => setVolOn((v) => !v)} style={chip(volOn)}
+                aria-pressed={volOn}
+                title={volOn ? 'Hide the volume pane and give price its height back (v)'
+                  : 'Show volume in its own pane (v)'}>volume</button>
+        <button type="button" onClick={saveImage} style={chip(false)}
+                title="Save the chart canvas as a PNG. The toolbars and notes are not in the image.">
+          ⤓ png
+        </button>
         <button type="button" onClick={() => setFull((v) => !v)} style={chip(full)}
                 aria-pressed={full}
                 title={full ? 'Leave fullscreen (f or Escape)' : 'Fill the window (f)'}>
@@ -1162,6 +1259,13 @@ export default function PriceChart({
                 all, so the only times on screen were the axis labels — which the library renders in
                 UTC. A bare "09:15" is ambiguous between IST and UTC, and that ambiguity is what made
                 Section 117's defect hard to see, so the zone travels with the reading. */}
+            {chartType === 'heikin' && (
+              // The warning rides on the chart, not in a tooltip on the menu item that selected it —
+              // master will have forgotten the tooltip by the time he reads a level off a body.
+              <div style={{ color: 'var(--amber)', marginBottom: '2px', maxWidth: '52ch' }}>
+                Heikin-Ashi: averaged prices. Read direction, not levels.
+              </div>
+            )}
             {readout ? (
               <>
                 <div style={{ color: 'var(--text-dim, var(--muted))', marginBottom: '2px' }}>

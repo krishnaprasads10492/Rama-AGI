@@ -1799,6 +1799,7 @@ authenticated **Master session**, not merely an open store.
 | 137 | The projection was broken by Section 110 — one implicit rule, three defects | done | Section 117. Master: *"In strategy screen, projection not working. saying about utc timestap."* **MY OWN REGRESSION, and the ledger's own warning applies: Section 110 changed the default chart interval to 30m and nothing was positioned to notice that the projection could not be drawn on a 30m chart. It has failed on every default open since commit `3d7babd`.** **THE CAUSE: `toChartTime` returns TWO TYPES** — a `'YYYY-MM-DD'` **string** for daily bars (lightweight-charts reads that as a whole day, which is what keeps daily bars on a business-day scale with no weekend gaps) and epoch-second **numbers** for intraday (so a session's bars do not collapse onto one point, Section 73's defect class). **Both are correct; what was missing was anything enforcing that ONE CHART USES ONE OF THEM.** `loadCone` requested by named horizon with `barInterval === '60m' ? 'intraday' : 'swing'` — but only `60m` and `1d` are fitted while the chart offers nine intervals, **so every intraday interval except 60m fell through to `swing`, which measures on DAILY bars.** A 30m chart drew numeric candles against a string-timed cone. Before Section 110 the default was daily, so strings met strings and the mismatch stayed latent. **THE FIX: `forecast()` accepts an `interval` override and the chart asks for the cone on the bars it is actually showing.** The horizon still travels because it decides whether a model may TILT the centre. **DECISION: entitlement stays per fitted horizon, so an interval no horizon was fitted on cannot tilt** — nothing is fitted on 30m, so the centre stays flat and `intervalMismatch` says *"the cone's WIDTH is measured from 30m bars and is unaffected"*, which is the correct answer rather than a missing one and is consistent with the existing design (width is measured fact, centre needs a gate-cleared model). Only `entitled` is overridden on the entitlement record and the rest preserved, because its shape belongs to `alerts` and a second construction here would drift. The response now reports `measuredInterval`/`measuredBars` beside the horizon — **reporting only the horizon would say `1d` while the numbers came from 30m bars, which is how this stayed invisible.** **THE SAME DEFECT IN A SECOND LAYER, found while fixing the first: master's FILLS carry a date with no time of day.** The ledger records `YYYY-MM-DD`, so a fill is always a string — unplaceable on an intraday chart, and it would take the candles down with it, so **anyone with a recorded fill had a broken intraday chart too.** **DECISION: resolved by looking up the FIRST STORED BAR of that session, not by inventing a time of day** — master's ledger genuinely does not know when he filled, so the marker sits on a real bar derived from data on hand; a plausible time of day would be a number Rāma made up about master's own trade. A date with no stored bar is skipped, because a marker at a time with no candle is a marker in empty space. **TWO DEFECTS FROM ONE IMPLICIT RULE, SO THE RULE IS NOW EXPLICIT AND TESTED:** `src/pages/StockMind/chartTime.js` holds `toChartTime`/`timeTypesMatch`/`sessionStarts`/`markerTime`, pure and React-free, and `PriceChart.jsx` **imports rather than redefines — which is what kept the rule implicit.** The cone effect now **refuses to draw on a type mismatch and says so** rather than throwing, because a silent absence is easier to diagnose than a crashed effect that also takes the candles down; the request is fixed at the source, so this is the belt after the braces. **A THIRD DEFECT, found by the suite rather than on screen: the daily branch tested only `s.length <= 10`, and `'not a date'` is exactly ten characters** — so junk reached lightweight-charts as a business day. Now matched against `^\d{4}-\d{2}-\d{2}$`, returning `null` otherwise. **VERIFIED: `scripts/verifyChartTime.mjs` 50 assertions** — that a daily cone time and an intraday candle time are different types, that `timeTypesMatch` refuses the pair, that a dated fill lands on a REAL bar from the candle list, that a date with no bar is null, plus source-level checks that PriceChart imports rather than redefines, the cone is requested on `barInterval`, the bridge forwards it, and the engine reports `intervalMismatch`/`measuredInterval`. 22 JS suites; audit clean at 139 bridge calls / 72 files / 365 channels; `vite build` succeeds; Python unchanged at 801. **NOT VERIFIED: not seen on screen, and the Python half CANNOT be run here at all** — `projection.py` imports numpy and pandas at module level and neither is installed — so the JS half is tested and the Python half is reasoned from the code path. **Master's next run is the test, and the thing to look at is whether PROJECTION reports a `measuredInterval` matching the chart's interval.** **THE PROCEDURAL LESSON, which is the more useful half: Section 110 changed a default and broke a feature on a different screen, and nothing caught it because NOTHING TIED THE CHART'S INTERVAL TO THE PROJECTION'S — two independent choices that happened to agree until one moved. The general shape: a default that other code derives from is an INTERFACE, and changing it is an interface change.** `verifyChartTime` now asserts that agreement at source level, so the next session to change the default interval sees a failure rather than shipping it. |
 | 138 | The store speaks UTC; the screen speaks master's time | done | Section 118. Master: *"time shown should be client time not utc in the UI."* He was reading a chart in a timezone he does not trade in: the store keeps intraday stamps in UTC deliberately (Section 73 — one provenance, no DST guessing, arithmetic that cannot drift with a machine's locale) and `lightweight-charts` renders a `UTCTimestamp` **in UTC**, with nothing converting at the boundary — so **the 09:15 IST open was labelled 03:45** on the axis and in the crosshair. **THE DECISION THAT MATTERS: CONVERT THE LABEL, NEVER THE DATA.** The common fix is to shift every timestamp by the local offset so the library's UTC rendering happens to read as local. That is wrong here for three reasons: Section 117's session-start lookup **keys on the UTC date of each bar**, so shifted values would key on the wrong day for anyone west of UTC and put master's fills on the wrong session; ordering, de-duplication and the crosshair all compare those same numbers; and it corrupts data to fix a label, so every future reader inherits the lie. **So the epoch values stay true UTC and only the formatters change** — `timeScale.tickMarkFormatter` for the axis and `localization.timeFormatter` for the crosshair — and **`verifyChartTime` asserts no `getTimezoneOffset` appears in either file**, so the shifting approach cannot creep back in. **A DAILY BAR IS NEVER ZONE-CONVERTED, and that is the subtle half: a daily bar is a CALENDAR DATE in the exchange's own reckoning, not an instant.** Pushing `2026-09-18` through a timezone can land it on the 17th or the 19th, mislabelling every daily bar for anyone west of UTC — so date strings pass through untouched and only intraday instants convert, asserted in three zones including `Pacific/Kiritimati` and `America/New_York` where a naive conversion would move the day. **THE ZONE IS NAMED, because a bare time is ambiguous** — `"09:15"` could be IST or UTC, and **that exact ambiguity is what made Section 117's defect hard to see** — so the legend now shows the bar's time with `GMT+5:30` beside it, and shows a time **at all**, which it previously did not: the only times on screen were the axis labels the library drew. The accessible readout carries it too, because a screen reader cannot infer a zone from an axis tick. **The axis respects the tick type** (Year/Month/DayOfMonth/Time/TimeWithSeconds), each getting only the field asked for, or the axis becomes a wall of text; the enum values are declared locally so `chartTime.js` stays free of the charting library and testable without it, and the suite pins all five against the library's public enum. **Everything else was already correct:** the only other stored stamp rendered as text in StockMind is the derivatives `as of`, a `deriv1d` calendar date, correctly unconverted — so the axis, crosshair and new legend line are the whole surface. **VERIFIED: `verifyChartTime.mjs` 50 → 86 assertions, every one passing an EXPLICIT timezone**, because relying on this machine's zone would make the suite pass here and fail on master's, which is the opposite of what a test is for. Measured: the stored stamp formats to `03:45` in UTC and **`09:15` in `Asia/Kolkata`, the real NSE open**; `23:45` on the previous day in `America/New_York`; `GMT+5:30` as the IST label; an invalid zone returns empty rather than throwing; `NaN` formats to empty rather than `Invalid Date`. 22 JS suites; audit clean at 139 bridge calls / 72 files / 365 channels; `vite build` succeeds; Python unchanged at 801. **NOT VERIFIED: not seen on screen** — the conversion is exercised against four timezones but not on master's machine, and **what he should check is that the axis on a 30m chart now starts near 09:15 rather than 03:45.** **NEXT unchanged from Section 116: the charge-approval overlay; pre-2024 rate history; `macro/sync` against real data; a block that reads a second series; the renderer tab strip.** |
 | 139 | The default zoom was configured at 8px and displayed as 5 | done | Section 119. Master: *"also set the default zoom to see candles properly."* **Section 110 set out to show candles at 8px per bar and did not, and the cause was a width that had not settled plus TWO DIFFERENT FALLBACKS FOR IT.** `createChart` is called with **no width** and `autoSize: false`, so the chart takes the container's width at creation and a `ResizeObserver` corrects it afterwards; the chart's own initial width fell back to **`clientWidth || 600`** while the default zoom derived a **bar count** from **`clientWidth || 900`** and called `setVisibleLogicalRange`. **On any mount where `clientWidth` was 0, the zoom asked for 112 bars into a 600px pane — 5.4px per candle for a setting of 8.** And it survived the correction, because **`lightweight-charts` preserves `barSpacing` across a resize, NOT the logical range** — so the ResizeObserver widened the chart without restoring the intended candle width. **A setting expressed in the wrong unit could not be enforced by the thing that knew the right width.** **THE FIX: express it in the library's own unit.** `barSpacing` IS pixels between candle centres, so setting it states the intent exactly and cannot be knocked out of shape by resize timing; the width is now consulted for one coarse question only — whether the series already fits — where being a little wrong changes nothing. **DECISION: `TARGET_BAR_PX` 8 → 12** — at 8 the body is about 5px and master said it still was not readable; 12 leaves roughly an 8px body with a 4px gap, which is where TradingView sits. The cost is context, **about 75 bars on a 900px pane instead of 112**, and that is the right trade because `fit all` is one click away and a smear is not readable at any width. **DECISION: a short series fills the pane rather than sitting in a corner** — below 90% of the pane at the target width, `fitContent` runs instead, because twenty fat candles against 900px of blank is not "seeing candles properly" either. **THE DECISION IS NOW PURE AND TESTED:** `src/pages/StockMind/chartZoom.js` holds `zoomPlan(count, width) -> {mode, barSpacing, reason}` and touches no chart library; `PriceChart` imports it and only APPLIES the result — the same split `chartTime.js` earned in Section 117. **ONE DEFINITION:** the data effect and the `reset zoom` button both call one `applyLegibleZoom`, asserted by counting call sites, because **Section 110 had two copies of the arithmetic and that is how they were free to disagree.** The assertion that pins the actual bug: **the same series gives the same candle width at 600px and at 900px** — under the old code it did not. **VERIFIED: `verifyChartTime.mjs` 86 → 117 assertions, green on the first run.** Measured: 4,649 bars give `mode: 'spacing'` at 12px with **75 bars on screen at 900px** rather than the whole series as a smear; a wider pane shows MORE bars at the SAME candle width; 20 bars in 900px are shown whole; the fit/spacing boundary lands exactly where the series stops fitting; an unknown width still yields the target spacing rather than a guessed pane size; zero, negative and `NaN` counts return `mode: 'none'` rather than a fit of nothing. Source-level: PriceChart holds no copy of `TARGET_BAR_PX`, applies `barSpacing` not a width-derived range, scrolls the newest bars into view, has exactly one `applyLegibleZoom` with two call sites, and no longer contains the `clientWidth || 900` that disagreed with the chart's own 600. 22 JS suites; audit clean at **139 bridge calls / 74 files / 365 channels** (the two new modules are now scope-checked); `vite build` succeeds; Python unchanged at 801. **NOT VERIFIED: not seen on screen** — what master should check is that a 30m chart opens with roughly 75 readable candles rather than a dense band, and that `fit all` still shows the whole series. **THE PATTERN, NOW TWICE IN THREE SECTIONS: Section 117 — a default other code derived from was an interface; Section 118 — storage units and display units are different concerns; Section 119 — a setting expressed in the wrong unit cannot be enforced. All three are the same shape: a value crossing a boundary with nothing asserting what it means on the other side.** The two extracted modules exist so the next such crossing has a place to be tested rather than a comment to be trusted. |
+| 140 | The chart audited against professional charting; 8 studies → 22 | done | Section 120. Master: *"Do extensive research on charts and it's related things. because it's by far too minimal and various thing in and around it are still lacking."* **AUDIT (counted, not estimated): 8 studies in the menu, 5 chart types, 3 scale modes, and ZERO of — drawing tools, `lightweight-charts` primitives/plugins, comparison symbols, image or data export, replay, chart alerts, indicator parameter editing.** ~30 indicator concepts are computed in Python and unreachable from the chart. The library is pinned at 5.2.1 and **its entire plugin surface was unused**, which is the single root of most of those gaps. **THE DEFECT THE AUDIT FOUND: RSI WAS DRAWN ON THE PRICE PANE.** The overlay renderer branched on `kind` before `pane`, and `rsi14` is `{pane:'oscillator', kind:'line'}` — so it matched the `kind === 'line'` branch and landed on pane 0, a 0–100 series on a 25,000-point index axis, flat along the floor, with its 30/70 guides and 0–100 autoscale in an unreachable branch. **`indicators.js` warns about exactly this in its own comment and the code quoting it was doing it.** `pane` and `kind` are independent properties and are now read independently. **SHIPPED: 8 → 22 studies**, all still pure functions of the visible bars — price overlays Donchian, Keltner, Supertrend, Parabolic SAR, Ichimoku, Pivots; own-pane ATR%, ADX+±DI, Stochastic, Williams %R, CCI, MFI, OBV, ROC; plus Heikin-Ashi as a chart type. **DECISION: one generic `kind: 'series'` rather than five one-off kinds** — `make` returns `{series:[{data,label,color,width,dashed,dotted,dots}], guides, scale}`, so five multi-line studies were affordable at once and the next needs no component change. **FORMULAS: the four with a widely-copied WRONG version are each asserted against a value the wrong version fails, because an indicator that is subtly wrong is worse than an absent one — it is read with confidence.** CCI divides by **mean absolute deviation, not standard deviation** (on a 20-bar ramp: exactly 126.667; the stdev version gives 109.8, and both are asserted). ADX counts **only the larger directional move and only if positive** (+DI exactly 50, −DI exactly 0 on the fixture; counting both would put −DI at 50). Stochastic smooths %K before %D so fast and slow cross on different bars. Parabolic SAR **clamps to the prior two bars' extreme** or the stop lands inside the reversal bar and flips again immediately. **A flat window reports the MIDPOINT, not the bottom** — Stochastic and MFI return 50, because 0 would read as "at the bottom of the range", a claim the data does not make. **TWO EXCLUSIONS IN OPPOSITE DIRECTIONS:** VWAP intraday-only (resets each session), pivots daily-or-longer (computed from the previous SESSION — on 5m bars they would be "pivots of the last five minutes"). The suite asserted a net count difference of one; that premise is gone and each exclusion is now asserted BY NAME, because **a net count would pass while both were broken.** **THREE THRESHOLD ERRORS FOUND by asserting that one bar short really is incomplete: MACD 35→34** (line draws at 26, signal needs nine more), **Ichimoku 52→78** (Senkou B is the 52-bar midpoint displaced 26 bars FORWARD, so at 52 bars the cloud's slower edge was absent and reported as drawn), **Stochastic 16→18**, and **VWAP had no requirement at all** so it reported "drew fine" regardless. `OVERLAY_NEEDS` is exported and shared, and every study must declare one. **ICHIMOKU'S DISPLACEMENT IS HONOURED AND ITS TRUNCATION DISCLOSED** — Senkou A/B 26 ahead, Chikou 26 behind, because that displacement IS the indicator; Rāma has no future bars so the forward cloud stops at the last stored bar and the final 26 carry none, stated rather than papered over by **synthesising 26 future timestamps, which would put invented bars on master's chart to make an indicator look complete.** **HEIKIN-ASHI WITH THE WARNING ON THE CHART, not in a tooltip on the menu item** — HA open and close are averages, so they are prices that never traded, and a stop read off an HA body sits at a price that never existed; master will have forgotten a tooltip by the time he reads a level off a body. **DECISION: studies are computed on the REAL bars, never the HA ones** — an RSI of Heikin-Ashi values is an RSI of a price that did not trade, a well-known way to manufacture a smoother, more confident, less true reading. **ALSO: volume is now a TOGGLE (`v`)** — it was a prop defaulting true that **no call site ever passed**, so it was permanently on and took 18% of the pane from price, the one study with no way to switch it off. **PNG export** via `takeScreenshot()`, which the library provides and nothing used, so there was no way to get a chart out of Rāma at all; filename carries symbol/interval/date, and it is stated that **the image is the canvas only** — toolbars and notes are DOM. **VERIFIED: verifyIndicators 80 → 164 assertions, all green; 22 JS suites; audit clean at 139 bridge calls / 74 files / 365 channels; `vite build` succeeds; Python unchanged at 801.** **NOT VERIFIED: nothing rendered** — every formula is tested but no new study has been drawn, and the RSI pane fix is a claim about the chart rather than about arithmetic. **The one thing to check is whether RSI now appears in its OWN PANE below price with 30/70 guides instead of flat along the bottom of the price pane.** **ROADMAP, in the order that earns most: (1) DRAWING TOOLS — the largest remaining gap and the whole plugin surface is unused; trendline/ray/horizontal/rectangle/Fibonacci/text on series primitives with `priceToCoordinate`+`coordinateToLogical` hit-testing, `subscribeClick` placement and a persisted per-symbol annotation store. A section of its own, not a tranche item. (2) A MEASURE TOOL — drag for % move, bar count, elapsed time; the most-used tool after the crosshair. (3) EDITABLE INDICATOR PARAMETERS — 22 studies with fixed periods is the next thing to feel minimal. (4) RESPONSIVE PANEL HEIGHT — the workspace chart sits in a 400px panel with a hard `height={260}`, so maximising widens but never heightens it; design decided (`fillHeight` prop, flex holder, height from the existing ResizeObserver) but NOT done blind, because layout is what cannot be verified here. (5) COMPARISON SYMBOL in `%` scale. (6) SERIES FROM THE ENGINE — ~30 concepts in `advanced_features.py` return LAST-BAR SCALARS with the full arrays computed and discarded, so charting them needs series-returning endpoints and is NOT a quick wiring job. (7) Session shading, event markers, alert lines, replay.** |
 | 132 | Role-based routing — what Rāma needs a model FOR | done | Section 112. Builds row 131's next step and row 130's item 5. **WHAT IT REPLACES:** `TASK_ROUTING`'s eight hand-written buckets plus a seven-id `FALLBACK_CHAIN` ending at `primaryModel`, so any task not matching a bucket fell to the first available entry — **the mechanism by which a 397B cloud model parses a date**, and by which a model that cannot do tool calling does tool calling, because a chain has no concept of *unfit*. **Nine roles declared with a label, a reason master can read, and hard requirements:** `extraction`, `tool-calling`, `code`, `reasoning`, `long-context`, `multilingual`, `embedding`, `vision`, `narration`. **TWO KINDS OF EVIDENCE, NEVER CONFLATED — `measured`** (the daemon and its fetched library: what is installed, its size, its parameter count, whether weights are on this disk) **and `published`** (leaderboards: function-calling collapses below ~7B, reasoning wants 14B+). Published evidence is about the FAMILY, not this machine, and every requirement records which kind it is so **a leaderboard can never be presented as a local measurement** — the same discipline as `{value, source, measured}` and `ctxVerified`. **DECISION: a role is a REQUIREMENT, not a preference** — a failed requirement EXCLUDES with a reason rather than ranking lower, because down-ranking lets an unfit model win whenever nothing better is present. **DECISION: no silent substitution and no silent absence** — `fit` is `declared` / `substitute` / `none`; a substitute is allowed (capability is never removed) but **labelled with what is unverified**; `none` reports the absence and how many candidates failed rather than handing the work onward. **DECISION: an unverified claim is a substitute, never a declared fit** — Ollama truncates to `num_ctx` whatever the family supports, so a 128K window is a claim; `multilingual` is a substitute BY CONSTRUCTION because Rāma has no local test, stated rather than implied. **DECISION: sensitivity is a gate, not a ranking** — `narration` names master's real holdings, so a non-private model is **refused outright**; a prompt that has left this machine cannot be recalled. Asserted: a 397B cloud model does not win narration by being large, and appears in `excluded` so the choice is auditable; any caller may raise `requirePrivate`. **Embedding and chat are a hard split both directions**, with mirror-image reasons. **DECISION: cheapest sufficient, not best available** — fit → privacy → cost → `fast` → capability, and for a role with a floor **the smallest model clearing it wins**; an unknown cost sorts LAST, because unknown must never look like free. Retired models are never candidates, with the replacement named. **THE DEFECT FOUND BY RUNNING IT: `Number(null)` is `0`** — a model with no parameter count was excluded as *"0B is below the 7B floor"* and a model with no reported size **silently CLEARED the disk budget**; unknown was read as zero and **zero passes or fails a threshold confidently.** Fixed with one `num()` returning `null` for absent, applied to parameters, context, size and cost. **Worth hunting for wherever else a threshold meets an optional field.** **THE RESEARCH HALF:** `researchPlan()` names, per unfilled or substituted role, what would fill it with the requirement in words — **from the FETCHED catalogue only**, because a list produced from memory is the Section 94 fabrication; with none loaded it reports `blocked` naming `models:refresh-catalog`, since *nothing to recommend* and *never looked* read alike and mean opposites. **WIRING — role selection is tried FIRST and the old path is the fallback, not the reverse:** `TASK_ROUTING` and `FALLBACK_CHAIN` are untouched so nothing that routes today changes, but a declared role is decided on fitness and only an unfilled role falls through — capability kept, silent default ended. `models:route` returns `role`/`roleFit`/`roleWhy`/`roleExcluded`; new reads `models:roles` and `models:role-research` gated on `models.use`, because being told a role is unfilled should not need elevated rights. **No capability decision — fitness is not authorisation**; no Electron, nothing persisted, no network. **VERIFIED: `npm run verify` 21 suites; `verifyModelRoles` 87 assertions; audit clean at 139 bridge calls / 72 files / 355 channels; `vite build` succeeds.** **NOT VERIFIED: no Ollama daemon was running, so every model record in the suite is a FIXTURE — the table has never been drawn against a real install.** **NEXT: the renderer surface.** `models:roles` and `models:role-research` have no UI, so master cannot see the table or the gaps, which is the point of building it — it belongs on the MODELS screen beside the existing suggestions list. |
 
 ### Resume checklist for a cold session
@@ -12820,4 +12821,171 @@ units are different concerns. This one: **a setting expressed in the wrong unit 
 three are the same shape — a value crossing a boundary without anything asserting what it means on the
 other side. The two extracted modules exist so the next such crossing has a place to be tested rather
 than a comment to be trusted.
+
+---
+
+## SECTION 120 — The chart: a full audit against professional charting, and the first tranche
+
+Master: *"Do extensive research on charts and it's related things. because it's by far too minimal and
+various thing in and around it are still lacking."*
+
+He is right, and the audit is worse than "minimal" in one specific place: a study was being drawn on the
+wrong pane, silently, for as long as it has existed.
+
+### What was actually there, counted
+
+| | before |
+|---|---|
+| studies in the indicator menu | **8** (6 price overlays, 2 own-pane) |
+| chart types | 5 |
+| price scale modes | 3 (LIN / LOG / %) |
+| drawing tools | **0** |
+| `lightweight-charts` primitives or plugins | **0** |
+| comparison symbols | **0** |
+| image or data export | **0** |
+| bar replay | **0** |
+| chart alerts | **0** |
+| indicator parameter editing | **0** — every period hard-coded |
+| indicator concepts computed in Python but unreachable from the chart | **~30** |
+
+`lightweight-charts` 5.2.1 is pinned, and the whole plugin surface — series primitives, pane primitives,
+custom series — was unused. That is the mechanism the library provides for drawing tools, annotations and
+Renko-style series, so **every one of those gaps traces to the same unused capability.**
+
+### The defect the audit found: RSI was on the price pane
+
+The overlay renderer branched on `kind` before `pane`:
+
+```js
+if (def.kind === 'line') { addLine(computed, { pane: 0 }); }
+...
+} else if (def.pane === 'oscillator') { /* own pane, guides, 0-100 autoscale */ }
+```
+
+`rsi14` is `{pane: 'oscillator', kind: 'line'}`. It matched the **first** branch, so **RSI was drawn on
+pane 0 against the price** — a 0–100 series on a 25,000-point index axis, flat along the floor. Its 30/70
+guides and its 0–100 autoscale sat in an unreachable branch.
+
+`indicators.js` warns about exactly this in its own comment — *"a 0–100 series on a 24,000-point index
+axis renders as a flat line along the bottom, which is a classic chart bug"* — and the code that quoted it
+was doing it. **`pane` and `kind` are independent properties and are now read independently.**
+
+### What shipped: 8 studies → 22
+
+All still pure functions of the visible bars, which is the line this module has always held.
+
+**Price overlays added:** Donchian 20, Keltner 20/2×ATR20, Supertrend 10/3, Parabolic SAR, Ichimoku
+9/26/52, floor-trader Pivots.
+**Own-pane studies added:** ATR% 14, ADX 14 with ±DI, Stochastic 14/3/3, Williams %R 14, CCI 20, MFI 14,
+OBV, ROC 12.
+**Chart type added:** Heikin-Ashi.
+
+**DECISION: one generic `kind: 'series'` instead of five one-off kinds.** `make` returns
+`{series: [{data, label, color, width, dashed, dotted, dots}], guides, scale}`, so Ichimoku's five lines,
+Supertrend's two sides, ADX's three, the pivot ladder and PSAR's dots all render through one branch. That
+is the only reason five multi-line studies were affordable at once, and the next one needs no component
+change.
+
+### Formulas: the four with a widely-copied wrong version
+
+**An indicator that is subtly wrong is worse than an absent one, because it is read with confidence.** So
+each is asserted against a value the wrong version fails:
+
+- **CCI divides by MEAN ABSOLUTE DEVIATION, not standard deviation.** On a 20-bar ramp the MAD is exactly
+  5, so CCI is `9.5 / (0.015 × 5) = 126.667`. The standard-deviation version gives 109.8. Both are
+  asserted — the correct value, and that it is *not* the wrong one.
+- **ADX counts only the LARGER directional move, and only if positive.** On the fixture each bar's high
+  and low both rise by 1 while the true range is 2, so +DI is exactly **50** and −DI exactly **0**. An
+  implementation counting both would put −DI at 50 too and fail.
+- **Stochastic smooths %K before %D**, so fast and slow cross on different bars; asserted to differ.
+- **Parabolic SAR clamps to the prior TWO bars' extreme after a flip.** Without it the stop lands inside
+  the bar that triggered the reversal and flips again immediately, producing a stream of false signals.
+
+**A flat window reports the midpoint, not the bottom.** Stochastic on an unchanging series returns 50, and
+MFI likewise — `0` would read as *"at the bottom of the range"*, which is a claim the data does not make.
+Same rule as the warm-up policy: no number that looks like a reading but is an artefact of division.
+
+### Two exclusions, in opposite directions
+
+VWAP is **intraday-only** because it resets each session. Floor-trader pivots are **daily-or-longer**
+because they are computed from the previous *session* — on 5-minute bars they would be "pivots of the last
+five minutes", a respected name over arithmetic nobody uses. The suite previously asserted the two lists
+differed by a net count of one; that premise is gone, and it now asserts each exclusion by name, because
+**a net count would pass while both were broken.**
+
+### Three threshold errors found by asserting completeness
+
+The bar requirement is *where the study is complete*, not where its first line appears — and testing that
+found three:
+
+- **MACD was 35, is 34.** The MACD line draws from 26 bars, the signal needs nine more of it: 26 + 8.
+- **Ichimoku was 52, is 78.** Senkou B is the 52-bar midpoint displaced **26 bars forward**, so the first
+  one landing on a real bar needs 52 + 26. At 52 bars the cloud's slower edge is simply absent, and the
+  old threshold reported it as drawn.
+- **Stochastic was 16, is 18.** %K needs 14 bars plus 3-bar smoothing; %D needs three of those.
+- **VWAP had no requirement at all**, so it reported "drew fine" regardless.
+
+`OVERLAY_NEEDS` is now exported and shared, and the suite asserts every study declares one — a study added
+without a requirement would otherwise report success while drawing nothing.
+
+### Ichimoku's displacement is honoured, and its truncation disclosed
+
+Senkou A and B are plotted **26 bars ahead** and Chikou **26 behind**. That displacement *is* the
+indicator; a version drawing the cloud at the current bar is a different thing wearing the name. Rāma has
+no future bars, so **the forward cloud stops at the last stored bar and the final 26 bars carry none.**
+That is stated rather than papered over by synthesising 26 future timestamps — which would put invented
+bars on master's chart to make an indicator look complete.
+
+### Heikin-Ashi, with the warning on the chart
+
+**HA open and close are averages — prices that never traded.** Excellent for reading whether a trend is
+intact, useless as a source of levels: a stop read off an HA body sits at a price that never existed. The
+warning is rendered **on the chart** while HA is active, not in a tooltip on the menu item that selected
+it, because master will have forgotten the tooltip by the time he reads a level off a body.
+
+**DECISION: studies are computed on the REAL bars, never the HA ones.** An RSI of Heikin-Ashi values is an
+RSI of a price that did not trade, and it is a well-known way to manufacture a smoother, more confident,
+less true reading.
+
+### Also shipped
+
+- **Volume is a toggle** (`v`). It was a prop defaulting to `true` that **no call site ever passed**, so
+  it was permanently on and took 18% of the pane from price whether master wanted it or not — the one
+  study with no way to switch it off.
+- **PNG export** (`⤓ png`) via `takeScreenshot()`, which the library provides and nothing used, so there
+  was no way to get a chart out of Rāma at all. The filename carries symbol, interval and date. Stated
+  plainly: **the image is the canvas only** — toolbars, readout and shortfall notes are DOM and are not in
+  it.
+
+### Verified
+
+`verifyIndicators.mjs` **80 → 164 assertions**, all green. 22 JS suites; audit clean at **139 bridge calls
+/ 74 files / 365 IPC channels**; `vite build` succeeds. Python unchanged at 801.
+
+**Not verified:** not seen on screen. Every formula is tested, but no new study has been *rendered* — and
+the RSI pane fix in particular is a claim about the chart, not about arithmetic. **The single thing worth
+checking is whether RSI now appears in its own pane below price with 30/70 guides**, rather than flat along
+the bottom of the price pane.
+
+### The roadmap, in the order that earns the most
+
+1. **Drawing tools.** The largest remaining gap by far, and the whole plugin surface is unused. Trendline,
+   ray, horizontal line, rectangle, Fibonacci retracement, text — built on series primitives with
+   `priceToCoordinate`/`coordinateToLogical` for hit-testing, `subscribeClick` for placement, and a
+   persisted annotation store per symbol. This is a section of its own, not a tranche item.
+2. **A measure tool** — drag to read % move, bar count and elapsed time. A small primitive, and the single
+   most-used tool on any real chart after the crosshair.
+3. **Editable indicator parameters.** Twenty-two studies with fixed periods is the next thing to feel
+   minimal; the catalogue already declares its parameters in the `make` closures and needs them lifted
+   into the definition.
+4. **Responsive panel height.** The workspace chart is created inside a 400px panel with a hard
+   `height={260}`, so maximising the panel widens the chart but never heightens it. Design decided: a
+   `fillHeight` prop, flex-sized holder, chart height driven by the existing `ResizeObserver`. Not done
+   blind because it is a layout change and layout is what cannot be verified here.
+5. **Comparison symbol** — a second series in `%` scale, which is how a relative-strength read is done.
+6. **Series from the engine.** ~30 indicator concepts exist in `advanced_features.py` and return **last-bar
+   scalars**, with the full arrays computed and discarded. Charting Ichimoku from the engine, market-profile
+   POC/VAH/VAL or the order-flow delta needs series-returning endpoints, not merely wiring — stated so a
+   later session does not mistake it for a quick connection.
+7. **Session shading, event markers, alert lines, replay** — each real, each smaller than the above.
 
