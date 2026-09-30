@@ -128,6 +128,17 @@ export const TERMS = {
       + 'detail — for more detail you need a finer interval.',
     seeAlso: ['interval', 'barsOverride'],
   },
+  zoom: {
+    term: 'Candle width', group: 'instrument',
+    short: 'How many pixels wide one candle is. Your setting, and the header shows what it measured.',
+    long: 'A candle narrower than about three pixels has no readable body, so a deep history drawn to '
+      + 'fit the pane is a smear rather than a chart — and a handful of bars stretched across the pane '
+      + 'is the same mistake in the other direction. So the chart opens at a fixed candle width and '
+      + 'lets the rest scroll, rather than fitting everything in. The width is yours to choose; the '
+      + 'figure in the header is measured off the chart afterwards, not the number that was asked for, '
+      + 'because a zoom that quietly failed to apply is exactly the defect this closed.',
+    seeAlso: ['bars', 'interval'],
+  },
   barsOverride: {
     term: 'Bars (override)', group: 'instrument',
     short: 'The exact bar count to request. The window buttons set it; you can type over them.',

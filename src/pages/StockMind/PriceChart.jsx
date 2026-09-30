@@ -14,7 +14,10 @@ import {
   toChartTime, sessionStarts, markerTime, timeTypesMatch,
   makeTickFormatter, makeTimeFormatter, formatStamp, zoneLabel,
 } from './chartTime.js';
-import { zoomPlan } from './chartZoom.js';
+import {
+  zoomPlan, pxPerBar, verifyZoom, rangeForPxPerBar, describeZoom,
+  DENSITIES, DEFAULT_DENSITY, densityById, pxForDensity,
+} from './chartZoom.js';
 import * as DRAW from './chartDrawings.js';
 import { createDrawingLayer } from './ChartDrawingLayer.js';
 import InfoTip from './InfoTip.jsx';
@@ -44,26 +47,110 @@ const ATTRIBUTION_URL = 'https://www.tradingview.com';
 
 const PREFS_KEY = 'rama.stockmind.chart';
 
+/** Next paint, or the next tick where there is no compositor (a test, a hidden tab). */
+const frame = (fn) => (typeof requestAnimationFrame === 'function'
+  ? requestAnimationFrame(fn) : setTimeout(fn, 0));
+
 /**
- * Apply the default zoom. The DECISION lives in `chartZoom.js`, tested; this only carries it out.
+ * The width of the PLOT AREA, not of the container — and the difference is a real defect (Section 122).
  *
- * ONE DEFINITION — the data effect and the `reset zoom` button both call this. Two copies of the
- * arithmetic is how they drift apart, and Section 110 had two.
+ * `clientWidth` includes the price scale: sixty to seventy pixels of axis that no candle is ever drawn
+ * in. Every width-derived candle calculation in Sections 110 and 119 used it, so each one overstated the
+ * result by about 8% at 900px, and "correcting" a visible range against an overstated width applies a
+ * systematically wrong zoom rather than fixing one. `timeScale().width()` is the axis's own width, which
+ * is exactly the span the visible logical range covers.
+ *
+ * The container is kept as a fallback, because a slightly wrong width beats no measurement at all.
  */
-function applyLegibleZoom(chart, count, holderEl) {
-  if (!chart) return;
-  const plan = zoomPlan(count, holderEl?.clientWidth || 0);
-  if (plan.mode === 'none') return;
-  const ts = chart.timeScale();
+function plotWidth(chart, holderEl) {
   try {
-    if (plan.mode === 'fit') { ts.fitContent(); return; }
-    // `barSpacing` is the library's own unit for pixels per candle, so it cannot be knocked out of
-    // shape by a width that has not settled — which is what went wrong in Section 110.
-    ts.applyOptions({ barSpacing: plan.barSpacing });
+    const w = chart?.timeScale?.()?.width?.();
+    if (Number.isFinite(w) && w > 0) return w;
+  } catch { /* before the first layout there is no axis yet */ }
+  return holderEl?.clientWidth || 0;
+}
+
+/**
+ * READ the candle width off the live chart and report it. Measurement only — it changes nothing.
+ *
+ * This is the piece Sections 110 and 119 were both missing. Neither ever asked the chart what the
+ * candle width had become, so a zoom that did not take looked exactly like one that did, and three
+ * sections were spent adjusting a number that was never being honoured.
+ */
+function measureZoom(chart, count, holderEl, report, note = null) {
+  if (!chart || !report) return;
+  const width = plotWidth(chart, holderEl);
+  let range = null;
+  try { range = chart.timeScale().getVisibleLogicalRange(); }
+  catch { range = null; }
+  const actual = pxPerBar(range, width);
+  report({ actual, width, count, text: describeZoom(actual, count, width), note });
+}
+
+/**
+ * Apply the default zoom, then CHECK THAT IT TOOK, and correct it once if it did not.
+ *
+ * The decision — how wide a candle should be — lives in `chartZoom.js`, tested. This carries it out
+ * and verifies it, which is the whole of Section 122:
+ *
+ *   1. set `barSpacing`, the library's own unit for pixels between bar centres;
+ *   2. **wait a frame.** `setData` moves the visible range itself and the time scale settles
+ *      asynchronously, so a read-back in this tick reads a range that is about to be replaced. The
+ *      library's maintainers describe the correct sequence as change, wait, then read;
+ *   3. measure the actual width from the visible logical range and the pane width;
+ *   4. if it drifted outside tolerance, set the range explicitly — which does hold — and measure again.
+ *
+ * There is NO `fitContent()` fallback. Both previous attempts had one, and it restored precisely the
+ * squeeze-everything-in behaviour being replaced, silently, so the fix looked applied when it was not.
+ * A failure is warned about and reported instead.
+ *
+ * ONE DEFINITION — the data effect, the density control and `reset zoom` all call this. Two copies of
+ * the arithmetic is how they drift apart, and Section 110 had two.
+ */
+function applyLegibleZoom(chart, count, holderEl, targetPx, report) {
+  if (!chart) return;
+  const plan = zoomPlan(count, targetPx);
+  if (plan.mode === 'none') return;
+  const target = plan.barSpacing;
+  const ts = chart.timeScale();
+
+  try {
+    ts.applyOptions({ barSpacing: target });
     ts.scrollToRealTime();
-  } catch {
-    try { ts.fitContent(); } catch { /* no chart yet */ }
+  } catch (err) {
+    console.warn(`[PriceChart] the candle width could not be set: ${err.message}`);
+    measureZoom(chart, count, holderEl, report, `the ${target}px candle width was refused`);
+    return;
   }
+
+  const settle = (correctionsLeft) => {
+    const width = plotWidth(chart, holderEl);
+    let range = null;
+    try { range = ts.getVisibleLogicalRange(); }
+    catch { range = null; }
+    const check = verifyZoom(range, width, target);
+
+    if (check.ok) { measureZoom(chart, count, holderEl, report); return; }
+    if (correctionsLeft <= 0 || check.actual === null) {
+      // Said out loud rather than left as "it still looks wrong". If this ever appears on master's
+      // machine it names both numbers, which is the diagnosis Sections 110 and 119 never had.
+      console.warn(`[PriceChart] zoom unverified: ${check.why}`);
+      measureZoom(chart, count, holderEl, report, check.why);
+      return;
+    }
+
+    const want = rangeForPxPerBar(count, width, target);
+    if (!want) { measureZoom(chart, count, holderEl, report, check.why); return; }
+    try { ts.setVisibleLogicalRange(want); }
+    catch (err) {
+      console.warn(`[PriceChart] zoom correction refused: ${err.message}`);
+      measureZoom(chart, count, holderEl, report, check.why);
+      return;
+    }
+    frame(() => settle(correctionsLeft - 1));
+  };
+
+  frame(() => settle(1));
 }
 
 const SIGNAL_LEVELS = [
@@ -202,6 +289,12 @@ export default function PriceChart({
   const linesRef = useRef([]);
   const fitKeyRef = useRef(null);
   const savedRangeRef = useRef(null);
+  // The zoom target and the bar count as refs, so the effects that need the LATEST value can read it
+  // without listing it as a dependency — listing `density` on the data effect would re-`setData` every
+  // bar in the series each time master nudged the candle width.
+  const targetPxRef = useRef(null);
+  const countRef = useRef(0);
+  const lastPxRef = useRef(null);
 
   // ── Drawings (Section 121) ─────────────────────────────────────────────────
   const shellRef = useRef(null);
@@ -241,9 +334,26 @@ export default function PriceChart({
   const [volOn, setVolOn] = useState(() => (typeof prefs.current?.volume === 'boolean'
     ? prefs.current.volume : showVolume));
 
+  /**
+   * HOW WIDE A CANDLE IS, AS MASTER'S SETTING (Section 122).
+   *
+   * Three sections guessed at a single number and he reported it wrong three times. A number I choose
+   * for him is a number I will keep getting wrong; a setting he chooses, that Rāma remembers and shows
+   * back to him, ends the guessing. The default is still an opinion — `standard`, about where a trading
+   * platform opens — but it is now the starting point rather than the only point.
+   */
+  const [density, setDensity] = useState(() => {
+    const want = prefs.current?.density;
+    return densityById(want) ? want : DEFAULT_DENSITY;
+  });
+  const barPx = pxForDensity(density);
+
+  // What the zoom ACTUALLY is, measured off the chart. Displayed, so it is never again invisible.
+  const [zoom, setZoom] = useState(null);
+
   useEffect(() => {
-    savePrefs({ chartType, scaleMode, overlays: enabled, volume: volOn });
-  }, [chartType, scaleMode, enabled, volOn]);
+    savePrefs({ chartType, scaleMode, overlays: enabled, volume: volOn, density });
+  }, [chartType, scaleMode, enabled, volOn, density]);
 
   const isIntraday = showsClock(interval);
 
@@ -313,6 +423,11 @@ export default function PriceChart({
     .map((c) => ({ time: c.time, value: c.volume, up: c.close >= c.open })),
   [candles]);
 
+  // Kept current on every render so the long-lived chart subscription and the data effect both see
+  // master's present choice rather than the one in force when they were created.
+  targetPxRef.current = barPx;
+  countRef.current = candles.length;
+
   const last = candles.length ? candles[candles.length - 1] : null;
   const prev = candles.length > 1 ? candles[candles.length - 2] : null;
   const change = last && prev ? last.close - prev.close : null;
@@ -372,6 +487,15 @@ export default function PriceChart({
       timeScale: {
         borderColor: theme.border,
         rightOffset: 6,
+        // THE CANDLE WIDTH IS SET AT CREATION, NOT ONLY AFTER THE FIRST `setData` (Section 122). The
+        // library's default is 6px, and that default is almost certainly what master was looking at:
+        // Section 110 measured "about 5px" while asking for 8, which is the untouched default rather
+        // than a miscalculated target. Starting at the right width means the first paint is already
+        // correct instead of being corrected.
+        barSpacing: targetPxRef.current,
+        // A manual zoom may go narrower than a body is readable — that is master's business — but the
+        // floor stays above zero so a pinch cannot collapse the series into a line.
+        minBarSpacing: 0.5,
         timeVisible: showsClock(interval),
         secondsVisible: false,
         // THE AXIS READS IN MASTER'S OWN TIME (Section 118). The library renders a UTCTimestamp in UTC,
@@ -451,6 +575,30 @@ export default function PriceChart({
       console.warn(`[PriceChart] drawing layer unavailable: ${err.message}`);
       layerRef.current = null;
     }
+
+    /**
+     * THE ZOOM IS NOW OBSERVABLE, AND THAT IS THE REAL FIX (Section 122).
+     *
+     * Nothing on screen ever said how wide a candle was, so "the default zoom is wrong" could only be
+     * answered by guessing. This reports the measured width on every range change — the default, a
+     * scroll-wheel zoom, a pan, a resize — so the number is always visible and a wrong one is
+     * immediately a specific complaint rather than a vague one.
+     *
+     * Deduped to quarter-pixel steps: a drag fires this every frame, and sixty identical state updates
+     * a second is a way to make a chart stutter.
+     */
+    chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      const width = plotWidth(chart, holder.current);
+      const actual = pxPerBar(range, width);
+      const step = actual === null ? null : Math.round(actual * 4) / 4;
+      if (step === lastPxRef.current) return;
+      lastPxRef.current = step;
+      setZoom({
+        actual, width, count: countRef.current,
+        text: describeZoom(actual, countRef.current, width),
+        note: null,
+      });
+    });
 
     chart.subscribeCrosshairMove((param) => {
       if (!param?.time || !param.seriesData) { setReadout(null); return; }
@@ -542,9 +690,10 @@ export default function PriceChart({
     if (candles.length === 0) return;
 
     // ZOOM TO LEGIBLE CANDLES, NOT TO EVERY BAR (Section 110), as bar spacing rather than a
-    // width-derived range (Section 119). `applyLegibleZoom` above holds the reasoning and the only copy
-    // of the arithmetic.
-    const fitLegible = () => applyLegibleZoom(chart, candles.length, holder.current);
+    // width-derived range (Section 119), VERIFIED RATHER THAN ASSUMED (Section 122).
+    // `applyLegibleZoom` above holds the reasoning and the only copy of the arithmetic.
+    const fitLegible = () => applyLegibleZoom(chart, candles.length, holder.current,
+      targetPxRef.current, setZoom);
 
     // The DATES are part of the series identity, not just the preset name: with a hand-typed window
     // `rangeId` is null, so a key from the preset alone would keep the old zoom over a different span.
@@ -842,6 +991,15 @@ export default function PriceChart({
 
   const empty = candles.length === 0;
   const toggle = (k) => setLayers((s) => ({ ...s, [k]: !s[k] }));
+
+  // One step wider or narrower. `+1` is narrower because the list runs comfortable → dense.
+  const stepDensity = useCallback((dir) => {
+    const here = DENSITIES.findIndex((d) => d.id === density);
+    const from = here < 0 ? DENSITIES.findIndex((d) => d.id === DEFAULT_DENSITY) : here;
+    const next = Math.max(0, Math.min(DENSITIES.length - 1, from + dir));
+    setDensity(DENSITIES[next].id);
+  }, [density]);
+
   const toggleOverlay = (id) => setEnabled((s) => (s.includes(id)
     ? s.filter((x) => x !== id) : s.concat(id)));
 
@@ -849,12 +1007,32 @@ export default function PriceChart({
   const resetZoom = useCallback(() => {
     const chart = chartRef.current;
     if (!chart) return;
-    applyLegibleZoom(chart, candles.length, holder.current);
+    applyLegibleZoom(chart, candles.length, holder.current, targetPxRef.current, setZoom);
   }, [candles.length]);
 
+  /**
+   * `fit all` is the one place `fitContent()` is right: master asked for the whole series, so a smear
+   * is the answer he wants. It is a button, never a fallback — as a fallback it is what silently undid
+   * the fix twice.
+   */
   const zoomAll = useCallback(() => {
-    try { chartRef.current?.timeScale().fitContent(); } catch { /* no chart yet */ }
-  }, []);
+    const chart = chartRef.current;
+    if (!chart) return;
+    try { chart.timeScale().fitContent(); }
+    catch { return; }
+    // Measured afterwards, so the readout does not go on claiming the density's width.
+    frame(() => measureZoom(chart, candles.length, holder.current, setZoom,
+      'fitted to the whole series, so the candle width is whatever that takes'));
+  }, [candles.length]);
+
+  // MASTER'S CHOICE APPLIES AT ONCE. A density that only took effect at the next data change would
+  // read as a control that does nothing, which is its own defect.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || candles.length === 0) return;
+    applyLegibleZoom(chart, candles.length, holder.current, targetPxRef.current, setZoom);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [density]);
 
   /**
    * Save the chart as a PNG (Section 120).
@@ -1034,6 +1212,10 @@ export default function PriceChart({
     }
     if (k === 'r') { resetZoom(); e.preventDefault(); return; }
     if (k === 'v') { setVolOn((v) => !v); e.preventDefault(); return; }
+    // Candle width, the bracket keys — the same convention as every brush-size control. Neither
+    // bracket is a chart-type, view or drawing shortcut, and the suite asserts that.
+    if (k === ']') { stepDensity(-1); e.preventDefault(); return; }
+    if (k === '[') { stepDensity(1); e.preventDefault(); return; }
     // Drawing keys. Every one is checked against the chart-type and view keys by the suite, so a tool
     // shortcut can never silently steal `1`-`6`, `f`, `l`, `r` or `v`.
     const td = DRAW.TOOL_IDS.find((id) => DRAW.TOOLS[id].key === k);
@@ -1102,7 +1284,8 @@ export default function PriceChart({
     // "l" and "r" while master types a symbol into the field above.
     <div ref={shellRef} style={shell} onKeyDown={onKeyDown} tabIndex={0} role="group"
          aria-label={`Price chart for ${symbol || 'the selected symbol'}. `
-           + 'Press 1 to 6 for chart type, L for log scale, V for volume, R to reset zoom, '
+           + 'Press 1 to 6 for chart type, L for log scale, V for volume, '
+           + 'open and close bracket to widen or narrow the candles, R to reset zoom, '
            + 'F for fullscreen.'}>
 
       {/* ── Identity and last price. Previously the only header was the symbol and the interval
@@ -1135,6 +1318,23 @@ export default function PriceChart({
         <span style={{ display: 'inline-flex', alignItems: 'center' }}>
           {candles.length.toLocaleString()} bars<InfoTip id="bars" />
         </span>
+
+        {/* ── WHAT THE ZOOM ACTUALLY IS (Section 122) ─────────────────────────────────────────────
+               Master reported the default zoom wrong three times and there was no way for either of us
+               to say what it was — so each fix was a guess at a number nothing on screen reported. This
+               is measured off the chart's own visible range, not restated from what was requested, and
+               it turns "the zoom is wrong" into "it says 3px and I want 12". ── */}
+        {zoom?.text && (
+          <span style={{
+            fontVariantNumeric: 'tabular-nums',
+            color: zoom.note ? 'var(--amber)' : 'var(--muted)',
+          }} title={`Measured from the chart, not the value asked for. Target ${barPx}px per candle `
+            + `(${densityById(density)?.label || density}) — change it under `
+            + `${CHART_TYPES.find((t) => t.id === chartType)?.label || 'Candles'}, or press [ and ].`
+            + (zoom.note ? `\n\n${zoom.note}` : '')}>
+            {zoom.text}{zoom.note ? ' ⚠' : ''}
+          </span>
+        )}
         {busy && <span style={{ color: 'var(--accent)' }}>loading…</span>}
         <span style={{ flex: 1 }} />
         <button type="button" onClick={resetZoom} style={chip(false)}
@@ -1409,6 +1609,34 @@ export default function PriceChart({
                   </button>
                 ))}
               </div>
+              {/* ── CANDLE WIDTH, AS A SETTING (Section 122) ───────────────────────────────────────
+                     The default zoom was reported wrong in Sections 110, 119 and again after 121. A
+                     single number I pick is a number I will keep picking wrongly; this is master's to
+                     set, Rāma remembers it per browser, and the measured result is in the header. The
+                     options are named by intent because nobody wants "16 pixels", they want to see the
+                     candles or to see the year. ── */}
+              <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '2px 6px 4px',
+                borderTop: '1px solid var(--border)' }}>
+                CANDLE WIDTH<InfoTip id="zoom" />
+              </div>
+              <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', padding: '0 4px 4px' }}>
+                {DENSITIES.map((d) => (
+                  <button key={d.id} type="button" style={seg(d.id === density)}
+                          aria-pressed={d.id === density}
+                          onClick={() => setDensity(d.id)}
+                          title={`${d.px}px per candle — ${d.hint}`}>
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '0 6px 6px',
+                lineHeight: 1.5 }}>
+                {densityById(density)?.hint}
+                {' '}Applies on open and on <em>reset zoom</em>; the brackets <kbd>[</kbd>{' '}
+                <kbd>]</kbd> step it. A short series leaves the rest of the pane empty rather than
+                stretching a few bars across it.
+              </div>
+
               <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '2px 6px 4px',
                 borderTop: '1px solid var(--border)' }}>
                 PRICE SCALE
@@ -1638,7 +1866,8 @@ export default function PriceChart({
           </>
         ) : (
           <span>
-            Keys: 1–5 chart type · L log scale · R reset zoom · F fullscreen. Click the chart first.
+            Keys: 1–6 chart type · L log scale · V volume · [ ] candle width · R reset zoom ·
+            F fullscreen. Click the chart first.
           </span>
         )}
       </div>
