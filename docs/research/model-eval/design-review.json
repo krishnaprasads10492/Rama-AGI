@@ -1,0 +1,128 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "iteration": 3,
+  "reviewedDesign": "c:\\CodeBase\\Velvet_UI\\Velvet\\Rama_AGI\\.worktrees\\model-eval\\.agents\\tasks\\model-eval\\design.md",
+  "reviewDoc": "c:\\CodeBase\\Velvet_UI\\Velvet\\Rama_AGI\\.worktrees\\model-eval\\.agents\\tasks\\model-eval\\design-review.md",
+  "counts": { "HIGH": 1, "MEDIUM": 5, "NIT": 6 },
+  "findings": [
+    {
+      "id": 1,
+      "severity": "HIGH",
+      "title": "The D1 scanner, as specified, mis-tokenises JSX, and src/ (43 .jsx files) is inside SHIPPED_DIRS",
+      "where": "design.md D1 (scan), D1a (walkShipped), §3 scanner fixture, P4; rows I8, I9, I10, I11, I12",
+      "problem": "scan() is specified as a JavaScript-only state machine (normal / line comment / block comment / single / double / template / regex). JSX text children are not JavaScript: an apostrophe in element text opens single-quote state and blanks the code view until the next quote. Verified live: src/pages/Introspect/Introspect.jsx:276, src/pages/System/System.jsx:88 and :105, src/.../HelpPanel.jsx:401, src/pages/Settings/Settings.jsx:366. The result is a false GREEN on absence assertions over the blanked region (I12(b) console.log, I12(c) markers on the comments view, I9 renderer fetch ban, I8 second-tier-table ban) and corrupted catchBodies spans for I11 in PriceChart.jsx. The §3 scanner fixture contains no JSX case and every planted mutation for the tree-wide rows targets a .cjs, so --self-test cannot detect it and AC5 is satisfied on .cjs evidence only.",
+      "fix": "Add an explicit JSX mode selected by extension and specify it: track element context; on '<' + identifier//|'>' enter tag state; inside tag state behave as JS for attribute values and {…} expression containers; on a closing '>' enter text state, where NOTHING opens a string, comment or regex and only '<' or '{' change state, with text emitted as blanks on both code and comments. Add fixture cases for each of the five measured lines plus '<p>see https://x/y</p>' and \"<p>{'a'}</p>\", each asserting a console.log('x') on the FOLLOWING line is still visible on code. Move at least one planted mutation onto a .jsx (plant console.log('x') after System.jsx:105) so --self-test exercises the JSX path. Acceptable alternative: narrow walkShipped to .cjs/.js/.mjs/.json, declare .jsx out of scope for the tree-wide rows, adjust SCAN_FLOOR and P4, and lower the affected row labels to say so."
+    },
+    {
+      "id": 2,
+      "severity": "MEDIUM",
+      "title": "I17's 'nothing on a timer writes' assertion is vacuous for the dependency-review task",
+      "where": "design.md §4, I17, '\"Neither writes\" — narrowed, with the reason', and mutation (b)",
+      "problem": "blockAfter is defined as 'the next {…} block at or after offset'. Measured at electron/main.cjs:570 the second task's body is an expression-bodied arrow: run: async () => runDependencyReview({ file: true }). blockAfter therefore returns { file: true }, which trivially satisfies the ban list (releaseChannel, release:cut, cutRelease, bumpSemver, .apply(, version =, writeFileSync), and the real body (runDependencyReview at :579) is never inspected. Mutation (b) is only red if the implementer happens to pick task 1, which the design does not say.",
+      "fix": "Specify: for each sched.register( argument block, find run:; if the first significant token after the arrow is '{', the span is that block; otherwise the span is the expression up to the ',' at the register argument's own brace depth, UNION the functionBody of the called identifier when functionBody resolves it in the same file. A run: whose span cannot be resolved fails the row (R1.6). Pin two mutations: (b1) insert cutRelease({}) into task 1's run: body; (b2) insert require('./lib/releaseChannel.cjs').cutRelease({}) into runDependencyReview's body. Both must go red."
+    },
+    {
+      "id": 3,
+      "severity": "MEDIUM",
+      "title": "§7 contradicts itself on `warning` for a future asOf, and verifyStaleness.cjs asserts exact shapes",
+      "where": "design.md §7, electron/lib/staleness.cjs, the Semantics bullet list",
+      "problem": "One bullet states 'warning is null unless stale or neverFetched'; three lines later 'A future asOf (clock skew) → days: 0, stale: false, and a warning naming the skew'. A future asOf is neither stale nor neverFetched, so the two rules cannot both hold. AC15 and §7 both specify that the suite asserts exact shapes, so module and suite will disagree according to which sentence the implementer followed. Same defect class finding 14 closed for the invalid-budget branch, left open one bullet later.",
+      "fix": "Keep the skew warning and restate the rule as: warning === null iff stale === false && neverFetched === false && asOf is not in the future. Add the skew row to §7's input table with the literal sentence, e.g. '<label> is timestamped <asOf>, which is in the future — the clock on one side is wrong', and add the assertion describe({asOf: now + 3*86400000, budgetDays: 1, now}) → {days: 0, stale: false, warning: <non-null>}."
+    },
+    {
+      "id": 4,
+      "severity": "MEDIUM",
+      "title": "I3's source-shape half asserts a shape sessionManager.masterUnlock does not have",
+      "where": "design.md §4, I3, 'Source-shape, independently'",
+      "problem": "The design says `!cryptoCore.hasVerifier(` 'appears exactly once AND is the condition guarding the writeVerifier branch'. Measured electron/sessionManager.cjs:78-82: `const firstUnlock = !cryptoCore.hasVerifier(dataDir);` then `if (firstUnlock) { cryptoCore.writeVerifier(dataDir); } else if (!cryptoCore.verifyPasscode(dataDir)) {`. The branch condition is the boolean firstUnlock; the hasVerifier call sits in a declaration one line above. An implementer asserting the sentence literally writes a row that is RED ON HEAD for the wrong reason — the defect class §4's own preamble calls worse than a missing assertion.",
+      "fix": "Replace the clause with three assertions true of this code: (i) `!cryptoCore.hasVerifier(` occurs exactly once in masterUnlock's span; (ii) the first `if (` at or after that offset has `cryptoCore.writeVerifier(` inside its blockAfter body; (iii) orderWithin puts hasVerifier before verifyPasscode. If (ii) is felt too adjacency-dependent, use the stronger form 'the identifier assigned from !cryptoCore.hasVerifier( is the whole condition of that if' — but state which one is being implemented."
+    },
+    {
+      "id": 5,
+      "severity": "MEDIUM",
+      "title": "I16 never asserts that a failed open records a failure, so R1.3's 'repeated failed opens escalate' is half covered and the gap is undeclared",
+      "where": "design.md §4, I16 ('Escalation arithmetic', 'Cooldown refusal'); R1.3's I16 row; §13's 'Not asserted' list",
+      "problem": "The row asserts roundsFor's arithmetic (a pure function, loyaltyCore.cjs:124-127) and the cooldown refusal reached by PLANTING .loyalty.attempts as {failures: COOLDOWN_AFTER, lastFailAt: now}. Neither touches the enforcement that a failed openCore accumulates a failure: recordFailure() is at :112 and is reached from openCore's failure path at :279, and describe() already exposes failures and nextAttemptRounds (:344-353). Delete recordFailure() and the row stays green, because the planted file supplies the state the code was supposed to produce — the 'tests the module, not the invariant' shape this tranche exists to remove. §13 records only the cooldown EXPIRY as unasserted, so the gap reads as covered.",
+      "fix": "After the seal, inside the same finally-cleaned block: capture describe(), await openCore('a-wrong-passcode') twice, and assert describe().failures goes 0 → 1 → 2 with nextAttemptRounds strictly increasing. Add a mutation that deletes recordFailure() from openCore's failure path and require the row to go red. Cost is two 4096-round PBKDF2 derivations, inside the budget §1 already measures. If master prefers not to pay it, declare the gap explicitly in §13 in the same voice I13 uses rather than leaving R1.3's clause looking satisfied."
+    },
+    {
+      "id": 6,
+      "severity": "MEDIUM",
+      "title": "scripts/verifyStaleness.cjs is wired into the verify chain but left outside the mutual-attestation argument",
+      "where": "design.md §5 STRUCTURAL_GUARDED and the structural-checks list; §3 preflight P1; §6.3; D7; §11",
+      "problem": "The design's standard for a check it adds is mutual attestation: P1 asserts the tripwire exists, is non-empty and is wired into package.json's verify chain, and the tripwire asserts the same of verifyInvariants.cjs plus its row ids and --self-test branch. §6.3 concludes 'There is no single edit that removes the check silently'. That holds for the two covenant suites but not for the third suite this tranche ships: nothing asserts scripts/verifyStaleness.cjs exists, and §5's package.json wiring check looks only for verifyInvariants.cjs and verifyLoyaltyTripwire.cjs. Deleting the file and its chain link is exactly the one silent edit — a suite going quiet, ledger row 118's recorded failure mode and what AC20 guards. §9's ownership table has no owner for it either.",
+      "fix": "Add 'scripts/verifyStaleness.cjs' to STRUCTURAL_GUARDED (not APPROVABLE, so no approval is ever needed to edit it — the same trade D8 took for verifyInvariants.cjs) and extend §5's package.json structural check to require all three script names in the verify string. Alternatively state in §5 and §6 that it is deliberately unguarded and why; guarding it is one array entry, so that is the cheaper honesty."
+    },
+    {
+      "id": 7,
+      "severity": "NIT",
+      "title": "D2 and D3 both define Module._resolveFilename with different bodies",
+      "where": "design.md D2 and D3",
+      "problem": "D2's snippet handles only 'electron'; D3's patched() handles 'electron' plus the overlay rebase. They read as two installed resolvers and the implementer has to infer that D3's supersedes.",
+      "fix": "State it: 'D3's patched() is the single installed resolver; D2's snippet shows only the stub exports it returns for the electron request.'"
+    },
+    {
+      "id": 8,
+      "severity": "NIT",
+      "title": "Bare specifiers requested from an overlay-materialised parent are not rebased",
+      "where": "design.md D3 (the rebase rule is gated on isRelative(request))",
+      "problem": "A bare specifier issued from a file under ctx.tmp resolves with parent.paths rooted at os.tmpdir(), so require('argon2') from a mutated cryptoCore.cjs copy throws MODULE_NOT_FOUND. Harmless today — every reachable optional-dependency require sits in a try/catch (verified cryptoCore.cjs:79, authCore.cjs:72, nucleusSealer.cjs:164) — but it is an undocumented behaviour difference between an overlay run and a normal run.",
+      "fix": "Either extend the rebase to all requests (set p.paths from the repo path whenever the parent lies under ctx.tmp) or record the limitation next to fixture S1."
+    },
+    {
+      "id": 9,
+      "severity": "NIT",
+      "title": "§4's I7 prose is wrong by one field",
+      "where": "design.md §4, I7",
+      "problem": "'route: occurs 19 times … while the other five fields occur 18 times.' Measured in src/config/registry.js: route: 19, id: 18, component: 18, voice: 18, keys: 18, but minTier 20 — 18 inside the PAGES span (:34–:197), one in the JSDoc at :26, and one real code use at :204 (PAGES.filter(p => tier <= p.minTier)). The row's span-scoped assertion is unaffected and correct; the justifying sentence names the wrong exception set.",
+      "fix": "Rewrite as: 'two of the six fields also occur outside the span — route: at :233 and minTier at :204 — plus minTier in the JSDoc at :26, which code blanks.'"
+    },
+    {
+      "id": 10,
+      "severity": "NIT",
+      "title": "Two export counts for loyaltyGuard read as a conflict",
+      "where": "design.md §4/I15 (14-name frozen export set) versus §10 ('nine exported predicates')",
+      "problem": "Both are true — nine of the fourteen exports are functions — but the two numbers invite a maintainer to treat one as stale.",
+      "fix": "Say 'nine of its fourteen exports are predicates'."
+    },
+    {
+      "id": 11,
+      "severity": "NIT",
+      "title": "I5 never states where the HMAC input comes from",
+      "where": "design.md §4, I5",
+      "problem": "The row asserts createHmac('sha256', digits).update('u1').digest('hex') === captured.keyHash, but the suite cannot see digits; it can only derive them as r1.key.replace(/-/g,''). The adjacent bullet implies this; the assertion does not state it. Verified that the derivation works: mintKey (authCore.cjs:219-226) builds formatted from the same 12 digits.",
+      "fix": "Write the derivation into the row: const digits = r1.key.replace(/-/g, '')."
+    },
+    {
+      "id": 12,
+      "severity": "NIT",
+      "title": "--self-test re-spawns auditRenderer once for I7's mutation",
+      "where": "design.md §10 ('source-shape mutations only, no KDF repeat') versus §4, I7",
+      "problem": "I7 keeps its behavioural half, so one planted mutation costs a 2.51 s child spawn (measured), which the self-test cost note does not acknowledge.",
+      "fix": "Either state it in §10's cost table, or skip the child half when ctx.overlay is non-empty — the child cannot see the overlay, so it contributes nothing to that verdict, and skipping is consistent with D3's existing rule for the KDF halves."
+    }
+  ],
+  "verifiedAssumptionsCount": 40,
+  "wrongOrUnverifiedAssumptions": [
+    "WRONG — D1's scanner handles every file walkShipped returns: JSX text breaks the string/comment state machine on five measured lines across four .jsx files (finding 1)",
+    "WRONG — I17: blockAfter yields each task's run: body; the second task is an expression-bodied arrow, so blockAfter returns { file: true } (finding 2)",
+    "WRONG — I3: '!cryptoCore.hasVerifier(' is the condition guarding the writeVerifier branch; the condition is the boolean firstUnlock (finding 4)",
+    "CONTRADICTED — §7: 'warning is null unless stale or neverFetched' versus the future-asOf bullet three lines later (finding 3)",
+    "NOT ESTABLISHED — I16 covers R1.3's 'repeated failed opens escalate then refuse'; nothing asserts recordFailure() runs (finding 5)",
+    "TRUE ONLY FOR THE TWO COVENANT SUITES — §6.3's 'there is no single edit that removes the check silently'; verifyStaleness.cjs is removable by one edit (finding 6)",
+    "WRONG BY ONE FIELD — §4/I7's 'the other five fields occur 18 times'; minTier occurs 20 times (finding 9)",
+    "NOT VERIFIED HERE — P3's CACHE_ALLOWED being exactly argon2, @phc/format and node-gyp-build requires running the KDF-bearing rows, which this review did not do. Acceptable: P3 fails closed, so a wrong list is a visible failure",
+    "NOT RE-MEASURED — §1's 776 ms / 427 ms / 210 ms / 1.41 s and the ≈5 s projection; no suite was run. §10 already commits to recording real figures on implementation",
+    "NOT STATED — the total cost of --self-test (see finding 12)",
+    "CANNOT BE EXERCISED HERE — electron-builder's beforeBuild hook; correctly reported as a limitation (AC14)",
+    "NOT RUNNABLE HERE — vite build, the Python engine, costs.py; the design claims nothing about them (R4.5, R3.6), which is correct"
+  ],
+  "notBlocking": {
+    "loyaltyCoreUntouched": true,
+    "i16AccessorBanSelfEnforcing": true,
+    "loyaltyMatrixNeverReturned": true,
+    "newDependenciesProposed": 0,
+    "stalenessIsAdditive": true,
+    "notes": "No row requests the loyalty matrix; CORE_EXPORTS is frozen against the real 15-name surface, so adding an accessor fails the row and changes loyaltyCore.cjs's digest. withCore(c => …) is the module's own documented mechanism and the row asserts the scrub, which R1.3 requires. I16's two-sided probe, I6's per-branch messages, D9's --force refusal, D11's tier-0 projection, finding 3's regress argument, D8's structural guarding, D10's counted inventories and R3's nested-only additive adoption were all verified sound and should not be reopened."
+  }
+}
