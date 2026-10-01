@@ -1513,9 +1513,13 @@ export default function PriceChart({
       return;
     }
     if (k === 'z') { setDrawings((l) => DRAW.undo(l)); e.preventDefault(); return; }
-    if (k === 'escape' && (editing || pointer.current)) {
+    if (k === 'escape'
+        && (editing || pointer.current?.mode === 'move' || pointer.current?.mode === 'reshape')) {
       // Escape mid-drag RESTORES the mark: only the working copy is dropped, the stored one was never
       // written to, and pan and zoom come back because the drag that switched them off has ended.
+      // SCOPED TO THE EDIT DRAGS BY MODE, not to `pointer.current` bare: a DRAW drag also sets the ref,
+      // and matching it here swallowed the Escape that the branch below uses to drop a half-drawn mark
+      // and disarm the tool — one press left the draft painted and the tool still armed.
       pointer.current = null;
       setEditing(null);
       try { chartRef.current?.applyOptions({ handleScroll: true, handleScale: true }); } catch {
@@ -1525,10 +1529,15 @@ export default function PriceChart({
       return;
     }
     if (k === 'escape' && (tool || draft)) {
-      // Escape abandons the tool and any half-drawn mark before it reaches fullscreen or a menu.
+      // Escape abandons the tool and any half-drawn mark before it reaches fullscreen or a menu. Pan and
+      // zoom are restored here as well, because a DRAW drag may be the thing being abandoned: nulling the
+      // ref makes `up` return early, which would otherwise leave the grab in place and the chart frozen.
       setTool(null);
       setDraft(null);
       pointer.current = null;
+      try { chartRef.current?.applyOptions({ handleScroll: true, handleScale: true }); } catch {
+        /* the chart is gone; nothing to restore */
+      }
       e.preventDefault();
       return;
     }

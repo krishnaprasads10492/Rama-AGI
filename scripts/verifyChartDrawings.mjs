@@ -608,6 +608,17 @@ check('a drag commits ONCE, at mouse up, rather than writing the store per mouse
   /ONE commit per drag/.test(chart));
 check('Escape mid-drag drops the working copy and leaves the stored mark standing',
   /editing \|\| pointer\.current/.test(chart));
+// THE SEAM THE ESCAPE ORDERING LIVES ON, pinned because it broke once. The mid-drag branch sits BEFORE
+// the tool/draft branch and returns, so testing `pointer.current` bare made it match a DRAW drag too and
+// one Escape no longer dropped the half-drawn mark or disarmed the tool. The guard must name the two EDIT
+// modes, which is a property of the condition rather than of the order the branches happen to be in.
+check('the mid-drag Escape guard is scoped to the edit drags BY MODE, not to pointer.current bare',
+  /pointer\.current\?\.mode === 'move'/.test(chart)
+  && /pointer\.current\?\.mode === 'reshape'/.test(chart));
+check('so a DRAW drag still falls through to the branch that abandons the draft and the tool',
+  !/escape' && \(editing \|\| pointer\.current\)/.test(chart));
+check('and that branch restores pan and zoom itself, since `up` returns early once the ref is null',
+  /\(tool \|\| draft\)\) \{[\s\S]{0,700}?handleScroll: true, handleScale: true/.test(chart));
 check('the cursor says whether a drag would move the mark or reshape an end',
   /nwse-resize/.test(chart) && /hoverEdit === 'move'/.test(chart));
 check('the pointer handlers read the STORED list, whose anchors are epoch seconds',
