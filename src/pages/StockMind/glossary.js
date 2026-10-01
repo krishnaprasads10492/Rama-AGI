@@ -298,6 +298,16 @@ export const TERMS = {
       + 'which is why the projection cone is not in this menu.',
     seeAlso: ['sma', 'ema', 'bollinger', 'rsi', 'macd', 'vwap', 'oscillatorPane', 'projection'],
   },
+  indicatorPeriod: {
+    term: 'Indicator period', group: 'overlays',
+    short: 'How many bars a study averages over. Yours to set, and the label follows it.',
+    long: 'A period is a window length in BARS, so the same number means a different span on every '
+      + 'interval — 14 bars is fourteen days of daily candles and seven hours of 30-minute ones. A longer '
+      + 'window also needs more history before the study can draw anything at all, which is why the bar '
+      + 'requirement moves with the setting and a raised value can empty a line that was drawing a moment '
+      + 'before. Rāma never alters one of these on your behalf.',
+    seeAlso: ['overlay', 'interval', 'bars'],
+  },
   sma: {
     term: 'SMA', group: 'overlays',
     short: 'Simple moving average — the mean close over N bars.',

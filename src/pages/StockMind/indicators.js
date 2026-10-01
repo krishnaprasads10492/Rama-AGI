@@ -19,6 +19,37 @@ const finite = (v) => typeof v === 'number' && Number.isFinite(v);
 // and not iterable, so it throws inside the `for...of` instead of degrading.
 const asBars = (bars) => (Array.isArray(bars) ? bars : []);
 
+/**
+ * ABSENT IS NOT ZERO, and in this module zero is not a period at all (Section 123).
+ *
+ * `Number(null) === 0` has shipped as a defect three times — `modelRoles` (Section 112), an explicit lot
+ * size swallowed by `int(s.get("lotSize") or 1)` (Section 115), and `clampPxPerBar(null)` returning a
+ * one-pixel smear (Section 122). Every period here has a floor of at least 1, so a missing, blank or
+ * unparseable value must fall back to THE STUDY'S OWN LITERAL — never to zero, which would read as "no
+ * smoothing", and never to the minimum, which would silently become a different indicator.
+ *
+ * A form field hands back a STRING, so '20' is honoured. An object, an array, a boolean and 'abc' are
+ * not numbers at all and therefore mean exactly what `undefined` means: use the default.
+ */
+function numParam(v, fallback, min, max) {
+  const n = typeof v === 'number' ? v
+    : (typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
+  if (!Number.isFinite(n)) return fallback;
+  if (n < min) return min;
+  if (n > max) return max;
+  return n;
+}
+
+/** A whole-bar count. Clamped first, then rounded, so a value just under the floor still lands ON it. */
+export function intParam(v, fallback, min, max) {
+  return Math.round(numParam(v, fallback, min, max));
+}
+
+/** A multiplier, where a fraction is the point. */
+export function floatParam(v, fallback, min, max) {
+  return numParam(v, fallback, min, max);
+}
+
 /** Closing prices with their times, skipping anything unusable. */
 function closes(bars) {
   const out = [];
@@ -189,22 +220,141 @@ export function vwap(bars) {
 }
 
 /**
+ * PARAMETER RANGES, NAMED ONCE AND READ TWICE — by the schema the input field offers and by the clamp
+ * inside `make`. Two independent copies of a bound is how a field comes to offer a period the arithmetic
+ * then quietly refuses, so there is one copy of each.
+ *
+ * The floors are per study family rather than global: a one-bar SMA is legal and pointless, a one-bar RSI
+ * divides by a zero-length window, and a σ multiplier is a float where every period here is an integer.
+ * The ceilings are where the study stops being readable rather than where the maths breaks — except
+ * ADX's, which is lower because its own requirement is 2n+1 bars.
+ */
+const SPAN = { min: 1, max: 500 };        // a lookback where a single bar is legal, if useless
+const WINDOW = { min: 2, max: 500 };      // a lookback that needs two bars to mean anything
+const SMOOTH = { min: 1, max: 50 };       // a smoothing pass over an already-computed series
+const MULT = { min: 0.1, max: 10 };       // a σ or ATR multiplier — the one float among them
+const CYCLE = { min: 2, max: 300 };       // Ichimoku's three nested lookbacks
+const TREND = { min: 2, max: 200 };       // ADX: 2n+1 bars, so the ceiling is half the others'
+const MACD_FAST = { min: 1, max: 200 };
+const MACD_SLOW = { min: 2, max: 400 };
+
+/**
  * The overlay catalogue. `pane: 'oscillator'` needs its own scale — a 0–100 series on a 24,000-point
  * index axis renders as a flat line along the bottom, which is a classic chart bug.
+ *
+ * EVERY PERIOD IS MASTER'S TO SET (Section 123), and the three properties that make that work are here
+ * rather than in a parallel table: `params` is what the menu offers, `need` is how many bars the study
+ * wants AT THOSE PARAMETERS, and `labelOf` is what it is called once they change. `make`'s second
+ * argument is optional and its fallback IS the literal the study shipped with, so `def.make(candles)` —
+ * the call every existing site makes — is value-identical to before. That is asserted, not assumed:
+ * `verifyIndicators.mjs` deep-compares `make(bars)` against `make(bars, defaultsFor(id))` for all 22.
  */
 export const OVERLAY_DEFS = [
-  { id: 'sma20',  label: 'SMA 20',  pane: 'price', kind: 'line', make: (b) => sma(b, 20) },
-  { id: 'sma50',  label: 'SMA 50',  pane: 'price', kind: 'line', make: (b) => sma(b, 50) },
-  { id: 'sma200', label: 'SMA 200', pane: 'price', kind: 'line', make: (b) => sma(b, 200) },
-  { id: 'ema21',  label: 'EMA 21',  pane: 'price', kind: 'line', make: (b) => ema(b, 21) },
-  { id: 'bb',     label: 'Bollinger 20,2', pane: 'price', kind: 'band', make: (b) => bollinger(b, 20, 2) },
-  { id: 'vwap',   label: 'VWAP',    pane: 'price', kind: 'line', make: (b) => vwap(b), intradayOnly: true },
-  { id: 'rsi14',  label: 'RSI 14',  pane: 'oscillator', kind: 'line', make: (b) => rsi(b, 14),
+  { id: 'sma20',  label: 'SMA 20',  pane: 'price', kind: 'line',
+    params: [{ key: 'period', label: 'Period', kind: 'int', ...SPAN, step: 1, default: 20 }],
+    need: (p) => p.period, labelOf: (p) => `SMA ${p.period}`,
+    make: (b, p) => sma(b, intParam(p?.period, 20, SPAN.min, SPAN.max)) },
+  { id: 'sma50',  label: 'SMA 50',  pane: 'price', kind: 'line',
+    params: [{ key: 'period', label: 'Period', kind: 'int', ...SPAN, step: 1, default: 50 }],
+    need: (p) => p.period, labelOf: (p) => `SMA ${p.period}`,
+    make: (b, p) => sma(b, intParam(p?.period, 50, SPAN.min, SPAN.max)) },
+  { id: 'sma200', label: 'SMA 200', pane: 'price', kind: 'line',
+    params: [{ key: 'period', label: 'Period', kind: 'int', ...SPAN, step: 1, default: 200 }],
+    need: (p) => p.period, labelOf: (p) => `SMA ${p.period}`,
+    make: (b, p) => sma(b, intParam(p?.period, 200, SPAN.min, SPAN.max)) },
+  { id: 'ema21',  label: 'EMA 21',  pane: 'price', kind: 'line',
+    params: [{ key: 'period', label: 'Period', kind: 'int', ...SPAN, step: 1, default: 21 }],
+    need: (p) => p.period, labelOf: (p) => `EMA ${p.period}`,
+    make: (b, p) => ema(b, intParam(p?.period, 21, SPAN.min, SPAN.max)) },
+  { id: 'bb',     label: 'Bollinger 20,2', pane: 'price', kind: 'band',
+    params: [{ key: 'period', label: 'Period', kind: 'int', ...WINDOW, step: 1, default: 20 },
+      { key: 'mult', label: 'σ mult', kind: 'float', ...MULT, step: 0.1, default: 2 }],
+    need: (p) => p.period, labelOf: (p) => `Bollinger ${p.period},${p.mult}`,
+    make: (b, p) => bollinger(b, intParam(p?.period, 20, WINDOW.min, WINDOW.max),
+      floatParam(p?.mult, 2, MULT.min, MULT.max)) },
+  { id: 'vwap',   label: 'VWAP',    pane: 'price', kind: 'line', make: (b) => vwap(b),
+    params: [], need: () => 1, intradayOnly: true },
+  { id: 'rsi14',  label: 'RSI 14',  pane: 'oscillator', kind: 'line',
+    params: [{ key: 'period', label: 'Period', kind: 'int', ...WINDOW, step: 1, default: 14 }],
+    need: (p) => p.period + 1, labelOf: (p) => `RSI ${p.period}`,
+    make: (b, p) => rsi(b, intParam(p?.period, 14, WINDOW.min, WINDOW.max)),
     scale: { min: 0, max: 100 }, guides: [30, 70] },
-  { id: 'macd',   label: 'MACD',    pane: 'oscillator', kind: 'macd', make: (b) => macd(b) },
+  { id: 'macd',   label: 'MACD',    pane: 'oscillator', kind: 'macd',
+    params: [{ key: 'fast', label: 'Fast', kind: 'int', ...MACD_FAST, step: 1, default: 12 },
+      { key: 'slow', label: 'Slow', kind: 'int', ...MACD_SLOW, step: 1, default: 26 },
+      { key: 'signal', label: 'Signal', kind: 'int', ...SMOOTH, step: 1, default: 9 }],
+    // The MACD LINE draws from `slow` bars, but the study is not complete until the SIGNAL has drawn —
+    // which is `signal` more of them, less the bar they share.
+    need: (p) => p.slow + p.signal - 1,
+    labelOf: (p) => `MACD ${p.fast},${p.slow},${p.signal}`,
+    make: (b, p) => macd(b, intParam(p?.fast, 12, MACD_FAST.min, MACD_FAST.max),
+      intParam(p?.slow, 26, MACD_SLOW.min, MACD_SLOW.max),
+      intParam(p?.signal, 9, SMOOTH.min, SMOOTH.max)) },
 ];
 
 export const overlayById = (id) => OVERLAY_DEFS.find((o) => o.id === id) || null;
+
+/**
+ * A study's shipped parameters, frozen so a caller cannot edit the catalogue by reference.
+ * @returns {Object} `{}` for a study with no parameters and for an unknown id.
+ */
+export function defaultsFor(id) {
+  const def = overlayById(id);
+  const out = {};
+  for (const f of def?.params || []) out[f.key] = f.default;
+  return Object.freeze(out);
+}
+
+/**
+ * The defaults, overridden by whatever of `stored` is usable — and nothing else.
+ *
+ * THE STORE IS NOT TRUSTED. `rama.stockmind.chart` is master's own localStorage and can be stale from an
+ * older build or hand-edited, so every value is run through the same clamp the input field uses. A period
+ * of 0, of -5, of 1e9 or of 'twenty' cannot reach the arithmetic from here.
+ */
+export function resolveParams(id, stored) {
+  const def = overlayById(id);
+  const src = (stored && typeof stored === 'object' && !Array.isArray(stored)) ? stored : {};
+  const out = {};
+  for (const f of def?.params || []) {
+    out[f.key] = f.kind === 'float'
+      ? floatParam(src[f.key], f.default, f.min, f.max)
+      : intParam(src[f.key], f.default, f.min, f.max);
+  }
+  return Object.freeze(out);
+}
+
+/**
+ * Bars this study needs AT THESE PARAMETERS.
+ *
+ * `OVERLAY_NEEDS` is the defaults row of this function, not the whole truth — a 200-period SMA raised to
+ * 300 needs 300 bars, and a requirement that did not move with the setting would report "drew fine" on a
+ * line that is drawing nothing.
+ * @returns {number|null} null for an unknown id or a study that declares no requirement.
+ */
+export function needsFor(id, params) {
+  const def = overlayById(id);
+  if (!def || typeof def.need !== 'function') return null;
+  return def.need(resolveParams(id, params));
+}
+
+/**
+ * What the study is called once its parameters change — 'SMA 20' becomes 'SMA 50'.
+ *
+ * A LABEL THAT STILL READS 'SMA 20' WHILE A 50-PERIOD AVERAGE IS DRAWN IS WORSE THAN NO PARAMETER
+ * EDITING AT ALL, because it is a wrong number that looks right. At defaults the shipped label is
+ * returned verbatim rather than regenerated, so 'Bollinger 20,2' can never drift to 'Bollinger 20,2.0'
+ * because a formatter rounded differently.
+ */
+export function labelFor(def, params) {
+  const d = typeof def === 'string' ? overlayById(def) : def;
+  if (!d) return '';
+  if (typeof d.labelOf !== 'function') return d.label;
+  const p = resolveParams(d.id, params);
+  const dflt = defaultsFor(d.id);
+  const unchanged = Object.keys(dflt).every((k) => p[k] === dflt[k]);
+  return unchanged ? d.label : d.labelOf(p);
+}
 
 /**
  * Studies that mean what their name says on this interval.
@@ -220,22 +370,34 @@ export function overlaysFor(intradayInterval) {
 
 /**
  * Why an overlay drew nothing, in one sentence, so an empty toggle is never a mystery.
+ *
+ * `params` is OPTIONAL and omitting it means the shipped defaults, so the existing call sites need no
+ * change. Supplied, both the requirement and the label move with it — a raised period that empties a line
+ * must say so with the raised number, not the shipped one.
  * @returns {string|null} null when it drew fine.
  */
-export function overlayShortfall(id, barCount, intradayInterval) {
+export function overlayShortfall(id, barCount, intradayInterval, params) {
   const def = overlayById(id);
   if (!def) return null;
+  const label = labelFor(def, params);
   if (def.intradayOnly && !intradayInterval) {
-    return `${def.label} is only meaningful on intraday bars — it resets each session.`;
+    return `${label} is only meaningful on intraday bars — it resets each session.`;
   }
   if (def.dailyOnly && intradayInterval) {
-    return `${def.label} is computed from the previous SESSION, so it needs daily or longer bars.`;
+    return `${label} is computed from the previous SESSION, so it needs daily or longer bars.`;
   }
-  // Read from the shared table rather than a literal here: a study added without a requirement would
+  // A combination the arithmetic refuses outright, rather than one it can draw from more bars. MACD's own
+  // guard returns nothing when the fast EMA is not faster than the slow one, and that silence is only
+  // reachable now that master can set the two — so it is named here rather than left as an empty pane.
+  const p = resolveParams(id, params);
+  if (id === 'macd' && !(p.slow > p.fast)) {
+    return `${label} needs its fast length BELOW its slow one — ${p.fast} and ${p.slow} describe no gap.`;
+  }
+  // Read from the study's own requirement rather than a literal here: a study added without one would
   // otherwise report "drew fine" while drawing nothing.
-  const need = OVERLAY_NEEDS[id];
+  const need = needsFor(id, params);
   if (need && barCount < need) {
-    return `${def.label} needs ${need} bars and there are ${barCount}. `
+    return `${label} needs ${need} bars and there are ${barCount}. `
       + 'Widen the range, or choose a finer interval.';
   }
   return null;
@@ -759,24 +921,51 @@ export function heikinAshi(bars) {
 OVERLAY_DEFS.push(
   // ── Price-pane overlays ────────────────────────────────────────────────────
   { id: 'donchian', label: 'Donchian 20', pane: 'price', kind: 'band',
-    make: (b) => donchian(b, 20) },
+    params: [{ key: 'period', label: 'Period', kind: 'int', ...WINDOW, step: 1, default: 20 }],
+    // +1 because the channel EXCLUDES the current bar, so it needs one bar more than its own window.
+    need: (p) => p.period + 1, labelOf: (p) => `Donchian ${p.period}`,
+    make: (b, p) => donchian(b, intParam(p?.period, 20, WINDOW.min, WINDOW.max)) },
   { id: 'keltner', label: 'Keltner 20,2×ATR20', pane: 'price', kind: 'band',
-    make: (b) => keltner(b, 20, 20, 2) },
+    params: [{ key: 'ema', label: 'EMA', kind: 'int', ...SPAN, step: 1, default: 20 },
+      { key: 'atr', label: 'ATR', kind: 'int', ...SPAN, step: 1, default: 20 },
+      { key: 'mult', label: 'ATR mult', kind: 'float', ...MULT, step: 0.1, default: 2 }],
+    // Both legs must have drawn, and the ATR leg needs a previous close — hence the +1 on the longer.
+    need: (p) => Math.max(p.ema, p.atr) + 1,
+    labelOf: (p) => `Keltner ${p.ema},${p.mult}×ATR${p.atr}`,
+    make: (b, p) => keltner(b, intParam(p?.ema, 20, SPAN.min, SPAN.max),
+      intParam(p?.atr, 20, SPAN.min, SPAN.max), floatParam(p?.mult, 2, MULT.min, MULT.max)) },
   // `directionalSplit` says one of the two sides may legitimately be empty: a window where the trend
   // never flipped has no opposite-side stop to draw, and that is information rather than a shortfall.
   { id: 'supertrend', label: 'Supertrend 10,3', pane: 'price', kind: 'series', directionalSplit: true,
-    make: (b) => {
-      const st = supertrend(b, 10, 3);
+    params: [{ key: 'atr', label: 'ATR', kind: 'int', ...SPAN, step: 1, default: 10 },
+      { key: 'mult', label: 'ATR mult', kind: 'float', ...MULT, step: 0.1, default: 3 }],
+    need: (p) => p.atr + 2, labelOf: (p) => `Supertrend ${p.atr},${p.mult}`,
+    make: (b, p) => {
+      const st = supertrend(b, intParam(p?.atr, 10, SPAN.min, SPAN.max),
+        floatParam(p?.mult, 3, MULT.min, MULT.max));
       return { series: [
         { data: st.up, label: 'Supertrend', color: 'var(--green)', width: 2 },
         { data: st.down, label: null, color: 'var(--red)', width: 2 },
       ] };
     } },
-  { id: 'psar', label: 'Parabolic SAR', pane: 'price', kind: 'series',
+  // PSAR's acceleration factor and its ceiling are Wilder's own constants, not a window length, and a
+  // chart that let them be nudged would invite master to tune a stop rule by eye. Left as shipped.
+  { id: 'psar', label: 'Parabolic SAR', pane: 'price', kind: 'series', params: [], need: () => 3,
     make: (b) => ({ series: [{ data: psar(b), label: 'PSAR', dots: true, width: 1 }] }) },
   { id: 'ichimoku', label: 'Ichimoku 9,26,52', pane: 'price', kind: 'series',
-    make: (b) => {
-      const i = ichimoku(b);
+    params: [{ key: 'tenkan', label: 'Tenkan', kind: 'int', ...CYCLE, step: 1, default: 9 },
+      { key: 'kijun', label: 'Kijun', kind: 'int', ...CYCLE, step: 1, default: 26 },
+      { key: 'senkouB', label: 'Senkou B', kind: 'int', ...CYCLE, step: 1, default: 52 }],
+    // Senkou B is the slowest midpoint displaced FORWARD by the Kijun length, so the first one that
+    // lands on a real bar needs both — 52 + 26 at the shipped settings.
+    need: (p) => p.senkouB + p.kijun,
+    labelOf: (p) => `Ichimoku ${p.tenkan},${p.kijun},${p.senkouB}`,
+    make: (b, p) => {
+      // THE DISPLACEMENT FOLLOWS KIJUN rather than being a fourth field. In Ichimoku the cloud is shifted
+      // by the base period; a displacement set apart from it would draw a cloud of no defined indicator.
+      const kijun = intParam(p?.kijun, 26, CYCLE.min, CYCLE.max);
+      const i = ichimoku(b, intParam(p?.tenkan, 9, CYCLE.min, CYCLE.max), kijun,
+        intParam(p?.senkouB, 52, CYCLE.min, CYCLE.max), kijun);
       return { series: [
         { data: i.tenkan, label: 'Tenkan', width: 1 },
         { data: i.kijun, label: 'Kijun', width: 2 },
@@ -785,7 +974,9 @@ OVERLAY_DEFS.push(
         { data: i.chikou, label: 'Chikou', dotted: true },
       ] };
     } },
+  // Floor-trader pivots are the previous bar's own high, low and close. There is nothing to set.
   { id: 'pivots', label: 'Pivots (prev bar)', pane: 'price', kind: 'series', dailyOnly: true,
+    params: [], need: () => 2,
     make: (b) => {
       const p = pivots(b);
       return { series: [
@@ -799,10 +990,17 @@ OVERLAY_DEFS.push(
 
   // ── Own-pane studies ──────────────────────────────────────────────────────
   { id: 'atrPct', label: 'ATR% 14', pane: 'oscillator', kind: 'line',
-    make: (b) => atrPct(b, 14) },
+    params: [{ key: 'period', label: 'Period', kind: 'int', ...SPAN, step: 1, default: 14 }],
+    // +1 because a true range needs a previous close, so the first bar never reports.
+    need: (p) => p.period + 1, labelOf: (p) => `ATR% ${p.period}`,
+    make: (b, p) => atrPct(b, intParam(p?.period, 14, SPAN.min, SPAN.max)) },
   { id: 'adx', label: 'ADX 14 +DI −DI', pane: 'oscillator', kind: 'series',
-    make: (b) => {
-      const a = adx(b, 14);
+    params: [{ key: 'period', label: 'Period', kind: 'int', ...TREND, step: 1, default: 14 }],
+    // Wilder smooths twice: once into the DI pair, again into ADX itself — hence 2n, plus the bar the
+    // first true range consumes.
+    need: (p) => p.period * 2 + 1, labelOf: (p) => `ADX ${p.period} +DI −DI`,
+    make: (b, p) => {
+      const a = adx(b, intParam(p?.period, 14, TREND.min, TREND.max));
       return { series: [
         { data: a.adx, label: 'ADX', width: 2 },
         { data: a.plusDI, label: '+DI', color: 'var(--green)' },
@@ -810,22 +1008,43 @@ OVERLAY_DEFS.push(
       ], guides: [25] };
     } },
   { id: 'stoch', label: 'Stochastic 14,3,3', pane: 'oscillator', kind: 'series',
-    make: (b) => {
-      const s = stochastic(b, 14, 3, 3);
+    params: [{ key: 'k', label: '%K', kind: 'int', ...WINDOW, step: 1, default: 14 },
+      { key: 'smoothK', label: 'Smooth', kind: 'int', ...SMOOTH, step: 1, default: 3 },
+      { key: 'd', label: '%D', kind: 'int', ...SMOOTH, step: 1, default: 3 }],
+    // Three windows in series, each sharing its first bar with the one before: k + smoothK + d − 2.
+    need: (p) => p.k + p.smoothK + p.d - 2,
+    labelOf: (p) => `Stochastic ${p.k},${p.smoothK},${p.d}`,
+    make: (b, p) => {
+      const s = stochastic(b, intParam(p?.k, 14, WINDOW.min, WINDOW.max),
+        intParam(p?.d, 3, SMOOTH.min, SMOOTH.max), intParam(p?.smoothK, 3, SMOOTH.min, SMOOTH.max));
       return { series: [
         { data: s.k, label: '%K', width: 2 },
         { data: s.d, label: '%D', color: 'var(--amber)' },
       ], guides: [20, 80], scale: { min: 0, max: 100 } };
     } },
   { id: 'williams', label: 'Williams %R 14', pane: 'oscillator', kind: 'line',
-    make: (b) => williamsR(b, 14), scale: { min: -100, max: 0 }, guides: [-80, -20] },
+    params: [{ key: 'period', label: 'Period', kind: 'int', ...WINDOW, step: 1, default: 14 }],
+    need: (p) => p.period, labelOf: (p) => `Williams %R ${p.period}`,
+    make: (b, p) => williamsR(b, intParam(p?.period, 14, WINDOW.min, WINDOW.max)),
+    scale: { min: -100, max: 0 }, guides: [-80, -20] },
   { id: 'cci', label: 'CCI 20', pane: 'oscillator', kind: 'line',
-    make: (b) => cci(b, 20), guides: [-100, 100] },
+    params: [{ key: 'period', label: 'Period', kind: 'int', ...WINDOW, step: 1, default: 20 }],
+    need: (p) => p.period, labelOf: (p) => `CCI ${p.period}`,
+    make: (b, p) => cci(b, intParam(p?.period, 20, WINDOW.min, WINDOW.max)), guides: [-100, 100] },
   { id: 'mfi', label: 'MFI 14', pane: 'oscillator', kind: 'line',
-    make: (b) => mfi(b, 14), scale: { min: 0, max: 100 }, guides: [20, 80] },
-  { id: 'obv', label: 'OBV', pane: 'oscillator', kind: 'line', make: (b) => obv(b) },
+    params: [{ key: 'period', label: 'Period', kind: 'int', ...WINDOW, step: 1, default: 14 }],
+    // +1 because the flow of a bar is signed by the previous bar's typical price.
+    need: (p) => p.period + 1, labelOf: (p) => `MFI ${p.period}`,
+    make: (b, p) => mfi(b, intParam(p?.period, 14, WINDOW.min, WINDOW.max)),
+    scale: { min: 0, max: 100 }, guides: [20, 80] },
+  // OBV is a running total of every bar there is. It has no window to set.
+  { id: 'obv', label: 'OBV', pane: 'oscillator', kind: 'line', params: [], need: () => 2,
+    make: (b) => obv(b) },
   { id: 'roc', label: 'ROC 12', pane: 'oscillator', kind: 'line',
-    make: (b) => roc(b, 12), guides: [0] },
+    params: [{ key: 'period', label: 'Period', kind: 'int', ...SPAN, step: 1, default: 12 }],
+    // +1 because the rate is measured against the bar `period` back, which must itself exist.
+    need: (p) => p.period + 1, labelOf: (p) => `ROC ${p.period}`,
+    make: (b, p) => roc(b, intParam(p?.period, 12, SPAN.min, SPAN.max)), guides: [0] },
 );
 
 /**
@@ -833,6 +1052,11 @@ OVERLAY_DEFS.push(
  *
  * Kept beside the definitions rather than inside `overlayShortfall`'s literal, because a study added
  * without a requirement here reports "drew fine" while drawing nothing.
+ *
+ * SINCE SECTION 123 THIS IS THE DEFAULTS ROW OF `needsFor`, NOT THE WHOLE TRUTH — periods are master's to
+ * set and the requirement moves with them. It stays exported and exact because the three corrections
+ * recorded below were each earned by measurement, and `verifyIndicators.mjs` pins every `need` formula
+ * against this table at defaults rather than against a copied number.
  */
 export const OVERLAY_NEEDS = {
   // `macd: 34`, not 35. The MACD LINE draws from 26 bars but the SIGNAL needs nine more of it, so the

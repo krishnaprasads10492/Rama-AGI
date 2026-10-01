@@ -529,5 +529,272 @@ check('an oscillator with a fixed scale declares both ends',
     return !s || (Number.isFinite(s.min) && Number.isFinite(s.max) && s.max > s.min);
   }));
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// SECTION 123 — EVERY PERIOD IS MASTER'S TO SET
+//
+// WHY THIS IS THE LARGEST BLOCK IN THE FILE. 19 of the 22 trading surfaces researched let the user
+// change an indicator's window, and all 22 of ours were frozen in a literal. Making them editable adds
+// two failure modes that did not exist before, and both are silent:
+//
+//   1. THE DIFF IS NOT ADDITIVE. `def.make(candles)` is what all three `PriceChart` call sites do today,
+//      and if its fallback drifted from the literal it replaced, every chart in the app would change
+//      without anything looking broken. Pinned here by deep-comparing `make(bars)` against
+//      `make(bars, defaultsFor(id))` for all 22.
+//   2. ABSENT IS READ AS ZERO. `Number(null) === 0` has shipped three times (Sections 112, 115, 122) and
+//      zero is not a period at all, so each of the seven ways a value can be absent is asserted on its
+//      own rather than as a set.
+//
+// And one that is not silent but is worse: a label still reading 'SMA 20' over a 50-period average.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+const deep = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const sameParams = (got, want) => {
+  if (!got || !want) return false;
+  const gk = Object.keys(got).sort();
+  const wk = Object.keys(want).sort();
+  return gk.join() === wk.join() && gk.every((k) => got[k] === want[k]);
+};
+const ALL = ind.OVERLAY_DEFS;
+const byId = (id) => ind.overlayById(id);
+// Long enough that a study clamped to its own declared ceiling still draws: Ichimoku at 300,300 needs
+// 600 bars, Stochastic at 500,50,50 needs 598, MACD at 400,50 needs 449.
+const long = ramp(620);
+const fixtureFor = (o) => (o.intradayOnly ? twoSessions : ramp(300));
+
+console.log('\n--- (1) every study declares what it can be set to ---');
+
+check('all 22 studies declare a params array',
+  ALL.length === 22 && ALL.every((o) => Array.isArray(o.params)),
+  `${ALL.length} studies; missing: ${ALL.filter((o) => !Array.isArray(o.params)).map((o) => o.id).join()}`);
+check('every field names a key, a label, a kind, a range, a step and a default',
+  ALL.every((o) => o.params.every((f) => typeof f.key === 'string' && f.key
+    && typeof f.label === 'string' && f.label
+    && Number.isFinite(f.min) && Number.isFinite(f.max) && f.max > f.min
+    && Number.isFinite(f.step) && Number.isFinite(f.default))),
+  ALL.flatMap((o) => o.params.filter((f) => !(f.key && f.label && Number.isFinite(f.min)
+    && Number.isFinite(f.max) && Number.isFinite(f.step) && Number.isFinite(f.default)))
+    .map((f) => `${o.id}.${f.key}`)).join());
+check('every kind is one the input can render',
+  ALL.every((o) => o.params.every((f) => f.kind === 'int' || f.kind === 'float')),
+  ALL.flatMap((o) => o.params.filter((f) => !['int', 'float'].includes(f.kind))
+    .map((f) => `${o.id}.${f.key}:${f.kind}`)).join());
+// A default outside its own range would be clamped away the first time it was resolved, so the study
+// would draw one thing on a fresh install and another after the first keystroke.
+check('every default sits inside its own declared range',
+  ALL.every((o) => o.params.every((f) => f.default >= f.min && f.default <= f.max)),
+  ALL.flatMap((o) => o.params.filter((f) => f.default < f.min || f.default > f.max)
+    .map((f) => `${o.id}.${f.key}`)).join());
+check('every key is unique within its study',
+  ALL.every((o) => new Set(o.params.map((f) => f.key)).size === o.params.length));
+check('every step is positive', ALL.every((o) => o.params.every((f) => f.step > 0)));
+check('the four studies with nothing to set say so with an empty array, not a missing one',
+  ['vwap', 'obv', 'psar', 'pivots'].every((id) => Array.isArray(byId(id).params)
+    && byId(id).params.length === 0),
+  ALL.filter((o) => o.params.length === 0).map((o) => o.id).join());
+
+console.log('\n--- (2) the defaults ARE today\'s literals, asserted per study by name ---');
+
+const DEFAULTS = {
+  sma20: { period: 20 }, sma50: { period: 50 }, sma200: { period: 200 }, ema21: { period: 21 },
+  bb: { period: 20, mult: 2 }, rsi14: { period: 14 }, macd: { fast: 12, slow: 26, signal: 9 },
+  donchian: { period: 20 }, keltner: { ema: 20, atr: 20, mult: 2 }, supertrend: { atr: 10, mult: 3 },
+  ichimoku: { tenkan: 9, kijun: 26, senkouB: 52 }, atrPct: { period: 14 }, adx: { period: 14 },
+  stoch: { k: 14, smoothK: 3, d: 3 }, williams: { period: 14 }, cci: { period: 20 },
+  mfi: { period: 14 }, roc: { period: 12 },
+};
+for (const [id, want] of Object.entries(DEFAULTS)) {
+  check(`${id} defaults to ${JSON.stringify(want)}`, sameParams(ind.defaultsFor(id), want),
+    JSON.stringify(ind.defaultsFor(id)));
+}
+check('and the parameterless four resolve to an empty object rather than to undefined',
+  ['vwap', 'obv', 'psar', 'pivots'].every((id) => sameParams(ind.defaultsFor(id), {})));
+
+console.log('\n--- (3) THE ADDITIVE CONTRACT: make(bars) is make(bars, defaults) ---');
+
+// This is the assertion that proves the whole change is non-behavioural. If it ever fails, a default
+// drifted from the literal it replaced and every chart in the app moved.
+check('make(bars) is value-identical to make(bars, defaultsFor(id)) for all 22',
+  ALL.every((o) => {
+    const b = fixtureFor(o);
+    return deep(o.make(b), o.make(b, ind.defaultsFor(o.id)));
+  }),
+  ALL.filter((o) => !deep(o.make(fixtureFor(o)), o.make(fixtureFor(o), ind.defaultsFor(o.id))))
+    .map((o) => o.id).join());
+check('and to make(bars, {}) — an empty params object means the defaults',
+  ALL.every((o) => deep(o.make(fixtureFor(o)), o.make(fixtureFor(o), {}))),
+  ALL.filter((o) => !deep(o.make(fixtureFor(o)), o.make(fixtureFor(o), {}))).map((o) => o.id).join());
+check('and to make(bars, null) — a store that has never been written is not an error',
+  ALL.every((o) => deep(o.make(fixtureFor(o)), o.make(fixtureFor(o), null))),
+  ALL.filter((o) => !deep(o.make(fixtureFor(o)), o.make(fixtureFor(o), null))).map((o) => o.id).join());
+
+console.log('\n--- (4) needsFor agrees with OVERLAY_NEEDS on every default ---');
+
+check('every study declares a need function', ALL.every((o) => typeof o.need === 'function'),
+  ALL.filter((o) => typeof o.need !== 'function').map((o) => o.id).join());
+check('needsFor(id, defaults) === OVERLAY_NEEDS[id] for all 22',
+  ALL.every((o) => ind.needsFor(o.id, ind.defaultsFor(o.id)) === ind.OVERLAY_NEEDS[o.id]),
+  ALL.filter((o) => ind.needsFor(o.id, ind.defaultsFor(o.id)) !== ind.OVERLAY_NEEDS[o.id])
+    .map((o) => `${o.id}:${ind.needsFor(o.id, ind.defaultsFor(o.id))}≠${ind.OVERLAY_NEEDS[o.id]}`).join());
+// The three thresholds that were each corrected by measurement are now pinned against a FORMULA rather
+// than against a copied number, which is the only way they stay right when the periods move.
+eq('MACD\'s 34 comes out of slow + signal - 1', ind.needsFor('macd'), 34);
+eq('Ichimoku\'s 78 comes out of senkouB + kijun', ind.needsFor('ichimoku'), 78);
+eq('Stochastic\'s 18 comes out of k + smoothK + d - 2', ind.needsFor('stoch'), 18);
+
+console.log('\n--- (5) the requirement MOVES with the parameter ---');
+
+eq('a 10-period SMA needs 10 bars', ind.needsFor('sma20', { period: 10 }), 10);
+eq('a 300-period SMA needs 300', ind.needsFor('sma200', { period: 300 }), 300);
+eq('MACD at 12,26,9 needs 34', ind.needsFor('macd', { fast: 12, slow: 26, signal: 9 }), 34);
+eq('MACD at 5,13,4 needs 16', ind.needsFor('macd', { fast: 5, slow: 13, signal: 4 }), 16);
+eq('Ichimoku at 9,26,52 needs 78',
+  ind.needsFor('ichimoku', { tenkan: 9, kijun: 26, senkouB: 52 }), 78);
+eq('Ichimoku at 7,22,44 needs 66',
+  ind.needsFor('ichimoku', { tenkan: 7, kijun: 22, senkouB: 44 }), 66);
+eq('Stochastic at 5,2,2 needs 7', ind.needsFor('stoch', { k: 5, smoothK: 2, d: 2 }), 7);
+eq('Keltner takes the longer of its two legs', ind.needsFor('keltner', { ema: 50, atr: 10 }), 51);
+eq('ADX still needs twice its period plus one', ind.needsFor('adx', { period: 20 }), 41);
+eq('an unknown study has no requirement to report rather than zero', ind.needsFor('nope'), null);
+
+console.log('\n--- (6) a changed parameter reaches the ARITHMETIC, not only the label ---');
+
+const sma10 = byId('sma20').make(long, { period: 10 });
+const sma50v = byId('sma20').make(long, { period: 50 });
+check('a 10-period and a 50-period SMA differ in length',
+  sma10.length !== sma50v.length, `${sma10.length} vs ${sma50v.length}`);
+check('and in value on the same last bar',
+  !near(sma10.at(-1).value, sma50v.at(-1).value),
+  `${sma10.at(-1).value} vs ${sma50v.at(-1).value}`);
+check('a 5-period and a 20-period RSI differ',
+  !deep(byId('rsi14').make(zig, { period: 5 }), byId('rsi14').make(zig, { period: 20 })));
+check('a wider σ multiplier widens the Bollinger band',
+  byId('bb').make(long, { period: 20, mult: 3 }).upper.at(-1).value
+  > byId('bb').make(long, { period: 20, mult: 1 }).upper.at(-1).value);
+check('a wider ATR multiplier holds the Supertrend stop further from price', (() => {
+  const tight = byId('supertrend').make(long, { atr: 10, mult: 1 }).series[0].data.at(-1).value;
+  const wide = byId('supertrend').make(long, { atr: 10, mult: 5 }).series[0].data.at(-1).value;
+  return wide < tight;
+})());
+// Collective, because a parameter that is declared and then ignored is the defect this whole item is
+// about and it must not be possible for ONE study to have it.
+const intReach = ALL.flatMap((o) => o.params.filter((f) => f.kind === 'int').map((f) => ({ o, f })))
+  .filter(({ o, f }) => deep(o.make(long), o.make(long, { [f.key]: f.min })));
+check('every int parameter changes the output when it is changed', intReach.length === 0,
+  intReach.map(({ o, f }) => `${o.id}.${f.key}`).join());
+const floatReach = ALL.flatMap((o) => o.params.filter((f) => f.kind === 'float').map((f) => ({ o, f })))
+  .filter(({ o, f }) => deep(o.make(long), o.make(long, { [f.key]: f.min })));
+check('and every multiplier does too', floatReach.length === 0,
+  floatReach.map(({ o, f }) => `${o.id}.${f.key}`).join());
+
+console.log('\n--- (7) ABSENT IS NOT ZERO, asserted one way at a time ---');
+
+// Seven ways a value can be missing, each its own assertion. `Number(null) === 0` has shipped as a defect
+// three times in this project; a single collective check would pass while one of them was broken.
+const ABSENT = [['null', null], ['undefined', undefined], ['empty string', ''], ['NaN', NaN],
+  ['a non-numeric string', 'abc'], ['an object', {}], ['an array', []]];
+for (const [name, raw] of ABSENT) {
+  eq(`resolveParams reads ${name} as the DEFAULT, not 0`,
+    ind.resolveParams('sma20', { period: raw }).period, 20);
+}
+for (const [name, raw] of ABSENT) {
+  eq(`intParam reads ${name} as the DEFAULT, not 0`, ind.intParam(raw, 20, 1, 500), 20);
+}
+check('and never as the minimum either, which would be a different indicator',
+  ABSENT.every(([, raw]) => ind.intParam(raw, 20, 1, 500) !== 1));
+check('a missing value is identical to no value at all, for every field of every study',
+  ALL.every((o) => o.params.every((f) => ABSENT.every(([, raw]) => deep(o.make(fixtureFor(o)),
+    o.make(fixtureFor(o), { [f.key]: raw }))))),
+  ALL.flatMap((o) => o.params.filter((f) => !ABSENT.every(([, raw]) => deep(o.make(fixtureFor(o)),
+    o.make(fixtureFor(o), { [f.key]: raw })))).map((f) => `${o.id}.${f.key}`)).join());
+
+console.log('\n--- (8) clamping, rounding, and the string a form field hands back ---');
+
+eq('above the ceiling clamps to the ceiling', ind.intParam(9999, 20, 1, 500), 500);
+eq('below the floor clamps to the floor', ind.intParam(-5, 20, 2, 500), 2);
+eq('zero is out of range for a period and clamps rather than being accepted',
+  ind.intParam(0, 20, 2, 500), 2);
+eq('a float where an int is declared is rounded', ind.intParam(20.6, 14, 1, 500), 21);
+eq('a numeric string is honoured, because an input hands back a string',
+  ind.intParam('20', 14, 1, 500), 20);
+eq('a float parameter keeps its fraction', ind.floatParam('2.5', 2, 0.1, 10), 2.5);
+eq('and clamps the same way', ind.floatParam(99, 2, 0.1, 10), 10);
+eq('resolveParams honours a string too', ind.resolveParams('bb', { period: '50', mult: '3' }).period, 50);
+eq('and clamps a stored value no field could have produced',
+  ind.resolveParams('sma200', { period: 1e9 }).period, 500);
+// The clamp inside `make` and the range the field offers are the same two numbers, checked against the
+// raw function rather than against `make` on both sides — which would hide a disagreement.
+check('make honours a period right up to the ceiling the field offers',
+  deep(byId('sma20').make(long, { period: 500 }), ind.sma(long, 500)));
+check('and down to the floor it offers', deep(byId('sma20').make(long, { period: -5 }), ind.sma(long, 1)));
+check('RSI too', deep(byId('rsi14').make(long, { period: 500 }), ind.rsi(long, 500)));
+check('Bollinger, both of its fields',
+  deep(byId('bb').make(long, { period: 500, mult: 10 }), ind.bollinger(long, 500, 10)));
+check('and ADX, whose ceiling is lower because it needs twice its period',
+  deep(byId('adx').make(long, { period: 200 }).series[0].data, ind.adx(long, 200).adx));
+
+console.log('\n--- (9) the label follows the parameters ---');
+
+eq('labelFor at defaults is exactly the shipped label', ind.labelFor(byId('sma20'), {}), 'SMA 20');
+check('for every one of the 22, so nothing drifts on a fresh install',
+  ALL.every((o) => ind.labelFor(o, undefined) === o.label && ind.labelFor(o, {}) === o.label),
+  ALL.filter((o) => ind.labelFor(o, {}) !== o.label).map((o) => `${o.id}:${ind.labelFor(o, {})}`).join());
+eq('a 50-period SMA says so', ind.labelFor(byId('sma20'), { period: 50 }), 'SMA 50');
+eq('Bollinger carries both of its numbers',
+  ind.labelFor(byId('bb'), { period: 50, mult: 3 }), 'Bollinger 50,3');
+eq('Keltner names its EMA, its multiplier and its ATR',
+  ind.labelFor(byId('keltner'), { ema: 10, atr: 30, mult: 2.5 }), 'Keltner 10,2.5×ATR30');
+eq('Stochastic names all three windows',
+  ind.labelFor(byId('stoch'), { k: 5, smoothK: 2, d: 2 }), 'Stochastic 5,2,2');
+eq('MACD gains its numbers only once they leave the standard set',
+  ind.labelFor(byId('macd'), { fast: 5, slow: 13, signal: 4 }), 'MACD 5,13,4');
+eq('an id works as well as a definition', ind.labelFor('sma50', { period: 100 }), 'SMA 100');
+eq('an unknown study is named nothing rather than "undefined"', ind.labelFor('nope', {}), '');
+eq('a parameterless study keeps its name whatever is passed',
+  ind.labelFor(byId('obv'), { period: 99 }), 'OBV');
+
+console.log('\n--- (10) overlayShortfall\'s 4th argument is optional and omitting it is today ---');
+
+check('three arguments is identical to four with the defaults, for all 22',
+  ALL.every((o) => ind.overlayShortfall(o.id, 40, false)
+    === ind.overlayShortfall(o.id, 40, false, ind.defaultsFor(o.id))),
+  ALL.filter((o) => ind.overlayShortfall(o.id, 40, false)
+    !== ind.overlayShortfall(o.id, 40, false, ind.defaultsFor(o.id))).map((o) => o.id).join());
+const raised = ind.overlayShortfall('sma200', 250, false, { period: 300 });
+check('a raised period reports the RAISED requirement', /needs 300 bars/.test(raised || ''), String(raised));
+check('and names the study by the period actually set', /SMA 300/.test(raised || ''), String(raised));
+check('a lowered period stops complaining about bars it no longer needs',
+  ind.overlayShortfall('sma200', 120, false, { period: 50 }) === null
+  && ind.overlayShortfall('sma200', 120, false) !== null);
+check('a raised RSI reports its own +1',
+  /needs 61 bars/.test(ind.overlayShortfall('rsi14', 40, false, { period: 60 }) || ''),
+  String(ind.overlayShortfall('rsi14', 40, false, { period: 60 })));
+check('a MACD whose fast leg is not faster explains itself rather than drawing an empty pane',
+  /fast length BELOW/.test(ind.overlayShortfall('macd', 500, false, { fast: 30, slow: 26 }) || ''),
+  String(ind.overlayShortfall('macd', 500, false, { fast: 30, slow: 26 })));
+check('and at the shipped settings says nothing about ordering',
+  ind.overlayShortfall('macd', 500, false) === null);
+
+console.log('\n--- (11) both exclusions still hold BY NAME, whatever the params ---');
+
+check('VWAP is still intraday-only',
+  !ind.overlaysFor(false).some((o) => o.id === 'vwap')
+  && ind.overlaysFor(true).some((o) => o.id === 'vwap'));
+check('pivots are still daily-or-longer',
+  !ind.overlaysFor(true).some((o) => o.id === 'pivots')
+  && ind.overlaysFor(false).some((o) => o.id === 'pivots'));
+check('and a params object cannot talk either of them out of it', (() => {
+  const p = { period: 5, mult: 1, fast: 1, slow: 2, signal: 1 };
+  return /intraday/.test(ind.overlayShortfall('vwap', 500, false, p) || '')
+    && /session/i.test(ind.overlayShortfall('pivots', 500, true, p) || '');
+})());
+check('neither of them grew a parameter to be talked out of it with',
+  byId('vwap').params.length === 0 && byId('pivots').params.length === 0);
+check('the two lists still differ only by those two', (() => {
+  const day = new Set(ind.overlaysFor(false).map((o) => o.id));
+  const intra = new Set(ind.overlaysFor(true).map((o) => o.id));
+  return [...day].filter((id) => !intra.has(id)).join() === 'pivots'
+    && [...intra].filter((id) => !day.has(id)).join() === 'vwap';
+})());
+
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILURES'} — ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

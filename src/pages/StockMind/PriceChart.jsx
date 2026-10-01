@@ -4,7 +4,7 @@ import {
   HistogramSeries, createSeriesMarkers, CrosshairMode, LineStyle, PriceScaleMode,
 } from 'lightweight-charts';
 import {
-  overlaysFor, overlayById, overlayShortfall, heikinAshi,
+  overlaysFor, overlayById, overlayShortfall, heikinAshi, resolveParams, labelFor,
 } from './indicators';
 import {
   intervalGroups, allRangesFor, shortfallNote, describeLimit, showsClock,
@@ -328,6 +328,28 @@ export default function PriceChart({
     const want = prefs.current?.overlays;
     return Array.isArray(want) ? want.filter((id) => overlayById(id)) : [];
   });
+
+  /**
+   * INDICATOR PERIODS ARE MASTER'S TO SET (Section 123).
+   *
+   * Every one of the 22 studies had its window frozen in a literal, which is the single most universal
+   * feature of every trading surface researched and the one Rāma did not have. Stored as
+   * `{ [id]: { [key]: value } }` inside the EXISTING prefs key, so an older stored preference simply has
+   * no `overlayParams` and therefore loads today's defaults — the fallback path IS the upgrade path.
+   *
+   * Loaded through `resolveParams`, because this is master's own localStorage: a stale build or a hand
+   * edit must not be able to put a period of 0 or of 1e9 into a study. A RAW value is what sits in state
+   * while he is typing, so clearing the field reads as "use the default" rather than as zero.
+   */
+  const [overlayParams, setOverlayParams] = useState(() => {
+    const want = prefs.current?.overlayParams;
+    if (!want || typeof want !== 'object' || Array.isArray(want)) return {};
+    const out = {};
+    for (const id of Object.keys(want)) {
+      if (overlayById(id)) out[id] = resolveParams(id, want[id]);
+    }
+    return out;
+  });
   // VOLUME IS NOW A TOGGLE (Section 120). It was a prop defaulting to true that no call site ever
   // passed, so it was permanently on and took 18% of the pane from price whether or not master wanted
   // it — the one study with no way to switch it off.
@@ -352,8 +374,8 @@ export default function PriceChart({
   const [zoom, setZoom] = useState(null);
 
   useEffect(() => {
-    savePrefs({ chartType, scaleMode, overlays: enabled, volume: volOn, density });
-  }, [chartType, scaleMode, enabled, volOn, density]);
+    savePrefs({ chartType, scaleMode, overlays: enabled, volume: volOn, density, overlayParams });
+  }, [chartType, scaleMode, enabled, volOn, density, overlayParams]);
 
   const isIntraday = showsClock(interval);
 
@@ -404,6 +426,21 @@ export default function PriceChart({
     () => enabled.filter((id) => available.some((o) => o.id === id)),
     [enabled, available],
   );
+
+  // The RESOLVED parameters, keyed by id, computed once per change rather than per use — so the legend,
+  // the menu, the shortfall note and the arithmetic cannot disagree about what a study is set to.
+  const activeParams = useMemo(() => {
+    const out = {};
+    for (const id of active) out[id] = resolveParams(id, overlayParams[id]);
+    return out;
+  }, [active, overlayParams]);
+  // A keystroke that does not change a RESOLVED value must not tear down and rebuild every series, so the
+  // overlay effect depends on this rather than on the raw state object.
+  const paramsKey = useMemo(() => JSON.stringify(activeParams), [activeParams]);
+
+  const setOverlayParam = (id, key, raw) => setOverlayParams((s) => ({
+    ...s, [id]: { ...(s[id] || {}), [key]: raw },
+  }));
 
   const candles = useMemo(() => (bars || [])
     .map((b) => {
@@ -757,7 +794,11 @@ export default function PriceChart({
       if (!def) continue;
       const color = OVERLAY_COLORS[colorIdx % OVERLAY_COLORS.length];
       colorIdx += 1;
-      const computed = def.make(candles);
+      // THE LABEL FOLLOWS THE PARAMETERS, here and in the menu and the readout. A legend still reading
+      // 'SMA 20' over a 50-period average is a wrong number that looks right.
+      const params = resolveParams(id, overlayParams[id]);
+      const label = labelFor(def, params);
+      const computed = def.make(candles, params);
       const own = def.pane === 'oscillator';
       const pane = own ? nextPane : 0;
       if (own) nextPane += 1;
@@ -770,7 +811,7 @@ export default function PriceChart({
 
       if (def.kind === 'band') {
         anchor = addLine(computed.middle,
-          { color, style: LineStyle.Dashed, pane, legend: def.label });
+          { color, style: LineStyle.Dashed, pane, legend: label });
         addLine(computed.upper, { color: `${color}99`, pane });
         addLine(computed.lower, { color: `${color}99`, pane });
       } else if (def.kind === 'macd') {
@@ -787,8 +828,8 @@ export default function PriceChart({
           })));
           overlayRefs.current.push({ series: hist, legend: null });
         }
-        anchor = addLine(computed.macd, { color, width: 2, pane, legend: 'MACD' });
-        addLine(computed.signal, { color: theme.amber, pane, legend: 'MACD sig' });
+        anchor = addLine(computed.macd, { color, width: 2, pane, legend: label });
+        addLine(computed.signal, { color: theme.amber, pane, legend: `${label} sig` });
       } else if (def.kind === 'series') {
         // GENERIC MULTI-LINE. Ichimoku's five lines, Supertrend's two sides, ADX's three, the pivot
         // ladder and PSAR's dots all render here, so a study with any number of lines needs no new
@@ -811,7 +852,7 @@ export default function PriceChart({
           if (s && !anchor) anchor = s;
         }
       } else {
-        anchor = addLine(computed, { color, width: 2, pane, legend: def.label });
+        anchor = addLine(computed, { color, width: 2, pane, legend: label });
       }
 
       if (anchor && Array.isArray(guides)) {
@@ -839,7 +880,7 @@ export default function PriceChart({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candles, active, chartType, volOn]);
+  }, [candles, active, chartType, volOn, paramsKey]);
 
   // ── Master's own fills, as arrows on the bars they happened on ─────────────
   useEffect(() => {
@@ -1266,9 +1307,9 @@ export default function PriceChart({
   );
   const limitNote = useMemo(() => describeLimit(interval), [interval]);
   const shortfalls = useMemo(() => active
-    .map((id) => overlayShortfall(id, candles.length, isIntraday))
+    .map((id) => overlayShortfall(id, candles.length, isIntraday, activeParams[id]))
     .filter(Boolean),
-  [active, candles.length, isIntraday]);
+  [active, candles.length, isIntraday, activeParams]);
 
   const shell = full
     ? {
@@ -1670,24 +1711,64 @@ export default function PriceChart({
             <div style={{
               position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: '4px',
               background: 'var(--panel, #131722)', border: '1px solid var(--border)',
-              borderRadius: 'var(--radius, 6px)', padding: '6px', minWidth: '210px',
+              borderRadius: 'var(--radius, 6px)', padding: '6px', minWidth: '248px',
               boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
             }}>
-              {available.map((o) => (
-                <label key={o.id} style={{
-                  display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 6px',
-                  fontSize: '12.5px', color: 'var(--text)', cursor: 'pointer',
-                }}>
-                  <input type="checkbox" checked={active.includes(o.id)}
-                         onChange={() => toggleOverlay(o.id)} />
-                  {o.label}
-                  {o.pane === 'oscillator' && (
-                    <span style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--muted)' }}>
-                      own pane
-                    </span>
-                  )}
-                </label>
-              ))}
+              {available.map((o) => {
+                const on = active.includes(o.id);
+                // THE FIELDS APPEAR ONLY UNDER AN ENABLED STUDY. Twenty-two studies' worth of number
+                // boxes open at once is a form, not a menu, and master is here to read a chart.
+                const fields = on ? (o.params || []) : [];
+                const note = on
+                  ? overlayShortfall(o.id, candles.length, isIntraday, overlayParams[o.id]) : null;
+                return (
+                  <div key={o.id}>
+                    <label style={{
+                      display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 6px',
+                      fontSize: '12.5px', color: 'var(--text)', cursor: 'pointer',
+                    }}>
+                      <input type="checkbox" checked={on}
+                             onChange={() => toggleOverlay(o.id)} />
+                      {labelFor(o, overlayParams[o.id])}
+                      {o.pane === 'oscillator' && (
+                        <span style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--muted)' }}>
+                          own pane
+                        </span>
+                      )}
+                    </label>
+                    {fields.length > 0 && (
+                      <div style={{
+                        display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px',
+                        padding: '0 6px 6px 24px',
+                      }}>
+                        {fields.map((f) => (
+                          <label key={f.key} style={{
+                            display: 'flex', alignItems: 'center', gap: '4px',
+                            fontSize: '11.5px', color: 'var(--muted)',
+                          }}>
+                            {f.label}
+                            <input className="input" type="number"
+                                   value={overlayParams[o.id]?.[f.key] ?? f.default}
+                                   min={f.min} max={f.max} step={f.step}
+                                   aria-label={`${labelFor(o, overlayParams[o.id])} ${f.label}`}
+                                   onChange={(e) => setOverlayParam(o.id, f.key, e.target.value)}
+                                   style={{ width: '62px', fontSize: '11.5px', padding: '1px 4px' }} />
+                          </label>
+                        ))}
+                        <InfoTip id="indicatorPeriod" />
+                        {/* The consequence of the number he just typed, beside the number — the same
+                            sentence the chart shows below itself, so there is one wording for it. */}
+                        {note && (
+                          <div style={{ flexBasis: '100%', fontSize: '11.5px', lineHeight: 1.45,
+                            color: 'var(--amber)' }}>
+                            {note}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               <div style={{
                 fontSize: '12px', color: 'var(--muted)', padding: '6px 6px 2px',
                 borderTop: '1px solid var(--border)', marginTop: '4px', lineHeight: 1.5,
@@ -1766,7 +1847,8 @@ export default function PriceChart({
                  + (last ? `, last ${numberFmt(last.close)}` : '')
                  + (changePct !== null ? `, ${changePct >= 0 ? 'up' : 'down'} `
                    + `${Math.abs(changePct).toFixed(2)} percent on the bar` : '')
-                 + (active.length ? `, with ${active.map((id) => overlayById(id)?.label).join(', ')}`
+                 + (active.length ? `, with ${active
+                   .map((id) => labelFor(overlayById(id), activeParams[id])).join(', ')}`
                    : '')
                  + (fills?.length ? `, with ${fills.length} of your own fills marked` : '')
                  + (cone?.ok ? ', with a volatility projection drawn forward' : '')} />
