@@ -1982,7 +1982,10 @@ export default function PriceChart({
                 // THE FIELDS APPEAR ONLY UNDER AN ENABLED STUDY. Twenty-two studies' worth of number
                 // boxes open at once is a form, not a menu, and master is here to read a chart.
                 const fields = on ? (o.params || []) : [];
-                const note = on
+                // NAMED `shortfall`, NOT `note`: `note` is the open note editor's state in this same
+                // component, and a local called `note` here would read as that state to anyone editing
+                // this menu later — the two features that added them landed one after the other.
+                const shortfall = on
                   ? overlayShortfall(o.id, candles.length, isIntraday, overlayParams[o.id]) : null;
                 return (
                   <div key={o.id}>
@@ -2021,10 +2024,10 @@ export default function PriceChart({
                         <InfoTip id="indicatorPeriod" />
                         {/* The consequence of the number he just typed, beside the number — the same
                             sentence the chart shows below itself, so there is one wording for it. */}
-                        {note && (
+                        {shortfall && (
                           <div style={{ flexBasis: '100%', fontSize: '11.5px', lineHeight: 1.45,
                             color: 'var(--amber)' }}>
-                            {note}
+                            {shortfall}
                           </div>
                         )}
                       </div>

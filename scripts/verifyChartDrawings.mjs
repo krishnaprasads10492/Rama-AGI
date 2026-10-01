@@ -612,6 +612,12 @@ check('the cursor says whether a drag would move the mark or reshape an end',
   /nwse-resize/.test(chart) && /hoverEdit === 'move'/.test(chart));
 check('the pointer handlers read the STORED list, whose anchors are epoch seconds',
   /drawingsRef\.current/.test(chart));
+// A SEAM BETWEEN TWO FEATURES, pinned so it cannot come back. The indicators menu and the note editor
+// were added one after the other, and the menu's shortfall sentence was briefly a local called `note`
+// shadowing the editor's state of the same name in the same 2250-line component. Behaviour was right
+// and the next reader would not have been, so `note` is reserved for the editor by assertion.
+check('`note` names the editor\'s state and nothing else in the component',
+  /const \[note, setNote\]/.test(chart) && !/\bconst note\b/.test(chart));
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 if (fail > 0) process.exit(1);
