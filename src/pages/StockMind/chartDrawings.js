@@ -62,6 +62,16 @@ export const FIB_LEVELS = Object.freeze([0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 
 /** Bounded, because this is persisted and master can hold the mouse down. */
 export const MAX_PER_SYMBOL = 200;
 
+/**
+ * Pixel tolerance for grabbing an ANCHOR rather than the body of a drawing.
+ *
+ * Deliberately wider than `hitTest`'s 6, and that is the whole behaviour: when the pointer is near an
+ * end of a trendline, both tests succeed, and the drag that master means is the one that moves the END.
+ * Every platform does this and none of them say so. Asserted numerically in the suite, so the property
+ * survives a later edit rather than depending on the order the component happens to call the two.
+ */
+export const HANDLE_TOL = 8;
+
 const PREFIX = 'rama.stockmind.drawings';
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
 
@@ -237,6 +247,95 @@ export function hitTest(drawings, at, project, opts = {}) {
     }
   }
   return null;
+}
+
+/**
+ * Which ANCHOR of one drawing is under the pointer, by index.
+ *
+ * `hitTest` answers "which mark did he grab"; this answers "did he grab an END of it". The two are
+ * asked in that order by the component — handle first — and `HANDLE_TOL` being the wider tolerance is
+ * what makes the answer unambiguous where they overlap.
+ *
+ * A LOCKED drawing returns null. Locking already meant "cannot be selected"; now that a mark can be
+ * dragged it must also mean "cannot be moved", or a lock would protect master's work from `undo` and
+ * `clear` while leaving it one stray drag from being lost.
+ *
+ * @param {object} drawing one drawing, in the same point shape `project` expects
+ * @param {{x: number, y: number}} at pointer position in pixels
+ * @param {(point: object) => ({x: number, y: number}|null)} project
+ * @param {{tol?: number}} [opts]
+ * @returns {number|null} the anchor index, or null — never a clamped guess
+ */
+export function handleAt(drawing, at, project, opts = {}) {
+  const tol = finite(opts.tol) ? opts.tol : HANDLE_TOL;
+  if (!drawing || drawing.locked || !at || typeof project !== 'function') return null;
+  if (!finite(at.x) || !finite(at.y)) return null;
+  const pts = Array.isArray(drawing.points) ? drawing.points : [];
+  if (pts.length === 0) return null;
+
+  let best = null;
+  let bestDist = Infinity;
+  for (let i = 0; i < pts.length; i += 1) {
+    const c = project(pts[i]);
+    // An anchor the chart cannot place is not grabbable, and neither is the drawing it belongs to —
+    // the same refusal `hitTest` makes, for the same reason: a handle drawn nowhere cannot be dragged.
+    if (!c || !finite(c.x) || !finite(c.y)) return null;
+    const dist = Math.hypot(at.x - c.x, at.y - c.y);
+    // Nearest wins, so two anchors within tolerance of each other resolve to the closer one rather
+    // than to whichever happens to be first.
+    if (dist <= tol && dist < bestDist) { bestDist = dist; best = i; }
+  }
+  return best;
+}
+
+/** The tool definition, own-property only, so `__proto__` is not a tool. */
+const toolOf = (tool) => (Object.prototype.hasOwnProperty.call(TOOLS, tool) ? TOOLS[tool] : null);
+
+/**
+ * Move a whole drawing by one delta, applied to EVERY anchor.
+ *
+ * `dTime` is a delta in SECONDS, not a chart time — it is run through `toEpoch` anyway, which passes a
+ * finite number through and turns anything else into null, so a non-finite delta cannot become a `NaN`
+ * anchor. That keeps the store's one rule intact: anchors are ABSOLUTE EPOCH SECONDS (Section 121), so
+ * a line dragged on a 30m chart still places on daily.
+ *
+ * Returns the ORIGINAL OBJECT, unchanged and by reference, whenever it cannot do the whole job. A
+ * half-moved mark is not a mark master made, and the caller stores whatever comes back.
+ */
+export function moveDrawing(drawing, dTime, dPrice) {
+  const def = toolOf(drawing?.tool);
+  // A measure is never stored, so it is never moved either — the store refuses it, the commit point
+  // refuses it, and this is the third way in that must not open.
+  if (!def || def.transient || drawing.locked) return drawing;
+  const dt = toEpoch(dTime);
+  if (dt === null || !finite(dPrice)) return drawing;
+  const pts = Array.isArray(drawing.points) ? drawing.points : [];
+  if (pts.length < def.points) return drawing;
+  if (!pts.every((p) => finite(p?.t) && finite(p?.price))) return drawing;
+  // Spread, so id, text, color, width, locked and createdAt all survive: a move is not a new drawing,
+  // and a regenerated createdAt would silently reorder master's own history.
+  return { ...drawing, points: pts.map((p) => ({ t: p.t + dt, price: p.price + dPrice })) };
+}
+
+/**
+ * Replace ONE anchor, leaving the others bit-identical.
+ *
+ * `point` arrives in the CHART's time type (`'YYYY-MM-DD'` or epoch seconds, straight off `unproject`)
+ * and is converted here, at the boundary, exactly as `makeDrawing` does — the store never learns which
+ * interval the reshape happened on.
+ */
+export function reshapeDrawing(drawing, index, point) {
+  const def = toolOf(drawing?.tool);
+  if (!def || def.transient || drawing.locked) return drawing;
+  const pts = Array.isArray(drawing.points) ? drawing.points : [];
+  // A float index, a negative one or one past the end are all refusals rather than an appended anchor:
+  // a drawing with three ends is not one of the eight tools.
+  if (!Number.isInteger(index) || index < 0 || index >= pts.length) return drawing;
+  const t = toEpoch(point?.time);
+  if (t === null || !finite(point?.price)) return drawing;
+  const next = pts.slice();
+  next[index] = { t, price: point.price };
+  return { ...drawing, points: next };
 }
 
 /**

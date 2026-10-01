@@ -307,6 +307,23 @@ export default function PriceChart({
   const [draft, setDraft] = useState(null);
   const [drawOpen, setDrawOpen] = useState(false);
   const [measured, setMeasured] = useState(null);
+
+  /**
+   * DRAGGING AND RESHAPING AN EXISTING MARK (Section 123).
+   *
+   * `editing` is a WORKING COPY of the drawing under the pointer, and nothing else sees it: the stored
+   * list is left alone until the mouse comes up, so one drag is one commit and one `DRAW.save` rather
+   * than one per mouse-move event. Escape mid-drag drops the copy and the stored mark stands, because a
+   * half-dragged line is not a claim master made.
+   *
+   * `drawingsRef` is the STORED list for the pointer handlers — whose anchors are absolute epoch
+   * seconds — while `drawStateRef` carries the placed copies the layer draws. Those are two different
+   * time types on purpose (Section 118), and mixing them is exactly the defect the split prevents.
+   */
+  const [editing, setEditing] = useState(null);
+  const [hoverEdit, setHoverEdit] = useState(null);  // 'move' | 'resize' | null, for the cursor
+  const hoverRef = useRef(null);
+  const drawingsRef = useRef([]);
   const [fitted, setFitted] = useState(0);           // container height when `fillHeight`
 
   const [readout, setReadout] = useState(null);
@@ -401,8 +418,14 @@ export default function PriceChart({
   // The layer reads this ref, so a redraw never waits on a React render.
   useEffect(() => {
     const el = holder.current;
+    // The drag in progress is substituted for its stored original, so the mark follows the pointer
+    // without the store being written to once per mouse-move event.
+    const shown = editing
+      ? drawings.map((d) => (d?.id === editing.id ? editing : d))
+      : drawings;
+    drawingsRef.current = drawings;
     drawStateRef.current = {
-      drawings: drawings.map((d) => DRAW.placed(d, isIntraday)).filter(Boolean),
+      drawings: shown.map((d) => DRAW.placed(d, isIntraday)).filter(Boolean),
       draft: draft ? DRAW.placed(draft, isIntraday) : null,
       selectedId,
       intraday: isIntraday,
@@ -410,7 +433,7 @@ export default function PriceChart({
       measureBars: measured?.bars ?? null,
     };
     layerRef.current?.redraw();
-  }, [drawings, draft, selectedId, isIntraday, measured]);
+  }, [drawings, draft, selectedId, isIntraday, measured, editing]);
 
   const commit = useCallback((d) => {
     if (!d) return;
@@ -1117,6 +1140,12 @@ export default function PriceChart({
    * A one-point tool commits on mouse DOWN; a two-point tool tracks a draft until mouse UP. There is no
    * click-click mode: a drag is unambiguous, and a two-click tool leaves the chart in a state where the
    * next click anywhere means something master may not remember arming.
+   *
+   * WITH NO TOOL ARMED the same three handlers now also EDIT an existing mark: a handle grabs an end and
+   * reshapes it, the body grabs the whole thing and moves it, and empty space deselects as it always
+   * did. The order is handle, then body, then nothing — `DRAW.HANDLE_TOL` is the wider tolerance, so
+   * where both tests succeed the end wins. `pointer.current.mode` says which of the three drags is in
+   * progress, because a reshape that pans the chart produces neither.
    */
   const pointer = useRef(null);
 
@@ -1128,6 +1157,11 @@ export default function PriceChart({
 
     // No tool: the chart behaves exactly as it did, and a click selects or deselects a mark.
     const rect = () => el.getBoundingClientRect();
+    const project = (p) => layer.project(p);
+    const grab = () => chart.applyOptions({ handleScroll: false, handleScale: false });
+    const release = () => chart.applyOptions({ handleScroll: true, handleScale: true });
+    // The stored original, whose anchors are epoch seconds — never the placed copy the layer holds.
+    const storedById = (id) => (drawingsRef.current || []).find((d) => d?.id === id) || null;
 
     const down = (e) => {
       if (e.button !== 0) return;
@@ -1136,9 +1170,37 @@ export default function PriceChart({
       const y = e.clientY - r.top;
 
       if (!tool) {
-        const hit = DRAW.hitTest(drawStateRef.current.drawings, { x, y },
-          (p) => layer.project(p), { tol: 6, width: r.width });
-        setSelectedId(hit ? hit.id : null);
+        const placedList = drawStateRef.current.drawings || [];
+        // The selection comes from the ref the layer already reads, not from the closure: a drag must
+        // not depend on the effect having been re-registered since master last clicked something.
+        const selected = placedList.find((d) => d?.id === drawStateRef.current.selectedId) || null;
+
+        const handle = DRAW.handleAt(selected, { x, y }, project);
+        if (selected && handle !== null) {
+          const before = storedById(selected.id);
+          if (before) {
+            grab();
+            pointer.current = { mode: 'reshape', id: before.id, index: handle };
+            setEditing(before);
+            return;
+          }
+        }
+
+        const hit = DRAW.hitTest(placedList, { x, y }, project, { tol: 6, width: r.width });
+        if (hit) {
+          setSelectedId(hit.id);
+          const at = layer.unproject(x, y);
+          const before = storedById(hit.id);
+          // Without an anchor under the pointer there is nothing to measure a delta from, so the click
+          // selects and stops there rather than moving the mark by a guess.
+          if (at && before) {
+            grab();
+            pointer.current = { mode: 'move', id: before.id, from: at };
+            setEditing(before);
+          }
+          return;
+        }
+        setSelectedId(null);
         return;
       }
       const at = layer.unproject(x, y);
@@ -1155,23 +1217,57 @@ export default function PriceChart({
         setTool(null);
         return;
       }
-      chart.applyOptions({ handleScroll: false, handleScale: false });
-      pointer.current = { from: at, fromX: x };
+      grab();
+      pointer.current = { mode: 'draw', from: at, fromX: x };
       setDraft(DRAW.makeDrawing(tool, [at, at]));
     };
 
     const move = (e) => {
-      if (!pointer.current) return;
       const r = rect();
       const x = e.clientX - r.left;
-      const to = layer.unproject(x, e.clientY - r.top);
+      const y = e.clientY - r.top;
+      const p = pointer.current;
+
+      if (!p) {
+        // HOVER, so the chart says what a drag will do BEFORE the button goes down. Only the changed
+        // value reaches state: a setState per mouse-move event would re-render the whole chart while
+        // master is simply passing over it.
+        let next = null;
+        if (!tool && x >= 0 && y >= 0 && x <= r.width && y <= r.height) {
+          const placedList = drawStateRef.current.drawings || [];
+          const selected = placedList.find((d) => d?.id === drawStateRef.current.selectedId) || null;
+          if (selected && DRAW.handleAt(selected, { x, y }, project) !== null) next = 'resize';
+          else if (DRAW.hitTest(placedList, { x, y }, project, { tol: 6, width: r.width })) next = 'move';
+        }
+        if (hoverRef.current !== next) { hoverRef.current = next; setHoverEdit(next); }
+        return;
+      }
+
+      const to = layer.unproject(x, y);
       if (!to) return;
-      const d = DRAW.makeDrawing(tool, [pointer.current.from, to]);
+
+      if (p.mode === 'reshape') {
+        setEditing((cur) => (cur ? DRAW.reshapeDrawing(cur, p.index, to) : cur));
+        return;
+      }
+      if (p.mode === 'move') {
+        const a = DRAW.toEpoch(p.from.time);
+        const b = DRAW.toEpoch(to.time);
+        if (a === null || b === null) return;
+        // The delta is measured from where the drag STARTED and applied to the stored original, so a
+        // reshape of one anchor per frame cannot accumulate rounding across a long drag.
+        const base = storedById(p.id);
+        if (!base) return;
+        setEditing(DRAW.moveDrawing(base, b - a, to.price - p.from.price));
+        return;
+      }
+
+      const d = DRAW.makeDrawing(tool, [p.from, to]);
       setDraft(d);
       if (tool === 'measure' && d) {
         // Bars from the chart's own logical scale, never from elapsed time — an intraday span crosses
         // overnight gaps in which no bars exist.
-        const a = layer.logicalAt(pointer.current.fromX);
+        const a = layer.logicalAt(p.fromX);
         const b = layer.logicalAt(x);
         const bars = (a !== null && b !== null) ? b - a : null;
         setMeasured(DRAW.measurement(d.points[0], d.points[1], bars));
@@ -1179,15 +1275,31 @@ export default function PriceChart({
     };
 
     const up = () => {
-      if (!pointer.current) return;
+      const p = pointer.current;
+      if (!p) return;
       pointer.current = null;
-      chart.applyOptions({ handleScroll: true, handleScale: true });
-      setDraft((d) => {
-        if (d) commit(d);
+      release();
+      if (p.mode === 'draw') {
+        setDraft((d) => {
+          if (d) commit(d);
+          return null;
+        });
+        // The measure reading survives the drag that produced it, so master can read it after letting go.
+        setTool((t) => (t === 'measure' ? t : null));
+        return;
+      }
+      // ONE commit per drag, at the end — so the store holds the mark master let go of, not every
+      // intermediate position his hand passed through. A click that selected without dragging commits
+      // NOTHING: rewriting the store with an identical copy would make every selection look like an
+      // edit to anything watching the list.
+      setEditing((cur) => {
+        if (cur) {
+          const base = storedById(cur.id);
+          const changed = !base || JSON.stringify(base.points) !== JSON.stringify(cur.points);
+          if (changed) setDrawings((list) => list.map((d) => (d?.id === cur.id ? cur : d)));
+        }
         return null;
       });
-      // The measure reading survives the drag that produced it, so master can read it after letting go.
-      setTool((t) => (t === 'measure' ? t : null));
     };
 
     el.addEventListener('mousedown', down);
@@ -1198,6 +1310,8 @@ export default function PriceChart({
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
     };
+    // UNCHANGED BY THE DRAG WIRING: the selection and the stored list are read through refs precisely so
+    // this array does not grow with them and the listeners are not re-registered on every click.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool, commit, chartType, candles.length]);
 
@@ -1270,6 +1384,17 @@ export default function PriceChart({
       return;
     }
     if (k === 'z') { setDrawings((l) => DRAW.undo(l)); e.preventDefault(); return; }
+    if (k === 'escape' && (editing || pointer.current)) {
+      // Escape mid-drag RESTORES the mark: only the working copy is dropped, the stored one was never
+      // written to, and pan and zoom come back because the drag that switched them off has ended.
+      pointer.current = null;
+      setEditing(null);
+      try { chartRef.current?.applyOptions({ handleScroll: true, handleScale: true }); } catch {
+        /* the chart is gone; nothing to restore */
+      }
+      e.preventDefault();
+      return;
+    }
     if (k === 'escape' && (tool || draft)) {
       // Escape abandons the tool and any half-drawn mark before it reaches fullscreen or a menu.
       setTool(null);
@@ -1280,6 +1405,11 @@ export default function PriceChart({
     }
     if (k === 'escape' && full) { setFull(false); e.preventDefault(); }
   };
+
+  // What a drag would do if it started here: reshape an end, or move the whole mark. Stated by the
+  // cursor, because a chart that reshapes on drag while showing a grab cursor is one master cannot read.
+  const editCursor = hoverEdit === 'resize' ? 'nwse-resize'
+    : (hoverEdit === 'move' ? 'move' : undefined);
 
   const chip = (on) => ({
     padding: '2px 8px', fontSize: '12px', borderRadius: '999px', cursor: 'pointer',
@@ -1403,6 +1533,7 @@ export default function PriceChart({
             ✎ draw{tool ? `: ${DRAW.TOOLS[tool].label}` : ''}
             {drawings.length > 0 ? ` (${drawings.length})` : ''} ▾
           </button>
+
           {drawOpen && (
             <div style={{
               position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: '4px',
@@ -1464,6 +1595,9 @@ export default function PriceChart({
                 lineHeight: 1.5 }}>
                 Your marks, not Rāma&rsquo;s — stored per symbol and anchored to time and price, so they
                 stay put through a zoom, a window change or a different interval.
+                <br />
+                Drag a selected mark to move it, or drag one of its handles to reshape it. A locked mark
+                does neither.
               </div>
             </div>
           )}
@@ -1839,7 +1973,7 @@ export default function PriceChart({
           {/* The cursor states which mode the chart is in. A chart that draws on drag while still
               showing a grab cursor is a chart master cannot predict. */}
           <div ref={holder} style={{ width: '100%', height: effectiveHeight,
-            cursor: tool ? 'crosshair' : undefined }}
+            cursor: tool ? 'crosshair' : editCursor }}
                role="img"
                aria-label={`${CHART_TYPES.find((t) => t.id === chartType)?.label || 'Candlestick'}`
                  + ` chart for ${symbol || 'the selected symbol'}, `

@@ -274,6 +274,178 @@ check('undo when everything is locked changes nothing', (() => {
   return D.undo(l).length === 5;
 })());
 
+// ── Handles: grabbing an END rather than the body ──────────────────────────────
+//
+// Until Section 123 a mark could be selected, locked, deleted and undone and could NOT be moved. The
+// geometry for it was already here and tested; what was missing was the handle hit-test and the two
+// mutators. `project` maps a stored point to x = 10px per day from DAY, y = 200 - price.
+console.log('\n  handles: grabbing an END beats grabbing the body');
+const tline = D.makeDrawing('trendline', [
+  { time: '2026-09-18', price: 100 },   // -> x 0,   y 100
+  { time: '2026-09-28', price: 150 },   // -> x 100, y 50
+]);
+check('the first anchor is found under the pointer', D.handleAt(tline, { x: 0, y: 100 }, project) === 0);
+check('and the second', D.handleAt(tline, { x: 100, y: 50 }, project) === 1);
+check('within the tolerance', D.handleAt(tline, { x: 6, y: 100 }, project) === 0);
+check('but not well outside it', D.handleAt(tline, { x: 30, y: 100 }, project) === null);
+check('NULL AT THE MIDPOINT — grabbing the middle must move the whole line, not an end',
+  D.handleAt(tline, { x: 50, y: 75 }, project) === null);
+check('the NEARER anchor wins when two are both in range', (() => {
+  const tight = D.makeDrawing('trendline', [
+    { time: DAY, price: 100 }, { time: DAY + 43200, price: 100 },   // 5px apart
+  ]);
+  return D.handleAt(tight, { x: 3, y: 100 }, project) === 1;
+})());
+check('a one-point drawing has one handle', D.handleAt(hline, { x: 0, y: 100 }, project) === 0);
+check('an unprojectable anchor is not grabbable rather than grabbable at a guess',
+  D.handleAt(tline, { x: 0, y: 100 }, () => null) === null);
+check('a missing projector is null', D.handleAt(tline, { x: 0, y: 100 }, null) === null);
+check('a null drawing is null, not a throw', D.handleAt(null, { x: 0, y: 100 }, project) === null);
+check('a non-finite pointer position is null', D.handleAt(tline, { x: NaN, y: 0 }, project) === null);
+
+console.log('\n  THE TOLERANCE IS THE BEHAVIOUR, so it is asserted as a number');
+check('HANDLE_TOL is wider than hitTest\'s 6px default — handle beats body',
+  D.HANDLE_TOL > 6, String(D.HANDLE_TOL));
+check('near an end BOTH tests succeed, which is why the component asks for the handle first', (() => {
+  const at = { x: 2, y: 99 };                      // on the segment, 2.2px from the first anchor
+  return D.handleAt(tline, at, project) === 0 && D.hitTest([tline], at, project)?.id === tline.id;
+})());
+
+console.log('\n  a LOCKED mark cannot be selected, and now cannot be moved either');
+const lockedLine = { ...tline, locked: true };
+check('handleAt refuses it', D.handleAt(lockedLine, { x: 0, y: 100 }, project) === null);
+check('moveDrawing returns it unchanged, by reference',
+  D.moveDrawing(lockedLine, 86400, 5) === lockedLine);
+check('and so does reshapeDrawing',
+  D.reshapeDrawing(lockedLine, 0, { time: '2026-09-20', price: 5 }) === lockedLine);
+
+// ── Moving ────────────────────────────────────────────────────────────────────
+console.log('\n  a move translates EVERY anchor by the same delta');
+const movedLine = D.moveDrawing(tline, 86400, 5);
+check('the first anchor moved', movedLine.points[0].t === tline.points[0].t + 86400
+  && movedLine.points[0].price === 105);
+check('and the second by exactly the same amount', movedLine.points[1].t === tline.points[1].t + 86400
+  && movedLine.points[1].price === 155);
+check('the original object is not mutated',
+  tline.points[0].price === 100 && tline.points[1].t === D.toEpoch('2026-09-28'));
+check('a one-point drawing moves too', (() => {
+  const h = D.moveDrawing(hline, -86400, -10);
+  return h.points.length === 1 && h.points[0].price === 90 && h.points[0].t === DAY - 86400;
+})());
+check('a Fibonacci set moves as a whole, both anchors together', (() => {
+  const f = D.moveDrawing(fib, 3600, 25);
+  return f.points[0].price === 125 && f.points[1].price === 225
+    && f.points[1].t === fib.points[1].t + 3600;
+})());
+check('a zero delta is a legal move, not a refusal', (() => {
+  const z = D.moveDrawing(tline, 0, 0);
+  return z !== tline && z.points[0].t === tline.points[0].t;
+})());
+
+console.log('\n  a reshape replaces ONE anchor and leaves the other bit-identical');
+const reshaped = D.reshapeDrawing(tline, 1, { time: '2026-10-05', price: 180 });
+check('the named anchor is replaced', reshaped.points[1].t === D.toEpoch('2026-10-05')
+  && reshaped.points[1].price === 180);
+check('the other is untouched',
+  JSON.stringify(reshaped.points[0]) === JSON.stringify(tline.points[0]));
+check('index 0 reshapes the first anchor instead', (() => {
+  const r = D.reshapeDrawing(tline, 0, { time: '2026-09-15', price: 80 });
+  return r.points[0].price === 80 && r.points[1].price === 150;
+})());
+check('the point arrives in the CHART\'s time type and is stored as epoch seconds', (() => {
+  const r = D.reshapeDrawing(tline, 1, { time: DAY + 7 * 86400 + 13500, price: 115 });
+  return r.points[1].t === DAY + 7 * 86400 + 13500;
+})());
+check('the original object is not mutated', tline.points[1].price === 150);
+
+console.log('\n  identity survives both — a move is not a new drawing');
+const rich = D.makeDrawing('trendline', [
+  { time: '2026-09-18', price: 100 }, { time: '2026-09-28', price: 150 },
+], { text: 'mine', color: '#ff00aa', width: 4 });
+const sameness = (a, b) => a.id === b.id && a.text === b.text && a.color === b.color
+  && a.width === b.width && a.locked === b.locked && a.createdAt === b.createdAt
+  && a.tool === b.tool;
+check('id, text, color, width, locked and createdAt all survive a move',
+  sameness(rich, D.moveDrawing(rich, 60, 1)));
+check('and a reshape',
+  sameness(rich, D.reshapeDrawing(rich, 0, { time: '2026-09-19', price: 101 })));
+check('LOSING createdAt WOULD REORDER MASTER\'S OWN HISTORY, so it is asserted on its own',
+  D.moveDrawing(rich, 60, 1).createdAt === rich.createdAt);
+
+console.log('\n  a caller can never store a half-moved mark');
+const pt = { time: '2026-09-20', price: 120 };
+check('an index past the end is refused', D.reshapeDrawing(tline, 2, pt) === tline);
+check('a negative index is refused', D.reshapeDrawing(tline, -1, pt) === tline);
+check('a fractional index is refused', D.reshapeDrawing(tline, 0.5, pt) === tline);
+check('a null index is refused rather than read as 0', D.reshapeDrawing(tline, null, pt) === tline);
+check('a non-finite price is refused',
+  D.reshapeDrawing(tline, 0, { time: '2026-09-20', price: NaN }) === tline);
+check('an unusable time is refused',
+  D.reshapeDrawing(tline, 0, { time: 'later', price: 120 }) === tline);
+check('a null point is refused', D.reshapeDrawing(tline, 0, null) === tline);
+check('a NaN time delta is refused', D.moveDrawing(tline, NaN, 1) === tline);
+check('a NaN price delta is refused', D.moveDrawing(tline, 60, NaN) === tline);
+check('a null delta is refused rather than read as zero', D.moveDrawing(tline, null, 1) === tline);
+check('an undefined price delta likewise', D.moveDrawing(tline, 60, undefined) === tline);
+check('an unknown tool cannot be moved', (() => {
+  const bogus = { tool: 'nope', points: [{ t: DAY, price: 1 }] };
+  return D.moveDrawing(bogus, 60, 1) === bogus && D.reshapeDrawing(bogus, 0, pt) === bogus;
+})());
+check('__proto__ is still not a tool here either', (() => {
+  const bogus = { tool: '__proto__', points: [{ t: DAY, price: 1 }] };
+  return D.moveDrawing(bogus, 60, 1) === bogus;
+})());
+check('a drawing with a corrupt anchor is refused rather than moved to NaN', (() => {
+  const bad = { tool: 'hline', points: [{ t: DAY, price: 'x' }], locked: false };
+  return D.moveDrawing(bad, 60, 1) === bad;
+})());
+check('null and undefined drawings are handled',
+  D.moveDrawing(null, 60, 1) === null && D.reshapeDrawing(undefined, 0, pt) === undefined);
+
+console.log('\n  A MEASURE IS NEVER MOVEABLE, because it is never stored');
+const meas = D.makeDrawing('measure', [
+  { time: '2026-09-18', price: 1 }, { time: '2026-09-19', price: 2 },
+]);
+check('the move path is not a third way into the store', D.moveDrawing(meas, 86400, 1) === meas);
+check('nor the reshape path',
+  D.reshapeDrawing(meas, 0, { time: '2026-09-20', price: 5 }) === meas);
+
+console.log('\n  ANCHORS ARE STILL ABSOLUTE EPOCH SECONDS AFTER A MOVE');
+const movedDaily = D.moveDrawing(tl, 2 * 86400, 0);
+check('the stored anchor is a number, not the chart\'s own time type',
+  typeof movedDaily.points[0].t === 'number' && Number.isFinite(movedDaily.points[0].t));
+check('it places as a date string on a daily chart',
+  D.placed(movedDaily, false).points[0].time === '2026-09-20');
+check('and as an epoch number on an intraday one',
+  D.placed(movedDaily, true).points[0].time === DAY + 2 * 86400);
+check('MOVED ON INTRADAY, IT STILL PLACES ON DAILY — a mark is not interval-locked', (() => {
+  const nudged = D.moveDrawing(tl, 1800, 0.5);          // half an hour, as an intraday drag would
+  const asDaily = D.placed(nudged, false);
+  return typeof asDaily.points[0].time === 'string' && asDaily.points[0].time === '2026-09-18';
+})());
+check('and a reshape made with an intraday epoch places on daily too', (() => {
+  const r = D.reshapeDrawing(tl, 1, { time: DAY + 7 * 86400 + 13500, price: 115 });
+  return D.placed(r, false).points[1].time === '2026-09-25'
+    && D.placed(r, true).points[1].time === DAY + 7 * 86400 + 13500;
+})());
+
+console.log('\n  a reshaped Fibonacci set re-derives every level');
+const fibReshaped = D.reshapeDrawing(fib, 0, { time: '2026-09-18', price: 120 });
+check('level 0 is still the FIRST anchor', near(D.fibLines(fibReshaped)[0].price, 120));
+check('level 1 is still the second', near(D.fibLines(fibReshaped)[6].price, 200));
+check('and the levels between come from the NEW pair, not the old one',
+  near(D.fibLines(fibReshaped).find((l) => l.level === 0.5).price, 160));
+
+console.log('\n  a move survives save then load');
+const movedFib = D.moveDrawing(fib, 86400, 10);
+D.save('MOVED', [movedFib]);
+const backMoved = D.load('MOVED');
+check('one drawing comes back', backMoved.length === 1);
+check('with the moved anchors, which the read-time validation accepts',
+  backMoved[0].points[0].t === movedFib.points[0].t && backMoved[0].points[0].price === 110);
+check('and its identity intact',
+  backMoved[0].id === movedFib.id && backMoved[0].createdAt === movedFib.createdAt);
+
 console.log('\n  the cap is bounded, and drops the OLDEST');
 let many = [];
 for (let i = 0; i < D.MAX_PER_SYMBOL + 30; i += 1) {
@@ -353,6 +525,22 @@ check('the workspace chart now fills its panel', (() => {
 })());
 check('and fillHeight falls back to the height prop until the container is measured',
   /fitted > 120 \? fitted : height/.test(chart));
+
+// The inline editor and the drag wiring, asserted the same way and for the same reason: the behaviour
+// needs a screen, but the removal of a prompt and the shape of the wiring do not.
+console.log('\n  the editing wiring');
+check('a handle starts a RESHAPE and a body starts a MOVE',
+  /DRAW\.handleAt\(/.test(chart) && /mode: 'reshape'/.test(chart) && /mode: 'move'/.test(chart));
+check('both run through the tested mutators',
+  /DRAW\.reshapeDrawing\(/.test(chart) && /DRAW\.moveDrawing\(/.test(chart));
+check('a drag commits ONCE, at mouse up, rather than writing the store per mouse-move',
+  /ONE commit per drag/.test(chart));
+check('Escape mid-drag drops the working copy and leaves the stored mark standing',
+  /editing \|\| pointer\.current/.test(chart));
+check('the cursor says whether a drag would move the mark or reshape an end',
+  /nwse-resize/.test(chart) && /hoverEdit === 'move'/.test(chart));
+check('the pointer handlers read the STORED list, whose anchors are epoch seconds',
+  /drawingsRef\.current/.test(chart));
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 if (fail > 0) process.exit(1);
