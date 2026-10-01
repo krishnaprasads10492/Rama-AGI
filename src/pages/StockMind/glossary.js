@@ -191,6 +191,18 @@ export const TERMS = {
       + 'nothing.',
     seeAlso: ['candles', 'instrument'],
   },
+  sessionBand: {
+    term: 'Session band', group: 'chart',
+    short: 'A faint band per trading day on intraday bars, so the overnight gap is visible.',
+    long: 'The NSE and BSE cash session runs 09:15 to 15:30 IST, 375 minutes, and intraday bars from '
+      + 'different days sit side by side with nothing between them — so a gap that happened overnight '
+      + 'can be read as a move that happened in minutes. Alternate days are tinted, which makes the '
+      + 'boundary itself the information rather than the colour. Each one begins and ends at a bar that '
+      + 'is actually stored, never at a clock time, so a part-loaded day is drawn as a part-loaded day '
+      + 'instead of being painted out to a close that has not happened. Daily bars get none, because '
+      + 'there a day is already one candle.',
+    seeAlso: ['interval', 'candles'],
+  },
   ohlcBars: {
     term: 'Bars (OHLC)', group: 'chart',
     short: 'A vertical line per bar with ticks left for open and right for close.',

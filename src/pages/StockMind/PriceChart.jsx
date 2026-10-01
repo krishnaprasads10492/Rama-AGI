@@ -20,6 +20,8 @@ import {
 } from './chartZoom.js';
 import * as DRAW from './chartDrawings.js';
 import { createDrawingLayer } from './ChartDrawingLayer.js';
+import { sessionBands, describeBands } from './chartSessions.js';
+import { createSessionLayer } from './ChartSessionLayer.js';
 import InfoTip from './InfoTip.jsx';
 
 /**
@@ -296,6 +298,12 @@ export default function PriceChart({
   const countRef = useRef(0);
   const lastPxRef = useRef(null);
 
+  // ── Session shading (Section 123) ──────────────────────────────────────────
+  // The second primitive, and it gets its own ref pair for the same reason the first has one: the
+  // layer reads live state on every draw, so nothing here is re-attached when the bands change.
+  const sessionLayerRef = useRef(null);
+  const sessionStateRef = useRef({});
+
   // ── Drawings (Section 121) ─────────────────────────────────────────────────
   const shellRef = useRef(null);
   const layerRef = useRef(null);
@@ -339,7 +347,6 @@ export default function PriceChart({
   const [fitted, setFitted] = useState(0);           // container height when `fillHeight`
 
   const [readout, setReadout] = useState(null);
-  const [layers, setLayers] = useState({ fills: true, levels: true, cone: true });
   const [full, setFull] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [viewOpen, setViewOpen] = useState(false);
@@ -386,6 +393,25 @@ export default function PriceChart({
     ? prefs.current.volume : showVolume));
 
   /**
+   * THE EVIDENCE LAYERS, AND THE ONE OF THEM THAT IS REMEMBERED (Section 123).
+   *
+   * `fills`, `levels` and `cone` stay session-scoped on purpose: each one appears only when the data for
+   * it arrives, so a remembered "off" would hide evidence master had forgotten he dismissed. `sessions`
+   * is different — it is a drawing preference about the bars themselves, the same class of choice as the
+   * chart type and the candle width, so it is persisted inside the EXISTING prefs key. An older stored
+   * preference has no `sessions` and therefore loads on, which is the default this feature wants.
+   *
+   * Declared here rather than beside `readout` because the initialiser reads `prefs`, which is a ref
+   * created a few lines above — a lazy initialiser runs during this render, so the order is load-bearing.
+   */
+  const [layers, setLayers] = useState(() => ({
+    fills: true,
+    levels: true,
+    cone: true,
+    sessions: typeof prefs.current?.sessions === 'boolean' ? prefs.current.sessions : true,
+  }));
+
+  /**
    * HOW WIDE A CANDLE IS, AS MASTER'S SETTING (Section 122).
    *
    * Three sections guessed at a single number and he reported it wrong three times. A number I choose
@@ -403,8 +429,11 @@ export default function PriceChart({
   const [zoom, setZoom] = useState(null);
 
   useEffect(() => {
-    savePrefs({ chartType, scaleMode, overlays: enabled, volume: volOn, density, overlayParams });
-  }, [chartType, scaleMode, enabled, volOn, density, overlayParams]);
+    savePrefs({
+      chartType, scaleMode, overlays: enabled, volume: volOn, density, overlayParams,
+      sessions: layers.sessions,
+    });
+  }, [chartType, scaleMode, enabled, volOn, density, overlayParams, layers.sessions]);
 
   const isIntraday = showsClock(interval);
 
@@ -519,6 +548,35 @@ export default function PriceChart({
     .filter((c) => Number.isFinite(c.volume) && c.volume > 0)
     .map((c) => ({ time: c.time, value: c.volume, up: c.close >= c.open })),
   [candles]);
+
+  /**
+   * WHERE ONE TRADING DAY ENDS (Section 123).
+   *
+   * `starts` was computed inside the fill-marker effect; it is hoisted here because the session bands
+   * need the same map and one chart should not build the same boundary list twice. It is still the
+   * tested `sessionStarts` doing the deciding — `chartSessions.js` consumes it and adds only where each
+   * session ends, which is the half no existing module had.
+   *
+   * `bands` is empty on a daily chart by design, and the chip hides itself when it is: alternating tints
+   * on daily bars would shade calendar days, which means nothing when a day is already one candle.
+   */
+  const starts = useMemo(() => sessionStarts(candles), [candles]);
+  const bands = useMemo(() => sessionBands(candles, { starts }), [candles, starts]);
+  const bandNote = useMemo(() => describeBands(bands), [bands]);
+
+  // The session layer reads this ref, so the toggle redraws without the chart being rebuilt. THE TOGGLE
+  // IS APPLIED HERE rather than in the layer: "switched off" and "there are no sessions in these bars"
+  // are the same thing to a renderer, and keeping that decision in one place leaves the layer with no
+  // opinion to hold. Declared after the memo it depends on, because a dependency array is evaluated
+  // during the render that reaches it and `bands` would not exist yet above.
+  useEffect(() => {
+    const el = holder.current;
+    sessionStateRef.current = {
+      bands: layers.sessions ? bands : [],
+      theme: el ? readTheme(el) : {},
+    };
+    sessionLayerRef.current?.redraw();
+  }, [bands, layers.sessions, chartType, volOn]);
 
   // Kept current on every render so the long-lived chart subscription and the data effect both see
   // master's present choice rather than the one in force when they were created.
@@ -671,6 +729,19 @@ export default function PriceChart({
       // A chart without drawings is still a chart. Reported rather than silently absent.
       console.warn(`[PriceChart] drawing layer unavailable: ${err.message}`);
       layerRef.current = null;
+    }
+
+    // THE SECOND PRIMITIVE: the session bands (Section 123). Attached to the same series and ordered by
+    // its own `zOrder: 'bottom'` rather than by the order of these two calls, so bands sit under the
+    // candles, under volume and under every drawing however this code is arranged later.
+    try {
+      const sessions = createSessionLayer(() => sessionStateRef.current);
+      price.attachPrimitive(sessions);
+      sessionLayerRef.current = sessions;
+    } catch (err) {
+      // Unshaded bars are still bars. The gap stops being marked, which is worth saying out loud.
+      console.warn(`[PriceChart] session layer unavailable: ${err.message}`);
+      sessionLayerRef.current = null;
     }
 
     /**
@@ -957,8 +1028,9 @@ export default function PriceChart({
     // ledger genuinely does not know when in the session he filled, so the marker sits at the
     // session's first stored bar: derived from data on hand rather than guessed. A date with no bar
     // is skipped, because a marker at a time that has no candle is a marker in empty space.
-    const starts = sessionStarts(candles);
-
+    //
+    // `starts` is now the hoisted memo rather than a second call, because the session bands need the
+    // same map. One boundary list per chart, and it is the tested one.
     const marks = (layers.fills ? (fills || []) : [])
       .map((f) => {
         const time = markerTime(f?.date, starts);
@@ -979,7 +1051,10 @@ export default function PriceChart({
     // the series — has to rebind rather than reuse the stale handle.
     markersRef.current = createSeriesMarkers(price, marks);
     // `candles` joins the dependencies because the session-start lookup is built from them: on an
-    // intraday chart a fill cannot be placed until the bars it sits among have loaded.
+    // intraday chart a fill cannot be placed until the bars it sits among have loaded. `starts` is a
+    // memo of the same `candles` and so cannot be stale while they are listed — naming both would name
+    // one thing twice, and `verifyChartTime.mjs` pins this array by name.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fills, layers.fills, chartType, candles]);
 
   // ── Levels: the signal's, and master's own thesis ──────────────────────────
@@ -1970,6 +2045,17 @@ export default function PriceChart({
 
         <span style={{ flex: 1 }} />
 
+        {/* HIDDEN WHEN THERE IS NOTHING TO SHADE, which on a daily chart is always: a toggle for a
+            thing that cannot appear is a control master would press to no effect. */}
+        {bands.length > 0 && (
+          <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+            <button type="button" onClick={() => toggle('sessions')} style={chip(layers.sessions)}
+                    aria-pressed={layers.sessions}>
+              sessions ({bands.length})
+            </button>
+            <InfoTip id="sessionBand" />
+          </span>
+        )}
         {(fills || []).length > 0 && (
           <button type="button" onClick={() => toggle('fills')} style={chip(layers.fills)}
                   aria-pressed={layers.fills}>
@@ -2039,7 +2125,8 @@ export default function PriceChart({
                    .map((id) => labelFor(overlayById(id), activeParams[id])).join(', ')}`
                    : '')
                  + (fills?.length ? `, with ${fills.length} of your own fills marked` : '')
-                 + (cone?.ok ? ', with a volatility projection drawn forward' : '')} />
+                 + (cone?.ok ? ', with a volatility projection drawn forward' : '')
+                 + (layers.sessions && bandNote ? `, ${bandNote}` : '')} />
 
           {/* THE LEGEND SITS ON THE CHART, not under it. The previous readout was below the canvas,
               so reading a candle's values meant moving your eyes 400px away from the candle and
