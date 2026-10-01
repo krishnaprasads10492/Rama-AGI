@@ -179,6 +179,18 @@ export const TERMS = {
       + 'Below roughly a pixel per bar the body carries nothing, so switch to a line for long views.',
     seeAlso: ['lineChart', 'ohlcBars'],
   },
+  chartNote: {
+    term: 'Note on the chart', group: 'chart',
+    short: 'A sentence pinned at a point on the chart — why you did something.',
+    long: 'Anchored to a time and a price, so it travels with the bar it is about through every zoom, '
+      + 'pan and interval change instead of sitting at a fixed place on the screen. Notes are kept per '
+      + 'instrument, and they are yours: Rāma never writes one, rewrites one or summarises what you '
+      + 'wrote. Press Enter to keep your words, Escape to leave them as they were, and Delete to remove '
+      + 'the mark — clearing the field is refused rather than treated as a deletion. An empty note is '
+      + 'never stored, because a blank marker is something you would have to click to discover means '
+      + 'nothing.',
+    seeAlso: ['candles', 'instrument'],
+  },
   ohlcBars: {
     term: 'Bars (OHLC)', group: 'chart',
     short: 'A vertical line per bar with ticks left for open and right for close.',

@@ -324,6 +324,18 @@ export default function PriceChart({
   const [hoverEdit, setHoverEdit] = useState(null);  // 'move' | 'resize' | null, for the cursor
   const hoverRef = useRef(null);
   const drawingsRef = useRef([]);
+
+  /**
+   * THE INLINE NOTE EDITOR, which is what finally removes the last browser prompt from the chart.
+   *
+   * `{ id, point, x, y, text }` — `id` null means a draft that does not exist yet. A prompt blocked the
+   * whole renderer, could not be styled, could not be re-opened to EDIT a note, and on a packaged
+   * Electron window is a system dialog over the chart master is reading. `noteRef` mirrors it so the
+   * pointer effect can see an open editor without listing it as a dependency and re-registering its
+   * listeners on every keystroke.
+   */
+  const [note, setNote] = useState(null);
+  const noteRef = useRef(null);
   const [fitted, setFitted] = useState(0);           // container height when `fillHeight`
 
   const [readout, setReadout] = useState(null);
@@ -435,11 +447,36 @@ export default function PriceChart({
     layerRef.current?.redraw();
   }, [drawings, draft, selectedId, isIntraday, measured, editing]);
 
+  useEffect(() => { noteRef.current = note; }, [note]);
+
   const commit = useCallback((d) => {
     if (!d) return;
     if (DRAW.TOOLS[d.tool]?.transient) return;       // a measure is read, never kept
     setDrawings((list) => DRAW.add(list, d));
   }, []);
+
+  /**
+   * Close the note editor — committing master's words, or abandoning the draft.
+   *
+   * `keep` false is Escape: a NEW note leaves nothing behind, and an EXISTING one keeps the text it
+   * already had. `keep` true is Enter or clicking away: an empty draft is still never created (the rule
+   * the prompt branch had, preserved exactly), and an emptied EXISTING note is refused by `DRAW.setText`
+   * rather than deleted, because deletion is the Delete key.
+   */
+  const settleNote = useCallback((keep) => {
+    const n = noteRef.current;
+    if (!n) return;
+    noteRef.current = null;
+    setNote(null);
+    const text = (n.text || '').trim();
+    if (keep) {
+      if (n.id) setDrawings((list) => DRAW.setText(list, n.id, text));
+      else if (text) commit(DRAW.makeDrawing('text', [n.point], { text }));
+    }
+    // The tool disarms either way, exactly as the one-point commit path already did — a note is placed
+    // one at a time, and an armed tool master has forgotten about is a click that surprises him.
+    if (!n.id) setTool(null);
+  }, [commit]);
   const available = useMemo(() => overlaysFor(isIntraday), [isIntraday]);
 
   // An overlay that is only meaningful intraday must not stay silently active on a daily chart. It
@@ -1169,11 +1206,28 @@ export default function PriceChart({
       const x = e.clientX - r.left;
       const y = e.clientY - r.top;
 
+      // An open editor settles first: clicking the chart commits non-empty words rather than discarding
+      // what master has already typed.
+      if (noteRef.current) { settleNote(true); return; }
+
       if (!tool) {
         const placedList = drawStateRef.current.drawings || [];
         // The selection comes from the ref the layer already reads, not from the closure: a drag must
         // not depend on the effect having been re-registered since master last clicked something.
         const selected = placedList.find((d) => d?.id === drawStateRef.current.selectedId) || null;
+
+        // Double-click a note to edit it in place. Read off `detail` rather than a second listener, so
+        // the pointer surface stays the three handlers it has always been.
+        if (e.detail >= 2) {
+          const onNote = DRAW.hitTest(placedList, { x, y }, project, { tol: 6, width: r.width });
+          if (onNote?.tool === 'text') {
+            const at = project(onNote.points[0]);
+            setSelectedId(onNote.id);
+            setNote({ id: onNote.id, point: onNote.points[0],
+              x: at ? at.x : x, y: at ? at.y : y, text: onNote.text || '' });
+            return;
+          }
+        }
 
         const handle = DRAW.handleAt(selected, { x, y }, project);
         if (selected && handle !== null) {
@@ -1207,13 +1261,13 @@ export default function PriceChart({
       if (!at) return;                                // off the data: nothing to anchor to
       const def = DRAW.TOOLS[tool];
       if (def.points === 1) {
-        const text = tool === 'text'
-          // The only prompt in the chart, and it is unavoidable: a note with no text is not a note. An
-          // inline editor is the better answer and is recorded as the next step.
-          ? (window.prompt('Note:') || '').trim()
-          : null;
-        if (tool === 'text' && !text) { setTool(null); return; }
-        commit(DRAW.makeDrawing(tool, [at], { text }));
+        if (tool === 'text') {
+          // THE LAST BROWSER PROMPT IS GONE. A draft opens an inline input at the clicked anchor; the
+          // note itself is created only once there are words, which is the rule the prompt branch had.
+          setNote({ id: null, point: at, x, y, text: '' });
+          return;
+        }
+        commit(DRAW.makeDrawing(tool, [at]));
         setTool(null);
         return;
       }
@@ -1310,10 +1364,10 @@ export default function PriceChart({
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
     };
-    // UNCHANGED BY THE DRAG WIRING: the selection and the stored list are read through refs precisely so
-    // this array does not grow with them and the listeners are not re-registered on every click.
+    // `settleNote` is the only addition, and it is a stable callback — the selection, the stored list and
+    // the open editor are all read through refs precisely so this array does not grow with them.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tool, commit, chartType, candles.length]);
+  }, [tool, commit, settleNote, chartType, candles.length]);
 
   // `fillHeight`: measure the shell and let the chart take what is left below the toolbars.
   useEffect(() => {
@@ -1533,7 +1587,7 @@ export default function PriceChart({
             ✎ draw{tool ? `: ${DRAW.TOOLS[tool].label}` : ''}
             {drawings.length > 0 ? ` (${drawings.length})` : ''} ▾
           </button>
-
+          <InfoTip id="chartNote" />
           {drawOpen && (
             <div style={{
               position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: '4px',
@@ -1596,8 +1650,8 @@ export default function PriceChart({
                 Your marks, not Rāma&rsquo;s — stored per symbol and anchored to time and price, so they
                 stay put through a zoom, a window change or a different interval.
                 <br />
-                Drag a selected mark to move it, or drag one of its handles to reshape it. A locked mark
-                does neither.
+                Drag a selected mark to move it, drag one of its handles to reshape it, double-click a
+                note to rewrite it. A locked mark does none of the three.
               </div>
             </div>
           )}
@@ -2055,6 +2109,41 @@ export default function PriceChart({
               </span>
             )}
           </div>
+
+          {/* ── THE NOTE EDITOR, WHERE A BLOCKING PROMPT USED TO BE (Section 123) ────────────────
+              A plain focused input at the anchor's own pixel position, not a modal and not a system
+              dialog: it is beside the bar it is about, it can be re-opened to EDIT a note that already
+              exists, and it cannot block the renderer. Its own keydown stops propagating, so typing
+              "f" is a letter rather than fullscreen and Escape abandons the note rather than also
+              leaving fullscreen. */}
+          {note && (
+            <div style={{
+              position: 'absolute', zIndex: 30,
+              left: Math.max(2, Math.min(note.x + 8,
+                Math.max(2, (holder.current?.clientWidth || 0) - 248))),
+              top: Math.max(2, note.y - 12),
+              display: 'flex', alignItems: 'center', gap: '4px',
+            }}>
+              <input className="input" type="text" autoFocus
+                     value={note.text}
+                     maxLength={DRAW.MAX_NOTE_CHARS}
+                     aria-label={note.id ? 'Edit this note' : 'Note text'}
+                     placeholder="why you did something"
+                     onChange={(ev) => setNote((n) => (n ? { ...n, text: ev.target.value } : n))}
+                     onKeyDown={(ev) => {
+                       ev.stopPropagation();
+                       if (ev.key === 'Enter') { ev.preventDefault(); settleNote(true); }
+                       else if (ev.key === 'Escape') { ev.preventDefault(); settleNote(false); }
+                     }}
+                     onBlur={() => settleNote(true)}
+                     style={{ width: '228px', fontSize: '12.5px', padding: '3px 6px',
+                       borderColor: 'var(--magenta)' }} />
+              <span style={{ fontSize: '12px', color: 'var(--muted)', whiteSpace: 'nowrap',
+                textShadow: '0 1px 3px rgba(0,0,0,0.75)' }}>
+                ⏎ keep · esc {note.id ? 'leave as it was' : 'drop'}
+              </span>
+            </div>
+          )}
         </>
       </div>
 

@@ -63,6 +63,15 @@ export const FIB_LEVELS = Object.freeze([0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 
 export const MAX_PER_SYMBOL = 200;
 
 /**
+ * How long a note may be, as ONE number the model and the editor both read.
+ *
+ * It was a literal inside `makeDrawing` while the editor was `window.prompt`, which had no length of
+ * its own. An inline input has a `maxLength`, and two numbers that must agree is one number that will
+ * eventually disagree.
+ */
+export const MAX_NOTE_CHARS = 280;
+
+/**
  * Pixel tolerance for grabbing an ANCHOR rather than the body of a drawing.
  *
  * Deliberately wider than `hitTest`'s 6, and that is the whole behaviour: when the pointer is near an
@@ -113,6 +122,19 @@ function nextId() {
 }
 
 /**
+ * A note's words, normalised to ONE meaning of "no words".
+ *
+ * Trimmed, capped, and an empty or whitespace-only text becomes `null` rather than `''` — otherwise a
+ * note with nothing in it has two representations, and the next reader has to know both. Same rule as
+ * the rest of this module: absent is null, never a value that reads like one.
+ */
+function noteText(v) {
+  if (typeof v !== 'string') return null;
+  const s = v.trim().slice(0, MAX_NOTE_CHARS);
+  return s.length > 0 ? s : null;
+}
+
+/**
  * Build a drawing from points in chart coordinates.
  *
  * @param {string} tool
@@ -134,7 +156,7 @@ export function makeDrawing(tool, points, extra = {}) {
     id: nextId(),
     tool,
     points: pts.slice(0, def.points),
-    text: typeof extra.text === 'string' ? extra.text.slice(0, 280) : null,
+    text: noteText(extra.text),
     color: typeof extra.color === 'string' ? extra.color : null,
     width: finite(extra.width) ? Math.max(1, Math.min(6, Math.round(extra.width))) : 2,
     locked: false,
@@ -440,6 +462,28 @@ export function add(drawings, drawing) {
 
 export function remove(drawings, id) {
   return (Array.isArray(drawings) ? drawings : []).filter((d) => d?.id !== id);
+}
+
+/**
+ * Edit a note's words in place.
+ *
+ * AN EMPTY TEXT IS A REFUSAL, NOT A DELETION. Clearing the field and pressing Enter leaves the note
+ * exactly as it was; deletion is the Delete key, which says what it does. Silently reading an edit as a
+ * delete would lose master's own words to a keystroke he did not mean, and his words are the one thing
+ * on this chart Rāma cannot reconstruct.
+ *
+ * A locked note is refused and an unknown id is a no-op, in both cases returning the SAME list so a
+ * caller storing the result cannot accidentally rewrite the store.
+ */
+export function setText(drawings, id, text) {
+  const list = Array.isArray(drawings) ? drawings : [];
+  const i = list.findIndex((d) => d?.id === id && id !== undefined && id !== null);
+  if (i < 0 || list[i].locked) return list;
+  const words = noteText(text);
+  if (words === null) return list;
+  const next = list.slice();
+  next[i] = { ...list[i], text: words };
+  return next;
 }
 
 export function toggleLock(drawings, id) {

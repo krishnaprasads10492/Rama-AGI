@@ -446,6 +446,65 @@ check('with the moved anchors, which the read-time validation accepts',
 check('and its identity intact',
   backMoved[0].id === movedFib.id && backMoved[0].createdAt === movedFib.createdAt);
 
+// ── Notes: master's words, edited in place ────────────────────────────────────
+console.log('\n  notes are master\'s own words — edited in place, never rewritten');
+const noteList = [D.makeDrawing('text', [{ time: '2026-09-18', price: 100 }],
+  { text: 'first try' })];
+const nid = noteList[0].id;
+check('setText replaces the words', D.setText(noteList, nid, 'second try')[0].text === 'second try');
+check('it trims', D.setText(noteList, nid, '   spaced   ')[0].text === 'spaced');
+check(`it caps at the module's own MAX_NOTE_CHARS (${D.MAX_NOTE_CHARS}), not at a literal in this test`,
+  D.setText(noteList, nid, 'y'.repeat(D.MAX_NOTE_CHARS + 120))[0].text.length === D.MAX_NOTE_CHARS);
+check('AN EMPTY TEXT ON AN EXISTING NOTE IS A REFUSAL, NOT A DELETION',
+  D.setText(noteList, nid, '')[0].text === 'first try');
+check('whitespace only is the same refusal',
+  D.setText(noteList, nid, '   \n  ')[0].text === 'first try');
+check('and the refusal returns the SAME list, so storing the result cannot lose the note',
+  D.setText(noteList, nid, '') === noteList);
+check('a non-string is refused too', D.setText(noteList, nid, null) === noteList
+  && D.setText(noteList, nid, 42) === noteList);
+check('an unknown id is a no-op', D.setText(noteList, 'nope', 'x') === noteList);
+check('an undefined id does not match a drawing with no id',
+  D.setText([{ id: undefined, tool: 'text', points: [] }], undefined, 'x').length === 1
+  && D.setText([{ id: undefined, tool: 'text', points: [] }], undefined, 'x')[0].text === undefined);
+check('a null list is handled', D.setText(null, nid, 'x').length === 0);
+check('a LOCKED note is refused — editing is not a way around a lock',
+  D.setText(D.toggleLock(noteList, nid), nid, 'x')[0].text === 'first try');
+check('the original list is never mutated', noteList[0].text === 'first try');
+check('an edited note keeps its id and createdAt', (() => {
+  const e = D.setText(noteList, nid, 'again')[0];
+  return e.id === nid && e.createdAt === noteList[0].createdAt && e.tool === 'text';
+})());
+
+console.log('\n  one meaning of "no words", so the editor and the model cannot disagree');
+const atOne = [{ time: '2026-09-18', price: 1 }];
+check('an empty text at construction is null, never an empty string',
+  D.makeDrawing('text', atOne, { text: '' }).text === null);
+check('whitespace at construction likewise', D.makeDrawing('text', atOne, { text: '  \n ' }).text === null);
+check('words are trimmed at construction too',
+  D.makeDrawing('text', atOne, { text: '  why  ' }).text === 'why');
+check('a non-string is null rather than coerced', D.makeDrawing('text', atOne, { text: 7 }).text === null);
+check('and the cap is the same constant',
+  D.makeDrawing('text', atOne, { text: 'z'.repeat(400) }).text.length === D.MAX_NOTE_CHARS);
+check('AN EMPTY NOTE IS STILL NEVER A SENTENCE — the component refuses to create one at all',
+  D.makeDrawing('text', atOne, { text: '' }).text === null);
+
+console.log('\n  words survive the store');
+const fullNote = 'q'.repeat(D.MAX_NOTE_CHARS);
+const awkward = 'he said "sell" — I did not,\nso this is here';
+D.save('NOTED', [
+  D.makeDrawing('text', atOne, { text: fullNote }),
+  D.makeDrawing('text', atOne, { text: awkward }),
+]);
+const backNotes = D.load('NOTED');
+check('both notes come back', backNotes.length === 2);
+check('a full-length note survives save then load', backNotes[0].text === fullNote);
+check('and one with quotes, an em dash and a newline', backNotes[1].text === awkward);
+check('an edit survives save then load', (() => {
+  D.save('NOTED', D.setText(backNotes, backNotes[1].id, 'rewritten by master, not by Rāma'));
+  return D.load('NOTED')[1].text === 'rewritten by master, not by Rāma';
+})());
+
 console.log('\n  the cap is bounded, and drops the OLDEST');
 let many = [];
 for (let i = 0; i < D.MAX_PER_SYMBOL + 30; i += 1) {
@@ -529,6 +588,18 @@ check('and fillHeight falls back to the height prop until the container is measu
 // The inline editor and the drag wiring, asserted the same way and for the same reason: the behaviour
 // needs a screen, but the removal of a prompt and the shape of the wiring do not.
 console.log('\n  the editing wiring');
+check('THE CHART CONTAINS NO window.prompt — the removal is permanent, not a preference',
+  !/window\.prompt/.test(chart));
+check('a note is edited through the tested mutator rather than in the component',
+  /DRAW\.setText\(/.test(chart));
+check('an existing note is reopened by double-click, read off the event rather than a new listener',
+  /e\.detail >= 2/.test(chart) && !/addEventListener\('dblclick'/.test(chart));
+check('the editor\'s own keydown stops propagating, so typing is not read as chart shortcuts',
+  /ev\.stopPropagation\(\)/.test(chart));
+check('and its Escape abandons the note rather than also leaving fullscreen',
+  /ev\.key === 'Escape'/.test(chart) && /settleNote\(false\)/.test(chart));
+check('the input is capped by the model\'s own constant, not a second literal',
+  /maxLength=\{DRAW\.MAX_NOTE_CHARS\}/.test(chart));
 check('a handle starts a RESHAPE and a body starts a MOVE',
   /DRAW\.handleAt\(/.test(chart) && /mode: 'reshape'/.test(chart) && /mode: 'move'/.test(chart));
 check('both run through the tested mutators',
