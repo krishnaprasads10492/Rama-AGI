@@ -78,7 +78,9 @@
 </style>
 </head>
 <body class="status-live">
-  <div id="stage" title="Rāma AGI">
+  <!-- The title is replaced by the label main sends on load (see the onStatus handler); this one
+       claims nothing about what is running, because at this point the page does not know. -->
+  <div id="stage" role="button" tabindex="0" title="Rāma AGI" aria-label="Rāma AGI">
     <div id="orb">
       <div id="ring"></div>
       <div id="core"></div>
@@ -112,9 +114,24 @@
       }
     });
 
-    window.badgeAPI?.onStatus(({ status }) => {
+    // The stage is reachable by keyboard, so it has to ACT on a keyboard. A focusable control that
+    // only answers the mouse is worse than an unfocusable one.
+    stage.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      window.badgeAPI?.notifyClick();
+    });
+
+    // The colour comes from the status; the TOOLTIP comes from the label, which names the timers
+    // that are still running. The tooltip is the only text master can read when the window is gone,
+    // and it used to be a fixed string while the ring quietly claimed "paused".
+    window.badgeAPI?.onStatus(({ status, label }) => {
       document.body.classList.remove('status-live', 'status-paused', 'status-closed');
       document.body.classList.add(`status-${status}`);
+      if (typeof label === 'string' && label) {
+        stage.title = label;
+        stage.setAttribute('aria-label', label);
+      }
     });
   </script>
 </body>

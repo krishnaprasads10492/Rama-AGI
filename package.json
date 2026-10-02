@@ -49,6 +49,7 @@
     "verify:glossary": "node scripts/verifyGlossary.mjs",
     "verify:popout": "node scripts/verifyPopoutGrant.cjs",
     "verify:claim-gate": "node scripts/verifyClaimGate.cjs",
+    "verify:badge-label": "node scripts/verifyBadgeLabel.cjs",
     "verify:chart-time": "node scripts/verifyChartTime.mjs",
     "verify:drawings": "node scripts/verifyChartDrawings.mjs",
     "verify:sessions": "node scripts/verifyChartSessions.mjs",
@@ -59,7 +60,7 @@
     "verify:conversation": "node scripts/verifyConversation.cjs",
     "verify:covenant": "node scripts/verifyInvariants.cjs && node scripts/verifyLoyaltyTripwire.cjs",
     "verify:tripwire": "node scripts/verifyLoyaltyTripwire.cjs",
-    "verify": "node scripts/verifyAudit.cjs && node scripts/verifyUpdateEngine.cjs && node scripts/verifySelfBuild.cjs && node scripts/verifyUpdateChannel.cjs && node scripts/simulateUpdateChannel.cjs && node scripts/verifyWorkspace.cjs && node scripts/verifySelfModel.cjs && node scripts/verifyOllamaCatalog.cjs && node scripts/verifyOllamaLibrary.cjs && node scripts/verifyOllamaCloud.cjs && node scripts/verifyWebResearch.cjs && node scripts/verifyRefresh.cjs && node scripts/verifyEngineDiagnosis.cjs && node scripts/verifyTimeframes.mjs && node scripts/verifyIndicators.mjs && node scripts/verifySymbols.mjs && node scripts/verifyPositionMath.mjs && node scripts/verifyGlossary.mjs && node scripts/verifyPopoutGrant.cjs && node scripts/verifyClaimGate.cjs && node scripts/verifyModelRoles.cjs && node scripts/verifyConversation.cjs && node scripts/verifyChartTime.mjs && node scripts/verifyChartDrawings.mjs && node scripts/verifyChartSessions.mjs && node scripts/verifyChartEmptyState.mjs && node scripts/verifyChartProjection.mjs && node scripts/verifyMarketClock.mjs && node scripts/auditRenderer.cjs && node scripts/verifyInvariants.cjs && node scripts/verifyLoyaltyTripwire.cjs",
+    "verify": "node scripts/verifyAudit.cjs && node scripts/verifyUpdateEngine.cjs && node scripts/verifySelfBuild.cjs && node scripts/verifyUpdateChannel.cjs && node scripts/simulateUpdateChannel.cjs && node scripts/verifyWorkspace.cjs && node scripts/verifySelfModel.cjs && node scripts/verifyOllamaCatalog.cjs && node scripts/verifyOllamaLibrary.cjs && node scripts/verifyOllamaCloud.cjs && node scripts/verifyWebResearch.cjs && node scripts/verifyRefresh.cjs && node scripts/verifyEngineDiagnosis.cjs && node scripts/verifyTimeframes.mjs && node scripts/verifyIndicators.mjs && node scripts/verifySymbols.mjs && node scripts/verifyPositionMath.mjs && node scripts/verifyGlossary.mjs && node scripts/verifyPopoutGrant.cjs && node scripts/verifyClaimGate.cjs && node scripts/verifyModelRoles.cjs && node scripts/verifyConversation.cjs && node scripts/verifyChartTime.mjs && node scripts/verifyChartDrawings.mjs && node scripts/verifyChartSessions.mjs && node scripts/verifyChartEmptyState.mjs && node scripts/verifyChartProjection.mjs && node scripts/verifyMarketClock.mjs && node scripts/verifyBadgeLabel.cjs && node scripts/auditRenderer.cjs && node scripts/verifyInvariants.cjs && node scripts/verifyLoyaltyTripwire.cjs",
     "rebuild": "electron-rebuild",
     "start": "electron .",
     "preview": "vite preview"

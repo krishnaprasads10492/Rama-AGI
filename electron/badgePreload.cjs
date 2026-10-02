@@ -14,7 +14,11 @@ contextBridge.exposeInMainWorld('badgeAPI', {
   /** Renderer reports a plain click (not a drag) — main decides what that means. */
   notifyClick: () => ipcRenderer.send('badge:clicked'),
 
-  /** Main pushes status changes — 'live' | 'paused' | 'closed'. */
+  /**
+   * Main pushes status changes — `{ status: 'live'|'paused'|'closed', label }`.
+   * The status selects the colour; the label (from lib/badgeLabel.cjs) names the timers still
+   * running, so the badge cannot say "paused" over live background work.
+   */
   onStatus: (cb) => {
     const handler = (_e, data) => cb(data);
     ipcRenderer.on('badge:status', handler);

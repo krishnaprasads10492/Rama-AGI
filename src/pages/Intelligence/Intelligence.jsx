@@ -17,27 +17,38 @@ const DEPTH_OPTIONS = [
   { id: 'deep',     label: 'Deep',     desc: '15+ sources, 2m' },
 ];
 
-function GradeRing({ grade, confidence }) {
-  const color =
-    grade === 'A' ? 'var(--green)'  :
-    grade === 'B' ? 'var(--accent)' :
-    grade === 'C' ? 'var(--amber)'  :
-    grade === 'D' ? 'var(--red)'    : 'var(--muted)';
+/**
+ * What replaced the grade ring (Section 131).
+ *
+ * The ring drew `overallConfidence` as an arc and a letter — 78.4% and a B — from a number the main
+ * process computed out of DOMAIN REPUTATION alone. Nothing behind it measured whether a finding
+ * answered the question, so the most calibrated-looking element on the page was the least calibrated
+ * thing in the app.
+ *
+ * A class is deliberately NOT drawn as a fraction of anything: no arc, no fill, no percentage, so
+ * there is no quantity to misread. The four classes come from electron/lib/claimGate.cjs and mean
+ * exactly what that module enforces.
+ */
+const CLAIM_CLASSES = {
+  grounded:     { color: 'var(--green)',  mark: '◆', label: 'GROUNDED',
+    meaning: 'every finding below is carried by the source named beside it' },
+  reflex:       { color: 'var(--accent)', mark: '◈', label: 'REFLEX',
+    meaning: 'computed by Rāma itself — the record is the evidence' },
+  prose:        { color: 'var(--muted)',  mark: '○', label: 'NOT EVIDENCE',
+    meaning: 'nothing here asserts a checkable external fact' },
+  unattributed: { color: 'var(--red)',    mark: '⊘', label: 'UNATTRIBUTED',
+    meaning: 'at least one statement could not be traced to a supplied source' },
+};
+
+function ClaimClassMark({ claimClass }) {
+  const c = CLAIM_CLASSES[claimClass] || CLAIM_CLASSES.unattributed;
   return (
-    <div style={{ position: 'relative', width: 80, height: 80, flexShrink: 0 }}>
-      <svg width="80" height="80" style={{ position: 'absolute', top: 0, left: 0 }}>
-        <circle cx="40" cy="40" r="34" fill="none" stroke="var(--border)" strokeWidth="5" />
-        <circle cx="40" cy="40" r="34" fill="none" stroke={color}
-          strokeWidth="5" strokeLinecap="round"
-          strokeDasharray={`${(confidence / 100) * 213.6} 213.6`}
-          transform="rotate(-90 40 40)"
-          style={{ filter: `drop-shadow(0 0 4px ${color})`, transition: 'stroke-dasharray 1s ease' }} />
-      </svg>
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
-        justifyContent: 'center', flexDirection: 'column', gap: 0 }}>
-        <span style={{ fontSize: 22, fontWeight: 700, color, lineHeight: 1 }}>{grade}</span>
-        <span style={{ fontSize: 10, color: 'var(--muted)' }}>{confidence}%</span>
-      </div>
+    <div style={{ width: 96, flexShrink: 0, display: 'flex', flexDirection: 'column',
+      alignItems: 'center', gap: 4, padding: '10px 6px', background: 'var(--surface)',
+      border: `1px solid ${c.color}`, borderRadius: 'var(--radius)' }}>
+      <span style={{ fontSize: 20, color: c.color, lineHeight: 1 }} aria-hidden="true">{c.mark}</span>
+      <span style={{ fontSize: 10, fontWeight: 700, color: c.color, letterSpacing: '0.06em',
+        textAlign: 'center' }}>{c.label}</span>
     </div>
   );
 }
@@ -126,18 +137,22 @@ export default function Intelligence() {
       // Dev mode mock
       setTimeout(() => {
         setResult({
-          query: query.trim(), category, overallConfidence: 72.5, grade: 'B',
-          complementLabel: '72.5% confidence means ~27.5% chance of being wrong',
+          query: query.trim(), category,
+          claimClass: 'grounded',
+          claimNotice: null,
+          withheld: [],
           sourceCount: 6,
           sourceSummary: [
             { domain: 'reuters.com',   credibility: 95, bias: 'center',  type: 'financial-news' },
             { domain: 'bloomberg.com', credibility: 93, bias: 'center',  type: 'financial-news' },
             { domain: 'apnews.com',    credibility: 96, bias: 'center',  type: 'general-news'   },
           ],
-          keyFindings: [{ source: 'reuters.com', credibility: 0.95, finding: 'Multiple sources confirm the trend.', bias: 'center' }],
+          keyFindings: [{ source: 'reuters.com', credibility: 0.95, class: 'grounded',
+            finding: 'Multiple sources confirm the trend.', bias: 'center' }],
           agreements: [{ phrase: 'consistent growth', sources: ['reuters.com', 'bloomberg.com'], count: 2 }],
           contradictions: [],
-          recommendation: 'Moderate confidence. Multiple sources agree but some uncertainty remains.',
+          contradictionNote: 'No contradiction was detected between these sources, which is not the same as them agreeing.',
+          recommendation: 'Every finding below is carried by the source named beside it.',
           disclaimer: 'This analysis is generated from publicly available sources. Informational only.',
           suppressed: false,
         });
@@ -172,7 +187,7 @@ export default function Intelligence() {
             UNIVERSAL INTELLIGENCE ENGINE
           </div>
           <div style={{ fontSize: 10, color: 'var(--muted)' }}>
-            Multi-source truth extraction · Human-emulated gathering · Calibrated confidence
+            Multi-source gathering · Human-emulated fetch · Every finding attributed or withheld
           </div>
         </div>
         <div style={{ flex: 1 }} />
@@ -279,18 +294,20 @@ export default function Intelligence() {
         {/* ── Result tab ── */}
         {tab === 'result' && result && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 760 }}>
-            {/* Suppressed warning */}
+            {/* Nothing attributable — the condition worth warning about, where the warning used to
+                be "confidence too low", a threshold on a number that no longer exists. */}
             {result.suppressed && (
               <div style={{ padding: 12, background: 'rgba(255,0,60,0.08)', border: '1px solid rgba(255,0,60,0.3)',
                 borderRadius: 'var(--radius)', color: 'var(--red)', fontSize: 12 }}>
-                ⚠ Confidence too low to display reliably. Treat as speculative only.
+                ⚠ At least one statement here could not be traced to a source that was actually
+                supplied. Treat none of it as evidence.
               </div>
             )}
 
             {/* Main result card */}
             <div className="hud-card" style={{ padding: 20 }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, marginBottom: 16 }}>
-                <GradeRing grade={result.grade} confidence={result.overallConfidence} />
+                <ClaimClassMark claimClass={result.claimClass} />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 6, lineHeight: 1.4 }}>
                     {result.query}
@@ -298,11 +315,34 @@ export default function Intelligence() {
                   <div style={{ fontSize: 11, color: 'var(--accent)', marginBottom: 4 }}>
                     {result.recommendation}
                   </div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>
-                    {result.complementLabel}
+                  <div style={{ fontSize: 10, color: 'var(--muted)', lineHeight: 1.6 }}>
+                    {(CLAIM_CLASSES[result.claimClass] || CLAIM_CLASSES.unattributed).meaning}
                   </div>
+                  {result.claimNotice && (
+                    <div style={{ fontSize: 10, color: 'var(--amber)', marginTop: 4, lineHeight: 1.6 }}>
+                      {result.claimNotice}
+                    </div>
+                  )}
                 </div>
               </div>
+
+              {/* What was refused, by reason. Counted and named rather than left out of the page. */}
+              {result.withheld?.length > 0 && (
+                <>
+                  <div className="section-label" style={{ marginBottom: 8, color: 'var(--amber)' }}>
+                    WITHHELD — {result.withheld.length}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16 }}>
+                    {result.withheld.map((w, i) => (
+                      <div key={i} style={{ padding: '7px 10px', background: 'var(--surface)',
+                        border: '1px solid rgba(212,169,64,0.35)', borderRadius: 'var(--radius)', fontSize: 11 }}>
+                        <span style={{ color: 'var(--amber)', fontWeight: 600 }}>{w.reason}</span>
+                        {w.detail && <span style={{ color: 'var(--text-dim)' }}> · {w.detail}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
 
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
                 <div style={{ textAlign: 'center', padding: '6px 14px', background: 'var(--surface)',
@@ -325,6 +365,14 @@ export default function Intelligence() {
                 </div>
               </div>
 
+              {/* A zero in the box above reads as "they agree". It means "the sentiment heuristic
+                  found no divergence", which is a weaker and different claim — so it is said. */}
+              {result.contradictionNote && (
+                <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 16, lineHeight: 1.6 }}>
+                  {result.contradictionNote}
+                </div>
+              )}
+
               {/* Sources */}
               <div className="section-label" style={{ marginBottom: 8 }}>SOURCES VETTED</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16 }}>
@@ -339,9 +387,17 @@ export default function Intelligence() {
                     {result.keyFindings.map((f, i) => (
                       <div key={i} style={{ padding: '10px 12px', background: 'var(--surface)',
                         border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 12 }}>
-                        <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+                        <div style={{ display: 'flex', gap: 8, marginBottom: 4, alignItems: 'baseline' }}>
                           <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{f.source}</span>
-                          <span style={{ color: 'var(--muted)', fontSize: 10 }}>{Math.round(f.credibility * 100)}% credibility</span>
+                          {/* The class on the finding itself: the batch verdict says nothing about
+                              which line was refused. */}
+                          <span style={{ fontSize: 10, fontWeight: 700,
+                            color: (CLAIM_CLASSES[f.class] || CLAIM_CLASSES.unattributed).color }}>
+                            {(CLAIM_CLASSES[f.class] || CLAIM_CLASSES.unattributed).label}
+                          </span>
+                          <span style={{ color: 'var(--muted)', fontSize: 10, marginLeft: 'auto' }}>
+                            {Math.round(f.credibility * 100)}% domain reputation
+                          </span>
                         </div>
                         <div style={{ color: 'var(--text-dim)', lineHeight: 1.6 }}>{f.finding}</div>
                       </div>
@@ -385,17 +441,22 @@ export default function Intelligence() {
               <div key={i} style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)',
                 display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}
                 onClick={() => { /* load session */ }}>
-                <div style={{ width: 36, height: 36, borderRadius: '50%', border: '2px solid var(--accent)',
+                <div style={{ width: 36, height: 36, borderRadius: '50%',
+                  border: `2px solid ${(CLAIM_CLASSES[s.claimClass] || CLAIM_CLASSES.prose).color}`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13,
-                  fontWeight: 700, color: 'var(--accent)', flexShrink: 0 }}>
-                  {s.grade || '?'}
+                  fontWeight: 700, color: (CLAIM_CLASSES[s.claimClass] || CLAIM_CLASSES.prose).color,
+                  flexShrink: 0 }} aria-hidden="true">
+                  {s.claimClass ? (CLAIM_CLASSES[s.claimClass] || CLAIM_CLASSES.unattributed).mark : '·'}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {s.query}
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
-                    {s.category} · {new Date(s.startedAt).toLocaleString()} · {s.confidence ?? '?'}% confidence
+                    {s.category} · {new Date(s.startedAt).toLocaleString()} ·{' '}
+                    {s.claimClass
+                      ? (CLAIM_CLASSES[s.claimClass] || CLAIM_CLASSES.unattributed).label
+                      : 'not finished'}
                   </div>
                 </div>
                 <span className={`badge ${s.status === 'complete' ? 'badge-green' : s.status === 'error' ? 'badge-red' : 'badge-amber'}`}

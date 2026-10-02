@@ -10,8 +10,21 @@
  *   2. Human-emulated multi-source gathering (browser + API fallback)
  *   3. Source vetting — credibility scoring, bias detection
  *   4. Cross-reference — find agreements AND contradictions across sources
- *   5. Truth extraction — weighted consensus with confidence scoring
- *   6. Calibrated output — probability, confidence, source map, contradictions
+ *   5. Attribution — every finding classified by electron/lib/claimGate.cjs
+ *   6. Output — a claim CLASS, the source map, and the contradictions said out loud
+ *
+ * THE NUMBER THIS FILE USED TO EMIT, AND WHY IT IS GONE (Sections 110/111). `buildOutput` shipped
+ * `overallConfidence: 78.4`, a letter `grade`, and "78.4% means ~21.6% chance of being wrong". All
+ * three came out of `extractTruth`, which averaged DOMAIN REPUTATION and added a bonus per keyword
+ * bigram shared by two documents. **Nothing in it measured whether a finding answered the question**,
+ * so five reputable domains about something else still graded A: a calibrated-looking number with no
+ * calibration behind it, which is the "emitted as if grounded" failure with extra decimals.
+ *
+ * It is replaced by claimGate's OWN classes — grounded / reflex / prose / unattributed — the
+ * per-source map that was always here, and contradictions stated plainly instead of folded into a
+ * penalty term on a score. A CLASS IS NOT A SCORE: there is no ordering to read off it and no
+ * percentage to quote, and `verifyClaimGate.cjs` asserts this file computes no score shape at all,
+ * so the number cannot be reintroduced quietly.
  *
  * Human emulation to bypass AI gates:
  *   - Randomized realistic user agents (Chrome/Firefox/Safari on Win/Mac/Linux)
@@ -23,8 +36,12 @@
  *   - Scroll/mouse simulation via Playwright
  */
 
-const crypto = require('crypto');
-const net    = require('../lib/http.cjs');
+const crypto    = require('crypto');
+const net       = require('../lib/http.cjs');
+const claimGate = require('../lib/claimGate.cjs');
+
+/** How much of a source is quoted back as a finding. Cut at a word boundary — see `excerpt`. */
+const FINDING_CHARS = 200;
 
 // ─── Human emulation profiles ─────────────────────────────────────────────────
 const HUMAN_PROFILES = [
@@ -138,10 +155,10 @@ function register(ipcMain) {
       const crossRef = crossReference(vettedSources, query);
       emit('crossref', { agreements: crossRef.agreements.length, contradictions: crossRef.contradictions.length });
 
-      // Step 5: Truth extraction
-      emit('extract', { message: 'Extracting truth with confidence scoring...' });
+      // Step 5: Attribution — which findings a supplied source actually carries
+      emit('extract', { message: 'Checking each finding against the source it came from...' });
       const truth = extractTruth(vettedSources, crossRef, query);
-      emit('extract', { confidence: truth.confidence });
+      emit('extract', { claimClass: truth.claimClass, withheld: truth.attribution.withheld.length });
 
       // Step 6: Build calibrated output
       const result = buildOutput(query, truth, vettedSources, crossRef, category);
@@ -175,7 +192,9 @@ function register(ipcMain) {
         query:    s.query,
         status:   s.status,
         category: s.category,
-        confidence: s.result?.overallConfidence ?? null,
+        // The history row carries the same class as the result it summarises. It used to carry the
+        // percentage, which made a list of past answers read as a list of scores.
+        claimClass: s.result?.claimClass ?? null,
         startedAt: s.startedAt,
       }));
     return { ok: true, data: list };
@@ -405,59 +424,113 @@ function crossReference(sources, query) {
   return { agreements, contradictions };
 }
 
-// ─── Truth extraction ─────────────────────────────────────────────────────────
+// ─── Attribution ──────────────────────────────────────────────────────────────
+
+/**
+ * Quote a source back without inventing anything by cutting it.
+ *
+ * A blind `slice(0, 200)` can land inside a figure — "1,402.55" becomes "1,402.5", a number the
+ * source does not contain — so Rāma's own excerpt would be refused by its own gate, and the refusal
+ * would name the SOURCE rather than the truncation that caused it. Cut at the last word boundary
+ * instead; a hard cut is kept only when there is no boundary to use, which for prose does not happen.
+ */
+function excerpt(text, max) {
+  const s = String(text ?? '').trim();
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max);
+  const lastSpace = cut.lastIndexOf(' ');
+  return (lastSpace > max / 2 ? cut.slice(0, lastSpace) : cut).trim();
+}
+
+/**
+ * Classify what the sources actually carry. No score of any kind is produced here.
+ *
+ * `claimGate` is the single classifier — reused, not re-implemented, because a second opinion about
+ * what counts as grounded is how declared policy and enforced policy drift apart. Each finding is
+ * cited to the source it was quoted from (`s1`…`sn`, which is exactly how `indexEvidence` ids an
+ * unlabelled source array), so a finding whose figures are not in its OWN source is withheld.
+ *
+ * THE WHOLE ANSWER IS `unattributed` IF ANY FINDING WAS WITHHELD. That is `gate`'s own `ok`
+ * discipline rather than a new rule: reporting `grounded` while quietly dropping a sentence would
+ * re-create the thing this replaced — a flattering summary over a worse reality.
+ */
 function extractTruth(sources, crossRef, query) {
-  if (sources.length === 0) {
-    return { confidence: 0.1, summary: 'Insufficient sources', keyFindings: [] };
-  }
-
-  // Weighted confidence based on:
-  // - Source credibility scores
-  // - Number of agreeing sources
-  // - Absence of contradictions
-  const avgCredibility = sources.reduce((s, src) => s + src.credibility.score, 0) / sources.length;
-  const agreementBonus = Math.min(0.15, crossRef.agreements.length * 0.02);
-  const contradictionPenalty = Math.min(0.20, crossRef.contradictions.length * 0.05);
-  const sourceCountBonus = Math.min(0.10, sources.length * 0.01);
-
-  const confidence = Math.max(0.05, Math.min(0.95,
-    avgCredibility + agreementBonus + sourceCountBonus - contradictionPenalty
-  ));
-
-  // Extract key findings from top sources
   const keyFindings = sources
     .slice(0, 5)
-    .map(s => ({
-      source:     s.domain,
+    .map((s, i) => ({
+      source:      s.domain,
       credibility: s.credibility.score,
-      finding:    (s.content || '').slice(0, 200).trim(),
-      bias:       s.credibility.bias,
+      finding:     excerpt(s.content, FINDING_CHARS),
+      bias:        s.credibility.bias,
+      cite:        `s${i + 1}`,
     }));
 
+  const checked = claimGate.gate({
+    claims:  keyFindings.map(f => ({ text: f.finding, cite: f.cite })),
+    sources,
+  });
+
+  // Index-aligned: `classifyOne` carries the claim's position, so each finding gets the verdict on
+  // itself rather than the verdict on the batch.
+  const classOf = new Map();
+  for (const c of [...checked.emitted, ...checked.withheld]) classOf.set(c.index, c);
+
+  const findings = keyFindings.map((f, i) => {
+    const verdict = classOf.get(i);
+    return {
+      ...f,
+      class:  verdict?.class ?? claimGate.CLASS.UNATTRIBUTED,
+      reason: verdict?.reason ?? null,
+      detail: verdict?.detail ?? null,
+    };
+  });
+
+  let claimClass;
+  if (!checked.emitted.length || checked.withheld.length) claimClass = claimGate.CLASS.UNATTRIBUTED;
+  else if (checked.emitted.some(c => c.class === claimGate.CLASS.GROUNDED)) claimClass = claimGate.CLASS.GROUNDED;
+  else claimClass = claimGate.CLASS.PROSE;
+
   const topAgreements = crossRef.agreements
+    .slice()
     .sort((a, b) => b.count - a.count)
     .slice(0, 5)
     .map(a => a.phrase);
 
-  return { confidence, keyFindings, topAgreements, avgCredibility };
+  return {
+    claimClass,
+    keyFindings: findings,
+    topAgreements,
+    attribution: {
+      notice:   checked.notice,
+      withheld: checked.withheld.map(w => ({ reason: w.reason, cite: w.cite ?? null, detail: w.detail ?? null })),
+      accepted: checked.evidence.accepted,
+      grounded: checked.evidence.grounded,
+      rejected: checked.evidence.rejected,
+    },
+  };
 }
 
-// ─── Build calibrated output ──────────────────────────────────────────────────
-function buildOutput(query, truth, sources, crossRef, category) {
-  const conf = truth.confidence;
-  const grade =
-    conf >= 0.85 ? 'A' :
-    conf >= 0.70 ? 'B' :
-    conf >= 0.55 ? 'C' :
-    conf >= 0.40 ? 'D' : 'F';
+// ─── Build the output ─────────────────────────────────────────────────────────
 
+/**
+ * What master is shown: a class, the sources that produced it, and the disagreements between them.
+ *
+ * `recommendation` is kept — `ramaEventBus` writes it into vector memory, so dropping the key would
+ * silently empty the memory of every past analysis (I11). What it SAYS no longer comes from a score.
+ *
+ * `suppressed` is likewise kept and now means "nothing here is attributable", which is the condition
+ * the renderer should actually warn about. It used to mean `conf < 0.15`, a threshold on the number
+ * that is gone.
+ */
+function buildOutput(query, truth, sources, crossRef, category) {
   return {
     query,
     category,
     timestamp:         Date.now(),
-    overallConfidence: parseFloat((conf * 100).toFixed(1)),
-    grade,
-    complementLabel:   `${parseFloat((conf * 100).toFixed(1))}% confidence means ~${parseFloat(((1 - conf) * 100).toFixed(1))}% chance of being wrong`,
+    claimClass:        truth.claimClass,
+    // Words, from the gate, naming what was refused and why. Never a figure.
+    claimNotice:       truth.attribution.notice,
+    withheld:          truth.attribution.withheld,
     sourceCount:       sources.length,
     sourceSummary:     sources.slice(0, 8).map(s => ({
       domain:      s.domain,
@@ -468,18 +541,49 @@ function buildOutput(query, truth, sources, crossRef, category) {
     keyFindings:       truth.keyFindings,
     agreements:        crossRef.agreements.slice(0, 10),
     contradictions:    crossRef.contradictions,
+    // Stated either way. "No contradiction was detected" and "the sources agree" are different
+    // facts, and the old output let the second be inferred from a high grade.
+    contradictionNote: describeContradictions(crossRef.contradictions, sources.length),
     topAgreements:     truth.topAgreements,
-    recommendation:    buildRecommendation(query, conf, category),
+    recommendation:    buildRecommendation(truth, crossRef, sources.length),
     disclaimer:        'This analysis is generated from publicly available sources. It is informational only. Verify independently before acting on any finding. No guarantees of accuracy.',
-    suppressed:        conf < 0.15,   // Too low confidence — flag for UI
+    suppressed:        truth.claimClass === claimGate.CLASS.UNATTRIBUTED,
   };
 }
 
-function buildRecommendation(query, confidence, category) {
-  if (confidence >= 0.80) return 'High confidence consensus across vetted sources.';
-  if (confidence >= 0.60) return 'Moderate confidence. Multiple sources agree but some uncertainty remains.';
-  if (confidence >= 0.40) return 'Low-moderate confidence. Sources diverge — independent verification recommended.';
-  return 'Low confidence. Contradictory or insufficient sources. Treat as preliminary only.';
+function describeContradictions(contradictions, sourceCount) {
+  if (contradictions.length) {
+    return contradictions.map(c => c.message).join('; ');
+  }
+  if (!sourceCount) return 'No source survived vetting, so no contradiction could be detected either.';
+  return 'No contradiction was detected between these sources, which is not the same as them agreeing.';
+}
+
+/**
+ * The standing statement about the answer. Derived from the CLASS, so it cannot drift away from what
+ * the gate decided — the old version took a number and the prose took a different threshold.
+ */
+function buildRecommendation(truth, crossRef, sourceCount) {
+  const parts = [];
+
+  if (truth.claimClass === claimGate.CLASS.GROUNDED) {
+    parts.push('Every finding below is carried by the source named beside it.');
+  } else if (truth.claimClass === claimGate.CLASS.PROSE) {
+    parts.push('The sources returned nothing checkable on this question, so nothing below is evidence.');
+  } else if (!sourceCount) {
+    parts.push('No source survived vetting, so there is nothing here to stand on.');
+  } else {
+    parts.push('At least one finding could not be attributed to the source it came from, so this answer is not evidence.');
+  }
+
+  if (truth.attribution.withheld.length) {
+    const reasons = [...new Set(truth.attribution.withheld
+      .map(w => claimGate.REASON_LABELS[w.reason] ?? w.reason))];
+    parts.push(`Withheld ${truth.attribution.withheld.length}: ${reasons.join(', ')}.`);
+  }
+
+  parts.push(describeContradictions(crossRef.contradictions, sourceCount));
+  return parts.join(' ');
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -533,4 +637,10 @@ function humanDelay(minMs, maxMs) {
 // `vetSources` and `buildFallbackResults` are exported so the Section 94 fix is TESTED rather than
 // merely asserted in a comment — the fabrication it prevents was invisible precisely because nothing
 // exercised it.
-module.exports = { register, getSourceCredibility, vetSources, buildFallbackResults };
+// `extractTruth`, `buildOutput` and `excerpt` are exported for the same reason: the score they no
+// longer emit was asserted absent only by reading the file, and a source-level regex cannot tell
+// whether the OBJECT that reaches master carries one. `verifyClaimGate.cjs` now runs both.
+module.exports = {
+  register, getSourceCredibility, vetSources, buildFallbackResults,
+  extractTruth, buildOutput, excerpt,
+};

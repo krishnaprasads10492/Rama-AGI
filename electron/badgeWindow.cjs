@@ -28,6 +28,7 @@
 const { BrowserWindow, screen } = require('electron');
 const path  = require('path');
 const state = require('./lib/badgeState.cjs');
+const label = require('./lib/badgeLabel.cjs');
 
 const SIZE   = 72;     // square window — enough for the orb + status ring + glow
 const MARGIN = 20;     // default distance from the screen edge
@@ -102,6 +103,11 @@ function create({ onClick } = {}) {
   badgeWin.setAlwaysOnTop(true, 'screen-saver');   // stays above fullscreen apps too
   badgeWin.loadFile(path.join(__dirname, 'badge.html'));
 
+  // Until the first lifecycle event the tooltip would be whatever badge.html hardcodes, which is the
+  // only moment the label could still be a guess. Sent once on load so the very first hover reads a
+  // state that was computed rather than typed into the markup.
+  badgeWin.webContents.once('did-finish-load', () => setStatus(label.STATUS.LIVE));
+
   badgeWin.on('moved', () => {
     if (!badgeWin || badgeWin.isDestroyed()) return;
     const [px, py] = badgeWin.getPosition();
@@ -133,10 +139,15 @@ function hide() {
   badgeWin.hide();
 }
 
-/** @param {'live'|'paused'|'closed'} status */
+/**
+ * @param {'live'|'paused'|'closed'} status
+ *
+ * The status still selects the colour; the LABEL that travels with it states what is still running,
+ * because `paused` was false in the one state master cannot see past — see lib/badgeLabel.cjs.
+ */
 function setStatus(status) {
   if (!badgeWin || badgeWin.isDestroyed()) return;
-  badgeWin.webContents.send('badge:status', { status });
+  badgeWin.webContents.send('badge:status', label.statusPayload(status));
 }
 
 function destroy() {

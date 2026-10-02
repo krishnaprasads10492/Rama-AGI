@@ -107,7 +107,11 @@ class RamaEventBus extends EventEmitter {
         const vectorMem = require('./ipc/vectorMemory.cjs');
         await vectorMem.store(
           `Intelligence finding: ${query}\n${result?.recommendation || ''}`,
-          { type: 'intelligence', query, confidence: result?.overallConfidence }
+          // `confidence: result?.overallConfidence` until Section 131. The field is gone from
+          // `intelligenceEngine` (a score averaged from domain reputation), and this would have
+          // stamped every remembered finding with `undefined` — a metadata key that reads as
+          // "unmeasured" when it means "never existed".
+          { type: 'intelligence', query, claimClass: result?.claimClass ?? null }
         );
       } catch { /* non-fatal */ }
     });

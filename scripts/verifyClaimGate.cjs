@@ -268,5 +268,105 @@ check('it persists nothing — an audit trail is the caller\'s to keep',
 check('it makes no capability decision — attribution is not authorisation',
   !/capability|\.can\(|tier/i.test(code));
 
+// ─── the engine that used to ship the score ───────────────────────────────────
+//
+// The header above said the confidence shape "is the failure mode Section 110 named and
+// `intelligenceEngine` already ships" — and then asserted its absence only in claimGate.cjs, the one
+// file that never had it. The assertion was true and pointed at the wrong file. Both halves are
+// checked here now: the SOURCE of the engine, and the OBJECT it hands to master, because a regex
+// cannot see what an object carries and a shape test cannot see a number that is computed and
+// discarded. Appended, never substituted (I11).
+console.log('\n  the intelligence engine computes no score');
+
+const ENGINE_REL = path.join('electron', 'ipc', 'intelligenceEngine.cjs');
+const engineSrc = fs.readFileSync(path.join(__dirname, '..', ENGINE_REL), 'utf8');
+const engineCode = engineSrc.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+
+check('intelligenceEngine computes no confidence, probability or likelihood',
+  !/\b(confidence|probability|likelihood)\s*[=:]/i.test(engineCode));
+check('and no letter grade, which was the same number wearing a letter',
+  !/\bgrade\s*[=:]/i.test(engineCode));
+check('overallConfidence is gone as a field, not merely unused',
+  !/overallConfidence/.test(engineCode));
+check('and so is the complement label that quoted a chance of being wrong',
+  !/complementLabel/.test(engineCode));
+check('it reuses claimGate rather than classifying in parallel',
+  /require\(['"]\.\.\/lib\/claimGate\.cjs['"]\)/.test(engineCode));
+check('and takes its class names from that module instead of declaring its own',
+  /claimGate\.CLASS\./.test(engineCode) && !/CLASS\s*=\s*Object\.freeze/.test(engineCode));
+
+const engine = require('../electron/ipc/intelligenceEngine.cjs');
+
+const RAW = [
+  { domain: 'reuters.com',   title: 'RELIANCE session close',
+    content: 'RELIANCE closed at 1,402.55 on 2026-09-18, up 1.4% for the session.' },
+  { domain: 'bloomberg.com', title: 'Repo rate held',
+    content: 'The repo rate was held at 5.50% on 2026-08-06.' },
+];
+const NO_CROSSREF = { agreements: [], contradictions: [] };
+
+const vetted = engine.vetSources(RAW.map(s => ({ ...s })));
+check('the fixture survives vetting, or the rest of this section proves nothing',
+  vetted.length === 2, String(vetted.length));
+
+const t = engine.extractTruth(vetted, NO_CROSSREF, 'what did RELIANCE close at');
+check('a finding quoted from its own source is grounded',
+  t.claimClass === G.CLASS.GROUNDED, `${t.claimClass} ${JSON.stringify(t.attribution.withheld)}`);
+check('and every finding carries its own class, not the batch verdict',
+  t.keyFindings.every(f => f.class === G.CLASS.GROUNDED), JSON.stringify(t.keyFindings.map(f => f.class)));
+
+const out = engine.buildOutput('what did RELIANCE close at', t, vetted, NO_CROSSREF, 'financial');
+check('the output carries a class', out.claimClass === G.CLASS.GROUNDED);
+check('and NO score key anywhere in it', !hasScoreKey(out), JSON.stringify(Object.keys(out)));
+check('and no field holds a bare percentage of rightness',
+  !/chance of being wrong/i.test(JSON.stringify(out)));
+check('the source map it always had is still there',
+  Array.isArray(out.sourceSummary) && out.sourceSummary.length === 2);
+check('contradictions are stated even when there are none',
+  typeof out.contradictionNote === 'string' && /not the same as them agreeing/.test(out.contradictionNote),
+  out.contradictionNote);
+check('recommendation survives as a key — ramaEventBus writes it to vector memory',
+  typeof out.recommendation === 'string' && out.recommendation.length > 0);
+check('and it reads off the class rather than a threshold',
+  /carried by the source/.test(out.recommendation), out.recommendation);
+check('a grounded answer is not suppressed', out.suppressed === false);
+
+// A document cannot contain the future, so a source that predicts cannot ground the quote from it.
+const predictive = engine.vetSources([{ domain: 'cnbc.com', title: 'Outlook',
+  content: 'Analysts say profit will double next year.' }]);
+const tp = engine.extractTruth(predictive, NO_CROSSREF, 'what happens to profit');
+check('a predictive finding is withheld, so the whole answer is unattributed',
+  tp.claimClass === G.CLASS.UNATTRIBUTED, tp.claimClass);
+check('and the reason is that a document cannot support a prediction',
+  tp.attribution.withheld[0]?.reason === 'unsourceable-prediction',
+  JSON.stringify(tp.attribution.withheld));
+const outp = engine.buildOutput('what happens to profit', tp, predictive, NO_CROSSREF, 'financial');
+check('an unattributed answer is suppressed for the renderer', outp.suppressed === true);
+check('and says what was withheld in words', /Withheld 1/.test(outp.recommendation), outp.recommendation);
+check('still with no score', !hasScoreKey(outp));
+
+const tz = engine.extractTruth([], NO_CROSSREF, 'anything');
+const outz = engine.buildOutput('anything', tz, [], NO_CROSSREF, 'general');
+check('no sources at all is unattributed rather than a low number',
+  tz.claimClass === G.CLASS.UNATTRIBUTED);
+check('and says so plainly', /No source survived vetting/.test(outz.recommendation), outz.recommendation);
+check('with no score on the empty case either', !hasScoreKey(outz));
+
+// Found by running: a blind slice(0, 200) can cut inside a figure, so Rāma's OWN excerpt carries a
+// number its source does not contain — and the gate correctly refuses it while naming the source.
+console.log('\n  an excerpt must not invent what it cuts');
+const longSrc = 'word '.repeat(39) + '1402.55 tail';
+const naive = longSrc.slice(0, 200);
+const naiveGated = G.gate({ claims: [{ text: naive, cite: 's1' }], sources: [{ id: 's1', content: longSrc }] });
+check('a mid-figure cut WOULD be withheld — this is the defect, demonstrated',
+  naiveGated.withheld.length === 1, JSON.stringify(naiveGated.emitted));
+const cut = engine.excerpt(longSrc, 200);
+check('the excerpt stops at a word boundary instead', cut.endsWith('word'), JSON.stringify(cut.slice(-24)));
+check('so no partial figure is quoted', !/1402/.test(cut));
+check('and the excerpt is grounded by the source it came from',
+  G.gate({ claims: [{ text: cut, cite: 's1' }], sources: [{ id: 's1', content: longSrc }] }).withheld.length === 0);
+check('a text shorter than the cap is returned whole', engine.excerpt('short', 200) === 'short');
+check('and nothing is not an exception', engine.excerpt(null, 200) === '');
+
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 if (fail > 0) process.exit(1);
