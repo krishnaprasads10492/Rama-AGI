@@ -16,11 +16,14 @@ export const health = {
 // PRIMARY PATH: window.rama.models.chat() → modelRouter (main process, vault access)
 // FALLBACK:     HTTP /api/ai/chat (browser dev mode only — no vault access)
 export const ramaChat = {
-  send: async ({ messages, provider, model, sessionId, taskType }) => {
+  // `user` is forwarded because the keyed cloud path is capability-gated inside the transport, and
+  // this is the ONLY models.chat caller in the tree — without it the gate stands shut and every
+  // cloud request comes back as a gate error that looks like a policy decision.
+  send: async ({ messages, provider, model, sessionId, taskType, user }) => {
     // Real path — IPC to modelRouter which has credential vault access
     if (typeof window !== 'undefined' && window.rama?.models?.chat) {
       try {
-        const res = await window.rama.models.chat({ messages, model, taskType: taskType || 'general' });
+        const res = await window.rama.models.chat({ messages, model, taskType: taskType || 'general', user });
         if (res?.ok) {
           return {
             ok:        true,
@@ -29,10 +32,28 @@ export const ramaChat = {
             model:     res.model,
             fallbackFrom: res.fallbackFrom,
             usage:     res.usage,
+            // WHICH PATH SERVED THE REQUEST, forwarded rather than discarded: 'cloud' | 'local' |
+            // undefined, where undefined means a provider that has only one path. And when a
+            // fallback answered, `unconfigured` says WHY the substitution happened — the chain
+            // declares both and this is the layer that used to drop one of them.
+            unconfigured: res.unconfigured ?? null,
+            path:         res.path ?? null,
+            endpoint:     res.endpoint ?? null,
+            via:          res.via ?? null,
+            credentialSource: res.credentialSource ?? null,
           };
         }
-        // modelRouter returned an error — surface it, don't silently fall back
-        return { ok: false, error: res?.error || 'Model router returned no content' };
+        // modelRouter returned an error — surface it, don't silently fall back. ABSENT IS NOT
+        // BROKEN: `unconfigured` and `remedy` are the fields that make a missing credential
+        // actionable, and deleting them here would make the one useful sentence unreachable.
+        return {
+          ok:    false,
+          error: res?.error || 'Model router returned no content',
+          unconfigured: res?.unconfigured ?? null,
+          failures:     res?.failures ?? null,
+          remedy:       res?.remedy ?? null,
+          gateError:    res?.gateError ?? false,
+        };
       } catch (err) {
         return { ok: false, error: `IPC error: ${err.message}` };
       }

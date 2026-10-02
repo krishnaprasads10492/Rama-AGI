@@ -72,15 +72,61 @@ const THRESHOLDS = {
 };
 
 // ─── API rate limit registry ──────────────────────────────────────────────────
-// Tracks used capacity per provider per minute
+/**
+ * Used capacity per provider. `reqPerMin`/`tokPerMin` are per-minute counters on a 60-second reset;
+ * `maxConcurrent`/`inFlight` are a SLOT COUNT, which is a different kind of limit and cannot be
+ * expressed in the per-minute fields.
+ *
+ * NO FIELD ON ANY ROW MAY EVER DERIVE FROM A CREDENTIAL VALUE. `orchestrator:api-limits` returns
+ * this object WHOLESALE and is ungated (see its handler), so that rule is what makes the exposure
+ * acceptable. Nothing here derives from a key today, and the suite asserts that no own-property name
+ * matches /key|secret|bearer|prefix|hash/i.
+ *
+ * `tokPerMin: null` means UNCHECKED, never zero — the same `num()` discipline modelRoles.cjs applies
+ * to an unknown parameter count. An unknown budget is not a failed one.
+ */
 const API_RATE_LIMITS = {
-  openai:    { reqPerMin: 500,  tokPerMin: 200000,  usedReq: 0, usedTok: 0, resetAt: 0 },
-  anthropic: { reqPerMin: 60,   tokPerMin: 100000,  usedReq: 0, usedTok: 0, resetAt: 0 },
-  gemini:    { reqPerMin: 60,   tokPerMin: 1000000, usedReq: 0, usedTok: 0, resetAt: 0 },
-  groq:      { reqPerMin: 30,   tokPerMin: 14400,   usedReq: 0, usedTok: 0, resetAt: 0 },
-  mistral:   { reqPerMin: 60,   tokPerMin: 100000,  usedReq: 0, usedTok: 0, resetAt: 0 },
-  ollama:    { reqPerMin: 9999, tokPerMin: 9999999, usedReq: 0, usedTok: 0, resetAt: 0 },
+  openai:    { reqPerMin: 500,  tokPerMin: 200000,  maxConcurrent: 8, inFlight: 0, usedReq: 0, usedTok: 0, resetAt: 0 },
+  anthropic: { reqPerMin: 60,   tokPerMin: 100000,  maxConcurrent: 4, inFlight: 0, usedReq: 0, usedTok: 0, resetAt: 0 },
+  gemini:    { reqPerMin: 60,   tokPerMin: 1000000, maxConcurrent: 4, inFlight: 0, usedReq: 0, usedTok: 0, resetAt: 0 },
+  groq:      { reqPerMin: 30,   tokPerMin: 14400,   maxConcurrent: 4, inFlight: 0, usedReq: 0, usedTok: 0, resetAt: 0 },
+  mistral:   { reqPerMin: 60,   tokPerMin: 100000,  maxConcurrent: 4, inFlight: 0, usedReq: 0, usedTok: 0, resetAt: 0 },
+
+  // A LOCAL daemon: unmetered, bounded only by the machine, which admit() already governs.
+  ollama:    { reqPerMin: 9999, tokPerMin: 9999999, maxConcurrent: 2, inFlight: 0, usedReq: 0, usedTok: 0, resetAt: 0 },
+
+  // KEYED CLOUD, FREE TIER. The binding constraint is ONE CONCURRENT REQUEST, not a rate.
+  // `reqPerMin` is a courtesy ceiling so a loop cannot queue a thousand requests behind the one
+  // slot; the slot is what is actually enforced. RATE_LIMIT_BUFFER is applied to reqPerMin, so the
+  // ENFORCED ceiling is 16/min, not the 20 in this table — and it is deliberately NOT applied to
+  // maxConcurrent, because Math.floor(1 * 0.8) is 0 and would deadlock.
+  // `tokPerMin: null` because a per-minute token budget is not something Ollama publishes, and
+  // inventing one would be a fabricated limit presented as a measurement.
+  'ollama-cloud':  { reqPerMin: 20, tokPerMin: null, maxConcurrent: 1, inFlight: 0,
+                     usedReq: 0, usedTok: 0, resetAt: 0,
+                     monthlyTokenBudget: null, usedTokMonth: 0, monthStartedAt: null,
+                     note: 'free tier: one concurrent request; the monthly credit pool is not exposed to the API' },
+
+  // Hosted web search shares the credential, NOT the inference slot. A page of search traffic must
+  // not be able to consume the single concurrent slot inference needs.
+  'ollama-search': { reqPerMin: 10, tokPerMin: null, maxConcurrent: 1, inFlight: 0,
+                     usedReq: 0, usedTok: 0, resetAt: 0 },
+
+  // Master-registered OpenAI-compatible providers. Conservative, because their real limits are
+  // unknown. Present so that refuse-by-default below cannot break a shipped capability.
+  custom:    { reqPerMin: 20, tokPerMin: null, maxConcurrent: 2, inFlight: 0, usedReq: 0, usedTok: 0, resetAt: 0 },
 };
+
+/**
+ * `'__proto__'` resolves through the prototype chain on a plain object literal, and
+ * Object.prototype is TRUTHY — so a bare `if (API_RATE_LIMITS[p])` guard PASSES for it and the
+ * write lands on Object.prototype, polluting every plain object in the process from one free-text
+ * UI field. Ownership, not truthiness, is the guard. Used by _canRun, _tick, admit and recordApiUse.
+ */
+function limitFor(provider) {
+  return Object.prototype.hasOwnProperty.call(API_RATE_LIMITS, provider)
+    ? API_RATE_LIMITS[provider] : null;
+}
 
 // ─── Task queue ───────────────────────────────────────────────────────────────
 class TaskQueue {
@@ -137,13 +183,24 @@ class TaskQueue {
 
     // API rate limit check
     if (task.aiProvider) {
-      const limit = API_RATE_LIMITS[task.aiProvider];
-      if (limit) {
-        const now = Date.now();
-        if (now > limit.resetAt) { limit.usedReq = 0; limit.usedTok = 0; limit.resetAt = now + 60000; }
-        const capacity = limit.reqPerMin * THRESHOLDS.NETWORK.RATE_LIMIT_BUFFER;
-        if (limit.usedReq >= capacity) return false;
-      }
+      const limit = limitFor(task.aiProvider);
+      // A provider with no declared limit is REFUSED, not waved through. An unknown budget is not
+      // an unlimited one, and the old `if (limit)` with no else admitted an unregistered provider's
+      // traffic unmetered. The assertion that every shipped provider HAS a row is what makes
+      // refusing here safe rather than a capability regression.
+      //
+      // This stays as DEFENCE IN DEPTH: submit() now refuses an unknown provider where it is ASKED
+      // FOR, because `_canRun` returning false means "not this tick", and "not this tick" is the
+      // wrong answer to "this provider does not exist".
+      if (!limit) return false;
+      const now = Date.now();
+      if (now > limit.resetAt) { limit.usedReq = 0; limit.usedTok = 0; limit.resetAt = now + 60000; }
+      const capacity = limit.reqPerMin * THRESHOLDS.NETWORK.RATE_LIMIT_BUFFER;
+      if (limit.usedReq >= capacity) return false;
+      // An unknown token budget is UNCHECKED, never failed and never cleared.
+      if (Number.isFinite(limit.tokPerMin)
+          && limit.usedTok >= limit.tokPerMin * THRESHOLDS.NETWORK.RATE_LIMIT_BUFFER) return false;
+      if (limit.inFlight >= limit.maxConcurrent) return false;
     }
 
     return true;
@@ -211,6 +268,16 @@ class ResourceOrchestrator extends EventEmitter {
       status:      'queued',
       ...taskDef,
     };
+    // AN UNKNOWN PROVIDER IS REFUSED WHERE IT IS ASKED FOR. `aiProvider` is free text from the UI
+    // (src/pages/Resources/Resources.jsx submits the input verbatim), so a typo like `opanai` would
+    // otherwise sit in the queue permanently and say nothing.
+    //
+    // THROWN rather than returned because submit()'s success contract is a bare id STRING and its
+    // one caller wraps it as { ok: true, id }. Changing the return type would break that wrap,
+    // which is the opposite of additive.
+    if (task.aiProvider && !limitFor(task.aiProvider)) {
+      throw new Error(`unknown AI provider "${task.aiProvider}" — no rate-limit row, so it cannot be metered`);
+    }
     this.queue.enqueue(task);
     this.emit('task:queued', { id: task.id, type: task.type, priority: task.priority });
     this._tick();  // Try to run immediately
@@ -249,10 +316,15 @@ class ResourceOrchestrator extends EventEmitter {
       this.queue.addRunning(task);
       this.emit('task:started', { id: task.id, type: task.type });
 
-      // Track API usage if needed
-      if (task.aiProvider && API_RATE_LIMITS[task.aiProvider]) {
-        API_RATE_LIMITS[task.aiProvider].usedReq++;
-        if (task.estimatedTokens) API_RATE_LIMITS[task.aiProvider].usedTok += task.estimatedTokens;
+      // Track API usage if needed. `limitFor` and not a bracket read: the old guard tested
+      // TRUTHINESS, and API_RATE_LIMITS['__proto__'] resolves through the prototype chain to
+      // Object.prototype, which IS truthy — so the guard passed and `.usedReq++` wrote NaN onto
+      // Object.prototype. Prototype pollution from a free-text UI field, with the symptom appearing
+      // nowhere near the cause.
+      const tickLimit = task.aiProvider ? limitFor(task.aiProvider) : null;
+      if (tickLimit) {
+        tickLimit.usedReq++;
+        if (task.estimatedTokens) tickLimit.usedTok += task.estimatedTokens;
       }
 
       // Execute async
@@ -355,19 +427,124 @@ class ResourceOrchestrator extends EventEmitter {
       const info = MODEL_REGISTRY[modelId];
       if (!info || !checkAvailable(modelId)) continue;
 
-      const limit = API_RATE_LIMITS[info.provider];
-      if (limit) {
-        if (now > limit.resetAt) { limit.usedReq = 0; limit.resetAt = now + 60000; }
-        const capacity = limit.reqPerMin * THRESHOLDS.NETWORK.RATE_LIMIT_BUFFER;
-        if (limit.usedReq < capacity) {
-          return { model: modelId, reason: 'rate-limit-ok' };
-        }
-      } else {
-        return { model: modelId, reason: 'no-rate-limit' };
+      const limit = limitFor(info.provider);
+      // A model whose provider has no row is SKIPPED, not SELECTED. The old `else` branch returned
+      // it with reason 'no-rate-limit', i.e. a missing entry was an affirmative selection of an
+      // unmeterable provider.
+      if (!limit) continue;
+      if (now > limit.resetAt) { limit.usedReq = 0; limit.resetAt = now + 60000; }
+      const capacity = limit.reqPerMin * THRESHOLDS.NETWORK.RATE_LIMIT_BUFFER;
+      if (limit.usedReq < capacity) {
+        return { model: modelId, reason: 'rate-limit-ok' };
       }
     }
 
     return { model: 'ollama/phi3', reason: 'fallback-all-limited' };
+  }
+
+  // ── The concurrency slot, inside the one authority (I10) ──────────────────
+  /**
+   * Reserve one of a provider's concurrent request slots.
+   *
+   * `PRIORITY.CRITICAL` WAITS for the slot; it does NOT bypass it. One concurrent request is a
+   * PHYSICAL limit of the free tier — bypassing it does not produce a faster answer for master, it
+   * produces a 429 and spends an attempt. Waiting honours "loyalty outranks throttling" in the only
+   * way the endpoint permits. The wait is BOUNDED, because an unbounded await on a leaked slot is
+   * an invisible hang, which is worse than an honest refusal.
+   *
+   * Non-critical priorities do NOT wait: they are refused immediately, because a queue of waiters
+   * on a one-slot row is a latency trap that looks like a hang.
+   *
+   * THE TEST AND THE INCREMENT HAPPEN IN THE SAME SYNCHRONOUS TURN, so exactly one waiter wins per
+   * release. An event wait with no re-check would let two CRITICAL waiters both resolve on one
+   * `slot:released` and both take a maxConcurrent:1 row — the exact limit this method exists to
+   * honour, broken by the mechanism added to honour it.
+   */
+  async reserveSlot(provider, { priority = PRIORITY.NORMAL, waitMs = 20000 } = {}) {
+    const limit = limitFor(provider);
+    if (!limit) {
+      return { ok: false, deferred: true,
+               reason: `no rate-limit row for provider "${provider}" — it cannot be metered` };
+    }
+
+    if (limit.inFlight < limit.maxConcurrent) { limit.inFlight++; return { ok: true, waited: false }; }
+
+    if (priority !== PRIORITY.CRITICAL) {
+      return { ok: false, deferred: true,
+               reason: `${provider} is at its ${limit.maxConcurrent}-request concurrency limit` };
+    }
+
+    const deadline = Date.now() + Math.max(0, Number(waitMs) || 0);
+    for (;;) {
+      if (limit.inFlight < limit.maxConcurrent) { limit.inFlight++; return { ok: true, waited: true }; }
+      const left = deadline - Date.now();
+      if (left <= 0) {
+        return { ok: false, deferred: true, timedOut: true,
+                 reason: `${provider}'s single slot did not free within ${waitMs}ms` };
+      }
+      await this._onceOrTimeout('slot:released', left);
+    }
+  }
+
+  /** Release one slot. Floored at zero so a double-release cannot create free capacity. */
+  releaseSlot(provider) {
+    const limit = limitFor(provider);
+    if (!limit) return false;
+    limit.inFlight = Math.max(0, limit.inFlight - 1);
+    this.emit('slot:released', { provider, inFlight: limit.inFlight });
+    return true;
+  }
+
+  /** Resolve on the next `event`, or on the timeout, whichever comes first. Never rejects. */
+  _onceOrTimeout(event, ms) {
+    return new Promise((resolve) => {
+      let done = false;
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        this.removeListener(event, onEvent);
+        resolve(false);
+      }, ms);
+      const onEvent = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(true);
+      };
+      this.once(event, onEvent);
+    });
+  }
+
+  /**
+   * Record what a provider actually spent. ONE implementation: the
+   * `orchestrator:record-api-use` handler calls this rather than carrying its own copy.
+   *
+   * `usedTokMonth` is what RĀMA SPENT, as counted here — never what remains. Ollama does not expose
+   * the remaining free balance, so a budget is never modelled.
+   */
+  recordApiUse(provider, tokens = 0) {
+    const limit = limitFor(provider);
+    if (!limit) return false;
+    const now = Date.now();
+    if (now > limit.resetAt) { limit.usedReq = 0; limit.usedTok = 0; limit.resetAt = now + 60000; }
+    limit.usedReq++;
+    const n = Number(tokens);
+    if (Number.isFinite(n) && n > 0) limit.usedTok += n;
+
+    if (Object.prototype.hasOwnProperty.call(limit, 'usedTokMonth')) {
+      const MONTH_MS = 31 * 24 * 60 * 60 * 1000;
+      if (!limit.monthStartedAt || now - limit.monthStartedAt > MONTH_MS) {
+        limit.monthStartedAt = now;
+        limit.usedTokMonth = 0;
+      }
+      if (Number.isFinite(n) && n > 0) limit.usedTokMonth += n;
+      try {
+        require('./dataStore.cjs').set('config', 'ollamaCloudUsage', {
+          usedTokMonth: limit.usedTokMonth, monthStartedAt: limit.monthStartedAt,
+        });
+      } catch { /* the counter is still correct in memory; persistence is a convenience */ }
+    }
+    return true;
   }
 
   /**
@@ -378,7 +555,7 @@ class ResourceOrchestrator extends EventEmitter {
    * judgements with different thresholds. They now all ask here, so one policy
    * governs the whole process and there is one place to tune it.
    *
-   * @param {object} req { ramMB, label, priority, allowUnderPressure }
+   * @param {object} req { ramMB, label, priority, allowUnderPressure, aiProvider }
    * @returns {{ allow: boolean, reason: string, snapshot: object }}
    */
   admit(req = {}) {
@@ -387,6 +564,9 @@ class ResourceOrchestrator extends EventEmitter {
       label    = 'workload',
       priority = PRIORITY.NORMAL,
       allowUnderPressure = false,
+      // Default null → byte-identical behaviour for the three existing call sites
+      // (agentOrchestrator, instanceManager, sandboxEngine), which is what keeps this additive.
+      aiProvider = null,
     } = req;
 
     const snap = this.snapshot.ts ? this.snapshot : this._liveSnapshot();
@@ -420,6 +600,29 @@ class ResourceOrchestrator extends EventEmitter {
       return { allow: false, reason: `System under critical pressure — ${label} deferred`, snapshot: snap };
     }
 
+    // THIS IS THE ONLY PLACE THE CLOUD PATH IS METERED. ollamaCloud.chat() calls admit() then
+    // reserveSlot() and never touches TaskQueue._canRun or selectOptimalModel — so a ceiling
+    // asserted against those two is a ceiling that is not enforced on the one path that spends
+    // master's allowance. Three NAMED reasons, not one, so master can tell them apart.
+    if (aiProvider) {
+      const limit = limitFor(aiProvider);
+      if (!limit) {
+        return { allow: false, snapshot: snap,
+                 reason: `no rate-limit row for provider "${aiProvider}" — it cannot be metered` };
+      }
+      const now = Date.now();
+      if (now > limit.resetAt) { limit.usedReq = 0; limit.usedTok = 0; limit.resetAt = now + 60000; }
+      const ceiling = Math.floor(limit.reqPerMin * THRESHOLDS.NETWORK.RATE_LIMIT_BUFFER);
+      if (limit.usedReq >= ceiling) {
+        return { allow: false, snapshot: snap,
+                 reason: `${aiProvider} is at its ${ceiling}/min courtesy ceiling` };
+      }
+      if (limit.inFlight >= limit.maxConcurrent) {
+        return { allow: false, snapshot: snap,
+                 reason: `${aiProvider} is at its ${limit.maxConcurrent}-request concurrency limit` };
+      }
+    }
+
     return { allow: true, reason: 'ok', snapshot: snap };
   }
 
@@ -445,11 +648,16 @@ class ResourceOrchestrator extends EventEmitter {
       snapshot:     this.snapshot,
       queue:        this.queue.getStats(),
       workers:      { current: this._workerCount, max: this._maxWorkers },
+      // An EXPLICIT projection, deliberately narrower than the row. The monthly counters are
+      // reported through ollamaCloud.status() instead, which is the surface whose key set is frozen
+      // and asserted — so there is one definition of what may be said about the cloud path.
       apiLimits:    Object.fromEntries(
         Object.entries(API_RATE_LIMITS).map(([provider, l]) => [provider, {
           used:    l.usedReq,
           cap:     Math.round(l.reqPerMin * THRESHOLDS.NETWORK.RATE_LIMIT_BUFFER),
           pct:     Math.round((l.usedReq / (l.reqPerMin * THRESHOLDS.NETWORK.RATE_LIMIT_BUFFER)) * 100),
+          inFlight:      l.inFlight,
+          maxConcurrent: l.maxConcurrent,
         }])
       ),
       running:      this.queue.getRunning(),
@@ -474,9 +682,11 @@ function register(ipcMain) {
   orchestrator.on('workers:adapted',(d) => broadcast('orchestrator:workers-adapted',d));
 
   // ── Submit a task ─────────────────────────────────────────────────────────
+  // submit() throws on a provider it cannot meter, so the refusal becomes something the renderer
+  // can render instead of a task that sits in the queue forever saying nothing.
   ipcMain.handle('orchestrator:submit', async (_e, task) => {
-    const id = orchestrator.submit(task);
-    return { ok: true, id };
+    try { return { ok: true, id: orchestrator.submit(task) }; }
+    catch (e) { return { ok: false, error: e.message }; }
   });
 
   // ── Get status ────────────────────────────────────────────────────────────
@@ -500,19 +710,19 @@ function register(ipcMain) {
   });
 
   // ── Get API rate limit status ─────────────────────────────────────────────
+  // This returns API_RATE_LIMITS WHOLESALE and is UNGATED — it was before this change and still is.
+  // That is acceptable only because no field on any row derives from a credential value, which is
+  // the rule written at the table's declaration and asserted by the suite. getStatus().apiLimits
+  // keeps its explicit narrower projection; the monthly counters are reported through
+  // ollamaCloud.status(), whose key set is frozen.
   ipcMain.handle('orchestrator:api-limits', async () => {
     return { ok: true, data: API_RATE_LIMITS };
   });
 
   // ── Record API usage (called by modelRouter after each call) ─────────────
+  // Delegates to the instance method so there is ONE implementation of what "a recorded use" means.
   ipcMain.handle('orchestrator:record-api-use', async (_e, provider, tokens) => {
-    const limit = API_RATE_LIMITS[provider];
-    if (!limit) return { ok: false };
-    const now = Date.now();
-    if (now > limit.resetAt) { limit.usedReq = 0; limit.usedTok = 0; limit.resetAt = now + 60000; }
-    limit.usedReq++;
-    if (tokens) limit.usedTok += tokens;
-    return { ok: true };
+    return { ok: orchestrator.recordApiUse(provider, tokens) };
   });
 
   // ── Cancel a queued task ──────────────────────────────────────────────────

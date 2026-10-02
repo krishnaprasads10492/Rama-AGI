@@ -1,7 +1,8 @@
 'use strict';
 
 /**
- * verifyInvariants.cjs — the 17 locked invariants, asserted instead of trusted.
+ * verifyInvariants.cjs — the 17 locked invariants, plus the rows not yet numbered, asserted
+ * instead of trusted.
  *
  * ── WHY THIS EXISTS ───────────────────────────────────────────────────────────────────────────────
  *
@@ -234,6 +235,150 @@ function walkShipped(root) {
   return found.sort();
 }
 
+// ─── The secret scan (I-SECRETS) ──────────────────────────────────────────────
+
+/**
+ * `walkShipped` has an explicit `if (rel.startsWith('scripts/')) continue;` — the suites themselves
+ * are not shipped — but a credential pasted into a suite is still a credential in the repository, so
+ * the secret scan needs its own walker over FIVE trees and SIX extensions.
+ *
+ * MEASURED over the real tree: 194 files (.cjs 103, .jsx 43, .js 36, .mjs 9, .json 3, .md 0), 0
+ * prefix hits and 0 entropy hits. `.md` matches ZERO files inside these five trees today, so that
+ * half of the scan currently scans nothing; `docs/` is covered by verifyOllamaCloud.cjs's
+ * tracked-file sweep instead, which applies the PREFIX matcher only.
+ */
+function walkForSecrets(root) {
+  const skip = new Set(['node_modules', '.git', 'build', 'dist', 'release', '.worktrees',
+    'coverage', '.vite', 'docs', 'research', '.agents', '.kiro']);
+  const exts = new Set(['.cjs', '.mjs', '.js', '.jsx', '.json', '.md']);
+  const found = [];
+  const walk = (dir) => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith('.') && e.name !== '.') continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) { if (!skip.has(e.name)) walk(full); continue; }
+      if (!exts.has(path.extname(e.name))) continue;
+      found.push(path.relative(root, full).split(path.sep).join('/'));
+    }
+  };
+  for (const top of ['electron', 'src', 'server', 'scripts', 'shared']) walk(path.join(root, top));
+  return found.sort();
+}
+
+/**
+ * WHICH SOURCE VIEW EACH MATCHER RUNS AGAINST IS LOAD-BEARING, because the wrong choice makes the
+ * scan permanently green — a silently-passing check, which this file's own header names as the worst
+ * outcome available.
+ *
+ *   .cjs .mjs .js .jsx → `nc`  (comments blanked, string literals INTACT). A credential in shipped
+ *                              code lives in a LITERAL; a credential-shaped string in a comment is
+ *                              master's own note. Against `code` every literal is spaces and the
+ *                              scan could never match anything.
+ *   .json .md          → raw   `views()` is a JavaScript comment-stripper and understands neither
+ *                              format — a `//` inside a URL would blank the rest of the line and
+ *                              silently hide whatever followed it.
+ *
+ * Asserted on synthetic strings in scannerSelfCheck(), which needs no file on disk.
+ */
+const JS_EXTS = new Set(['.cjs', '.mjs', '.js', '.jsx']);
+function secretViewFor(rel) { return JS_EXTS.has(path.extname(rel)) ? 'nc' : 'raw'; }
+
+/** Known credential prefixes, each followed by at least 16 of `[A-Za-z0-9_-]`. Low false-positive
+ *  by construction: `.env.example`'s `sk-...` shape hints are three dots, not sixteen characters. */
+const SECRET_PREFIXES = Object.freeze([
+  'sk-ant-', 'sk-', 'AIzaSy', 'ghp_', 'gho_', 'gsk_', 'xoxb-', 'hf_', 'pplx-',
+]);
+const PREFIX_RE = new RegExp(
+  `(?:${SECRET_PREFIXES.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})[A-Za-z0-9_-]{16,}`,
+  'g');
+
+/** A line that names a credential, so a high-entropy literal on it or just below it is suspicious. */
+const CRED_ADJACENT = /key|token|secret|password|credential|bearer|apikey/i;
+
+/**
+ * A credential is not a sentence and not an identifier.
+ *
+ * MEASURED, and the measurement decided the shape: with `!WORDY` alone the scan is quiet over all
+ * 194 files, and the only two strings that would otherwise hit —
+ * `locally-privileged-but-HTTP-reachable` (src/services/ghostMode.js) and
+ * `ABSOLUTE_LOYALTY_TO_KRISHNA_PRASAD_SECRET_MATRIX` (scripts/verifySelfModel.cjs) — are both
+ * all-letters-and-separators runs that WORDY matches. A "must contain a digit" test was considered
+ * and REJECTED: it does no work against either measured string and it would silently exclude every
+ * digit-free credential, which is not exotic since any long alphabetic slice of a token is one.
+ */
+const WORDY = /^[A-Za-z]+(?:[_-][A-Za-z]+)+$/;
+
+function entropy(s) {
+  const counts = new Map();
+  for (const ch of s) counts.set(ch, (counts.get(ch) || 0) + 1);
+  let h = 0;
+  for (const n of counts.values()) {
+    const p = n / s.length;
+    h -= p * Math.log2(p);
+  }
+  return h;
+}
+
+const candidate = (s) => !WORDY.test(s) && entropy(s) >= 3.5;
+
+/**
+ * ALLOW-LIST, EXACTLY ONE ENTRY. Every addition is a hole, so the length is itself asserted — and
+ * the note that matters for the next person: THE MATCHER, NOT THE ALLOW-LIST, is what keeps this
+ * scan quiet. Reaching for the list when it goes red is the wrong move; narrowing the matcher or
+ * renaming the literal is the right one.
+ */
+const SECRET_ALLOWED = Object.freeze(['test-not-a-real-key']);
+
+/** Every quoted literal in a source text, with the 1-based line it sits on. */
+function literalsOf(text) {
+  const out = [];
+  const re = /(['"`])((?:\\.|(?!\1)[^\\])*)\1/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    out.push({ value: m[2], line: text.slice(0, m.index).split('\n').length });
+  }
+  return out;
+}
+
+/** @returns {string[]} one message per hit, empty when clean. */
+function scanForSecrets(root, rel) {
+  const v = viewOf(root, rel);
+  if (!v) return [];
+  const text = v[secretViewFor(rel)];
+  const lines = text.split('\n');
+  const hits = [];
+
+  let m;
+  PREFIX_RE.lastIndex = 0;
+  while ((m = PREFIX_RE.exec(text)) !== null) {
+    if (SECRET_ALLOWED.includes(m[0])) continue;
+    hits.push(`${rel}:${text.slice(0, m.index).split('\n').length} known credential prefix`);
+  }
+
+  // A `.md` body has no quoted literals to speak of, so bare high-entropy tokens are the only thing
+  // worth looking at there. Everything else is scanned as literals, which is what the rule says and
+  // what keeps a long identifier from reading as a secret.
+  const items = path.extname(rel) === '.md'
+    ? lines.flatMap((line, i) => (line.match(/[A-Za-z0-9_-]{32,}/g) || [])
+      .map((value) => ({ value, line: i + 1 })))
+    : literalsOf(text);
+
+  for (const { value, line } of items) {
+    if (value.length < 32) continue;
+    if (SECRET_ALLOWED.includes(value)) continue;
+    if (!/^[A-Za-z0-9_-]+$/.test(value)) continue;
+    const here = lines[line - 1] ?? '';
+    const above = lines[line - 2] ?? '';
+    if (!CRED_ADJACENT.test(here) && !CRED_ADJACENT.test(above)) continue;
+    if (!candidate(value)) continue;
+    hits.push(`${rel}:${line} credential-adjacent high-entropy literal (H=${entropy(value).toFixed(2)})`);
+  }
+
+  return hits;
+}
+
 function readJson(root, rel) {
   try { return JSON.parse(fs.readFileSync(path.join(root, rel), 'utf8')); }
   catch { return null; }
@@ -272,6 +417,36 @@ function scannerSelfCheck() {
   const lengths = views('const a = 1; // x');
   r.check('offsets are preserved, so line numbers stay true',
     lengths.code.length === lengths.raw.length);
+
+  // ── The per-extension view choice I-SECRETS rests on ─────────────────────
+  // Proved on synthetic strings, because the alternative — a planted-defect case in a tracked `.md`
+  // file — has nothing to plant into: there are ZERO .md files inside the five trees the secret scan
+  // walks, and walkShipped's extension set would not copy one into the self-test sandbox anyway.
+  // Without these three, an implementer who routed every extension through the JavaScript stripper
+  // would get a suite that is green for the wrong reason and a dead half of the scan.
+  r.check('.md and .json are scanned RAW, not through the JavaScript comment-stripper',
+    secretViewFor('a/b.md') === 'raw' && secretViewFor('a/b.json') === 'raw');
+  r.check('and the JS family is scanned nc, where string literals survive',
+    ['x.cjs', 'x.mjs', 'x.js', 'x.jsx'].every((f) => secretViewFor(f) === 'nc'));
+
+  const md = 'see https://example.com/a // and KEEPTHISLINE follows\n';
+  r.check('a // inside a markdown URL does not blank the rest of the line when read raw',
+    views(md).raw.includes('KEEPTHISLINE') && !views(md).code.includes('KEEPTHISLINE'));
+
+  const cjs = views("const k = 'SURVIVES_IN_NC'; // COMMENT_GOES\n");
+  r.check('a .cjs string literal survives the nc view, so a planted credential can be seen',
+    cjs.nc.includes('SURVIVES_IN_NC'));
+  r.check('and a .cjs comment does not, so master\'s own notes are not hits',
+    !cjs.nc.includes('COMMENT_GOES'));
+
+  // The matcher's own discriminator, on the two strings that would otherwise be its only hits.
+  r.check('the two measured English runs are rejected as identifier-shaped, not allow-listed',
+    !candidate('locally-privileged-but-HTTP-reachable')
+    && !candidate('ABSOLUTE_LOYALTY_TO_KRISHNA_PRASAD_SECRET_MATRIX'));
+  r.check('while a digit-free high-entropy token is still a candidate',
+    candidate('qTvbXkPzRmLhWcNjSyFdAgEuIoBtZrVxQwMnKpLs'));
+  r.check('the allow-list holds exactly one entry, because every entry is a hole',
+    SECRET_ALLOWED.length === 1);
   return r;
 }
 
@@ -497,6 +672,12 @@ const INVARIANTS = [
     files: [HTTP, 'src/services/apiClient.js'],
     check(root, r) {
       present(r, root, HTTP, /const https\s*=\s*require\('https'\)/, 'lib/http.cjs is the client', 'nc');
+      // POSITIVE, not merely "does not use a second one": the keyed cloud transport USES the one
+      // client, by the correct specifier from inside electron/lib/.
+      present(r, root, 'electron/lib/ollamaCloud.cjs', /require\('\.\/http\.cjs'\)/,
+        'the keyed cloud transport goes through the one client', 'nc');
+      absent(r, root, 'electron/lib/ollamaCloud.cjs', /\bnet\.request\s*\(/,
+        'and never through Electron\u2019s own net.request, which has no breaker and no cap', 'nc');
       const rawReq = /require\('(?:node:)?https?'\)/;
       const offenders = walkShipped(root).filter((f) => {
         if (RAW_HTTP_ALLOWED[f]) return false;
@@ -812,6 +993,80 @@ const INVARIANTS = [
         + 'suite cannot witness; it can only prove Rāma never starts one');
     },
   },
+  {
+    // A NEW ROW, NOT A WIDENING OF I12.
+    //
+    // I12's text — here and at RAMA_AGI_MASTER_SPEC.md Section 28 — is "no console.log in shipped
+    // code; pinned dependencies; no placeholders". A credential scan is a DIFFERENT PROPERTY, and
+    // widening a locked invariant's check changes what that invariant means without master saying
+    // so, which the resume protocol forbids in as many words. The goal was one implementation caught
+    // by both `npm run audit` and `verify:covenant`, and both chains run every row in INVARIANTS —
+    // so adding a row reaches it and I12 keeps its text.
+    //
+    // Whether this should be promoted to a numbered invariant I18 in Section 28 is RAISED FOR
+    // MASTER, not taken. Until he decides, the id is the string `I-SECRETS`, which cannot be
+    // mistaken for a numbered invariant.
+    id: 'I-SECRETS',
+    title: 'no real-looking credential in shipped or scripted source',
+    files: ['.env.example', '.gitignore'],
+    check(root, r) {
+      const files = walkForSecrets(root);
+      r.check('there are files to scan', files.length > 50, files.length);
+
+      const byExt = {};
+      for (const f of files) byExt[path.extname(f)] = (byExt[path.extname(f)] || 0) + 1;
+      r.check('the JS family is covered', (byExt['.cjs'] || 0) > 50, JSON.stringify(byExt));
+      r.check('and scripts/, which walkShipped deliberately skips',
+        files.some((f) => f.startsWith('scripts/')));
+      r.check('and server/, which no other extension-specific walker here reaches',
+        files.some((f) => f.startsWith('server/')) || !fs.existsSync(path.join(root, 'server')));
+
+      const hits = [];
+      for (const f of files) hits.push(...scanForSecrets(root, f));
+      r.check('no credential-shaped literal in any of the five trees',
+        hits.length === 0, hits.slice(0, 6).join(' | '));
+
+      // Root-level tracked files get the PREFIX matcher ONLY. `.env.example:HMAC_SECRET` is
+      // `change-this-to-a-random-64-char-string` — not a credential and not a prefix match, but the
+      // `64` breaks WORDY's all-letters run, so it IS a high-entropy literal on a /secret/i line.
+      // Anyone widening the entropy half to the repo root should expect it and RENAME the literal
+      // rather than allow-list it, because every allow-list entry is a hole.
+      for (const rel of ['.env.example', '.gitignore']) {
+        let text = '';
+        try { text = fs.readFileSync(path.join(root, rel), 'utf8'); } catch { text = ''; }
+        PREFIX_RE.lastIndex = 0;
+        r.check(`${rel} carries no known credential prefix`, !PREFIX_RE.test(text));
+      }
+
+      let example = '';
+      try { example = fs.readFileSync(path.join(root, '.env.example'), 'utf8'); } catch { example = ''; }
+      const uncommented = example.split('\n')
+        .filter((l) => /^\s*OLLAMA_API_KEY\s*=/.test(l));
+      r.check('.env.example has no uncommented Ollama Cloud key assignment — the name appears in a '
+        + 'comment only, which cannot be mistaken for somewhere to paste a value',
+        uncommented.length === 0, uncommented.join(' | '));
+
+      let ignore = '';
+      try { ignore = fs.readFileSync(path.join(root, '.gitignore'), 'utf8'); } catch { ignore = ''; }
+      r.check('.gitignore has a line that is exactly .env',
+        ignore.split('\n').some((l) => l.trim() === '.env'));
+
+      // THE LOAD-BEARING ONE. It cannot stop a key being put in .env — loadEnv() really does read
+      // that file into process.env, and start.cjs even creates it from .env.example. It stops Rāma
+      // READING a credential from there, which is what makes the exposure useless rather than
+      // convenient.
+      const envReaders = walkForSecrets(root).filter((f) => {
+        const fv = viewOf(root, f);
+        return fv && /process\.env\.OLLAMA_API_KEY|process\.env\[['"]OLLAMA_API_KEY['"]\]/.test(fv.nc);
+      });
+      r.check('no module reads an Ollama Cloud key out of process.env',
+        envReaders.length === 0, envReaders.join(', '));
+
+      r.residual('a credential that looks like ordinary prose — low entropy, no known prefix — is '
+        + 'not detectable by this row. The behavioural leak sweep in verifyOllamaCloud.cjs is what '
+        + 'covers the runtime half, by asserting a dummy key appears exactly once in a whole run');
+    },
+  },
 ];
 
 // ─── Self-test: plant a breach, require the named row to go red ────────────────
@@ -936,6 +1191,18 @@ const MUTATIONS = [
       return head + tail;
     },
   },
+  {
+    id: 'I-SECRETS-planted',
+    expect: 'I-SECRETS',
+    why: 'a prefix-shaped credential literal planted on a credential-adjacent line',
+    // electron/**/*.cjs, because walkShipped DOES copy that extension into the self-test sandbox,
+    // which is the only route by which a file reaches the row under test.
+    pick: (root) => walkShipped(root).find((f) => f.startsWith('electron/') && f.endsWith('.cjs')),
+    // CONCATENATED ON PURPOSE. walkForSecrets covers scripts/, so a contiguous prefix-shaped
+    // literal here would make this suite's own source a hit for the scan it installs — the same
+    // self-referential trap as a false positive, from the other direction. Do not "tidy" this.
+    mutate: (src) => `const apiKey = '${`sk${'-'}A1b2C3d4E5f6G7h8I9j0`}';\n${src}`,
+  },
 ];
 
 function copyInto(root, dest, rels) {
@@ -1018,7 +1285,10 @@ function selfTest() {
 
 const onlySelfTest = process.argv.includes('--self-test-only');
 
-console.log('\nthe 17 locked invariants — asserted, not trusted\n');
+// The count is stated as it is because an 18th ROW now runs while Section 28 still numbers 17. A
+// banner that says 17 while 18 rows execute is the same defect this file exists to stop, at smaller
+// scale. Promoting I-SECRETS to a numbered I18 is RAISED FOR MASTER.
+console.log('\nthe 17 locked invariants, plus the rows not yet numbered — asserted, not trusted\n');
 
 if (!onlySelfTest) {
   scannerSelfCheck();

@@ -814,6 +814,12 @@ const RAMA_API = {
       const promise = ipcRenderer.invoke('models:ollama-pull', opts);
       return promise.finally(() => ipcRenderer.removeListener('models:ollama-pull-progress', handler));
     },
+    // The KEYED Ollama Cloud path, beside the local daemon. `cloudStatus` reports PRESENT or ABSENT
+    // and never any part of the key; `searchWeb` runs the egress classification gate above backend
+    // selection. Both sit inside the `models:` prefix genome.cjs already declares for this gene.
+    cloudStatus:      ()           => ipcRenderer.invoke('models:cloud-status'),
+    cloudList:        (opts)       => ipcRenderer.invoke('models:cloud-list', opts),
+    searchWeb:        (opts)       => ipcRenderer.invoke('models:search-web', opts),
     // Custom OpenAI-compatible providers — master-only (models.add-key).
     listCustomProviders:   (opts)  => ipcRenderer.invoke('models:list-custom-providers', opts),
     addCustomProvider:     (opts)  => ipcRenderer.invoke('models:add-custom-provider', opts),

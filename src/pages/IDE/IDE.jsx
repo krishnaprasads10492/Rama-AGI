@@ -250,7 +250,9 @@ function AIPanel({ currentFile, currentContent, repoPath, onApplyPatch, onRunCod
         { role:'user',   content: prompt },
       ];
 
-      const res = await ramaChat.send({ messages, provider, model, sessionId:`ide_${Date.now()}` });
+      // `user` carries the capability the keyed cloud path is gated on; `currentUser` is already in
+      // scope here for the same reason window.rama.sandbox.* is given it.
+      const res = await ramaChat.send({ messages, provider, model, sessionId:`ide_${Date.now()}`, user: currentUser });
 
       if (res.ok && res.message) {
         setResponse(res.message.content);

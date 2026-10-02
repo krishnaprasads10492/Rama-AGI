@@ -4,12 +4,15 @@ import { useUserStore } from '@store/userStore.js';
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
 const PROVIDER_COLORS = {
-  openai:    'var(--green)',
-  anthropic: 'var(--amber)',
-  gemini:    'var(--accent)',
-  mistral:   'var(--violet)',
-  groq:      'var(--magenta)',
-  ollama:    'var(--green)',
+  openai:          'var(--green)',
+  anthropic:       'var(--amber)',
+  gemini:          'var(--accent)',
+  mistral:         'var(--violet)',
+  groq:            'var(--magenta)',
+  ollama:          'var(--green)',
+  // The KEYED cloud path. A different colour from `ollama` on purpose: the two are different
+  // transports with different costs, and the id prefix is the only other thing that says so.
+  'ollama-cloud':  'var(--cyan)',
 };
 
 const PROVIDER_LINKS = {
@@ -21,9 +24,22 @@ const PROVIDER_LINKS = {
   NEWSAPI_KEY:       { label: 'NewsAPI',   url: 'https://newsapi.org/register',                    hint: 'Free for developers — 100 req/day' },
   ALPHA_VANTAGE_KEY: { label: 'Alpha Vantage', url: 'https://www.alphavantage.co/support/#api-key',hint: 'Free API key for stock data' },
   GITHUB_TOKEN:      { label: 'GitHub',    url: 'https://github.com/settings/tokens',              hint: 'Settings → Developer settings → Personal access tokens' },
+  OLLAMA_API_KEY:    { label: 'Ollama Cloud', url: 'https://ollama.com/settings/keys',             hint: 'Create a key named Rama → paste here. No Ollama install needed for cloud models.' },
 };
 
-function ModelRow({ model, status, primary, onSetPrimary, onAddKey }) {
+/**
+ * `cloudStatus` is the whole reason this component takes a third state.
+ *
+ * `checkAvailable` ends `!!getCredential(credKey)` and `getCredential` returns null while the vault
+ * is LOCKED, so `credentialStatus()` maps every unavailable non-local row to 'missing-key'. Without
+ * the branch below, master — who has already given Rāma the key — is shown an Add-key button and
+ * invited to re-paste a credential Rāma already holds. Locked is not absent, at any layer.
+ */
+export function vaultLockedWithStoredKey(cloudStatus, model) {
+  return cloudStatus?.vaultUnlocked === false && model?.provider === 'ollama-cloud';
+}
+
+function ModelRow({ model, status, primary, onSetPrimary, onAddKey, cloudStatus }) {
   // 'available' for a local model means Ollama actually reported it. This used to also accept
   // 'local', which meant only "needs no API key" — so every Ollama model in the registry rendered
   // as ready on machines with no Ollama installed (Section 88).
@@ -65,10 +81,14 @@ function ModelRow({ model, status, primary, onSetPrimary, onAddKey }) {
           <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>not pulled</span>
         )}
         {!isAvailable && model.credKey && (
-          <button className="btn btn-sm" onClick={() => onAddKey(model.credKey)}
-            style={{ borderColor: 'var(--amber)', color: 'var(--amber)', fontSize: '10px' }}>
-            + Add Key
-          </button>
+          vaultLockedWithStoredKey(cloudStatus, model)
+            ? <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
+                vault locked — unlock to use the stored key
+              </span>
+            : <button className="btn btn-sm" onClick={() => onAddKey(model.credKey)}
+                style={{ borderColor: 'var(--amber)', color: 'var(--amber)', fontSize: '10px' }}>
+                + Add Key
+              </button>
         )}
         {isAvailable && !primary && (
           <button className="btn btn-sm" onClick={() => onSetPrimary(model.id)}
@@ -231,19 +251,22 @@ export default function Models() {
   const [customProviders,   setCustomProviders]   = useState([]);
   const [showAddCustom,     setShowAddCustom]     = useState(false);
   const [customError,       setCustomError]       = useState(null);
+  const [cloudStatus,       setCloudStatus]       = useState(null);
 
   const load = useCallback(async () => {
     if (!isElectron) return;
-    const [mRes, pRes, vRes, cpRes] = await Promise.all([
+    const [mRes, pRes, vRes, cpRes, csRes] = await Promise.all([
       window.rama.models.list(),
       window.rama.models.getPrimary(),
       window.rama.vault.status(),
       window.rama.models.listCustomProviders({ user: currentUser }),
+      window.rama.models.cloudStatus(),
     ]);
     if (mRes.ok) { setModels(mRes.data); setOllamaModels(mRes.ollama || []); }
     if (pRes.ok) setPrimary(pRes.model);
     if (vRes.ok) setVaultLocked(!vRes.unlocked);
     if (cpRes.ok) setCustomProviders(cpRes.data);
+    if (csRes?.ok) setCloudStatus(csRes);
 
     const cRes = await window.rama.models.checkCredentials();
     if (cRes.ok) setCredentials(cRes.data);
@@ -351,13 +374,35 @@ export default function Models() {
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>
         {tab === 'cloud' && (
-          <div className="hud-card" style={{ overflow: 'hidden' }}>
-            {cloudModels.map(m => (
-              <ModelRow key={m.id} model={m} status={credentials[m.id]}
-                primary={m.id === primary}
-                onSetPrimary={setAsPrimary}
-                onAddKey={setAddKeyFor} />
-            ))}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {/* THREE STATES, NEVER TWO. "no key stored" and "vault locked" mean opposite things:
+                one needs a key, the other needs a password Rāma will not ask for twice. */}
+            <div className="hud-card" style={{ padding: '10px 14px', fontSize: '11px' }}>
+              <span style={{ color: 'var(--muted)', letterSpacing: '0.08em' }}>OLLAMA CLOUD — </span>
+              {cloudStatus?.present
+                ? <span style={{ color: 'var(--green)' }}>key PRESENT ({cloudStatus.source})</span>
+                : cloudStatus?.vaultUnlocked === false
+                  ? <span style={{ color: 'var(--amber)' }}>vault locked — unlock to use the stored key</span>
+                  : <span style={{ color: 'var(--amber)' }}>key ABSENT — add a key to use cloud models</span>}
+              {cloudStatus?.baseUrlOverrideRejected && (
+                <span style={{ color: 'var(--red)', marginLeft: '8px' }}>
+                  base URL override rejected — using the default
+                </span>
+              )}
+              <div style={{ color: 'var(--muted)', marginTop: '4px', fontSize: '10px' }}>
+                {cloudStatus?.baseUrl || 'https://ollama.com'} · cloud models need no Ollama install
+              </div>
+            </div>
+
+            <div className="hud-card" style={{ overflow: 'hidden' }}>
+              {cloudModels.map(m => (
+                <ModelRow key={m.id} model={m} status={credentials[m.id]}
+                  primary={m.id === primary}
+                  onSetPrimary={setAsPrimary}
+                  onAddKey={setAddKeyFor}
+                  cloudStatus={cloudStatus} />
+              ))}
+            </div>
           </div>
         )}
 
@@ -366,8 +411,11 @@ export default function Models() {
             <div className="hud-card" style={{ overflow: 'hidden' }}>
               <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
                 <div className="section-label">OLLAMA LOCAL MODELS</div>
+                {/* A master with no daemon is told the way forward at the point he discovers the
+                    problem, rather than having to find the cloud tab himself. */}
                 <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px' }}>
                   {ollamaModels.length} models detected · Ollama must be running at localhost:11434
+                  {' '}— or add an Ollama Cloud key to use cloud models with no install
                 </div>
               </div>
               {localModels.map(m => (

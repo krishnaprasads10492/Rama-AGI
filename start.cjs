@@ -495,6 +495,42 @@ function diagnose() {
     });
   }
 
+  // ── Ollama Cloud ────────────────────────────────────────────────────────────
+  // THIS STAGE RUNS BEFORE ELECTRON, SO IT CANNOT READ THE VAULT — the vault needs master's
+  // password — and Rāma reads no credential from process.env by design. So it does NOT report
+  // PRESENT or ABSENT for the credential: reporting ABSENT here would be a false negative in the
+  // normal case (key in the vault) and reporting PRESENT is impossible. An honest diagnostic says
+  // what it can see and names where the answer lives. `models:cloud-status` is the authoritative
+  // surface, because it runs where the vault is readable.
+  //
+  // This block is deliberately SYNCHRONOUS and does no I/O beyond one readFileSync. diagnose() is
+  // not async and is called un-awaited at two sites, so a daemon-reachability probe cannot live
+  // here; daemon reachability belongs to the IPC surface that can await.
+  add('Ollama Cloud base', true,
+    `${process.env.OLLAMA_CLOUD_BASE_URL || 'https://ollama.com'} (config.ollamaCloudBaseUrl wins)`);
+  add('Ollama Cloud credential', true,
+    'read only from the encrypted vault — not readable before the app starts; check Models → Cloud');
+
+  // THE ONE CREDENTIAL THING THIS STAGE CAN HONESTLY OBSERVE. loadEnv() loads .env into process.env
+  // and start.cjs spawns every child with env: { ...process.env }, so a key there is both in
+  // plaintext on disk and in five processes — and Rāma will NOT read it, so master would get the
+  // exposure with none of the benefit. This tests only that a non-empty assignment EXISTS: it never
+  // reads, prints, lengths, hashes or otherwise characterises the value, and the text below names
+  // no part of it. A WARNING and not a failure: it is master's file and his choice.
+  const envText = (() => {
+    try { return fs.readFileSync(path.join(ROOT, '.env'), 'utf8'); }
+    catch { return ''; }
+  })();
+  if (/^\s*OLLAMA_API_KEY\s*=\s*\S/m.test(envText)) {
+    add('Ollama Cloud key in .env', false,
+      'a key in .env is loaded into process.env and inherited by every child process');
+    defects.push({
+      id: 'ollama-key-in-env', severity: 'degrade',
+      detail: 'an Ollama Cloud key is assigned in .env, where Rāma does not read it',
+      fix: 'delete that line and add the key in Models → Cloud → Ollama Cloud → Add key',
+    });
+  }
+
   // ── Learned memory ──────────────────────────────────────────────────────────
   const db = loadScenarios();
   add('Scenario memory', true, `${db.scenarios.length} remembered, ${db.scenarios.filter(s => s.resolved).length} with known fixes`);

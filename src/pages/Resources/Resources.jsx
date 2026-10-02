@@ -380,6 +380,10 @@ export default function Resources() {
     }
     const res = await window.ipcRenderer?.invoke('orchestrator:submit', task);
     if (res?.ok) { emitActivity('action', `Task submitted: ${task.type} — id ${res.id}`); load(); }
+    // The `else` this never had. `aiProvider` is a free-text field, so a typo is a refusal the
+    // orchestrator now reports — and a refusal nobody renders is indistinguishable from a task
+    // that silently sits in the queue forever.
+    else { emitActivity('error', `Task refused: ${res?.error || 'unknown reason'}`); }
   };
 
   const cancelTask = async (id) => {

@@ -81,6 +81,98 @@ function touchBrowser() {
   }, 5 * 60 * 1000 + 2000);
 }
 
+/**
+ * Web search through the local browser.
+ *
+ * EXTRACTED FROM THE `browser:search` HANDLER, with no behaviour change, because an `ipcMain`
+ * handler cannot be called from main-process code and `models:search-web` needs this path as its
+ * second backend. One implementation serves both the IPC surface and the main process; the
+ * alternative — leaving this reachable only through `browser:search` — would leave a live egress
+ * OUTSIDE the classification gate that was just built to cover it.
+ *
+ * It is declared at module scope but closes over the same module-scoped `browser`/`browserCtx` the
+ * handler did, so `launchChosen`/`touchBrowser` behave identically: the extraction moves no state.
+ * The first line is still the playwright absence check.
+ *
+ * DEFAULT ENGINE IS BING, AND THAT IS A MEASURED CHOICE (Section 94).
+ *
+ * This defaulted to DuckDuckGo and would have returned zero results even with a working browser:
+ * probed through a real Edge and a real Chrome, DDG serves an empty shell — 305 bytes, no result
+ * nodes under any selector — because it blocks automated requests. Bing returned ten results
+ * through `.b_algo`, a selector already written below. Fixing only the missing browser would have
+ * produced a search that launches, succeeds, and finds nothing.
+ *
+ * DuckDuckGo stays selectable: a blocked engine may work again, and removing it would be a
+ * capability regression. It is simply no longer the default.
+ */
+async function searchWeb(query, engine = 'bing') {
+  if (!playwright) return { ok: false, error: 'playwright not installed' };
+  try {
+    // Ensure browser is up
+    if (!browser) {
+      browser    = await launchChosen();
+      browserCtx = await browser.newContext({
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+      });
+    }
+    const page = await browserCtx.newPage();
+    const urls = {
+      duckduckgo: `https://duckduckgo.com/?q=${encodeURIComponent(query)}&ia=web`,
+      bing:       `https://www.bing.com/search?q=${encodeURIComponent(query)}`,
+      google:     `https://www.google.com/search?q=${encodeURIComponent(query)}`,
+    };
+    await page.goto(urls[engine] || urls.bing, { waitUntil: 'domcontentloaded', timeout: 20000 });
+
+    // Extract results
+    const results = await page.evaluate(() => {
+      const items = [];
+      // DuckDuckGo / generic result extraction
+      const selectors = [
+        '.result__body',        // DDG
+        '.b_algo',              // Bing
+        '.g',                   // Google
+        'article',              // Generic
+      ];
+      for (const sel of selectors) {
+        const els = document.querySelectorAll(sel);
+        if (els.length > 0) {
+          els.forEach((el, i) => {
+            if (i >= 8) return;
+            const titleEl = el.querySelector('h2,h3,a');
+            const linkEl  = el.querySelector('a[href]');
+            const descEl  = el.querySelector('p,.result__snippet,.b_caption p');
+            items.push({
+              title:   titleEl?.innerText?.trim() || '',
+              url:     linkEl?.href || '',
+              snippet: descEl?.innerText?.trim() || '',
+            });
+          });
+          break;
+        }
+      }
+      return items.filter(r => r.url.startsWith('http'));
+    });
+
+    await page.close();
+    // `browser` names which one was actually driven, and zero results is reported as such rather
+    // than as success with an empty array — an engine that blocks automation looks identical to a
+    // query with no matches unless it is said out loud.
+    return {
+      ok: true,
+      query,
+      engine,
+      results,
+      browser: browserRuntime().chosen?.label ?? null,
+      note: results.length === 0
+        ? `${engine} returned no usable results — it may be blocking automated requests. `
+          + 'Try engine "bing".'
+        : null,
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 // ─── Register ────────────────────────────────────────────────────────────────
 function register(ipcMain) {
 
@@ -178,85 +270,10 @@ function register(ipcMain) {
   });
 
   // ── Search the web ────────────────────────────────────────────────────────
-  /**
-   * DEFAULT ENGINE IS BING, AND THAT IS A MEASURED CHOICE (Section 94).
-   *
-   * This defaulted to DuckDuckGo and would have returned zero results even with a working browser:
-   * probed through a real Edge and a real Chrome, DDG serves an empty shell — 305 bytes, no result
-   * nodes under any selector — because it blocks automated requests. Bing returned ten results
-   * through `.b_algo`, a selector already written below. Fixing only the missing browser would have
-   * produced a search that launches, succeeds, and finds nothing.
-   *
-   * DuckDuckGo stays selectable: a blocked engine may work again, and removing it would be a
-   * capability regression. It is simply no longer the default.
-   */
-  ipcMain.handle('browser:search', async (_e, query, engine = 'bing') => {
-    if (!playwright) return { ok: false, error: 'playwright not installed' };
-    try {
-      // Ensure browser is up
-      if (!browser) {
-        browser    = await launchChosen();
-        browserCtx = await browser.newContext({
-          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
-        });
-      }
-      const page = await browserCtx.newPage();
-      const urls = {
-        duckduckgo: `https://duckduckgo.com/?q=${encodeURIComponent(query)}&ia=web`,
-        bing:       `https://www.bing.com/search?q=${encodeURIComponent(query)}`,
-        google:     `https://www.google.com/search?q=${encodeURIComponent(query)}`,
-      };
-      await page.goto(urls[engine] || urls.bing, { waitUntil: 'domcontentloaded', timeout: 20000 });
-
-      // Extract results
-      const results = await page.evaluate(() => {
-        const items = [];
-        // DuckDuckGo / generic result extraction
-        const selectors = [
-          '.result__body',        // DDG
-          '.b_algo',              // Bing
-          '.g',                   // Google
-          'article',              // Generic
-        ];
-        for (const sel of selectors) {
-          const els = document.querySelectorAll(sel);
-          if (els.length > 0) {
-            els.forEach((el, i) => {
-              if (i >= 8) return;
-              const titleEl = el.querySelector('h2,h3,a');
-              const linkEl  = el.querySelector('a[href]');
-              const descEl  = el.querySelector('p,.result__snippet,.b_caption p');
-              items.push({
-                title:   titleEl?.innerText?.trim() || '',
-                url:     linkEl?.href || '',
-                snippet: descEl?.innerText?.trim() || '',
-              });
-            });
-            break;
-          }
-        }
-        return items.filter(r => r.url.startsWith('http'));
-      });
-
-      await page.close();
-      // `browser` names which one was actually driven, and zero results is reported as such rather
-      // than as success with an empty array — an engine that blocks automation looks identical to a
-      // query with no matches unless it is said out loud.
-      return {
-        ok: true,
-        query,
-        engine,
-        results,
-        browser: browserRuntime().chosen?.label ?? null,
-        note: results.length === 0
-          ? `${engine} returned no usable results — it may be blocking automated requests. `
-            + 'Try engine "bing".'
-          : null,
-      };
-    } catch (err) {
-      return { ok: false, error: err.message };
-    }
-  });
+  // ONE implementation, shared with main-process callers: the body is `searchWeb` above. The
+  // playwright-absent return is identical, which is the one behaviour an extraction could
+  // plausibly break and is therefore asserted.
+  ipcMain.handle('browser:search', async (_e, query, engine = 'bing') => searchWeb(query, engine));
 
   // ── Screenshot ────────────────────────────────────────────────────────────
   ipcMain.handle('browser:screenshot', async (_e, id) => {
@@ -383,4 +400,6 @@ function getBrowserPid() {
   return browser?.process()?.pid ?? null;
 }
 
-module.exports = { register, closeBrowser, getBrowserPid };
+// `searchWeb` is ADDED, nothing replaced — models:search-web needs a callable implementation and an
+// ipcMain handler is not one.
+module.exports = { register, closeBrowser, getBrowserPid, searchWeb };

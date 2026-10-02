@@ -31,6 +31,26 @@ const MODEL_REGISTRY = {
   'ollama/phi3':       { provider: 'ollama',    credKey: null,                type: 'local', ctxK: 128,  costTier: 0, caps: ['general','fast','offline'] },
 };
 
+/**
+ * Keyed Ollama Cloud models — reached at https://ollama.com/api with a Bearer token from the vault,
+ * with NO local Ollama installation.
+ *
+ * THREE DIFFERENT THINGS COEXIST HERE and the id prefix plus `provider` says which is which:
+ *   `ollama/<tag>`              the four rows above — LOCAL PULLS, credKey null, type 'local'
+ *   `ollama/<tag>-cloud`        ollamaCatalog.describeInstalled's `cloud-ollama` entries — cloud
+ *                               models reached THROUGH a signed-in local daemon
+ *   `ollama-cloud/<api-name>`   these — the keyed direct API, which needs no daemon at all
+ *
+ * A separate id namespace and not a flag, because `allModels()` is
+ * `{ ...MODEL_REGISTRY, ...discoveredOllama }` — discovery SILENTLY WINS every key collision. A
+ * keyed cloud entry named `ollama/gemma4:31b` would be overwritten the moment the daemon reported a
+ * local `gemma4:31b` pull, and a request would change path with no visible cause.
+ *
+ * Mutated in place with Object.assign, the same discipline refreshCustomProviders uses, because
+ * resourceOrchestrator holds a direct reference to this object.
+ */
+Object.assign(MODEL_REGISTRY, require('../lib/ollamaCloud.cjs').toRegistryEntries());
+
 // Task → preferred model capabilities
 const TASK_ROUTING = {
   general:    ['general'],
@@ -293,7 +313,7 @@ function register(ipcMain) {
    * which forfeits the whole point. Callers are turned on one at a time, evidence in hand — the list
    * is in Section 111. Off still costs nothing: the report is there to read.
    */
-  ipcMain.handle('models:chat', async (_e, { messages, model, taskType, stream = false,
+  ipcMain.handle('models:chat', async (_e, { messages, model, taskType, user, stream = false,
                                              requireAttribution = false, sources = [], reflexes = {} } = {}) => {
     const targetModel = model || selectModel(taskType || 'general');
 
@@ -320,19 +340,128 @@ function register(ipcMain) {
     };
 
     try {
-      return gated(await chatCompletion(messages, targetModel));
+      return gated(await chatCompletion(messages, targetModel, user));
     } catch (err) {
-      // Try fallback chain
+      // ── ABSENT IS NOT BROKEN ──────────────────────────────────────────────
+      // This chain used to be `catch { continue; }`. It logged NOTHING, a missing credential was
+      // indistinguishable from a 500, a different model answered carrying only `fallbackFrom`, and
+      // when nothing else was available it returned `All models failed. Last error: …` — which is
+      // ABSENT reported as BROKEN, and a substitution reported silently. Both are things the brief
+      // forbids in as many words, and on a machine with no key and no daemon it is the normal case.
+      const unconfigured = [];
+      const failures     = [];
+      const note = (id, e) => (e.unconfigured
+        ? unconfigured.push({ model: id, reason: e.message, remedy: e.remedy ?? null })
+        : failures.push({ model: id, reason: e.message }));
+
+      note(targetModel, err);
+      // `unconfigured` is not a failure of a model, so it is not logged as one.
+      if (!err.unconfigured) console.warn(`[models] ${targetModel} failed: ${err.message}`);
+
       for (const fallback of FALLBACK_CHAIN) {
         if (fallback === targetModel) continue;
         if (!checkAvailable(fallback))  continue;
         try {
-          const result = await chatCompletion(messages, fallback);
-          return gated(result, { model: fallback, fallbackFrom: targetModel });
-        } catch { continue; }
+          const result = await chatCompletion(messages, fallback, user);
+          // The substitution is DECLARED, and so is its cause: `unconfigured` rides alongside
+          // `fallbackFrom` rather than being discarded.
+          return gated(result, { model: fallback, fallbackFrom: targetModel, unconfigured });
+        } catch (e) {
+          note(fallback, e);
+          if (!e.unconfigured) console.warn(`[models] ${fallback} failed: ${e.message}`);
+        }
       }
-      return { ok: false, error: `All models failed. Last error: ${err.message}` };
+
+      if (unconfigured.length && !failures.length) {
+        return { ok: false, unconfigured, error: unconfigured[0].reason,
+                 remedy: unconfigured[0].remedy };
+      }
+      return { ok: false, error: `All models failed. Last error: ${err.message}`,
+               unconfigured, failures };
     }
+  });
+
+  /**
+   * Is the keyed cloud path configured, and if not, why — the authoritative answer, because unlike
+   * `--diagnose` this runs in a process that can read the vault.
+   *
+   * Returns a SUBSET of `ollamaCloud.status()`'s frozen key set and never a parallel shape, so there
+   * is one definition of what may be said about the credential and the renderer surface is provably
+   * narrower than it. `baseUrl` is a host, not a secret. The key value never reaches the renderer.
+   */
+  ipcMain.handle('models:cloud-status', async () => {
+    const s = require('../lib/ollamaCloud.cjs').status();
+    return {
+      ok: true,
+      present:                 s.present,
+      source:                  s.source,
+      vaultUnlocked:           s.vaultUnlocked,
+      baseUrl:                 s.baseUrl,
+      baseUrlOverrideRejected: s.baseUrlOverrideRejected,
+      reason:                  s.reason,
+      remedy:                  s.remedy,
+    };
+  });
+
+  /** What the keyed endpoint says it serves. REPORT-ONLY — it never writes MODEL_REGISTRY. */
+  ipcMain.handle('models:cloud-list', async (_e, { user } = {}) => {
+    return require('../lib/ollamaCloud.cjs').listModels({ user });
+  });
+
+  /**
+   * Web search, with the egress gate ABOVE backend selection.
+   *
+   * THE CLASSIFICATION GATE RUNS ONCE, FOR EVERY BACKEND, AND A REFUSAL IS TERMINAL. An earlier
+   * design ran the gate inside the cloud transport and put the Playwright path directly beneath it
+   * as a fallback — so a query refused as private for ollama.com fell through to bing.com. bing.com
+   * is not less of a network than ollama.com. A refusal here never falls through to a different way
+   * of sending the same bytes.
+   *
+   * The channel is `models:search-web` and not `search:web` because electron/genome.cjs declares
+   * this gene with `channels: ['models:']`, and a handler outside its gene's declared prefix would
+   * make Rāma's self-model stop matching its IPC surface with nothing turning red.
+   *
+   * Gated on `browser.search` (tier 3), the capability TOOL_REGISTRY['web.search'] already declares.
+   * The cloud backend is additionally gated inside webSearch() itself.
+   */
+  ipcMain.handle('models:search-web', async (_e, { user, query, maxResults = 5, engine = 'bing' } = {}) => {
+    const capability = require('../lib/capability.cjs');
+    const denied = capability.deny(user, 'browser.search');
+    if (denied) return denied;
+
+    const egressBoundary = require('../lib/egressBoundary.cjs');
+    const gate = egressBoundary.assemble({ kind: 'search', query, maxResults });
+    if (!gate.ok) {
+      return { ok: false, refused: true, level: gate.level, reason: gate.reason, where: gate.where };
+    }
+
+    const cloud = require('../lib/ollamaCloud.cjs');
+    const order = Array.isArray(searchBackendOrder()) ? searchBackendOrder() : ['ollama-cloud', 'playwright'];
+    const tried = [];
+
+    for (const backend of order) {
+      if (backend === 'ollama-cloud') {
+        if (!cloud.isConfigured()) { tried.push({ backend, skipped: 'no Ollama Cloud key in the vault' }); continue; }
+        const res = await cloud.webSearch({ query, maxResults, user });
+        if (res.ok) return { ...res, backend: 'ollama-cloud', tried };
+        tried.push({ backend, reason: res.reason ?? res.error ?? 'failed' });
+        continue;
+      }
+      if (backend === 'playwright') {
+        try {
+          const res = await require('./browserEngine.cjs').searchWeb(gate.body.query, engine);
+          if (res.ok) return { ...res, backend: 'playwright', tried };
+          tried.push({ backend, reason: res.error ?? 'failed' });
+        } catch (e) { tried.push({ backend, reason: e.message }); }
+        continue;
+      }
+      tried.push({ backend, reason: 'unknown backend name' });
+    }
+
+    return {
+      ok: false, error: 'no search backend is available', tried,
+      remedy: 'add an Ollama Cloud key in Models → Cloud, or install playwright for the local browser path',
+    };
   });
 
   // ── Pull Ollama model ─────────────────────────────────────────────────────
@@ -466,7 +595,46 @@ function selectModel(taskType) {
     .sort((a, b) => (a.costTier - b.costTier) || (b.paramsB ?? 0) - (a.paramsB ?? 0));
   if (discovered.length) return discovered[0].id;
 
+  // ── LAST RESORT: the keyed cloud rows ─────────────────────────────────────
+  // Without this pass no cloud model is REACHABLE at all. The four passes above are roles over
+  // discoveredOllama, an offline pass, FALLBACK_CHAIN (a hardcoded seven-id array with no cloud
+  // entry) and discoveredOllama again — so on master's target machine, 16GB with no Ollama and no
+  // OpenAI key, `models:chat` with no explicit model resolved to `primaryModel` ('gpt-4o') and died
+  // in the fallback chain. The keyed rows existed and could not be selected.
+  //
+  // LAST, deliberately: a local pull still wins, because the free cloud tier allows one concurrent
+  // request and spends master's allowance. Largest-first within the cloud rows, because paramsB is
+  // the only quality signal this path has.
+  //
+  // `checkAvailable` ends `!!getCredential('OLLAMA_API_KEY')` for these rows, so this pass is inert
+  // when no key is stored AND inert when the vault is locked — which is correct: an unreachable
+  // model must not be selected.
+  //
+  // This does NOT feed the role engine. Role selection still passes only
+  // `Object.values(discoveredOllama)`, so a cloud row is selectable here and still cannot fill a
+  // role — and modelRoles' sensitive-role gate is asserted ahead of that path, on purpose.
+  const cloud = Object.entries(allModels())
+    .filter(([id, m]) => m.provider === 'ollama-cloud'
+                      && Array.isArray(m.caps) && caps.some(c => m.caps.includes(c))
+                      && checkAvailable(id))
+    .sort((a, b) => (b[1].paramsB ?? 0) - (a[1].paramsB ?? 0));
+  if (cloud.length) return cloud[0][0];
+
   return primaryModel;
+}
+
+/**
+ * Search backend order. Cloud first by default — not a preference but a measured choice: on a
+ * machine with no `node_modules` and therefore no Playwright, the local browser path cannot run at
+ * all. Master may pin the order the other way to conserve credit; both named backends are genuinely
+ * invocable, which is why `browserEngine.searchWeb` is exported.
+ */
+function searchBackendOrder() {
+  try {
+    const v = require('../dataStore.cjs').get('config', 'searchBackendOrder');
+    if (Array.isArray(v) && v.length) return v;
+  } catch { /* no store, or no setting — the default below is the one that works everywhere */ }
+  return ['ollama-cloud', 'playwright'];
 }
 
 function checkAvailable(modelId) {
@@ -534,7 +702,13 @@ function modelInfo(modelId) {
 }
 
 // ─── Chat completion per provider ─────────────────────────────────────────────
-async function chatCompletion(messages, modelId) {
+/**
+ * `user` is the third parameter, default `undefined`, and it is passed ONLY to `ollamaCloudChat`.
+ * Every other provider function is untouched, so a caller that omits it keeps working for the five
+ * non-Ollama providers and the local daemon, and a cloud call without a user gets `gateError`
+ * rather than a silent ungated cloud request — which is the right way round.
+ */
+async function chatCompletion(messages, modelId, user) {
   const info = modelInfo(modelId);
   if (!info) throw new Error(`Unknown model: ${modelId}`);
 
@@ -545,9 +719,35 @@ async function chatCompletion(messages, modelId) {
     case 'mistral':   return mistralChat(messages, modelId, info);
     case 'groq':      return groqChat(messages, modelId, info);
     case 'ollama':    return ollamaChat(messages, modelId.replace('ollama/', ''));
+    // FOUR arguments. `user` is the one that decides whether the cloud gate RUNS or merely STANDS
+    // SHUT: ollamaCloudChat declares it and the transport refuses `undefined` with gateError, so
+    // passing three here would make EVERY cloud request fail while looking like a policy decision.
+    case 'ollama-cloud': return ollamaCloudChat(messages, modelId, info, user);
     case 'custom':    return customChat(messages, modelId, info);
     default:          throw new Error(`Unsupported provider: ${info.provider}`);
   }
+}
+
+/**
+ * The keyed cloud path. Throws on failure, like every sibling, so the fallback chain's control flow
+ * is unchanged in shape — but it carries TWO extra flags on the thrown error, and both matter:
+ *
+ *   `unconfigured` — so the chain can tell a missing credential from a 500 and report ABSENT rather
+ *                    than BROKEN;
+ *   `remedy`       — so the one actionable sentence survives the throw. Without it the chain can
+ *                    only say that something failed.
+ */
+async function ollamaCloudChat(messages, modelId, info, user) {
+  const cloud = require('../lib/ollamaCloud.cjs');
+  const res = await cloud.chat({ messages, apiModel: info.apiModel, user, timeout: 120000 });
+
+  if (res.unconfigured) {
+    const e = new Error(res.reason); e.unconfigured = true; e.remedy = res.remedy; throw e;
+  }
+  if (res.gateError) { const e = new Error(res.reason); e.gateError = true; throw e; }
+  if (!res.ok) throw new Error(res.error || res.reason || 'Ollama Cloud request failed');
+
+  return { content: res.content, usage: res.usage, path: 'cloud', endpoint: res.endpoint };
 }
 
 /**
@@ -654,12 +854,17 @@ async function groqChat(messages, modelId, info) {
   return { content: parsed.choices[0].message.content };
 }
 
+/**
+ * The LOCAL daemon path, untouched by the keyed cloud work above — `localhost:11434` needs no auth
+ * at all and never carries a credential. `path: 'local'` is the only addition, so that WHICH path
+ * served a request is visible to master rather than inferred from a model name.
+ */
 async function ollamaChat(messages, modelName) {
   const body = JSON.stringify({ model: modelName, messages, stream: false });
   const data = await httpPost('localhost', 11434, '/api/chat', body);
   const parsed = JSON.parse(data);
   if (parsed.error) throw new Error(parsed.error);
-  return { content: parsed.message?.content || '' };
+  return { content: parsed.message?.content || '', path: 'local' };
 }
 
 // ─── Credential need analysis ─────────────────────────────────────────────────
@@ -755,4 +960,11 @@ function credentialStatus() {
 module.exports = {
   register, selectModel, chatCompletion, checkAvailable, credentialStatus,
   allModels, modelInfo, MODEL_REGISTRY,
+  // FALLBACK_CHAIN is destructured by resourceOrchestrator.selectOptimalModel out of a require that
+  // SUCCEEDS — so the catch default never applied, the binding was `undefined`, and
+  // `for (const id of undefined)` threw TypeError on EVERY call to that function. Exporting it is
+  // strictly additive and it fixes the caller. The CONTENTS are unchanged: it gains an export, not
+  // an entry, so master's configured preference order still wins where it applies and the keyed
+  // cloud pass in selectModel stays the last resort.
+  FALLBACK_CHAIN,
 };

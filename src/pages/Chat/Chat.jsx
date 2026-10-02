@@ -221,15 +221,20 @@ export default function Chat() {
         provider,
         model,
         sessionId: activeSessionId,
+        user:      currentUser,
       });
 
       if (res.ok && res.message) {
         addMessage({ ...res.message, id: Date.now() });
         recordInteraction({ prompt: text, response: res.message.content, model, satisfied: null });
       } else {
+        // `remedy` is the one actionable sentence an absent credential produces. Without this
+        // branch it travels all the way from the transport to here and is thrown away, so master
+        // reads "something failed" when the truth is "add a key in Models → Cloud".
         addMessage({
           role:    'assistant',
-          content: `[Error] ${res.error || 'No response from Rāma server. Is it running?'}`,
+          content: `[Error] ${res.error || 'No response from Rāma server. Is it running?'}`
+            + (res.remedy ? `\n\n${res.remedy}` : ''),
           id:      Date.now(),
         });
       }
@@ -242,7 +247,7 @@ export default function Chat() {
     } finally {
       setThinking(false);
     }
-  }, [input, isThinking, messages, provider, model, activeSessionId, addMessage, setThinking]);
+  }, [input, isThinking, messages, provider, model, activeSessionId, currentUser, addMessage, setThinking]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
