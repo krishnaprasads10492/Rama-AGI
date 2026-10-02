@@ -1931,3 +1931,142 @@ row names the findings in `docs/research/design-review.json` that must be resolv
 
 **The MEDIUM and NIT findings are not discharged either.** The design records them as *Addressed*,
 but "addressed in the design" is not "built": only the three items above exist in code.
+
+---
+
+## READY TO PASTE INTO `RAMA_AGI_MASTER_SPEC.md`
+
+**This branch does not edit the spec.** Round 2 of the build wrote the record in as Section 126 and
+ledger row 146; both numbers were claimed by other work on `dev` while this tranche was in review
+(Section 126 is *The scorecard that measured nothing*, row 146 its ledger entry), so the spec edit was
+dropped when the branch was rebased and the two blocks below carry the next free numbers instead —
+**Section 129** and **row 149**, 128 being reserved by the in-flight autonomy design and 130/150 by the
+context-store work. The in-code citations in `chartEmptyState.js`, `PriceChart.jsx`, `StockMind.jsx`,
+`PopoutPanel.jsx` and `verifyChartEmptyState.mjs` already read **Section 129**, so pasting these two
+blocks is all that is left; nothing in the code changes.
+
+### Block 1 — the spec section, to be appended after Section 128
+
+```markdown
+## SECTION 129 — The empty chart stops saying "nothing stored"
+
+Section 123.6 decision 8 deferred data-coverage shading one tranche for a stated reason: **`coverage`
+reached one of three `PriceChart` call sites**, and a band drawn in one place of three is a half-feature.
+Threading it was named as the first item of the next tranche. This is that item, plus the two defects
+that threading exposed. **The fetch queue, the gap-kind taxonomy and the fill affordance from
+`docs/research/FETCH_AND_STORE.md` are NOT built here** — the design went through three review rounds
+without converging because it covered six subsystems at once, and the six remaining HIGH findings all
+fall in the deferred half. They are recorded under `## DEFERRED BY THE ORCHESTRATOR` in that document,
+each with the finding ids that must be answered before it is built.
+
+### 129.1 The defect, and why a renderer may not compose this sentence
+
+**An empty canvas said `No 30m bars stored for NIFTY50 over 1Y.` while 400 bars sat on disk.** The store
+had them; master's selected dates simply did not overlap any of them. The sentence was false, and it was
+false in the way that costs most — it blamed the store, so the obvious next action was to fetch, and the
+button offered exactly that: `⇩ Fetch & store them`. **Fetching cannot move bars into a window the
+provider does not serve**, so the one affordance on screen could not help.
+
+**The engine was already sending the true sentence.** `ai_backend/main.py`'s `matched == 0` branch
+(lines 638-645) returns *"N 30m bars are stored, but none fall between X and Y. Widen the dates, or fetch
+more history."* It arrives as `res.data.note`. The renderer talked over it.
+
+### 129.2 Decisions taken in this section
+
+1. **FOUR STATES, DECIDED OUTSIDE THE RENDER.** `src/pages/StockMind/chartEmptyState.js` exports a pure
+   `emptyState()` returning `{kind, headline, composed, remedy, detail, hint, tail, action}` for
+   `fetching` · `failed` · `nothing-in-window` · `nothing-yet`. **The sentence was wrong for three
+   releases because it was composed inside JSX, where nothing could call it.** No callbacks in and no
+   JSX out: an action is an `id` the renderer binds to a handler it already has.
+2. **PRECEDENCE: `bars > 0` → nothing at all, then `busy`, then `failure`, then `stored > 0`, then
+   nothing-yet.** `busy` outranks a stale failure because advising a fetch while one is in flight is
+   advice to do the thing already happening. **`failure` outranks every claim about the store**, because
+   `coverage` on a failed reply is whatever the last successful reply left behind — a description of a
+   moment that has passed.
+3. **THE ROUTE'S NOTE IS USED VERBATIM, and `composed` says whose sentence it is.** The route names the
+   counts and both dates; nothing composable in the renderer is truer. The fallback for a missing note
+   states the count and that the window is empty **without claiming a cause** — no "widen", no
+   "provider", no "fetch". The note is never suppressed when the renderer has nothing truer to say.
+4. **THE ACTION MUST BE ONE THAT CAN HELP.** `nothing-in-window` offers `✕ clear dates`, never a fetch.
+   `nothing-yet` keeps the fetch, which is the one state it was always right for.
+5. **AN UNKNOWN END IS LEFT UNSAID.** The detail line first read `stored ${first} → ${last || 'now'}`,
+   and the `matched == 0` branch — the only branch this state is reached through — sends `storedFirstBar`
+   and **no** `storedLastBar`. So the overlay printed `stored 2019-04-01 → now` beneath a headline saying
+   nothing falls in a 2024 window. **If the store reached now, that window would have matched; the false
+   half was the one telling master where to aim.** An absent end now renders `stored from <first>` — no
+   arrow, no right-hand side. Reading a missing value as `now` was the right instinct ("never render
+   undefined") applied to the wrong half of the string.
+6. **`meta` and `syncInfo` ARE NOT PROPS.** The design specified an empty state requiring both;
+   `PriceChart` is never given either, and inventing them would have been a prop threaded for a reader
+   that does not exist. Only what the reply actually carries is threaded: `stored`, `storedFirstBar`,
+   `storedLastBar`, `note` from `/ohlcv`, and `error`, `diagnosis.{reason,remedy}`, `detail`,
+   `stderrTail` from the `ensureBackendRunning` gate object that `electron/ipc/marketIntel.cjs` returns
+   verbatim. The suite asserts the two non-props stay absent.
+7. **EVERY FAILURE MODE REACHES EVERY CHART, carrying the reason AND the remedy.** The bridge already
+   preserved the diagnosis and it surfaced on one chart for one mode; all four modes
+   `verifyEngineDiagnosis.cjs` distinguishes — a bound port, a version mismatch, a live-but-silent
+   engine, an unrecognised exit code — plus a route-level `error` alone and the pop-out's thrown-error
+   path now land as named failures. **Master's Python engine has never completed a run, so this is the
+   state he is actually in.** A generic failure where a named cause exists is the defect.
+8. **ONE REPORT OF ONE FAILURE.** Both pages keep a message band above the canvas that predates the
+   overlay, and both set it from the same reply. Ungated, master saw the reason, the collapsed `engine
+   output` and the knocked URL twice. Both bands are now gated on `bars.length > 0`, so a band covers
+   only what the overlay cannot: a message arriving while the previous fetch's candles are still drawn —
+   which is also where the truncation note lands.
+9. **THE POP-OUT SENDS NO DATES, and that is asserted rather than assumed.** `clear-dates` renders only
+   when `onDates` exists, and the pop-out passes `onFetch` alone — so a `nothing-in-window` state there
+   would advise widening the dates with no control to widen them. It cannot arise today because the
+   pop-out calls `limitForDates(interval, null, null)`, and the suite now fails if dates are threaded
+   there, so whoever does it supplies the action first.
+10. **THE CALL SITES ARE DISCOVERED, NOT COUNTED.** The threading assertions scan every `.jsx` under
+    `src/pages/StockMind` for `<PriceChart`, slice each element and require all three props on each, and
+    match attribute names rather than whole expressions. A hardcoded total of three would have left a
+    fourth chart in a new file green while reintroducing exactly this defect.
+
+### 129.3 Verified
+
+`scripts/verifyChartEmptyState.mjs`, **96 assertions, 0 failures** (`verify:empty-state`, **appended** to
+the `verify` chain after the sessions suite — appended, never reordered, per I11). The three assertions
+covering decision 5 were **demonstrated red** by restoring the `→ now` expression and then green on
+restore. **Measured in the MAIN workspace after the branch was rebased onto `dev` and `dev`
+fast-forwarded to it: `npm run verify` runs 27 scripts, 26 of them reporting counts, at 2,541
+assertions and 0 failures; `npx vite build` succeeds in 25.09s** (`StockMind` chunk 99.36 kB / 28.85 kB
+gzipped), **so unlike the last four chart sections this one is not reasoning about the bundle — it was
+built.** `verifyChartTime.mjs` holds at **197**, `verifyChartDrawings` 232, `verifyChartSessions` 109,
+`verifyIndicators` 267, `verifyTimeframes` 123, `verifyEngineDiagnosis` 34, `verifyGlossary` 48,
+`verifyModelRoles` 87; `verifyInvariants` 139 with all 17 rows enforced and its one `HELD BY HAND` row
+for I15 (Section 124 §9.1's open question to master, not a product of this work), `verifyLoyaltyTripwire`
+12 — the loyalty core byte-for-byte what master approved; `auditRenderer` clean at 79 files and 365 IPC
+channels. No `.cjs` touched, no dependency added, no protected file touched.
+
+### 129.4 Not verified
+
+**Nothing was seen on a screen.** The Python engine still has never completed a run here, so the
+`matched == 0` reply is reproduced from the route's source and the gate object from
+`verifyEngineDiagnosis`'s fixtures rather than observed over IPC; `nothing-in-window` has therefore never
+been exercised end to end, because exercising it needs a store with bars and a window that misses them.
+**The build proves the bundle compiles; it does not prove a single pixel.** There is no renderer test
+harness in this project, so the overlay's markup is asserted only by source-level regex — a binding
+exists, not that it renders — and colour, wrapping of a long remedy, and whether the collapsed
+`<details>` fits a 260px workspace panel are all unverified. Master's next run is the test of all three
+items.
+
+### 129.5 Next
+
+The deferred half, in the order its findings must be answered: the **fetch queue** (HIGH 1 the
+unspecified dispatcher, HIGH 2 `conflicts()` collapsing twelve windows into one, HIGH 3 key ambiguity on
+cancel-then-retry), then **gap kinds and the fill affordance** (HIGH 6 the retention clamp not applied to
+fill, and hole/beyond-cap overlapping with no precedence rule), then lazy paging and the older-history
+prompt, then `describeRequest()` and the request-contract strip. Three NITs from the approving review are
+open and recorded in `docs/research/build-review.json`: the composed `nothing-in-window` fallback still
+says "inside the selected dates" in a state only reachable if the renderer discarded bars the reply did
+carry; the empty-store note is superseded rather than shown, which is a stronger claim than decision 3
+makes; and the failure overlay offers `↻ Try again` on a capability denial, where `stockmind.view` is
+absent and no retry can succeed.
+```
+
+### Block 2 — the Section 28 ledger row, to be appended after row 150
+
+```markdown
+| 149 | The empty chart stops saying "nothing stored" — `coverage` to all three charts, the route's own sentence, the engine's diagnosis everywhere | done | Section 129. Row 143's own next step (Section 123.6 decision 8): **`coverage` reached ONE of three `PriceChart` call sites**, so two charts could not bound their date pickers and could only ever say "nothing stored". Threading it exposed two defects worse than the missing band. **(1) A FALSE HEADLINE ON A FULL STORE.** `No 30m bars stored for NIFTY50 over 1Y.` printed with **400 bars on disk** — master's dates simply did not overlap them — and the only button offered `⇩ Fetch & store them`, which **cannot move bars into a window the provider does not serve**. The engine was already sending the true sentence (`ai_backend/main.py` 638-645, *"N bars are stored, but none fall between X and Y…"*), it arrives as `res.data.note`, and the renderer talked over it. Now four states decided by a pure `src/pages/StockMind/chartEmptyState.js` — `fetching` · `failed` · `nothing-in-window` · `nothing-yet` — because **the sentence was wrong for three releases precisely because it was composed inside JSX where nothing could call it.** Precedence `bars > 0` → nothing, `busy`, `failure`, `stored > 0`, nothing-yet; **a failed reply outranks any claim about the store**, since `coverage` on a failure describes a moment that has passed. **(2) A FALSE DETAIL REPLACED THE FALSE HEADLINE and was caught in review:** the line read `stored ${first} → ${last || 'now'}` and the `matched == 0` branch — the only branch that state is reached through — sends `storedFirstBar` and **no** `storedLastBar`, so the overlay printed `stored 2019-04-01 → now` under a headline saying nothing falls in a 2024 window. **If the store reached now, that window would have matched.** An unknown end is now left unsaid: `stored from <first>`, no arrow. **(3) THE ENGINE'S DIAGNOSIS REACHES EVERY CHART AND EVERY MODE** — the bridge already returned the gate object verbatim with reason, remedy, detail and `stderrTail`, and it surfaced on one chart for one mode. **Master's engine has never completed a run, so this is the state he is actually in.** Also: both message bands gated on `bars.length > 0`, because ungated the chart tab reported one failure twice with two copies of the collapsed `engine output`; `meta`/`syncInfo` deliberately NOT invented as props (the design assumed them, `PriceChart` is never given either); the pop-out asserted to send no dates, so `clear-dates` cannot be advised where there is no control for it; and the threading assertions **discover** call sites by scanning `src/pages/StockMind/*.jsx` rather than counting three, so a fourth chart in a new file cannot pass. **PROCESS, recorded because it will recur: this row and Section 129 were written as 146 and 126, and `dev` took both numbers while the tranche was in review — the spec edit was DROPPED at the rebase in favour of `dev` and renumbered here, which is why `RAMA_AGI_MASTER_SPEC.md` is the one file this branch does not touch. Three concurrent workflows editing the most contended file in the project means a section number reserved at the start of a tranche is not reserved at the end of it.** **VERIFIED: `verifyChartEmptyState.mjs` 96 assertions, 0 failures**, three of them demonstrated red by restoring the `→ now` expression; `verifyChartTime.mjs` unmoved at **197**; and — unlike rows 140-143, every one of which could only reason about the bundle — **MEASURED IN THE MAIN WORKSPACE AFTER THE MERGE: `npm run verify` 27 scripts / 26 reporting suites / 2,541 assertions / 0 failures, and `npx vite build` GREEN IN 25.09s** (`StockMind` chunk 99.36 kB, 28.85 kB gzipped), with `verifyInvariants` 139 (all 17 rows enforced, one `HELD BY HAND` row for I15 which is Section 124 §9.1's standing question to master), `verifyLoyaltyTripwire` 12 ALL PASS, and `auditRenderer` clean at 79 files / 365 IPC channels. The review that approved this (`docs/research/build-review.json`, verdict APPROVED) re-ran the chain itself rather than trusting the recorded numbers. **NOT VERIFIED: nothing seen on a screen** — the build proves the bundle compiles and proves no pixel; there is no renderer test harness, so the overlay's markup is asserted only by source-level regex, and colour, long-remedy wrapping and whether the collapsed `<details>` fits a 260px workspace panel are all unchecked. **The Python engine still has never completed a run here**, so the `matched == 0` reply is read off the route's source rather than observed and `nothing-in-window` has never been exercised end to end. **THREE NITS LEFT OPEN BY THE APPROVING REVIEW, each a sentence that is true today only because of a path the route cannot currently produce:** the composed `nothing-in-window` fallback still claims "inside the selected dates" in the one state where bars arrived and the renderer discarded them; the empty-store note is superseded rather than shown, which decision 3's wording overstates; and the overlay offers `↻ Try again` on a `stockmind.view` capability denial, where the overlay's fetch button is the one chart control not gated on the capability and no retry can ever succeed. **NEXT, deliberately deferred by the orchestrator** (recorded under `## DEFERRED BY THE ORCHESTRATOR` in `docs/research/FETCH_AND_STORE.md` with the blocking finding ids): the **fetch queue** — resolve HIGH 1 (unspecified dispatcher), HIGH 2 (`conflicts()` collapsing twelve windows into one) and HIGH 3 (key ambiguity on cancel-then-retry) in the design first; then **gap kinds and the fill affordance** — resolve HIGH 6 (the retention clamp not applied to fill; hole/beyond-cap overlap with no precedence rule); then lazy paging and the older-history prompt; then `describeRequest()` and the request-contract strip; and the three NITs above, the first of which wants the raw reply bar count passed into `emptyState` beside `candles.length` so "arrived" and "drawn" stop being the same number. |
+```
