@@ -392,6 +392,85 @@ const hasLimit = (m, frag) => m.limits.some(l => l.what.includes(frag) || l.why.
         .map(g => `${g.id}→${g.cap}`).join(', '));
   }
 
+  // ── The renderer may not keep a second, invented self-assessment (Section 126) ──────────────
+  //
+  // `src/services/ramaCore.js` used to export CAPABILITY_AXES: ten hardcoded integers, including
+  // `generality: 8` for a system measured as Narrow and `memory: 6` labelled "4-layer persistent"
+  // for a store that keeps lengths in sessionStorage. `RamaMind.jsx` rendered their geometric mean
+  // as an "AAI Index".
+  //
+  // THE POINT IS NOT THAT THE NUMBERS WERE WRONG. It is that this module exists so that Rāma's
+  // account of itself carries a source per field, and a parallel scorecard with no probe behind it
+  // silently outranked it on the one screen master would look at. These assertions are what stop a
+  // later session reinstating a score because a page looked empty without one.
+  {
+    console.log('\n  no invented self-assessment anywhere in the renderer');
+    const fs = require('fs');
+    const path = require('path');
+    const root = path.resolve(__dirname, '..');
+
+    const readShipped = (dir, out = []) => {
+      let entries = [];
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+      for (const e of entries) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) { readShipped(full, out); continue; }
+        if (!/\.(js|jsx)$/.test(e.name)) continue;
+        out.push({ rel: path.relative(root, full).split(path.sep).join('/'),
+          text: fs.readFileSync(full, 'utf8') });
+      }
+      return out;
+    };
+    const shipped = readShipped(path.join(root, 'src'));
+    check('there are renderer files to scan', shipped.length > 20, shipped.length);
+
+    // Comments are stripped so this file's own explanation of the defect is not mistaken for it.
+    const codeOf = (t) => t.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+
+    const axes = shipped.filter((f) => /\bCAPABILITY_AXES\b/.test(codeOf(f.text)));
+    check('CAPABILITY_AXES is not declared or imported in any renderer module',
+      axes.length === 0, axes.map((f) => f.rel).join(', '));
+
+    const aai = shipped.filter((f) => /AAI[ _]?Index|aaiScore/i.test(codeOf(f.text)));
+    check('no AAI Index is computed or rendered', aai.length === 0, aai.map((f) => f.rel).join(', '));
+
+    // The general shape, so the next version cannot simply be renamed: a hardcoded capability score.
+    const scored = shipped.filter((f) => /\bscore:\s*\d+\s*,\s*desc:/.test(codeOf(f.text)));
+    check('no module ships a literal {score, desc} capability table',
+      scored.length === 0, scored.map((f) => f.rel).join(', '));
+
+    const mind = shipped.find((f) => f.rel.endsWith('pages/RamaMind/RamaMind.jsx'));
+    check('RamaMind.jsx exists', !!mind);
+    if (mind) {
+      const code = codeOf(mind.text);
+      check('it reads the measured account instead', /getSelfModel\(/.test(code));
+      check('and renders the DERIVED LIMITS, which is the half that makes it honest',
+        /limits/.test(code) && /fixable/.test(code));
+      check('an unmeasured field renders as "not measured", never as a number or a zero',
+        /not measured/.test(mind.text));
+      check('loyalty is shown as the attestation, not as a score',
+        /id\.loyalty/.test(code) && !/loyalty[\s\S]{0,40}\/\s*10/.test(code));
+      // CODE view, not raw: the file's own header explains the defect by name, and a check that
+      // cannot tell the heading from the comment recording its removal would forbid the comment.
+      check('the page no longer calls itself an AGI consciousness dashboard',
+        !/AGI Consciousness Dashboard/i.test(code));
+      check('and a capability-bar component is gone rather than left unused',
+        !/function CapabilityBar/.test(code));
+    }
+
+    const core = shipped.find((f) => f.rel.endsWith('services/ramaCore.js'));
+    check('ramaCore.js exists', !!core);
+    if (core) {
+      const code = codeOf(core.text);
+      check('getRamaStatus no longer returns a capabilities block',
+        !/capabilities:\s*CAPABILITY_AXES/.test(code));
+      check('and it exposes the measured account instead',
+        /export async function getSelfModel/.test(code));
+      check('which keeps "nothing to ask" apart from "you may not ask"',
+        /unavailable/.test(code) && /reason/.test(code));
+    }
+  }
+
   console.log(`\n  ${pass} passed, ${fail} failed\n`);
   process.exit(fail ? 1 : 0);
 })();

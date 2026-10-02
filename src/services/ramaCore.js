@@ -1,13 +1,17 @@
 /**
- * ramaCore.js — The cognitive core of Rāma AGI.
+ * ramaCore.js — the renderer-side cognitive scaffolding: memory, planning, a world snapshot,
+ * proactive triggers and self-revision insights.
  *
- * Implements all 10 capability axes from research:
- * Autonomy · Generality · Planning · Memory · Tool Economy ·
- * Self-Revision · Coordination · World-Model · Proactivity · Loyalty
+ * IT NAMES TEN AXES FROM THE LITERATURE AND IMPLEMENTS SOME OF THEM TO SOME DEGREE, which is a
+ * different sentence from the one that used to be here ("Implements all 10 capability axes"). The
+ * difference is the whole point of Section 126: the axes were an agenda read off papers, the
+ * implementation is partial, and the module cannot be the judge of how partial. `selfModel.cjs`
+ * measures; this file provides.
  *
- * Sources:
+ * Design sources, which remain the right references for the SHAPE even where the depth is not there:
  * - "Operational Kardashev-Style Scale for Autonomous AI" (arxiv 2511.13411)
- * - CoALA Framework (Princeton 2023) — 4 memory types
+ * - CoALA Framework (Princeton 2023) — 4 memory types. NOTE: working memory is in-process and the
+ *   other three are session-scoped here; the durable store they assume does not exist yet.
  * - Proactive Agent research (arxiv 2605.25971, 2605.14678)
  */
 
@@ -15,20 +19,73 @@ import { can } from '@services/accessControl.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
-// ─── AXIS 1: Capability Index ─────────────────────────────────────────────────
-// Tracks Rāma's current capability level on each axis (0–10)
-export const CAPABILITY_AXES = {
-  autonomy:      { label: 'Autonomy',        score: 7, desc: 'Acts without prompting' },
-  generality:    { label: 'Generality',      score: 8, desc: 'Any domain, any task' },
-  planning:      { label: 'Planning',        score: 7, desc: 'Multi-step, long-horizon' },
-  memory:        { label: 'Memory',          score: 6, desc: '4-layer persistent memory' },
-  toolEconomy:   { label: 'Tool Economy',    score: 8, desc: 'Routes to optimal tool/model' },
-  selfRevision:  { label: 'Self-Revision',   score: 5, desc: 'Learns from interactions' },
-  coordination:  { label: 'Coordination',    score: 8, desc: 'Multi-agent orchestration' },
-  worldModel:    { label: 'World Model',     score: 6, desc: 'Master context awareness' },
-  proactivity:   { label: 'Proactivity',     score: 6, desc: 'Acts before asked' },
-  loyalty:       { label: 'Loyalty',         score: 10, desc: 'Master-first always' },
-};
+/**
+ * ─── WHERE THE CAPABILITY SCORES WENT (Section 126) ──────────────────────────────────────────────
+ *
+ * `CAPABILITY_AXES` used to live here: ten hardcoded integers — `generality: 8` ("Any domain, any
+ * task"), `memory: 6` ("4-layer persistent memory"), `loyalty: 10` — which `RamaMind.jsx` rendered as
+ * the geometric mean of an "AAI Index" under the heading "AGI Consciousness Dashboard".
+ *
+ * **Nothing measured any of them.** They were literals, and two were contradicted by measurement:
+ *   - Section 124 placed Rāma on the NARROW column of DeepMind's generality matrix with no claim on
+ *     the General column at all, because the breadth that appears in conversation belongs to whichever
+ *     model was routed to and vanishes when it is swapped — which is the thing `modelRoles.cjs` was
+ *     built to admit.
+ *   - `consciousness.recordInteraction` writes LENGTHS, not content, into `sessionStorage`, which is
+ *     gone when the window closes. There were never four layers and there was never persistence.
+ *
+ * `loyalty: 10` was the most defensible of the ten and still the wrong SHAPE: I16 says the loyalty
+ * matrix is attested, never read, so the honest rendering is "sealed and verified" — a state, not a
+ * score out of ten.
+ *
+ * THE DECIDING ARGUMENT WAS NOT TIDINESS. Master's standing instruction is that Rāma should weigh its
+ * own upgrades. A self-assessment assembled from literals is a poisoned input to that weighing: a
+ * system reading an 8/10 on generality concludes it is nearly finished. So the scorecard is replaced
+ * by `electron/lib/selfModel.cjs`, where **every field carries its source, anything unmeasured is
+ * `null` rather than estimated, and the limits are DERIVED from what is absent right now** — each one
+ * carrying a `fixable` line naming what would change it.
+ *
+ * That last part is why this is an upgrade and not a deletion: ten invented numbers told master
+ * nothing he could act on, and the replacement is a to-do list computed from measurement.
+ */
+
+/**
+ * Read Rāma's measured self-account.
+ *
+ * THREE OUTCOMES, KEPT DISTINCT, because collapsing them is the same class of mistake this whole
+ * change is about: "there is nothing to ask" (a browser), "you may not ask" (a capability denial) and
+ * "here is the answer" mean different things, and a page that renders all three identically is back to
+ * showing a number whatever is actually true.
+ *
+ * `reflexSkills` and `voiceLevel` are passed IN because those registries live in the renderer — the
+ * main process genuinely cannot see them, and omitting them makes the account report two unmeasured
+ * fields instead of two measured ones.
+ *
+ * @returns {Promise<{account: object|null, unavailable: boolean, reason: string|null}>}
+ */
+export async function getSelfModel(user, extras = {}) {
+  if (!isElectron || !window.rama?.self?.describe) {
+    return { account: null, unavailable: true, reason: 'the probes run in the desktop app' };
+  }
+  try {
+    const res = await window.rama.self.describe({
+      user,
+      reflexSkills: Number.isInteger(extras.reflexSkills) ? extras.reflexSkills : undefined,
+      voiceLevel: extras.voiceLevel,
+    });
+    if (res && res.ok === false) {
+      return { account: null, unavailable: true, reason: res.error || 'refused' };
+    }
+    const account = res && res.identity ? res : (res && res.data) || null;
+    if (!account || !account.identity) {
+      return { account: null, unavailable: true, reason: 'the account came back in a shape this page does not recognise' };
+    }
+    return { account, unavailable: false, reason: null };
+  } catch (err) {
+    console.warn(`[ramaCore] the self-model could not be read: ${err.message}`);
+    return { account: null, unavailable: true, reason: err.message };
+  }
+}
 
 // ─── AXIS 4: Four-Layer Memory System (CoALA Framework) ──────────────────────
 /**
@@ -617,6 +674,8 @@ export function getRamaStatus() {
     world:        ramaWorld.getSnapshot(),
     proactive:    { triggers: ramaProactive.getTriggers().length, fired: ramaProactive.getFired().length },
     improvements: ramaRevision.getImprovements().length,
-    capabilities: CAPABILITY_AXES,
+    // `capabilities` is deliberately absent. It used to carry CAPABILITY_AXES' ten literals; the
+    // measured account comes from `getSelfModel()` above, asynchronously, because measuring takes
+    // probes and a synchronous getter could only ever return guesses.
   };
 }
