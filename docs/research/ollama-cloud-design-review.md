@@ -144,16 +144,24 @@ applies **only** the prefix matcher.
 `verifyInvariants.cjs:244` already exists for exactly this — proving the scanner on synthetic
 strings before any row trusts it — and it needs no file on disk:
 
+> **Note added at build time:** the fixture literal below is written as `SK + TAIL` rather
+> than contiguously. This file is tracked, and `verifyOllamaCloud.cjs`'s tracked-file sweep
+> applies the known-prefix matcher to every tracked text file — so a contiguous
+> prefix-shaped literal here would make the review document a hit for the scan it is
+> reviewing. Renaming the literal is the prescribed move; allow-listing it is not.
+
 ```js
 // scannerSelfCheck(), beside the existing views() cases. The per-extension view rule is the
 // thing that can make the scan permanently green, so it is proven on strings, not on a
 // planted file — there are no .md files under electron/ or src/ to plant into.
+const SK = 'sk' + '-';
+const TAIL = 'A1b2C3d4E5f6G7h8I9j0';
 r.check('a .md body is scanned RAW, so a // in a URL does not blank the line after it',
-  secretHits('x.md', "see https://x.test // ref\nkey: sk-A1b2C3d4E5f6G7h8I9j0\n").length === 1);
+  secretHits('x.md', `see https://x.test // ref\nkey: ${SK}${TAIL}\n`).length === 1);
 r.check('a JS string literal survives the nc view',
-  secretHits('a.cjs', "const apiKey = 'sk-A1b2C3d4E5f6G7h8I9j0';").length === 1);
+  secretHits('a.cjs', `const apiKey = '${SK}${TAIL}';`).length === 1);
 r.check('and a JS comment does not, so master\u2019s own notes are not hits',
-  secretHits('a.cjs', "// example: sk-A1b2C3d4E5f6G7h8I9j0").length === 0);
+  secretHits('a.cjs', `// example: ${SK}${TAIL}`).length === 0);
 ```
 
 Then `MUTATIONS` keeps exactly one new case, `I-SECRETS-planted`, whose target

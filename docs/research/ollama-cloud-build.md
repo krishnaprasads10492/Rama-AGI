@@ -246,6 +246,22 @@ carries **no key outside that pair** and its only caller-derived value is `query
   Ollama rows.
 - `Chat.jsx`'s `useCallback` dependency array gained `currentUser`.
 
+### 4.16 The scan caught its own review document, which is the scan working
+
+Committing `docs/research/ollama-cloud-design-review.md` turned the tracked-file sweep **red**:
+the round-3 review quotes the planted mutation's fixture literal **contiguously**, three times,
+in illustrative code. Not a credential — a test fixture in a review — but prefix-shaped, and
+the sweep applies the known-prefix matcher to every tracked text file including `docs/`.
+
+**Resolved the way the row's own comment prescribes: the literal was renamed, not
+allow-listed.** The three fixture lines in that document now build the string from two visible
+halves, with a note saying why. The allow-list still holds exactly one entry.
+
+This is worth recording rather than quietly fixing, because it is the second time the same
+self-referential trap has appeared in this tranche — the first was `verifyInvariants.cjs`'s own
+`MUTATIONS` table, which is why that literal is concatenated — and a third will appear the next
+time someone writes the fixture out in prose.
+
 ---
 
 ## 5. Where the capability entry is needed
