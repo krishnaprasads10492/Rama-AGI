@@ -176,6 +176,12 @@ export default function StockMind() {
   const [barsMeta, setBarsMeta] = useState(null);
   const [barsBusy, setBarsBusy] = useState(false);
   const [barsNote, setBarsNote] = useState(null);
+  // THE FAILED REPLY ITSELF, not a string pulled out of it (Section 123.6). `barsNote` kept only
+  // `res.error`, so the diagnosis, the engine's last lines and the knocked URL reached this page and
+  // then only ever reached ONE of the three charts. The whole gate object is held here and handed to
+  // every chart, because a chart that says "no bars stored" while the engine is down blames the store
+  // for the engine.
+  const [barsFail, setBarsFail] = useState(null);
 
   const [news, setNews]       = useState(null);
   const [newsBusy, setNewsBusy] = useState(false);
@@ -211,10 +217,24 @@ export default function StockMind() {
   // it invites a stale number — a signal priced off a price the market left days ago.
   const lastClose = bars.length ? bars[bars.length - 1].close : null;
 
+  // ONE coverage object for every chart on this page (Section 123.6). The chart tab had it and the
+  // workspace panel did not, so two charts drawn from the SAME reply bounded their date pickers
+  // differently and only one could say what was on disk.
+  //
+  // `stored` travels with it because it is the fact that separates "nothing is stored" from "nothing is
+  // stored IN THIS WINDOW" — and `storedLastBar` is deliberately allowed to be null, because the route
+  // omits it in precisely that second case.
+  const coverage = useMemo(() => (barsMeta ? {
+    first: barsMeta.storedFirstBar || null,
+    last: barsMeta.storedLastBar || null,
+    stored: Number.isFinite(barsMeta.stored) ? barsMeta.stored : 0,
+  } : null), [barsMeta]);
+
   const loadBars = useCallback(async (doSync = false) => {
     if (!inElectron || !sym) return;
     setBarsBusy(true);
     setBarsNote(null);
+    setBarsFail(null);
     // The window is a DATE RANGE; the limit is only a payload ceiling derived from it, and it is
     // clamped to what the provider can serve for this interval. Asking Yahoo for a year of 1m bars
     // returns HTTP 422, which arrives here as zero bars — indistinguishable from a misspelt symbol
@@ -233,6 +253,14 @@ export default function StockMind() {
       setBarsNote(res.error || 'Could not load price history');
       setEngineTail(Array.isArray(res.stderrTail) ? res.stderrTail : []);
       setEngineDetail(res.detail || null);
+      // Every failure mode, not only the diagnosed ones: a route-level error carries `error` alone and
+      // must still reach the canvas as a named failure rather than as an empty store.
+      setBarsFail({
+        error: res.error || 'Could not load price history',
+        diagnosis: res.diagnosis || null,
+        detail: res.detail || null,
+        stderrTail: Array.isArray(res.stderrTail) ? res.stderrTail : [],
+      });
       return;
     }
     setEngineDetail(null);
@@ -839,6 +867,12 @@ far as the provider allows, which for intraday is a few days to two years.">
                                             onInterval={pickInterval} onRange={pickRange}
                                             fromDate={fromDate} toDate={toDate} onDates={setDates}
                                             chartId="sm-ws-chart"
+                                            // The same three facts the chart tab gets. Without them
+                                            // this panel's pickers had no bounds and its empty state
+                                            // could only ever say "nothing stored" (Section 123.6).
+                                            coverage={coverage}
+                                            replyNote={barsMeta?.note || null}
+                                            failure={barsFail}
                                             busy={barsBusy} onFetch={() => loadBars(true)}
                                             basePrice={held?.avgCost ?? null}
                                             // FILLS THE PANEL instead of a hard 260px (Section 121).
@@ -930,8 +964,9 @@ far as the provider allows, which for intraday is a few days to two years.">
               fromDate={fromDate}
               toDate={toDate}
               onDates={setDates}
-              coverage={barsMeta ? { first: barsMeta.storedFirstBar, last: barsMeta.storedLastBar }
-                : null}
+              coverage={coverage}
+              replyNote={barsMeta?.note || null}
+              failure={barsFail}
               chartId="sm-chart"
               busy={barsBusy}
               onFetch={() => loadBars(true)}

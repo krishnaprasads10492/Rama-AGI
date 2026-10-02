@@ -1,0 +1,178 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "reviewDoc": "c:\\CodeBase\\Velvet_UI\\Velvet\\Rama_AGI\\.worktrees\\fetch-store\\docs\\research\\design-review.md",
+  "reviewedDesign": "docs/research/FETCH_AND_STORE.md",
+  "reviewedSections": "PHASE 3 §3.0–§3.15 (revision 3)",
+  "head": "9669eea",
+  "counts": { "HIGH": 6, "MEDIUM": 12, "NIT": 6 },
+  "findings": [
+    {
+      "id": 1,
+      "severity": "HIGH",
+      "where": "§3.4 (fetchQueue.js is pure, no IPC; settle() step 3 \"start the next job in each free lane\"), §3.13 StockMind.jsx row",
+      "problem": "Both start() and settle() move a job to `running`, and both are pure functions with no IPC. Nothing in the design says who issues window.rama.marketIntel.ohlcv(...) for a job that has become `running`. loadBars can dispatch the job master pressed a button for, but the next job in a lane — every job after the first of a `fill all`, and anything started by settle() step 3 — has no specified caller, so it would be marked running and never sent. The obvious implementation (a useEffect on queue) has an unspecified double-dispatch hazard: React 19 StrictMode double-invokes effects in development and the setQueue inside the dispatch re-runs the effect.",
+      "fix": "Specify the pump in §3.4: a single useEffect([queue]) in StockMind.jsx that, for each job whose state is 'running' and whose id is not already in a `dispatchedRef` Set, adds the id, awaits the ohlcv call, then setQueue(q => settle(q, job.id, reply, selectionRef.current)) and calls setBars/setBarsMeta only when r.wrote, finally deleting the id. State that start()/settle() only AUTHORISE a dispatch and never perform one, and that dispatchedRef (not queue state) is the idempotence guard. Add §3.12 assertions: settle() leaves at most one `running` job per lane, and exactly one `ohlcv(` call site exists in StockMind.jsx."
+    },
+    {
+      "id": 2,
+      "severity": "HIGH",
+      "where": "§3.4 conflicts(a,b) and the `superseded` row of the states table; §3.2 enqueueAll; E16; §3.12 (\"enqueueAll with 12 windows and 8 free slots accepting 8\")",
+      "problem": "conflicts() returns true for any two provider-class jobs on the same symbol/exchange/interval, so two `gap` jobs for DIFFERENT windows conflict. Since enqueue() supersedes conflicting jobs, enqueueAll(state, [12 windows]) supersedes each window as it adds the next and ends with exactly one live job. MAX_QUEUE = 8 becomes unreachable, E16's \"8 of 12 gaps were queued\" cannot happen, and §3.12's assertion would fail against the design's own conflicts(). The same rule also silently retires a running full-interval sync the moment master presses ⇠ older.",
+      "fix": "Redefine conflict as subsumption, not same-interval: `if (a.symbol!==b.symbol||a.exchange!==b.exchange) return false; if (a.mode==='disk'||b.mode==='disk') return a.mode===b.mode; if (a.interval!==b.interval) return false; if (a.mode==='provider'||b.mode==='provider') return true; return a.from===b.from && a.to===b.to;` — a full-interval `provider` sync subsumes (and is subsumed by) any windowed job on that interval, while two windowed jobs with different windows coexist. Add a §3.12 assertion that twelve `gap` jobs with twelve distinct windows produce twelve non-superseded jobs before MAX_QUEUE is applied."
+    },
+    {
+      "id": 3,
+      "severity": "HIGH",
+      "where": "§3.4 (\"retry(state, key) creates a new job with the same key and attempt = prev.attempt + 1\"), settle(state, key, reply, selection), cancel(key), lanes holding \"the key currently holding each lane\", §3.5(d) onCancel(key)/onRetry(key)",
+      "problem": "`key` is the identity used by settle, cancel and both lane tokens, and a retry deliberately duplicates it. Cancel-then-retry: job A (attempt 1, running, lane token = key) is cancelled and goes terminal with the lane still reserved; master presses ↻ and job B (attempt 2, same key) is enqueued; A's reply then arrives and settle(state, key, ...) matches the lane token and resolves \"the job with this key\" ambiguously. If it resolves to B (non-terminal, current) then A's discarded reply is written as B's outcome, violating the design's own cancel rule 2 and the invariant §3.9 assigns to isCurrent + settle. cancel(key) and onCancel(key) are ambiguous the same way.",
+      "fix": "Separate identity from conflict. Keep `key` for dedupe and conflicts(); add `job.id = `${job.key}#${job.attempt}``; make lanes hold an id, and key settle(state, id, reply, selection), cancel(id), retry(state, id), onCancel(id), onRetry(id) and the queue strip's rows on id. Add a §3.12 assertion: cancel attempt 1, retry to attempt 2, deliver attempt 1's reply → wrote === false, attempt 2 still live, lane released exactly once."
+    },
+    {
+      "id": 4,
+      "severity": "HIGH",
+      "where": "§3.5(d) states table (`nothing-yet`: \"no bars, no failure, nothing ever stored\"); E15; §3.5 \"Who owns a failure\" (barsNote \"is suppressed while the canvas is showing a non-`none` empty state\")",
+      "problem": "E15 routes \"a sync that stored 400 bars none of which fall in master's window\" to `nothing-yet`, whose trigger is \"nothing ever stored\" and whose headline is verified verbatim at PriceChart.jsx:2105-2110 as \"No 30m bars stored for NIFTY50.\" — false when 400 bars are stored. The one true sentence, the route's own note at main.py:638-645 (\"N bars are stored, but none fall between X and Y. Widen the dates, or fetch more history.\"), arrives as res.data.note, becomes barsNote, and is then SUPPRESSED by the ownership rule because the canvas is non-`none`. The offered action is ⇩ Fetch & store them, which is fact 9's un-followable remedy. Master gets a false headline, a useless button, and no sign of the accurate sentence on the payload.",
+      "fix": "Add a sixth canvas state `nothing-in-window`, triggered by no bars + no failure + coverage.stored > 0, whose headline IS the route's note verbatim, which also shows coverage.first → coverage.last as the window that does exist, and whose action is ✕ clear dates (the existing onDates('','')) plus, only when supportsWindowedSync, ⇩ fetch this window — never a bare ⇩ Fetch & store them. Narrow `nothing-yet` to !(coverage?.stored > 0) so §3.12's Section 107 no-regression assertion still holds, and restrict the barsNote suppression rule to the case where the canvas headline IS barsNote."
+    },
+    {
+      "id": 5,
+      "severity": "HIGH",
+      "where": "§3.5(d) prop contract (eight new props) versus its own emptyState({ bars, busy, failure, meta, syncInfo, intervalId, symbol, rangeId, contract }) and §3.3's describeFreshness(meta, syncInfo, receivedAt, now); §3.13 PriceChart.jsx row; §3.2 coverage superset",
+      "problem": "emptyState requires `meta` and `syncInfo`; PriceChart is given neither. Verified: the prop list (PriceChart.jsx:256-281) has no meta, no syncInfo and no note, and the coverage superset adds only stored/fetchedAt/source/truncated/ranges. So inside PriceChart, `nothing-upstream` is UNREACHABLE — its sole trigger is syncInfo.reason === 'no provider returned data' and its body needs providersTried — which removes one of the three canvas states Decision 5 and Phase 2 row 4 both require; and describeFreshness cannot be called with its specified signature, so `attributed` (gated on syncInfo.fetched === true) can never be true, though §3.12 asserts that branch.",
+      "fix": "Either add two optional props `meta = null` and `syncInfo = null` (both defaulting to null, so every existing call site keeps working — I11), keeping both function signatures as specified; or fold reason/providersTried/fetched/barsAdded/clamped into the coverage superset and change both signatures to take coverage. State that `supports` remains its own prop because it is page-retained rather than per-reply, and add a §3.12 assertion that `nothing-upstream` is reachable from props alone."
+    },
+    {
+      "id": 6,
+      "severity": "HIGH",
+      "where": "§3.2 \"Filled.\" (describeCoverage(model, intervalId, { supports, listMax }), actions gated on supportsWindowedSync only) and the three-kind table; §3.1's retention clamp (applied in olderWindow only); E16",
+      "problem": "Two parts. (a) The retention clamp §3.1 argues is load-bearing is applied to ⇠ older and not to fill: describeCoverage takes no `now` and consults no horizon, so once §3.10 lands a fill button appears for every hole. The design's own hole-formation scenario (fact 11) puts intraday holes OUTSIDE the rolling window by construction — fetch 30m covering D−21…D, return 42 sessions later, the provider serves D+21…D+42, and the hole sits 21–42 sessions back, beyond a 21-session rolling cap. So on capped intraday intervals, the only interval class where holes form, fill is almost never servable: fact 9 recreated by the affordance the design calls its most important guard. (b) `hole` (\"between two stored runs\") and `beyond-cap` (\"older than PROVIDER_CAP_SESSIONS sessions\") overlap for a hole 25 sessions old on 30m, with no precedence rule and no stated anchor for \"older than N sessions\".",
+      "fix": "State the anchor as `now` and give beyond-cap precedence over hole: compute horizonYmd = capSessions == null ? null : ymdMinusSessions(toYmd(now), capSessions) and set kind = (horizonYmd && gap.toYmd < horizonYmd) ? 'beyond-cap' : 'hole'. Change the signature to describeCoverage(model, intervalId, { supports, listMax, now = new Date() }) and emit an action only when supportsWindowedSync(supports) AND kind === 'hole'; for beyond-cap runs put describeLimit(intervalId) in `text` and leave `actions` empty, the same treatment §3.1 gives beyond-retention. Record in §3.14 that on capped intraday intervals the band is the deliverable and the button is rare. Assert in §3.12: a 30-session-old hole on 30m yields kind 'beyond-cap', no action and describeLimit's sentence; the same hole on 1d yields kind 'hole' with an action."
+    },
+    {
+      "id": 7,
+      "severity": "MEDIUM",
+      "where": "§3.2 coverageRanges(candles, intervalId, opts) and the \"Two injected inputs\" table; the returned shape (source: 'bars'|'store', leftEdge: 'store'|'payload-ceiling', kind: 'asked-absent'); §3.12 (\"truncated → left edge payload-ceiling\")",
+      "problem": "The function is declared to take exactly two injected inputs (opts.ymd, opts.starts), and neither supplies `truncated` (needed for leftEdge), the requested window plus the store's first/last bar (needed for asked-absent, defined as \"between the window master requested and the first/last stored bar\"), or the store's own ranges (the only way source: 'store' could be returned — §3.10 item 5). An implementer following §3.2 literally cannot satisfy §3.12.",
+      "fix": "Widen the declared opts and mark each optional: coverageRanges(candles, intervalId, { ymd, starts, truncated = false, storedFirst = null, storedLast = null, requestedFrom = null, requestedTo = null, ranges = null, now = new Date() }), stating that `ranges` present implies source === 'store' and that `now` is the beyond-cap/horizon anchor (finding 6)."
+    },
+    {
+      "id": 8,
+      "severity": "MEDIUM",
+      "where": "§3.2 (enqueueAll's note: \"4 of 12 gaps were queued…\") versus E16 and §3.15 row 10 (\"8 of 12 gaps were queued…\", \"accepting 8, reporting 4\")",
+      "problem": "With twelve windows and eight free slots, accepted is 8 and rejected is 4. §3.2's example sentence reports the rejected count as the queued count. §3.12 asserts the E16 wording, so a test written from §3.2 and one written from E16 contradict each other — and this is the one string master reads.",
+      "fix": "Correct §3.2 to E16's wording and state the template once: `${accepted} of ${total} gaps were queued; the fetch queue holds ${MAX_QUEUE} at a time, so press ⇩ fill all again when these finish.`"
+    },
+    {
+      "id": 9,
+      "severity": "MEDIUM",
+      "where": "§3.3 (`const wantBars = fromDate ? raw : (cap ?? raw);` and \"this figure is what the SENTENCE may print\"); §3.12 (asserts only the default 30m view)",
+      "problem": "Verified: limitForDates returns MAX_BARS (20000) whenever `from` is falsy (timeframes.js:259-263) and capBarsFor returns null for 1d/1wk/1mo (timeframes.js:93-99). So on 1d with no dates — a common view — wantBars is 20,000 and the stated rule permits printing it. The design identifies this exact trap for the capped case and re-opens it for the uncapped case, and the test matrix closes only the capped half.",
+      "fix": "Make the absence of a printable ceiling explicit: `const wantBars = fromDate ? raw : (cap ?? null);` with a comment that no window and no provider cap means the depth is the engine's want_years, not a bar count. Extend §3.12: for each of 1d/1wk/1mo with no dates, wantBars === null and `text` contains no bar figure and no 20,000/20000."
+    },
+    {
+      "id": 10,
+      "severity": "MEDIUM",
+      "where": "§3.5(d) (\"failure.error (reason AND remedy — diagnoseFailure and §3.5(b)'s sentences both put both in it)\"); §3.5 opening (\"diagnoseFailure is total — every input yields a reason and a remedy\")",
+      "problem": "Verified at marketIntel.cjs:44-56: the start-failure branch of ensureBackendRunning does NOT call diagnoseFailure. It builds its own object with diagnosis: { reason: started.error || 'the engine could not be started', remedy: '' }, and error appends the remedy only `if (diagnosis.remedy)`. So on that branch the headline is \"StockMind's engine could not be started: <raw spawn error>\" — a reason, no remedy, raw error promoted to the headline — and stderrTail is []. That is the branch that fires when the Python interpreter is missing, the likeliest engine-down shape on master's machine, and the step requires the existing diagnosis to be routed through rather than a generic failure.",
+      "fix": "Preferred: at §3.5(b)'s gate boundary, when gate.diagnosis?.remedy is empty, call aiProcess.diagnoseFailure({ stderr: [], exit: null, running: false }) and rebuild `error` as \"StockMind's engine is not running: ${diagnosis.reason}.\" + remedy, demoting the raw spawn error into `detail`. Alternative: state in §3.5(d)/§3.8 that error carries a remedy on the poll-timeout and transport paths and may carry reason only on the start-failure path, and assert exactly that in verifyEngineDiagnosis.cjs. Either way the blanket claim must go."
+    },
+    {
+      "id": 11,
+      "severity": "MEDIUM",
+      "where": "§3.5(c) (\"It calls ensureBackendRunning() … and reaches no provider and spends no engine time\"), askWhy, §3.7's engineDiagnosis row, E17",
+      "problem": "Verified at marketIntel.cjs:40-56: ensureBackendRunning() calls aiProcess.startPythonBackendPublic() when the process is not running, then polls /health for up to 8 seconds. So pressing `why?` attempts to START the Python process and blocks for up to ~8s. Three unstated consequences: why? is not a read; no pending/disabled state is specified, so master can queue start attempts by pressing it repeatedly; and E17's {ok:true} → \"the engine is answering now\" can be true BECAUSE why? just started it, while the design presents it as an observation about something that changed on its own.",
+      "fix": "Pick one and write it down. (a) Diagnose without starting: engineDiagnosis() reads aiProcess.getRunningStatus(), returns {ok:true} when py.running, else builds the gate shape from py.diagnosis || py.notAnswering || aiProcess.diagnoseFailure({...}) with stderrTail = py.lastStderr.slice(-4) — a question that does not change what it asks about. (b) Keep ensureBackendRunning() and say so: add a whyBusy state disabling why? while the call is out, and word describeDiagnosis's {ok:true} case as \"Rāma asked its engine manager and the engine is answering now — it may have started when you asked.\""
+    },
+    {
+      "id": 12,
+      "severity": "MEDIUM",
+      "where": "§3.5(b) transportKind (\"return 'transport'; // status 0, no status, 'Response too large', a refusal\"); §3.7's \"connection refused, socket error, oversized body\" row",
+      "problem": "Verified at http.cjs:129-131: the size cap trips while reading a response the engine is already sending — reject(new Error('Response too large')) inside res.on('data'). The engine answered. Routing that to diagnoseFailure, whose branches key on stderr, exit code and `running`, yields the cold-start-wait remedy for a live engine — precisely the \"confidently wrong rather than vague\" failure §3.5(b) was rewritten to remove, left in place for this one case. The remedy master needs is \"narrow the window\", which the design already writes for `timeout`.",
+      "fix": "Add one rule ahead of the status rule: `if (/^Response too large$/.test(msg)) return 'engine-error';` and one sentence in transportReason: \"The engine answered with more data than Rāma will accept in one reply. Narrow the window or pick a coarser interval; nothing was stored for this request.\" with res.error demoted into detail. Correct §3.7's row so `transport` means \"no answer at all\"."
+    },
+    {
+      "id": 13,
+      "severity": "MEDIUM",
+      "where": "§3.12 (\"the bar for this tranche is … plus auditRenderer.cjs, verifyGlossary.mjs, …\"); §3.14, which calls out vite build but not this",
+      "problem": "Verified: auditRenderer.cjs:194-197 requires @babel/parser and @babel/traverse, and node_modules does not exist in this worktree (only in the main workspace). So the one suite that would catch the new preload.cjs method without its market:engine-diagnosis handler — findIpcMismatches/auditIpcParity — is unrunnable here, exactly as vite build is. The design's own standard is that an admitted gap beats a plausible claim.",
+      "fix": "Move auditRenderer.cjs out of the in-worktree bar and into §3.14 beside vite build, stating that it needs @babel/parser from node_modules and therefore runs only in the main workspace after this branch merges. Add a source-reading assertion to verifyEngineDiagnosis.cjs pairing preload's marketIntel.engineDiagnosis with market:engine-diagnosis being a key of the readOnly map, so the coverage is not simply dropped."
+    },
+    {
+      "id": 14,
+      "severity": "MEDIUM",
+      "where": "§3.4 classifyOutcome (`if (count === 0) return 'nothing-read'`) and the nothing-read wording (\"Rāma reached the engine and the engine did not reach the provider for this one.\"); the two-lane table",
+      "problem": "classifyOutcome(reply) sees only the reply, not the job's mode. Verified at main.py:598-604: the automatic mount and filter-effect disk reads (sync: false) on a never-stored instrument return count: 0 with syncInfo = {\"fromStore\": true}. So every first view of a new instrument produces a terminal nothing-read job whose sentence complains the provider was not reached — for a job whose own contract (§3.3's disk text: \"Reads what is already on this machine. No network, no provider call, nothing stored.\") is that it never asks the provider. Two sentences about the same job contradict each other.",
+      "fix": "Keep classifyOutcome a pure function of the reply and make the SENTENCE mode-aware: an outcomeText(job, reply) in fetchQueue.js that for job.mode === 'disk' and state 'nothing-read' says \"Nothing is stored on this machine for this one yet — that is a fact about the store, not a failure. ⇩ Fetch & store them reaches the provider.\" and otherwise keeps the existing wording. Assert both in §3.12."
+    },
+    {
+      "id": 15,
+      "severity": "MEDIUM",
+      "where": "§3.4 (MAX_QUEUE = 8 \"counting provider-reaching jobs only\"; capacity(state) \"is the one place that arithmetic lives\"); §3.2 enqueueAll; §3.3's blocked \"the fetch queue is full\"",
+      "problem": "Terminal jobs must stay in `jobs` because ↻ on a failed job is a specified affordance, but whether capacity() counts them is never said. If it does, eight failures permanently block the fetch button with the sentence \"the fetch queue holds 8 provider requests at a time\", which would be false. And nothing bounds `jobs`, which grows unboundedly over a session of automatic disk reads — the same class of thing the design was careful to remove when it deleted MAX_SUPPORTS_KEYS.",
+      "fix": "State both rules in §3.4: `const LIVE = new Set(['queued','running']);` and `capacity(state) = MAX_QUEUE - state.jobs.filter(j => j.mode !== 'disk' && LIVE.has(j.state)).length`, with the comment that a terminal job is a record and not a reservation; plus `MAX_JOBS = 40` with oldest TERMINAL jobs dropped first and live jobs never dropped. Assert the eight-failures case in §3.12."
+    },
+    {
+      "id": 16,
+      "severity": "MEDIUM",
+      "where": "§3.2 (\"opts.ymd is built inside the same useMemo that builds candles, from the raw bar that produced each candle\"); §3.15 row 20",
+      "problem": "The alignment reasoning is correct and verified — PriceChart.jsx:533-544 maps bars, drops bars with an unusable time or non-finite prices, then de-duplicates consecutive equal times, so candles[i] and bars[i] diverge after the first drop. But that memo returns a bare array and candles is consumed by volumes, starts, countRef, last/prev, the aria text and the data effect. Producing ymd from inside it requires changing its return shape and every consumer, or adding a second memo that re-implements the drop/dedupe filter — the exact drift the design is avoiding. Neither is specified.",
+      "fix": "Name the refactor in §3.13's PriceChart row: the memo becomes `const { candles, ymd } = useMemo(() => { ... }, [bars])`, built in one loop that pushes the candle and sets dates.set(time, String(b.date).slice(0,10)) for the raw bar that produced it, with a comment that a parallel array built in a second pass would drift from this one's filters. Add a §3.12 source-reading assertion that PriceChart.jsx contains exactly one toChartTime( call site."
+    },
+    {
+      "id": 17,
+      "severity": "MEDIUM",
+      "where": "§3.3 describeRequest({ intervalId, fromDate, toDate, rangeId, mode, supports, queue, selection }); §3.0 (\"PriceChart computes its own request contract from its own props\"); §3.5(d) (\"There is no contract prop\")",
+      "problem": "Nothing in §3.3's rules reads `selection`: the blocked table needs the provider lane's occupancy (from queue) and whether a symbol is selected. And PriceChart cannot build a selection — verified, its prop list has `symbol` but no `exchange`. Passing a whole queue object into a pure contract function also couples it to the queue's internal shape for one boolean.",
+      "fix": "Reduce the signature to the scalars the rules use: describeRequest({ intervalId, fromDate, toDate, rangeId, mode, supports, hasSymbol = true, providerLaneFull = false }). StockMind.jsx passes capacity(queue) <= 0; PriceChart passes queue ? capacity(queue) <= 0 : false."
+    },
+    {
+      "id": 18,
+      "severity": "MEDIUM",
+      "where": "§3.4 states table (`queued` — \"accepted, nothing in flight\", no wording); the cancel rules (the provider lane stays reserved until the abandoned promise settles); E7; §3.12 (\"every TERMINAL state carries a sentence\")",
+      "problem": "After a cancel, the provider lane stays reserved for up to 90 seconds. A new fetch in that window is accepted, is not blocked (the queue is not full), and sits `queued` — while isBusyFor is true, so the loading overlay says \"Fetching 30m bars…\" with nothing in flight. The design's own standard is that a disabled control with no stated cause is a dead end, and this is fact 20 inverted. E7 says \"the queue strip says so\" but specifies no wording, and §3.12 asserts sentences only for terminal states.",
+      "fix": "Specify two queued sentences and assert them: lane free, FIFO position n → \"Queued — n ahead of it.\"; lane held by a terminal (cancelled or superseded) job → \"Queued — waiting for an earlier request Rāma stopped waiting for. The engine may still be finishing it; this starts as soon as it ends.\" Change §3.12 to \"every state, live or terminal, carries a sentence\"."
+    },
+    {
+      "id": 19,
+      "severity": "NIT",
+      "where": "§3.4's standalone selectionRef effect versus §3.5's second clear effect, both on [sym, exchange, barInterval]",
+      "problem": "Two different effects with identical dependency lists both write selectionRef.current. Harmless but ambiguous about which is the single writer, and §3.4's own comment already says \"written by the same effect that clears the series\".",
+      "fix": "Delete the standalone effect in §3.4 and cross-reference §3.5's second clear effect as the single writer of selectionRef."
+    },
+    {
+      "id": 20,
+      "severity": "NIT",
+      "where": "§3.1's subscription snippet, which calls setNearLeftEdge(...) above the existing quarter-pixel dedupe",
+      "problem": "Placing the edge test above the dedupe is correct (verified: PriceChart.jsx:757-762 early-returns on an unchanged px-per-bar, which a pure pan does not change), but the dedupe exists because \"a drag fires this every frame, and sixty identical state updates a second is a way to make a chart stutter\". React bails out on an identical useState value, so this is cheap rather than free — the design should not silently reintroduce the thing the comment above it warns about.",
+      "fix": "Guard with a ref so the setter fires only on a transition: `const nearEdge = from !== null && from <= OLDER_PROMPT_BARS; if (nearEdge !== nearEdgeRef.current) { nearEdgeRef.current = nearEdge; setNearLeftEdge(nearEdge); }`"
+    },
+    {
+      "id": 21,
+      "severity": "NIT",
+      "where": "§3.1 (`const horizon = ymdMinusSessions(toYmd(now), capSessions);`) versus the anchor `String(rawBars[0].date).slice(0, 10)`",
+      "problem": "Verified: intraday stored stamps are naive UTC (chartTime.js header, store.py Section 73) so the anchor slice is a UTC date, while toYmd is explicitly local (timeframes.js:236). In IST those differ by a day between 00:00 and 05:30 local. The +3-day slack in the session→calendar conversion absorbs it and §3.12's datesForRange drift assertion still holds, but the mixing is unstated and is the shape of master's last three reports.",
+      "fix": "Add one sentence to §3.1 stating that the horizon is local to agree with datesForRange and the date inputs while the anchor is a UTC stamp slice, and that the one-day worst case is inside ymdMinusSessions' +3-day slack by design. Add a §3.12 assertion that olderWindow is stable for the same bars across a `now` of 23:00 and 01:00 local."
+    },
+    {
+      "id": 22,
+      "severity": "NIT",
+      "where": "§3.6's table (\"coverage from its own reply, failure from its own reply\"); §3.13's PopoutPanel.jsx row",
+      "problem": "Verified: PopoutPanel.jsx:99-107 keeps only res.data?.bars and res.error; there is no meta/barsMeta state to build a coverage object from, and §3.13's row does not add one. The popout also receives no onFillGap, so whatever describeCoverage returns in `actions` has no handler there.",
+      "fix": "Add to §3.13's PopoutPanel row: a new barsMeta state set from res.data on every settle, from which coverage is built; and state that onFillGap is deliberately not passed, so describeCoverage's actions are not rendered in a popout and its `text` carries the reason — beside the existing no-asked-absent sentence."
+    },
+    {
+      "id": 23,
+      "severity": "NIT",
+      "where": "§3.8 (\"stderrTail … non-array → [], and the <details> block is not rendered\"); §3.5(d)'s could-not-ask row",
+      "problem": "Read literally the rule covers a non-array input but not a genuinely empty array — which is exactly what ensureBackendRunning's start-failure branch returns (verified, marketIntel.cjs:54). An \"engine output\" disclosure that opens to nothing is a control that lies about having something.",
+      "fix": "Reword to \"absent, non-array OR empty → the <details> block is not rendered at all\", and assert the empty case in §3.12 beside the failure.detail === null assertion."
+    },
+    {
+      "id": 24,
+      "severity": "NIT",
+      "where": "§3.4 states table (`superseded`: \"a conflicting job replaced it\") versus cancel rule 4's careful wording",
+      "problem": "Once finding 2's conflicts() is narrowed, the remaining supersede case for a RUNNING provider job is a genuine subsumption — but master is told it was \"replaced\" while the engine may still be fetching and storing. The cancel sentence already has the right words for this.",
+      "fix": "Give superseded-while-running the cancel sentence's second half: \"Replaced by a newer request. The engine may still finish this one, and anything it stored will appear on the next read from disk.\" Keep superseded-while-queued as \"Replaced before it started.\""
+    }
+  ]
+}

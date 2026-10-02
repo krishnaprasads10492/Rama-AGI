@@ -22,6 +22,7 @@ import * as DRAW from './chartDrawings.js';
 import { createDrawingLayer } from './ChartDrawingLayer.js';
 import { sessionBands, describeBands } from './chartSessions.js';
 import { createSessionLayer } from './ChartSessionLayer.js';
+import { emptyState } from './chartEmptyState.js';
 import InfoTip from './InfoTip.jsx';
 
 /**
@@ -274,12 +275,25 @@ export default function PriceChart({
   fromDate = null,          // the window as dates (Section 105) — the bar count was removed
   toDate = null,
   onDates = null,           // (from, to) => void; omit to hide the date pickers
-  coverage = null,          // {first, last} stored bar dates, so the picker has real bounds
+  coverage = null,          // {first, last, stored} from the reply, so the picker has real bounds
   chartId = 'chart',        // so two charts on one screen do not share input ids
   basePrice = null,         // master's average cost, for the baseline chart's zero line
   // ── Section 121 ──
   fillHeight = false,       // size to the container instead of the `height` prop — for a resizable panel
   onDrawingsChange = null,  // notified when master adds or removes a mark, for a count elsewhere
+  /**
+   * ── Section 123.6: what the reply already said, carried to the canvas ──
+   *
+   * Both optional and both defaulting to null, so the existing call sites keep working (I11). These are
+   * fields the ohlcv reply ACTUALLY carries today — `res.data.note` and, on `ok === false`, the gate
+   * object the bridge returns verbatim. `meta` and `syncInfo` are deliberately NOT props: the route
+   * sends them, but nothing here has a use for them yet, and a prop no renderer reads is a contract
+   * waiting to be believed.
+   */
+  // NOT `note`: this component already has a `note` state for the inline note editor, and shadowing it
+  // is a parse error the renderer audit catches. `replyNote` says whose sentence it is.
+  replyNote = null,         // the route's own sentence about THIS reply (`res.data.note`)
+  failure = null,           // {error, diagnosis:{reason, remedy}, detail, stderrTail} — all failure modes
 }) {
   const holder = useRef(null);
   const chartRef = useRef(null);
@@ -1166,6 +1180,12 @@ export default function PriceChart({
   }, [cone, layers.cone, candles.length, chartType]);
 
   const empty = candles.length === 0;
+  // WHAT THE OVERLAY SAYS, decided outside the render so it can be asserted (Section 123.6). The three
+  // defects it ends — a false "nothing stored", a fetch button that cannot help, and a generic failure
+  // over a named cause — are documented in chartEmptyState.js.
+  const vacancy = useMemo(() => emptyState({
+    bars: candles.length, busy, failure, note: replyNote, coverage, interval, symbol, rangeId,
+  }), [candles.length, busy, failure, replyNote, coverage, interval, symbol, rangeId]);
   const toggle = (k) => setLayers((s) => ({ ...s, [k]: !s[k] }));
 
   // One step wider or narrower. `+1` is narrower because the list runs comfortable → dense.
@@ -2090,34 +2110,64 @@ export default function PriceChart({
 
       {/* ── The canvas. ALWAYS MOUNTED; the empty state sits over it (Section 107). ── */}
       <div style={{ position: 'relative' }}>
-        {empty && (
+        {empty && vacancy && (
           <div style={{
             position: 'absolute', inset: 0, zIndex: 5,
             display: 'flex', flexDirection: 'column', gap: '10px',
             alignItems: 'center', justifyContent: 'center',
             color: 'var(--muted)', fontSize: '12.5px', border: '1px dashed var(--border)',
             borderRadius: 'var(--radius)', textAlign: 'center', padding: '0 16px',
-            background: 'var(--panel, #131722)',
+            background: 'var(--panel, #131722)', overflow: 'auto',
           }} aria-live="polite">
-            {busy ? (
-              // The old empty state said "fetch price history first" whether or not a fetch was
-              // already running — advice to do the thing in flight.
-              <span>Fetching {intervalDef(interval)?.label || interval} bars for{' '}
-                {symbol || 'this symbol'}…</span>
-            ) : (
-              <>
-                <span>
-                  No {intervalDef(interval)?.label || interval} bars stored for{' '}
-                  {symbol || 'this symbol'}
-                  {rangeId ? ` over ${rangeId}` : ''}.
-                </span>
-                {onFetch && (
-                  <button type="button" className="btn" onClick={() => onFetch()}>
-                    ⇩ Fetch &amp; store them
-                  </button>
-                )}
-                {limitNote && <span style={{ maxWidth: '44ch', lineHeight: 1.5 }}>{limitNote}</span>}
-              </>
+            {/* A DIAGNOSED FAILURE IS RED, a wrong window is amber, an absence is muted. Master has
+                never had a completed engine run, so `failed` is the state he actually sees, and it
+                must not look like the chart merely has nothing yet. */}
+            <span style={{ maxWidth: '62ch', lineHeight: 1.6,
+              color: vacancy.kind === 'failed' ? 'var(--red)'
+                : vacancy.kind === 'nothing-in-window' ? 'var(--amber)' : 'var(--muted)' }}>
+              {vacancy.kind === 'failed' ? '✕ ' : ''}{vacancy.headline}
+            </span>
+            {/* Only printed when the headline does not already contain it — the bridge usually folds
+                the remedy into its sentence, but a route-level failure carries the reason alone. */}
+            {vacancy.remedy && (
+              <span style={{ maxWidth: '62ch', lineHeight: 1.6, color: 'var(--amber)' }}>
+                {vacancy.remedy}
+              </span>
+            )}
+            {vacancy.action?.id === 'fetch' && onFetch && (
+              <button type="button" className="btn" onClick={() => onFetch()}>
+                {vacancy.action.label}
+              </button>
+            )}
+            {/* THE ACTION THAT CAN ACTUALLY HELP. Fetching cannot move bars into a window the provider
+                does not serve, so for `nothing-in-window` the button clears the dates instead. */}
+            {vacancy.action?.id === 'clear-dates' && onDates && (
+              <button type="button" className="btn" onClick={() => onDates('', '')}>
+                {vacancy.action.label}
+              </button>
+            )}
+            {vacancy.detail && (
+              <span style={{ maxWidth: '56ch', lineHeight: 1.5, color: 'var(--text-dim, var(--muted))',
+                fontVariantNumeric: 'tabular-nums' }}>
+                {vacancy.detail}
+              </span>
+            )}
+            {vacancy.hint && (
+              <span style={{ maxWidth: '44ch', lineHeight: 1.5 }}>{vacancy.hint}</span>
+            )}
+            {/* The engine's own last words, collapsed. Section 99 put these on the reply; two of the
+                three charts used to drop them on the floor. */}
+            {vacancy.tail.length > 0 && (
+              <details style={{ maxWidth: '62ch', width: '100%', textAlign: 'left' }}>
+                <summary style={{ cursor: 'pointer', color: 'var(--text-dim)', fontSize: '12px' }}>
+                  engine output
+                </summary>
+                <pre style={{
+                  margin: '6px 0 0', padding: '8px 10px', maxHeight: 120, overflow: 'auto',
+                  background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)',
+                  fontSize: '11.5px', color: 'var(--text-dim)', whiteSpace: 'pre-wrap',
+                }}>{vacancy.tail.join('\n')}</pre>
+              </details>
             )}
           </div>
         )}

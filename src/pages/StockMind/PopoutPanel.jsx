@@ -68,6 +68,11 @@ export default function PopoutPanel({ params }) {
   const [bars, setBars] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // WHAT THE REPLY SAID BESIDES THE BARS (Section 123.6). This window kept the array and dropped
+  // everything else, so a pop-out could not say what was stored, could not show the route's own
+  // sentence about an empty window, and reported an engine that never started as "no bars stored".
+  const [meta, setMeta] = useState(null);
+  const [fail, setFail] = useState(null);
 
   const title = `${symbol} · ${String(panel || '').toUpperCase()}`;
 
@@ -96,14 +101,28 @@ export default function PopoutPanel({ params }) {
     if (!inElectron || panel !== 'chart' || !user) return;
     setBusy(true);
     setError(null);
+    setFail(null);
     try {
       const res = await window.rama.marketIntel.ohlcv({
         user, symbol, exchange, interval, limit: limitForDates(interval, null, null),
       });
-      if (res?.ok) setBars(Array.isArray(res.data?.bars) ? res.data.bars : []);
-      else setError(res?.error || 'could not load bars');
+      if (res?.ok) {
+        setBars(Array.isArray(res.data?.bars) ? res.data.bars : []);
+        setMeta(res.data || null);
+      } else {
+        setError(res?.error || 'could not load bars');
+        // Both failure modes: a gate object carries the diagnosis, the remedy and the engine's last
+        // lines, and a route-level error carries only `error` — which is still a named cause.
+        setFail({
+          error: res?.error || 'could not load bars',
+          diagnosis: res?.diagnosis || null,
+          detail: res?.detail || null,
+          stderrTail: Array.isArray(res?.stderrTail) ? res.stderrTail : [],
+        });
+      }
     } catch (err) {
       setError(err.message);
+      setFail({ error: err.message, diagnosis: null, detail: null, stderrTail: [] });
     } finally {
       setBusy(false);
     }
@@ -144,9 +163,22 @@ export default function PopoutPanel({ params }) {
   if (panel === 'chart') {
     return (
       <Frame title={`${title} · ${interval}`} onRefresh={loadBars} onDock={dock} busy={busy}>
-        {error && <div style={{ fontSize: 12, color: 'var(--red)', marginBottom: 8 }}>{error}</div>}
+        {/* ONE REPORT OF ONE FAILURE. The canvas overlay now carries the reason, the remedy and the
+            engine's last lines, so this band would repeat its first sentence with less in it. It stays
+            for the case the overlay cannot cover: a refresh that fails while the PREVIOUS fetch's
+            candles are still drawn, where there is no empty state to put the message in. */}
+        {error && bars.length > 0 && (
+          <div style={{ fontSize: 12, color: 'var(--red)', marginBottom: 8 }}>{error}</div>
+        )}
         <PriceChart bars={bars} symbol={symbol} interval={interval} rangeId={range}
-                    chartId={`popout-${panel}`} busy={busy} onFetch={loadBars} height={420} />
+                    chartId={`popout-${panel}`} busy={busy} onFetch={loadBars} height={420}
+                    coverage={meta ? {
+                      first: meta.storedFirstBar || null,
+                      last: meta.storedLastBar || null,
+                      stored: Number.isFinite(meta.stored) ? meta.stored : 0,
+                    } : null}
+                    replyNote={meta?.note || null}
+                    failure={fail} />
       </Frame>
     );
   }
