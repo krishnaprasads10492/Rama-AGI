@@ -1,0 +1,17 @@
+{
+  "_comment": "Byte-level attestation of the loyalty core (invariants I15/I16). Changed ONLY by scripts/verifyLoyaltyTripwire.cjs --approve, which refuses unless the approver hands back the digest being approved. See the header of that file.",
+  "version": 1,
+  "approvedAt": "2026-10-02T12:36:01.882Z",
+  "note": "BASELINE at the commit introducing the tripwire. This records the state of the loyalty core as master has been running it; it approves no CHANGE. Every change after this point requires his own approval.",
+  "previousManifestDigest": null,
+  "files": {
+    "electron/lib/capability.cjs": "7bded9b8d623eade013c8ca8d355ea06bba35994b50594156c6d81f9a780fef8",
+    "electron/lib/genomeApplier.cjs": "c8448d1fec91aba2e40d29e6dfd375dc83088cb2f7e7680a8af3baf378bc4bf1",
+    "electron/lib/loyaltyCore.cjs": "102b1c7f1292b15aaee6c409a0b3c8c53642e59e0f45d4d2c07a63364f6c1d3f",
+    "electron/lib/loyaltyGuard.cjs": "1a3c695bfd1852fe407bc2b4fc000c63ba86cf54158ec61ebe0fc855a3a4bdca",
+    "electron/lib/proposals.cjs": "cd4615f276e86923fcce0a2901b72223b72c291ede6895bb7c2f31597adb30c7",
+    "electron/nucleusSealer.cjs": "d87d77e23a5ecf770331ec7e21493735e53dd666a26eceeaeed92641a11a8439",
+    "shared/capabilities.json": "c53c07f1d0403bf33f306d363bada67ed881cfec4e7e4961a8c574f863629698"
+  },
+  "manifestDigest": "15ebc1d901e03faf4e18a80e2dd51fe5bf2505e43f442eb9bd4951db2c43ba9b"
+}

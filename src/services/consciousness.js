@@ -185,7 +185,10 @@ export function getLastHealth() {
  * Phase 2 will build a feedback loop that improves prompts.
  */
 export function recordInteraction({ prompt, response, model, satisfied }) {
-  // TODO Phase 5: write to MongoDB, build improvement dataset
+  // THIS DOES NOT PERSIST. It records LENGTHS, not content, into sessionStorage, which is gone when
+  // the window closes — so it cannot become an improvement dataset, and nothing downstream should
+  // describe it as memory. Section 124 found a dashboard scoring this "4-layer persistent memory";
+  // the measurement is here, and it is one tab's worth of counters.
   const entry = {
     ts:        Date.now(),
     model,

@@ -266,8 +266,12 @@ export default function Agents() {
   }, [currentUser]);
 
   const handleResolve = useCallback((id, approved) => {
+    // THE DECISION IS RECORDED LOCALLY AND IS NOT YET SENT BACK TO THE AGENT. So an approval clears
+    // the item from master's queue without unblocking anything waiting on it — stated here because a
+    // queue that empties looks like a queue that was acted on. `approved` is accepted so the call
+    // site is already correct when the return path exists.
+    void approved;
     resolveApproval(id);
-    // TODO Phase 5: send approval decision back to agent
   }, [resolveApproval]);
 
   const active = agentList.filter(a => a.status === 'running').length;
