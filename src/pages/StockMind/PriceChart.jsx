@@ -282,7 +282,7 @@ export default function PriceChart({
   fillHeight = false,       // size to the container instead of the `height` prop — for a resizable panel
   onDrawingsChange = null,  // notified when master adds or removes a mark, for a count elsewhere
   /**
-   * ── Section 126: what the reply already said, carried to the canvas ──
+   * ── Section 129: what the reply already said, carried to the canvas ──
    *
    * Both optional and both defaulting to null, so the existing call sites keep working (I11). These are
    * fields the ohlcv reply ACTUALLY carries today — `res.data.note` and, on `ok === false`, the gate
@@ -1180,7 +1180,7 @@ export default function PriceChart({
   }, [cone, layers.cone, candles.length, chartType]);
 
   const empty = candles.length === 0;
-  // WHAT THE OVERLAY SAYS, decided outside the render so it can be asserted (Section 126). The three
+  // WHAT THE OVERLAY SAYS, decided outside the render so it can be asserted (Section 129). The three
   // defects it ends — a false "nothing stored", a fetch button that cannot help, and a generic failure
   // over a named cause — are documented in chartEmptyState.js.
   const vacancy = useMemo(() => emptyState({

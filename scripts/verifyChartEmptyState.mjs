@@ -1,6 +1,6 @@
 
 /**
- * verifyChartEmptyState.mjs — the four sentences an empty chart is allowed to say (Section 126).
+ * verifyChartEmptyState.mjs — the four sentences an empty chart is allowed to say (Section 129).
  *
  * WHAT THIS SUBSYSTEM IS FOR. A chart with no candles has to explain itself, and for three releases it
  * explained itself wrongly in three different ways. The explanation now comes from `emptyState()`,

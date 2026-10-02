@@ -176,7 +176,7 @@ export default function StockMind() {
   const [barsMeta, setBarsMeta] = useState(null);
   const [barsBusy, setBarsBusy] = useState(false);
   const [barsNote, setBarsNote] = useState(null);
-  // THE FAILED REPLY ITSELF, not a string pulled out of it (Section 126). `barsNote` kept only
+  // THE FAILED REPLY ITSELF, not a string pulled out of it (Section 129). `barsNote` kept only
   // `res.error`, so the diagnosis, the engine's last lines and the knocked URL reached this page and
   // then only ever reached ONE of the three charts. The whole gate object is held here and handed to
   // every chart, because a chart that says "no bars stored" while the engine is down blames the store
@@ -217,7 +217,7 @@ export default function StockMind() {
   // it invites a stale number — a signal priced off a price the market left days ago.
   const lastClose = bars.length ? bars[bars.length - 1].close : null;
 
-  // ONE coverage object for every chart on this page (Section 126). The chart tab had it and the
+  // ONE coverage object for every chart on this page (Section 129). The chart tab had it and the
   // workspace panel did not, so two charts drawn from the SAME reply bounded their date pickers
   // differently and only one could say what was on disk.
   //
@@ -778,7 +778,7 @@ far as the provider allows, which for intraday is a few days to two years.">
               overlay immediately below with the same sentence, the same output and the same detail.
               His engine has never completed a run, so that was the state he actually landed in. The band
               stays for the case the overlay cannot cover: a refresh that fails, or a truncation note
-              that arrives, while the PREVIOUS fetch's candles are still drawn (Section 126). */}
+              that arrives, while the PREVIOUS fetch's candles are still drawn (Section 129). */}
           {barsNote && bars.length > 0 && (
             <div style={{ fontSize: '12.5px', color: 'var(--amber)', lineHeight: 1.7 }}>
               {barsNote}
@@ -877,7 +877,7 @@ far as the provider allows, which for intraday is a few days to two years.">
                                             chartId="sm-ws-chart"
                                             // The same three facts the chart tab gets. Without them
                                             // this panel's pickers had no bounds and its empty state
-                                            // could only ever say "nothing stored" (Section 126).
+                                            // could only ever say "nothing stored" (Section 129).
                                             coverage={coverage}
                                             replyNote={barsMeta?.note || null}
                                             failure={barsFail}

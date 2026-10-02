@@ -1795,7 +1795,7 @@ no claim will be made that the renderer builds; the bar for this tranche is `nod
 | `electron/preload.cjs` | one named method, `marketIntel.engineDiagnosis`. `ALLOWED_PREFIXES` untouched |
 | `scripts/verifyEngineDiagnosis.cjs` | the `diagnoseTransport` assertions and the source-reading assertions in §3.12; the `electron` stub held until after the `marketIntel.cjs` require |
 | `package.json` | `verify:fetch-store`, and appended to the `verify` chain. No dependency added |
-| `RAMA_AGI_MASTER_SPEC.md` | **Section 126** recording these five decisions, and **ledger row 146** per the resume protocol — written before the code, not after |
+| `RAMA_AGI_MASTER_SPEC.md` | **Section 129** recording these five decisions, and **ledger row 149** per the resume protocol. *Numbers corrected from the 126/146 this table originally named: both were taken on `dev` while the narrowed tranche was in review. The blocks are at the end of this document, ready to paste; the branch itself does not edit the spec* |
 | `docs/research/FETCH_AND_STORE.md` | this Phase 3 section |
 
 **Explicitly not touched.** `chartTime.js`, `chartZoom.js`, `timeframes.js`, `chartSessions.js`,

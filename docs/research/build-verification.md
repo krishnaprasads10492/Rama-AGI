@@ -55,19 +55,27 @@ asymmetry as the thing being prevented.
 This supersedes the first round's note under §4 that the duplication was deliberate. It was not a
 judgement worth keeping: the overlay carries strictly more than the band in that state.
 
-### MEDIUM 3 — no spec section and no ledger row. FIXED.
+### MEDIUM 3 — no spec section and no ledger row. FIXED, then RENUMBERED AND MOVED OUT OF THE SPEC.
 
-The resume protocol requires the decision in the spec, not only in `docs/research/`. Added:
+The resume protocol requires the decision in the spec, not only in `docs/research/`. Round 2 wrote the
+section and the row directly into `RAMA_AGI_MASTER_SPEC.md` as **Section 126** and **ledger row 146**.
+Both numbers were taken by other work while this branch was in review — on `dev` Section 126 is *The
+scorecard that measured nothing* and row 146 is its ledger entry — exactly the collision §4's last
+bullet predicted. **The spec edit was therefore dropped at the rebase (the conflict was resolved in
+favour of `dev`, so this branch does not touch `RAMA_AGI_MASTER_SPEC.md` at all) and the content now
+lives as ready-to-paste blocks at the end of `docs/research/FETCH_AND_STORE.md`, renumbered to
+Section 129 and ledger row 149** — the next free numbers, 128 being claimed by the in-flight autonomy
+design and 130/150 by the context-store work.
 
-- **`RAMA_AGI_MASTER_SPEC.md` Section 126** — the defect, then ten numbered decisions (the four states,
-  the precedence order, the route's note used verbatim, the action that must be able to help, the
-  unknown end left unsaid, why `meta`/`syncInfo` are not props, every failure mode to every chart, one
-  report of one failure, the pop-out's absent dates asserted, and call sites discovered rather than
-  counted), plus **126.3 Verified**, **126.4 Not verified** and **126.5 Next**.
-- **Section 28 ledger row 146** — `3 items done, the rest deferred`, with the deferred queue and
-  gap-kinds work named as the next concrete step together with the HIGH finding ids that gate each.
+- **Section 129 (ready to paste)** — the defect, then ten numbered decisions (the four states, the
+  precedence order, the route's note used verbatim, the action that must be able to help, the unknown
+  end left unsaid, why `meta`/`syncInfo` are not props, every failure mode to every chart, one report
+  of one failure, the pop-out's absent dates asserted, and call sites discovered rather than counted),
+  plus **129.3 Verified**, **129.4 Not verified** and **129.5 Next**.
+- **Section 28 ledger row 149 (ready to paste)** — `done`, with the deferred queue and gap-kinds work
+  named as the next concrete step together with the HIGH finding ids that gate each.
 - The in-code citations of "Section 123.6" in `chartEmptyState.js`, `PriceChart.jsx`, `StockMind.jsx`,
-  `PopoutPanel.jsx` and `verifyChartEmptyState.mjs` now read **Section 126**. 123.6 is the previous
+  `PopoutPanel.jsx` and `verifyChartEmptyState.mjs` now read **Section 129**. 123.6 is the previous
   section's decisions list; its item 8 names this threading as the next tranche and records none of
   these decisions.
 
@@ -188,8 +196,8 @@ verbatim. Only the StockMind chart tab read any of it, and only as a string.
 | `src/pages/StockMind/PopoutPanel.jsx` | `meta`/`fail` state, three props on the call site, the duplicate error band narrowed to the bars-present case |
 | `scripts/verifyChartEmptyState.mjs` | **new**, 80 assertions in round 1, **96** after round 2 |
 | `package.json` | `verify:empty-state` added; the chain **appended** after `verifyChartSessions.mjs` |
-| `docs/research/FETCH_AND_STORE.md` | the deferral section appended; nothing else altered |
-| `RAMA_AGI_MASTER_SPEC.md` | **Section 126** (ten decisions, verified, not verified, next) and **Section 28 ledger row 146**, both added in round 2 |
+| `docs/research/FETCH_AND_STORE.md` | the deferral section appended, then the **ready-to-paste Section 129 and ledger row 149** appended after it; nothing else altered |
+| `RAMA_AGI_MASTER_SPEC.md` | **not touched.** Round 2 wrote Section 126 and row 146 here; both numbers were taken on `dev` while this branch was in review, so the edit was dropped at the rebase and the content moved into the design document as blocks for master to paste |
 
 No protected file was touched. No dependency was added; nothing is range-pinned. No `console.log`, no
 TODO/FIXME. No new `InfoTip` id, so `verifyGlossary.mjs` needed no new entry.
@@ -288,12 +296,13 @@ Read this section before believing anything above it.
 - **No test covers the renderer's JSX.** There is no renderer test harness in this project; the
   overlay's markup is asserted only by source-level regex, which proves a binding exists and not that
   it renders.
-- **The spec was edited on a contended file.** Section 126 and ledger row 146 are appended at the end
-  of their respective blocks to minimise it, but a third workflow is active elsewhere in the repo and
-  `RAMA_AGI_MASTER_SPEC.md` is the most contended file in the project. **If another branch also claims
-  Section 126 or row 146, this is a merge conflict to resolve by renumbering, not a correctness
-  problem** — the content is self-contained and the in-code citations are the only references to the
-  number.
+- **THE SPEC IS NOT UPDATED BY THIS BRANCH, AND THAT IS THE ONE OUTSTANDING PROCESS DEBT.** The
+  collision this bullet predicted happened: Section 126 and row 146 were taken on `dev` while the
+  branch was in review, so the spec edit was dropped at the rebase and the content now sits as
+  ready-to-paste **Section 129** and **ledger row 149** blocks at the end of
+  `docs/research/FETCH_AND_STORE.md`. Until master pastes them, the only durable record of these
+  decisions is `docs/research/`, and the in-code citations read "Section 129" for a section that does
+  not exist in the spec yet. Pasting the two blocks closes it; nothing in the code changes.
 - **The band gate is reasoned, not seen.** Gating `barsNote` on `bars.length > 0` removes a duplicate
   report in the engine-down state. That a truncation note still reaches the screen follows from the
   route sending it only alongside bars (`main.py` 677-679), which is a source reading; it has not been
