@@ -1,6 +1,6 @@
 
 /**
- * verifyChartEmptyState.mjs — the three sentences an empty chart is allowed to say (Section 123.6).
+ * verifyChartEmptyState.mjs — the four sentences an empty chart is allowed to say (Section 126).
  *
  * WHAT THIS SUBSYSTEM IS FOR. A chart with no candles has to explain itself, and for three releases it
  * explained itself wrongly in three different ways. The explanation now comes from `emptyState()`,
@@ -12,6 +12,10 @@
  *     whenever `coverage.stored > 0`, and the headline must be the ROUTE'S OWN note, verbatim.
  *   - THE ACTION MUST BE FOLLOWABLE. `nothing-in-window` must never offer a fetch: fetching cannot move
  *     bars into a window the provider does not serve, which is the defect the state exists to end.
+ *   - AND NEITHER MAY THE LINE UNDER THE HEADLINE. Fixing the headline moved the falsehood one line
+ *     down: the detail read `stored <first> → now` because the route omits `storedLastBar` on exactly
+ *     the branch this state is reached through. An unknown end is now left unsaid, and the assertions
+ *     require that it is not rendered as `now`, as a date, or as an empty arrow.
  *   - A NAMED CAUSE OUTRANKS A GENERIC ABSENCE. Master's Python engine has never completed a run, so
  *     `failed` is the state he is actually in; every failure mode must carry a reason, and a remedy must
  *     reach the screen whether the bridge folded it into `error` or left it on `diagnosis`.
@@ -127,10 +131,42 @@ console.log('\n  and with no note on the reply it states the fact without invent
   check('it claims no cause — no "widen", no "provider", no "fetch"',
     !/widen|provider|fetch/i.test(s.headline), s.headline);
   check('it is marked as composed by the renderer', s.composed === true);
-  check('a missing storedLastBar reads as "now" rather than as undefined',
-    s.detail === 'stored 2019-04-01 → now', s.detail);
   check('an empty note string is treated as absent, not printed as a blank headline',
     emptyState({ bars: 0, note: '   ', coverage: { stored: 5 } }).composed === true);
+}
+
+// THE DETAIL LINE MUST NOT CLAIM AN END THE REPLY DID NOT CARRY. `ai_backend/main.py` sends
+// `storedLastBar` on the success branch and NOT on the matched == 0 branch — which is the only branch
+// this state is reached through — so `coverage.last` is null in every real instance of it. The line read
+// `stored ${first} → ${last || 'now'}` and so printed `stored 2019-04-01 → now` under a headline saying
+// nothing falls in a 2024 window. Both cannot be true. The unknown end is now left unsaid.
+console.log('\n  and the stored window is stated only as far as the reply said it');
+{
+  const real = emptyState({
+    bars: 0,
+    note: ROUTE_NOTE,
+    coverage: { first: '2019-04-01', last: null, stored: 400 },
+  });
+  check('with no storedLastBar the end is NOT rendered as "now"',
+    !/now/.test(real.detail || ''), real.detail);
+  check('nor invented as a date — no second date appears at all',
+    ((real.detail || '').match(/\d{4}-\d{2}-\d{2}/g) || []).length === 1, real.detail);
+  check('nor printed as undefined, null or an empty arrow',
+    !/undefined|null|→\s*$/.test(real.detail || ''), real.detail);
+  check('what IS known is still stated: the start the reply carried',
+    real.detail === 'stored from 2019-04-01', real.detail);
+  check('and the detail never outlives the headline it sits under — one claim, one date',
+    /2019-04-01/.test(real.detail) && !/2024/.test(real.detail), real.detail);
+  check('an end that IS carried is rendered, with the arrow',
+    emptyState({ bars: 0, coverage: { first: '2019-04-01', last: '2019-06-28', stored: 400 } }).detail
+      === 'stored 2019-04-01 → 2019-06-28');
+  check('a blank storedLastBar string counts as absent, not as an end',
+    emptyState({ bars: 0, coverage: { first: '2019-04-01', last: '   ', stored: 400 } }).detail
+      === 'stored from 2019-04-01');
+  check('a non-string first is not rendered as a window at all',
+    emptyState({ bars: 0, coverage: { first: 17, last: '2019-06-28', stored: 400 } }).detail === null);
+  check('and with neither end known there is no detail line to be wrong',
+    emptyState({ bars: 0, coverage: { stored: 400 } }).detail === null);
 }
 
 // ── 4. A NAMED CAUSE OUTRANKS A GENERIC ABSENCE ───────────────────────────────
@@ -263,17 +299,47 @@ check('a headline is never empty, in any state',
 //
 // Source-level, because a prop that is threaded to two of three charts is exactly the defect found in
 // review, and no behavioural test of a pure function can see a missing attribute in JSX.
-console.log('\n  the reply reaches every chart, not one of three');
+//
+// DISCOVERED, NOT COUNTED. The first version of this block summed `<PriceChart` matches across two
+// hardcoded files and required the total to be 3 — so a FOURTH chart introduced in a third file left the
+// suite green while reintroducing the one-of-three defect the tranche exists to fix. Every `.jsx` under
+// src/pages/StockMind is scanned, every call site found is required to carry all three props, and the
+// patterns match ATTRIBUTE NAMES rather than whole expressions, so wrapping an attribute across lines
+// no longer turns a green suite red.
+console.log('\n  the reply reaches every chart, however many there are');
 {
   const chart = read(path.join(SM, 'PriceChart.jsx'));
   const stock = read(path.join(SM, 'StockMind.jsx'));
   const popout = read(path.join(SM, 'PopoutPanel.jsx'));
   const pkg = read(path.join(ROOT, 'package.json'));
 
-  check('there are exactly three PriceChart call sites',
-    ((stock.match(/<PriceChart/g) || []).length + (popout.match(/<PriceChart/g) || []).length) === 3,
-    String((stock.match(/<PriceChart/g) || []).length
-      + (popout.match(/<PriceChart/g) || []).length));
+  // One element's source, from `<PriceChart` to the `/>` that closes it. Every call site in this
+  // codebase is self-closing; a non-self-closing one would be caught by the per-site prop assertions
+  // below reading past its own tag, which fails loudly rather than passing quietly.
+  const callSites = fs.readdirSync(SM)
+    .filter((f) => f.endsWith('.jsx'))
+    .flatMap((f) => {
+      const src = read(path.join(SM, f));
+      const out = [];
+      let at = src.indexOf('<PriceChart');
+      while (at !== -1) {
+        const end = src.indexOf('/>', at);
+        out.push({ file: f, src: src.slice(at, end === -1 ? src.length : end) });
+        at = src.indexOf('<PriceChart', at + 1);
+      }
+      return out;
+    });
+
+  check('the call sites are found by scanning, not assumed — at least the three that exist',
+    callSites.length >= 3, String(callSites.length));
+  check('and they are spread across more than one file, so the scan is not reading one of them twice',
+    new Set(callSites.map((c) => c.file)).size >= 2,
+    [...new Set(callSites.map((c) => c.file))].join(', '));
+  for (const attr of ['coverage', 'replyNote', 'failure']) {
+    const missing = callSites.filter((c) => !new RegExp(`\\b${attr}=\\{`).test(c.src));
+    check(`EVERY call site is handed \`${attr}\` — one of three was the defect`,
+      missing.length === 0, missing.map((c) => c.file).join(', '));
+  }
   check('PriceChart takes replyNote and failure, both optional and both defaulting to null (I11)',
     /\n  replyNote = null,/.test(chart) && /\n  failure = null,/.test(chart));
   // It is `replyNote` and not `note` because `note` is this component's inline note-editor state, and
@@ -285,25 +351,47 @@ console.log('\n  the reply reaches every chart, not one of three');
   check('meta and syncInfo were NOT invented as props — the route sends them, nothing reads them',
     !/\n  meta = null,/.test(chart) && !/\n  syncInfo = null,/.test(chart));
   check('StockMind builds ONE coverage object for both of its charts',
-    /const coverage = useMemo/.test(stock) && (stock.match(/coverage=\{coverage\}/g) || []).length
-      === 2, String((stock.match(/coverage=\{coverage\}/g) || []).length));
+    /const coverage = useMemo/.test(stock)
+      && (stock.match(/coverage=\{coverage\}/g) || []).length
+        === (stock.match(/<PriceChart/g) || []).length,
+    String((stock.match(/coverage=\{coverage\}/g) || []).length));
   check('and it carries stored, which is what separates the two empty states',
     /stored: Number\.isFinite\(barsMeta\.stored\)/.test(stock));
-  check('both StockMind charts are handed the route note',
-    (stock.match(/replyNote=\{barsMeta\?\.note \|\| null\}/g) || []).length === 2);
-  check('both StockMind charts are handed the failure',
-    (stock.match(/failure=\{barsFail\}/g) || []).length === 2);
   check('the failed reply is kept whole rather than reduced to a string',
     /setBarsFail\(\{/.test(stock) && /diagnosis: res\.diagnosis \|\| null/.test(stock));
   check('and it is cleared when a fetch starts, so a stale failure cannot outlive it',
     /setBarsFail\(null\)/.test(stock));
-  check('the pop-out window threads all three too',
-    /coverage=\{meta \? \{/.test(popout) && /replyNote=\{meta\?\.note \|\| null\}/.test(popout)
-      && /failure=\{fail\}/.test(popout));
   check('the pop-out keeps the diagnosis as well as the message',
     /diagnosis: res\?\.diagnosis \|\| null/.test(popout));
   check('and its catch branch produces a failure too, so a thrown error is not a silent empty chart',
     /setFail\(\{ error: err\.message/.test(popout));
+
+  // ONE REPORT OF ONE FAILURE. Both pages keep a message band ABOVE the canvas that predates the
+  // overlay, and both set it from the same failed reply the overlay now renders. Ungated, master saw the
+  // reason, the collapsed `engine output` and the knocked URL twice over — once in the band and once in
+  // the overlay beneath it. The band is gated on drawn candles in both files, because the only case the
+  // overlay cannot cover is a message arriving while the PREVIOUS fetch's candles are still on screen.
+  check('the pop-out band only shows over drawn candles, so it cannot double the overlay',
+    /\{error && bars\.length > 0 && \(/.test(popout));
+  check('and StockMind gates its band the same way — the two files must not be asymmetric',
+    /\{barsNote && bars\.length > 0 && \(/.test(stock));
+
+  // The pop-out passes `onFetch` and no `onDates`, and PriceChart gates the clear-dates button on
+  // `onDates` — so a `nothing-in-window` state there would print "widen the dates" with no control to
+  // widen them. It cannot arise today because the pop-out sends NO dates at all, so `/ohlcv` never takes
+  // its matched == 0 branch. That is asserted rather than assumed: threading dates into the pop-out must
+  // fail this suite, so whoever does it supplies the action first.
+  const popoutSite = callSites.find((c) => c.file === 'PopoutPanel.jsx');
+  check('the pop-out chart is found as a call site at all', Boolean(popoutSite));
+  check('it sends no dates, so the nothing-in-window state cannot arise without an action',
+    popoutSite && !/\b(fromDate|toDate)=\{/.test(popoutSite.src), popoutSite?.src);
+  check('and the request it makes carries no dates either',
+    /limitForDates\(interval, null, null\)/.test(popout));
+  check('whereas a call site that DOES send dates also sends the handler that can change them',
+    callSites.filter((c) => /\bfromDate=\{/.test(c.src))
+      .every((c) => /\bonDates=\{/.test(c.src)));
+  check('and the clear-dates button is gated on that handler rather than assuming it',
+    /vacancy\.action\?\.id === 'clear-dates' && onDates/.test(chart));
 
   // The overlay itself: the renderer must read the decided state rather than re-deciding it.
   check('the overlay renders from emptyState() and composes no headline of its own',

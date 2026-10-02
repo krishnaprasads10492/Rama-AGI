@@ -65,6 +65,29 @@ function failureState(failure) {
 }
 
 /**
+ * What is on disk, stated only as far as the reply actually said it.
+ *
+ * A DEFECT NOT TO REINTRODUCE. This line used to read `stored ${first} → ${last || 'now'}`, and
+ * `ai_backend/main.py`'s matched == 0 branch — which is the ONLY branch `nothing-in-window` is reached
+ * through — sends `storedFirstBar` and no `storedLastBar` (main.py lines 638-645; the success branch at
+ * 669-682 sends both). So `last` was null in every real instance of this state and the overlay printed
+ * `stored 2019-04-01 → now` directly beneath a headline saying no bars fall between 2024-01-01 and
+ * 2024-02-01. If the store really reached now, that window would have matched: the two sentences cannot
+ * both be true, and the false one was the half telling master which window to aim at.
+ *
+ * So an unknown end is LEFT UNSAID — no arrow, no right-hand side — rather than guessed at. Reading a
+ * missing value as 'now' was the right instinct ("never render undefined") applied to the wrong half of
+ * the string.
+ */
+function describeStored(coverage) {
+  const text = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
+  const first = text(coverage?.first);
+  const last = text(coverage?.last);
+  if (!first) return null;
+  return last ? `stored ${first} → ${last}` : `stored from ${first}`;
+}
+
+/**
  * @param {object} input
  * @param {number} [input.bars] how many candles are actually on the canvas
  * @param {boolean} [input.busy] a fetch is in flight
@@ -118,7 +141,7 @@ export function emptyState({
         ? note.trim()
         : `${stored} ${label} bars are stored for ${who}, but none fall inside the selected dates.`,
       composed: !(typeof note === 'string' && note.trim()),
-      detail: coverage?.first ? `stored ${coverage.first} → ${coverage.last || 'now'}` : null,
+      detail: describeStored(coverage),
       // NOT a fetch. Fetching cannot move bars into a window the provider does not serve, which is the
       // whole reason this state is separate from `nothing-yet`.
       action: { id: 'clear-dates', label: '✕ clear dates' },

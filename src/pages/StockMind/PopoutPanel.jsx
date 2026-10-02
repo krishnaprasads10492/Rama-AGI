@@ -68,7 +68,7 @@ export default function PopoutPanel({ params }) {
   const [bars, setBars] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  // WHAT THE REPLY SAID BESIDES THE BARS (Section 123.6). This window kept the array and dropped
+  // WHAT THE REPLY SAID BESIDES THE BARS (Section 126). This window kept the array and dropped
   // everything else, so a pop-out could not say what was stored, could not show the route's own
   // sentence about an empty window, and reported an engine that never started as "no bars stored".
   const [meta, setMeta] = useState(null);
