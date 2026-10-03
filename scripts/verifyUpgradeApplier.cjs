@@ -577,6 +577,171 @@ console.log('\n  what this does NOT close');
     !/verified:\s*true/.test(read('electron/lib/upgradeApplier.cjs')));
 }
 
+// ─── 13. EVERY SPELLING OF A GOVERNED PATH, AT EVERY GATE ─────────────────────
+//
+// The hole this section exists to close, measured end to end before it was fixed: the path fence
+// compared strings that had only had their separators swapped and a leading './' stripped, so
+// 'electron/lib/./autonomyStop.cjs', 'electron//lib/autonomyStop.cjs' and
+// 'electron/lib/../lib/autonomyStop.cjs' all read as naming nothing governed. A self-upgrade proposal
+// with a correct baseSha256 and a tier-0 user was applied against a fixture repo with no refusal, and
+// the stop module on disk afterwards read `function isStopped(){return false;}`. autonomyStop.cjs is
+// not in loyaltyGuard.PROTECTED_FILES, so nothing downstream objected; the renderer create path returned
+// no refusal either. I6 held — the apply still needed master's recorded approval — but the diff should
+// never have been fileable.
+//
+// So: every variant of every one of the four SELF_GOVERNING_PATHS, at inspectCreate for BOTH origins
+// and at applyWith, with the write that would have landed asserted NOT to have landed. The control row
+// at the end applies the same spelling to an UNGOVERNED path, so a green section cannot mean "the gate
+// refuses odd-looking paths" when what is claimed is "the gate resolves them".
+console.log('\n  the path fence resolves structure — every spelling of a governed path is refused');
+{
+  const userData = scratch('variants');
+  stop.configure({ userDataRoot: userData });
+
+  function governedRepoFixture() {
+    const root = repoFixture();
+    fs.mkdirSync(path.join(root, 'shared'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'electron', 'lib', 'autonomyStop.cjs'),
+      'function isStopped(){return true;}\n', 'utf8');
+    fs.writeFileSync(path.join(root, 'electron', 'lib', 'autonomyPolicy.cjs'), 'module.exports = {};\n', 'utf8');
+    fs.writeFileSync(path.join(root, 'shared', 'autonomy-policy.json'), '{"version":1,"levels":{}}\n', 'utf8');
+    fs.writeFileSync(path.join(root, 'shared', 'loyalty-tripwire.json'), '{}\n', 'utf8');
+    return root;
+  }
+
+  /** The spellings that reduce to the same file. Generated from the path, so a fifth path is covered too. */
+  function variants(rel) {
+    const dir = path.posix.dirname(rel);
+    const base = path.posix.basename(rel);
+    return [
+      [`${dir}/./${base}`,                                     'a "." segment'],
+      [`${dir}//${base}`,                                      'a doubled separator'],
+      [`${dir}/../${path.posix.basename(dir)}/${base}`,         'a ".." that comes back'],
+      [`./${rel}`,                                             'a leading "./"'],
+      [`${rel.split('/').join('\\').replace(/\\([^\\]+)$/, '\\.\\$1')}`, 'backslashes and a "." segment'],
+    ];
+  }
+
+  const PAYLOAD = 'function isStopped(){return false;}\n';
+  let variantRows = 0;
+
+  for (const entry of policy.SELF_GOVERNING_PATHS) {
+    for (const [spelling, shape] of variants(entry.path)) {
+      variantRows += 1;
+
+      // (i) the renderer create path
+      const fromIpc = gate.inspectCreate(
+        { kind: 'self-modify', changes: [{ action: 'patch', path: spelling, content: PAYLOAD }] },
+        { origin: 'ipc' });
+      check(`IPC create: "${spelling}" (${shape}) is refused`,
+        fromIpc?.refused === true && /govern the autonomy policy or the stop/.test(fromIpc.reason),
+        fromIpc?.reason ?? 'it was allowed');
+
+      // (ii) Rāma's own create path
+      const fromRama = gate.inspectCreate(
+        { kind: gate.KIND.DIFF, changes: [{ action: 'patch', path: spelling, content: PAYLOAD }] },
+        { origin: 'rama' });
+      check(`Rāma's create: "${spelling}" is refused for naming a governed path, not merely for the stop`,
+        fromRama?.refused === true && /govern the autonomy policy or the stop/.test(fromRama.reason),
+        fromRama?.reason ?? 'it was allowed');
+
+      // (iii) and the same spelling hidden in meta, which is persisted and rehydrated on an id check
+      const inMeta = gate.inspectCreate(
+        { kind: 'self-modify', changes: [], meta: { plan: `then patch ${spelling}` } },
+        { origin: 'ipc' });
+      check(`and in meta: "${spelling}" is refused there too`,
+        inMeta?.refused === true, inMeta?.reason ?? 'it was allowed');
+    }
+  }
+  check('all four self-governing paths were covered, in five spellings each',
+    variantRows === policy.SELF_GOVERNING_PATHS.length * 5 && variantRows === 20, String(variantRows));
+
+  // (iv) the applier, where the bytes would actually land
+  for (const entry of policy.SELF_GOVERNING_PATHS) {
+    for (const [spelling] of variants(entry.path)) {
+      const repo = governedRepoFixture();
+      const target = path.join(repo, ...entry.path.split('/'));
+      const before = fs.readFileSync(target, 'utf8');
+      const proposal = {
+        id: pid(), kind: gate.KIND.DIFF, title: 'a governed path, spelled around the fence',
+        meta: { schema: gate.SCHEMA },
+        changes: [{ action: 'patch', path: spelling, content: PAYLOAD, baseSha256: sha256(fs.readFileSync(target)) }],
+      };
+      let message = null;
+      try { await applier.applyWith(io(repo, userData), proposal, { user: MASTER }); }
+      catch (err) { message = err.message; }
+      check(`applyWith: "${spelling}" is refused at step 3`,
+        message !== null && /govern the autonomy policy or the stop/.test(message),
+        message ?? 'it was applied');
+      check(`and ${entry.path} is byte-identical on disk afterwards`,
+        fs.readFileSync(target, 'utf8') === before);
+    }
+  }
+
+  // (v) THE CONTROL. The same spellings, an ungoverned path — these must APPLY. Without this row a
+  // green section above would be satisfied by a fence that refuses anything with a "." or a ".." in it,
+  // which is a different and much blunter guarantee than the one being claimed.
+  for (const [spelling, shape] of variants('electron/lib/target.cjs')) {
+    const repo = governedRepoFixture();
+    const target = path.join(repo, 'electron', 'lib', 'target.cjs');
+    const proposal = {
+      id: pid(), kind: gate.KIND.DIFF, title: 'an ungoverned path, same spelling',
+      meta: { schema: gate.SCHEMA },
+      changes: [{ action: 'patch', path: spelling, content: 'module.exports = 2;\n', baseSha256: sha256(fs.readFileSync(target)) }],
+    };
+    let message = null;
+    try { await applier.applyWith(io(repo, userData), proposal, { user: MASTER }); }
+    catch (err) { message = err.message; }
+    check(`control: an UNGOVERNED path written with ${shape} still applies`, message === null, message);
+    check('and the bytes really changed, so the fence resolves paths rather than rejecting odd ones',
+      fs.readFileSync(target, 'utf8') === 'module.exports = 2;\n');
+  }
+
+  const gateCode = strip(read('electron/lib/autonomyGate.cjs'));
+  check('the comparison canonicalises by resolution before it compares',
+    /path\.posix\.normalize/.test(gateCode));
+  check('and an empty path still names nothing, rather than normalising to the repository root',
+    gate.namesGovernedPath('') === null && gate.namesGovernedPath(null) === null
+    && gate.namesGovernedPath('.') === null);
+}
+
+// ─── 14. the data file cannot refuse master's apply either ────────────────────
+// The companion door to §1: with revert-own-apply merely EDITABLE, a validated data edit lowering it to
+// L0 made this applier's entry gate throw on a MASTER-APPROVED apply — the §1 defect, reached through a
+// documented edit instead of through the stop.
+console.log('\n  a real shared/autonomy-policy.json cannot refuse master\'s approved apply');
+{
+  const userData = scratch('policyfile');
+  stop.configure({ userDataRoot: userData });
+  if (fs.existsSync(policy.DATA_FILE)) {
+    residual(`${policy.DATA_FILE} already exists, so these rows were SKIPPED rather than overwrite `
+      + 'master\'s own policy file. Move it aside and re-run to exercise them.');
+  } else {
+    try {
+      for (const [label, body] of [
+        ['lowering revert-own-apply to L0', { version: 1, levels: { 'revert-own-apply': 'L0' } }],
+        ['lowering both MASTER_ACT classes', { version: 1, levels: { 'revert-own-apply': 'L0', 'apply-source': 'L0' } }],
+        ['a legitimate restriction of an editable class', { version: 1, levels: { 'research-network': 'L1' } }],
+      ]) {
+        fs.writeFileSync(policy.DATA_FILE, JSON.stringify(body, null, 2), 'utf8');
+        const repo = repoFixture();
+        const p = diffProposal(repo);
+        let threw = null;
+        try { await applier.applyWith(io(repo, userData), p, { user: MASTER }); }
+        catch (err) { threw = err.message; }
+        check(`with a data file ${label}, A MASTER-APPROVED APPLY STILL SUCCEEDS`, threw === null, threw);
+        check('and the bytes landed',
+          fs.readFileSync(path.join(repo, 'electron', 'lib', 'target.cjs'), 'utf8') === 'module.exports = 2;\n');
+      }
+    } finally {
+      try { fs.unlinkSync(policy.DATA_FILE); } catch { /* already gone, which is the shipped state */ }
+      policy.reload();
+    }
+    check('and the data file is absent again, exactly as it ships',
+      fs.existsSync(policy.DATA_FILE) === false);
+  }
+}
+
 }
 
 main()

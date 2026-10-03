@@ -24,10 +24,19 @@
  * ── THE FLOOR IS A FALLBACK, NOT A MINIMUM ───────────────────────────────────────────────────────
  *
  * `shared/autonomy-policy.json` SHIPS ABSENT, so the floor is the shipped level. A present file may
- * RESTRICT an editable class below its floor — that is how master puts Rāma offline, or turns the
- * automatic revert off — and may RAISE one only as far as its ceiling. It can do neither to a permanent
- * class. **That last half-sentence must travel with the first: master cannot lower `master-record` or
- * `loyalty-core` by data either, only by a source edit under an I6 approval.**
+ * RESTRICT an editable class below its floor — that is how master puts Rāma offline — and may RAISE one
+ * only as far as its ceiling. It can do neither to a permanent class. **That last half-sentence must
+ * travel with the first: master cannot lower `master-record` or `loyalty-core` by data either, only by a
+ * source edit under an I6 approval.**
+ *
+ * The data file **cannot turn the automatic revert off**, and an earlier revision of this header said it
+ * could. Measured: `{"version":1,"levels":{"revert-own-apply":"L0"}}` validated clean, and the only
+ * thing it changed was that `upgradeApplier`'s entry gate then REFUSED A MASTER-APPROVED APPLY — while
+ * `revert()` kept running, because a token is its authority and it consults neither the policy nor the
+ * stop. A documented, validator-accepted edit that re-created the one defect this slice exists to
+ * prevent, and did not do the thing it claimed. So `revert-own-apply` is PERMANENT now: the file is not
+ * read for it, a file that so much as names it is rejected whole, and turning the automatic revert off
+ * is not something this design offers at all.
  *
  * ── AND THE STOP DOMINATES ───────────────────────────────────────────────────────────────────────
  *
@@ -120,11 +129,19 @@ const CEILINGS = Object.freeze({
  * The classes the data file is NOT READ FOR AT ALL.
  *
  * `master-record` is here because of spec Section 127: **Rāma may never widen its own retention window
- * or capture scope for what is recorded about master.** The other five are I6, I17, I8, I15/I16 and the
- * policy's own authority.
+ * or capture scope for what is recorded about master.** Four more are I6, I17, I8 and I15/I16, and one
+ * is the policy's own authority.
+ *
+ * **Both `MASTER_ACT` members are here, and that is a structural requirement rather than a coincidence.**
+ * `requireMasterDriven` ignores the stop for exactly those two classes, so whatever the data file could
+ * say about them would be the only thing left standing between master's approved apply and a refusal.
+ * A class that describes MASTER'S act must not be governable by a file, which is why
+ * `requireMasterDriven` THROWS for a `MASTER_ACT` class that is not permanent: removing one from this
+ * set fails loudly at the first apply instead of quietly handing the decision to a data edit.
  */
 const PERMANENT = Object.freeze(new Set([
-  'apply-source',       // I6
+  'apply-source',       // I6 + MASTER_ACT
+  'revert-own-apply',   // MASTER_ACT — a data edit must not be able to refuse master's own apply
   'release-classify',   // I17 — master alone
   'capability-grant',   // I8 + protected file + the tripwire
   'loyalty-core',       // I15 / I16
@@ -234,7 +251,24 @@ function load() {
 
 function current() { return loaded || load(); }
 
-/** Re-read the file. Master edits it by hand; no build and no restart is required. */
+/**
+ * Re-read the file. Master edits it by hand, and no build is required.
+ *
+ * **It is called at each of the three doors that make or report a decision** — `require`,
+ * `requireMasterDriven` and `policyStatus` — so a hand edit takes effect at the next gating decision and
+ * at the next status read, with no restart. An earlier revision claimed "no restart is required" while
+ * having no production caller at all, so `current()` cached the first load for the whole process
+ * lifetime and a hand edit did nothing until the app was restarted. `effective()` deliberately stays on
+ * the cache: it is the plain reader, and the doors re-read before they consult it, so the two never
+ * disagree at the moment a decision is made.
+ *
+ * The residual, stated rather than engineered around: a read that lands mid-write sees a torn file,
+ * which is REJECTED WHOLE and so falls back to the floors. For a raise that is the stricter direction;
+ * for one of master's restrictions it is briefly the more permissive one. Every floor is at or below L3
+ * (propose-only) and no permanent class is readable from the file at all, so the worst case is a
+ * proposal Rāma should not have filed — which still cannot be applied without master's recorded
+ * approval (I6).
+ */
 function reload() { loaded = null; return load(); }
 
 function stop() {
@@ -250,9 +284,10 @@ function stop() {
  * would be refused — producing exactly the stranded half-applied tree the exception exists to prevent.
  * The carve-out is a token issued at apply entry instead (`upgradeApplier`).
  *
- * `ignoreStop` skips the FIRST LINE ONLY. `min(CEILINGS, levels)` is untouched, which is what keeps
- * master's restriction authority intact while restoring his apply: setting `revert-own-apply` to L0 in
- * the data file still genuinely disables the automatic revert.
+ * `ignoreStop` skips the FIRST LINE ONLY, and its one consumer only ever asks about a PERMANENT class,
+ * for which the data file is not consulted either. So the two classes that describe master's own act
+ * resolve to their frozen floors and nothing else — no stop, no file. Master's restriction authority
+ * over the nine EDITABLE classes is untouched by that, because it was never expressed through these two.
  */
 /**
  * Everything AFTER the stop's line: the data file intersected against the frozen floors and ceilings.
@@ -303,6 +338,7 @@ function gate(have, classId, need, action) {
 function require_(classId, need, { action = null } = {}) {
   if (!need) throw new Error(`policy.require("${classId}") needs an explicit level — a gate whose level defaults cannot name what it needed`);
   if (!Object.prototype.hasOwnProperty.call(LEVELS, need)) throw new Error(`"${need}" is not a level`);
+  reload();
   return gate(effective(classId), classId, need, action);
 }
 
@@ -315,7 +351,16 @@ function requireMasterDriven(classId, need) {
   if (!MASTER_ACT.has(classId)) {
     throw new Error(`requireMasterDriven is only for MASTER_ACT classes — "${classId}" is not one`);
   }
+  // The second half of the fence, and it fails LOUDLY on purpose. This is the one door that ignores the
+  // stop, so if its class were also readable from the data file then a validator-accepted edit would be
+  // the last thing standing between master's approved apply and a refusal. Rather than trust a comment
+  // saying the two sets agree, the door refuses to open for a MASTER_ACT class that is not permanent.
+  if (!PERMANENT.has(classId)) {
+    throw new Error(`"${classId}" is a MASTER_ACT class but not a PERMANENT one, so the data file could `
+      + 'refuse master\'s own act — refusing to resolve it at all until it is one or the other');
+  }
   if (!need) throw new Error(`policy.requireMasterDriven("${classId}") needs an explicit level`);
+  reload();
   return gate(effective(classId, { ignoreStop: true }), classId, need, 'a master-driven act');
 }
 
@@ -323,7 +368,7 @@ function requireMasterDriven(classId, need) {
 
 /** Every field carries its own truth; nothing is inferred by the renderer. */
 function policyStatus() {
-  const state = current();
+  const state = reload();
   const levels = {};
   for (const c of CLASSES) levels[c] = effective(c);
   const floorsNow = {};

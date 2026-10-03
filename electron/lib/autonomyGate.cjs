@@ -49,6 +49,8 @@
  * change the behaviour of a shipped applier. `scripts/verifyUpgradeApplier.cjs` prints both residuals.
  */
 
+const path   = require('path');
+
 const policy = require('./autonomyPolicy.cjs');
 const stop   = require('./autonomyStop.cjs');
 
@@ -70,8 +72,30 @@ const ORIGINS = Object.freeze(['ipc', 'rama']);
 
 // ─── Path fencing ─────────────────────────────────────────────────────────────
 
+/**
+ * Canonicalise for comparison: forward slashes, **structure RESOLVED**, lower case.
+ *
+ * The resolution is the whole point, and leaving it out was a measured hole rather than a theoretical
+ * one. A comparison that only swapped separators and stripped a leading `./` read
+ * `electron/lib/./autonomyStop.cjs`, `electron//lib/autonomyStop.cjs` and
+ * `electron/lib/../lib/autonomyStop.cjs` as naming nothing governed — so a `self-upgrade` entry with a
+ * correct `baseSha256` passed this gate at BOTH origins and passed the applier's step 3, and
+ * `autonomyStop.cjs` is not in `loyaltyGuard.PROTECTED_FILES`, so nothing downstream objected either.
+ * I6 still held — the apply needed a recorded master approval — but the diff should not have been
+ * fileable at all.
+ *
+ * `path.posix.normalize` collapses `.`, `..` and repeated separators, so every spelling of a path
+ * reduces to the one string the comparison below is written against. An empty input is returned empty
+ * rather than as `normalize`'s `'.'`, which would make a blank path name the repository root.
+ *
+ * It is applied to the stringified `meta` blob too, which is not a path. That is safe and deliberate:
+ * `normalize` only ever collapses `/`-delimited segments, so a path-like run hidden inside a JSON string
+ * is canonicalised in place and the surrounding text is left as it is.
+ */
 function normalise(p) {
-  return String(p ?? '').replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
+  const slashed = String(p ?? '').replace(/\\/g, '/');
+  if (!slashed) return '';
+  return path.posix.normalize(slashed).replace(/^\.\//, '').toLowerCase();
 }
 
 /**

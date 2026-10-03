@@ -39,6 +39,13 @@
  *    master. `scripts/verifyUpgradeApplier.cjs` asserts that in the shipped state: no allow-file, no
  *    policy file, master-approved apply SUCCEEDS.
  *
+ *    **The same defect had a second door, through the data file, and it is shut the same way.** With
+ *    `revert-own-apply` merely EDITABLE, `{"version":1,"levels":{"revert-own-apply":"L0"}}` validated
+ *    clean and this gate refused master again — a documented edit re-creating the defect. Both
+ *    `MASTER_ACT` classes are PERMANENT now, so the file is not read for them and a file that names one
+ *    is rejected whole; `requireMasterDriven` throws outright for a `MASTER_ACT` class that is not
+ *    permanent, so the two sets cannot drift apart quietly.
+ *
  * ── WHAT THIS DOES NOT DO, STATED SO NOTHING READS AS PASSED ──────────────────────────────────────
  *
  * There is NO verification plan, NO breakage analysis and NO corrected proposal in this slice: the
@@ -136,10 +143,15 @@ async function applyWith(io, proposal, opts = {}) {
 
   // ── 0. master-driven, derived from the caller — and declared insufficient ──────────────────────
   // `proposals.apply` already authorised `opts.user` before this runs, so the predicate is
-  // tautologically TRUE where it is evaluated, and `capability.can` reads only `user.tier`, so a
-  // `{tier: 0}` object is forgeable in-process. What this buys is that the applier does not depend on
-  // `proposals.cjs` having run its own gate. What guarantees Rāma does not START an apply is the
-  // asserted ABSENCE of in-process callers of `proposals.apply`.
+  // tautologically TRUE where it is evaluated. And `capability.can` reads only `user.tier`, so a
+  // `{tier: 0}` object is enough — which matters more than "forgeable in-process" conceded, because
+  // `proposals.cjs` registers `ipcMain.handle('proposals:apply', (_e, id, opts) => apply(id, opts))`
+  // at 269 and `apply()` authorises `opts.user` at 219: the user object ARRIVES WITH THE IPC REQUEST
+  // and is therefore RENDERER-SUPPLIED, not merely forgeable by code already inside the main process.
+  // That hole is pre-existing and lives in a protected file, so this build can only decline to depend
+  // on it: what the check buys is that the applier does not assume `proposals.cjs` ran its own gate,
+  // and what guarantees Rāma does not START an apply is the asserted ABSENCE of in-process callers of
+  // `proposals.apply`. Binding that user to the authenticated session is on the "FOR MASTER" list.
   const user = opts?.user;
   const masterDriven = !!(user && typeof user.tier === 'number' && capability.can(user, 'self-modify.apply'));
   if (!masterDriven) throw new Error('apply requires an authenticated tier-0 user (I6)');

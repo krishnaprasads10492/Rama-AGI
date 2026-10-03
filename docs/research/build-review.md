@@ -1,211 +1,218 @@
-# The empty chart stops saying "nothing stored" — review of the narrowed fetch-and-store tranche
+# The stop, the policy table, and the gate on `proposals:create`
 
-Three things were in scope after the orchestrator narrowed the design: `coverage` plus the whole failed
-reply plus the route's own sentence threaded to all three `<PriceChart` call sites as optional props; the
-false "No 30m bars stored for NIFTY50" headline eliminated for the case where bars are stored but none
-fall in master's window; and the engine-down diagnosis reaching every chart for every failure mode with
-both reason and remedy. All three are delivered. The sentence is no longer composed inside JSX: a pure
-`src/pages/StockMind/chartEmptyState.js` returns one of four states (`fetching` · `failed` ·
-`nothing-in-window` · `nothing-yet`) with a headline, a detail, an engine tail and an action *id*, which
-is what makes it assertable — `scripts/verifyChartEmptyState.mjs` runs 96 assertions against it, and I
-re-ran the full `npm run verify` chain in the worktree rather than trusting the recorded numbers.
+Four new main-process modules build the fence before anything autonomous exists behind it: a fail-safe
+stop whose absent configuration means stopped, a fifteen-class policy table with six classes the data
+file is never read for, a validation seam on the ledger's `proposals:create` channel, and an applier
+with entry validation plus a verified byte snapshot. Two new suites carry 271 assertions and both pass.
+The three measured defects the orchestrator named are genuinely closed: nothing renderer-supplied
+decides whether an action is autonomous, the snapshot directory is derived from the proposal id and the
+persisted one is never read, and a master-approved apply succeeds on a shipped install with no
+allow-file — asserted in exactly that state rather than against a fixture. No protected file changed,
+the tripwire is ALL PASS, no `console.log`, no TODO, no new dependency, and the pre-existing dispatchers
+are untouched.
 
-**Watch for:** the composed fallback headline for `nothing-in-window` ("…but none fall inside the
-selected dates") is the one sentence in the module that can still be false, and it is reachable only if
-the renderer discards bars the reply did carry (confirmed by reading the branch; the input that reaches
-it is not producible from `/ohlcv` today). The route's `stored == 0` note is dropped from both surfaces
-rather than shown (confirmed). The retry button offered on a capability denial cannot help (confirmed).
-None of the three is a false statement on a path master can reach.
+**Watch for:** the governed-path fence is defeated by a single `.` path segment (**confirmed** — a
+`self-upgrade` diff naming `electron/lib/./autonomyStop.cjs` was applied over the stop module in a
+fixture repo), so the narrowed FR-14 claim the build note states as true is also false; and a
+validator-accepted data edit (`revert-own-apply: L0`) makes the applier's entry gate refuse every
+master-approved apply (**confirmed**), reintroducing the defect class this slice exists to kill.
 
-**Verdict**: APPROVED
+**Verdict**: NEEDS_CHANGES
 
 ## High-level view
 
-The decision to move the sentence out of the render is the substance of the tranche. Three releases of
-wrong text survived because the string was assembled between JSX braces where nothing could call it;
-`emptyState()` takes facts in and returns a renderable object out, with no callbacks and no JSX, so each
-of the four sentences is now pinned by assertions that fail when the wording regresses.
+The deferrals are declared as data rather than implied: `DEFERRED_CHOKEPOINTS`, `FUTURE_ENTRIES` and
+`PRE_EXISTING[].haltedByEngage` are frozen lists the suite reads back, and the five unbuilt stage
+modules are asserted absent so `CHOKEPOINTS.length` cannot overclaim coverage.
 
-The precedence order is where the truth claim actually lives: candles on screen → say nothing, then
-`busy`, then `failure`, then `stored > 0`, then nothing-yet. A failed reply outranks `coverage` because
-`coverage` after a failure is whatever the last success left behind — a description of a moment that has
-passed. The distinguishing fact between the two empty states is `coverage.stored`, straight off
-`res.data.stored`, which the route sets on every branch.
+The stop's asymmetry — `isStopped()` fail-safe for new work, `isHalted()` explicit-engage only for the
+four dispatchers that already ship — is what keeps I11 intact, and it is proved behaviourally: a
+counting task registered with `refreshScheduler` is still dispatched on an install with no allow-file.
+Nothing in the diff touches `refreshScheduler`, `metaCognition`, `selfCare` or `marketIntel` at all, so
+`ollama-catalog`, `dependency-review`, the 10-minute audit, the 120-second sweep and the market ticks
+keep running. The cost, declared in words by `statusText()`, is that `engage()` tears nothing down and
+`lift()` cannot succeed on any machine.
 
-For the state the tranche exists for, the headline is the route's own note verbatim and the action is
-`clear dates`, not a fetch. Both halves matter: fetching cannot move bars into a window the provider does
-not serve, and clearing the dates genuinely refetches, because `fromDate`/`toDate` are in the effect that
-calls `loadBars`. The composed fallback that fires when no note arrived is honest about the count but
-asserts that dates are selected, which it has no input to know.
+Permanence is mechanical rather than documentary: `PERMANENT` is a frozen six-member set, `EDITABLE` is
+derived from it by filter rather than restated, the loader rejects a file that so much as names a
+permanent class, and `resolveWithoutStop` returns the frozen floor for those classes before it looks at
+the data. The suite pins the set against a literal list, so moving one into the editable set turns a row
+red.
 
-Every prop the renderer is given exists on a real payload: `note`, `stored`, `storedFirstBar` and
-`storedLastBar` on the `/ohlcv` reply, and `error` / `diagnosis` / `detail` / `stderrTail` on the gate
-object the bridge returns verbatim. The design's assumed `meta` and `syncInfo` were not turned into
-props, so nothing invented came back.
+The create gate derives `origin` as a literal written at each call site and throws on anything else,
+closing the `opts.autonomous` bypass at its root rather than sanitising it. What it does not close is
+the path fence itself: `autonomyGate.normalise()` lowercases and converts separators but never resolves,
+so `./`, `//` and `..` variants of the four self-governing paths pass unrecognised. The pre-existing
+`loyaltyGuard` handles the same input correctly, which makes the fix local and the gap new code's.
 
-Both pages gate their pre-existing message band on drawn candles, so one failure is reported once. The
-band still covers the case the overlay cannot: a refresh or a truncation note arriving while the previous
-fetch's candles are on screen.
+The applier's level comes from `requireMasterDriven` over a frozen two-class subset, which is what lets
+a permanently stopped install still apply what master approved. But that level is resolved through the
+data file, and `revert-own-apply` is editable down to L0 — so an edit the module documents as "turning
+the automatic revert off" instead refuses the whole apply, and does not disable the revert at all.
 
-Nothing was seen on a screen. `node_modules` is absent from the worktree, so `npx vite build` genuinely
-cannot run there and its absence is not held against the work; the renderer audit, which is this
-project's own `.jsx` scope check, passes. The `matched == 0` reply is reproduced from the route's source,
-not observed, because the Python engine has never completed a run on this machine.
+Coverage is mostly behavioural. The source-shape rows sit where the behaviour is unreachable and each
+says why. The exception is `lift()`: it writes the one file that enables autonomy and its success path
+has no behavioural coverage at all, with no seam to give it one.
 
 <details>
-<summary>Issues (3)</summary>
+<summary>Issues (6)</summary>
 
-1. **Composed `nothing-in-window` fallback claims a window** — when no `note` arrives, the headline says
-   "…but none fall inside the selected dates", which is false on the only input that can reach it (bars
-   returned, all discarded by `toChartTime`/finite filters, possibly with no dates selected at all). Feed
-   `emptyState` the raw reply bar count alongside `candles.length` and give the discard its own sentence,
-   or drop the clause about dates from the fallback.
-2. **The `stored == 0` note is suppressed on both surfaces** — the route's "Nothing stored for this
-   symbol. Call again with sync=true…" is replaced by the composed Section 107 headline and hidden from
-   the band; for `1d`, `describeLimit` returns null so no hint carries the provider-reach clause either.
-   Either print the note as the hint when `stored == 0`, or state in Section 126 that this note is
-   deliberately superseded rather than that notes are never suppressed.
-3. **Retry is offered on a capability denial** — `denyUnless` returns `{ok:false, error:"Access
-   denied…"}` with no diagnosis, which becomes a `failed` state with `↻ Try again`; retrying can never
-   succeed, and the overlay's fetch button is the one chart control not gated on `canView`. Gate
-   `onFetch` on the capability at the call site, or suppress the action for a denial.
+1. **Governed-path fence defeated by a dot segment** (HIGH, confirmed) — `autonomyGate.normalise()`
+   never resolves the path, so `electron/lib/./autonomyStop.cjs`, `electron//lib/autonomyStop.cjs` and
+   `electron/lib/../lib/autonomyStop.cjs` are not recognised as the stop module and are applied.
+   Normalise by resolution (as `loyaltyGuard` already does) and add suite rows for `./`, `//` and `..`
+   variants of each of the four self-governing paths.
+2. **A permitted data edit refuses master's apply** (MEDIUM, confirmed) — `revert-own-apply` is
+   editable to L0 and the applier's entry gate resolves it through the data file, so master setting it
+   to L0 blocks every apply while leaving `revert()` fully enabled. Resolve MASTER_ACT classes at the
+   entry gate against the frozen floor, or make `revert()` the thing that consults the class, and add a
+   suite row with a present data file that lowers it.
+3. **`lift()` has no behavioural coverage and no seam for it** (MEDIUM, confirmed) — it hard-requires
+   `./capability.cjs` and can never succeed, so the allow-file write ordering, the note check and the
+   halt clearing are asserted only by regex over source text. Give it an injectable capability module
+   so the success path can be exercised before master adds `system.suspend-autonomy`.
+4. **The policy file is read once per process** (NIT, confirmed) — `reload()` has no production caller
+   and no IPC surface, so a hand edit needs a restart, contradicting the module's own "no build and no
+   restart is required". Drop the claim or call `reload()` where the policy is read.
+5. **"Forgeable in-process" understates the trust boundary** (NIT, confirmed) — `proposals:apply`
+   passes the renderer's `opts` through, so the `{tier: 0}` object the applier's `masterDriven` check
+   reads is forgeable from the renderer, not just in-process. Reword the comment to name the renderer
+   route and add it to the "for master" list.
+6. **A degraded gate is a silent fail-open fence** (NIT, likely) — if `autonomyGate.cjs` fails to load,
+   `main.cjs` hands the ledger the bare recorder and the path fence disappears, while the stop itself
+   stays fail-safe. Surface the degradation in `status()` so it is visible where autonomy is reported,
+   not only in `loadFailures`.
 
 </details>
 
 <details>
 <summary>Details</summary>
 
-### Does item 2 eliminate the false statement, or relocate it?
+### A single dot segment reaches the stop module
 
-It eliminates it on the path master reaches. The branch that decides between the two empty states is
-`Number.isFinite(coverage?.stored) ? coverage.stored : 0` — not a note, not a date comparison — and
-`coverage.stored` is `res.data.stored`, which `ai_backend/main.py` sets on all three of its return
-shapes: `0` when `store.load` yields nothing, `len(df)` on the `matched == 0` branch, `len(df)` on
-success. So "nothing stored" and "stored but not in this window" are separated by the store's own count
-rather than by an inference, and the headline for the second is `res.data.note` character for character,
-which names both counts and both dates.
-
-The one sentence that can still be false is the fallback used when `stored > 0` and no note arrived:
+`autonomyGate.normalise()` is the whole of the path fence's canonicalisation:
 
 ```js
-headline: typeof note === 'string' && note.trim()
-  ? note.trim()
-  : `${stored} ${label} bars are stored for ${who}, but none fall inside the selected dates.`,
+function normalise(p) {
+  return String(p ?? '').replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
+}
 ```
 
-Tracing which replies can reach it: the `matched == 0` branch always sends a non-empty note, and the
-truncation branch sends one too, both with `stored > 0`. The success branch sends `note: null`, but it
-also sends bars — `tail = window.tail(max(10, min(limit, 20000)))` cannot be empty when `matched > 0`.
-So the fallback fires only when the reply carried bars and `candles` came out empty anyway, which happens
-when every bar fails `toChartTime` or the `finite` check on open/high/low/close. In that state the
-sentence is wrong twice over: the bars *did* fall inside the window, and if master had cleared the dates
-(`pickRange(null)` sets both to `''`) there is no window to be wrong about. `emptyState` is handed
-`bars: candles.length` and so cannot tell a reply with no bars from a reply whose bars it threw away.
+Separators and case are handled; path *structure* is not. `namesGovernedPath` then compares the result
+against four repo-relative tokens with `===` and `endsWith('/' + rel)`, so any form that is not already
+canonical misses:
 
-I could not produce that input from the route. `pd.to_datetime(..., errors='coerce')` plus `dropna`
-removes unparseable stamps before serialisation, and the two stamp formats the route emits
-(`%Y-%m-%d %H:%M:%S` and `str(date)`) are both accepted by `toChartTime`; a non-finite price would make
-the engine emit bare `NaN`, which fails `JSON.parse` in the bridge and arrives as a route-level failure
-rather than as a dropped candle. That is why this is a NIT rather than a blocker — but it is a latent
-trap, and the suite's "with no note on the reply" fixture tests an input the route cannot currently
-produce, which makes the fallback look exercised when it is only reachable through a defect elsewhere.
+```
+"electron/lib/autonomyStop.cjs"          -> "electron/lib/autonomystop.cjs"
+"electron/lib/./autonomyStop.cjs"        -> null
+"electron//lib/autonomyStop.cjs"         -> null
+"electron/lib/../lib/autonomyStop.cjs"   -> null
+"shared/./autonomy-policy.json"          -> null
+```
 
-One consequence of the same `bars`-versus-`candles` split: StockMind gates its band on `bars.length > 0`
-while the overlay is gated on `candles.length === 0`, so in the discard case both appear at once and the
-failure is reported twice again. Same cause, same fix.
+The stop's own state files survive this, because they are matched on basename and
+`.../rama/./autonomy.allow` still ends with `/autonomy.allow`. The four repo-relative paths do not, and
+`electron/lib/autonomyStop.cjs` is one of them.
 
-### The note the renderer talks over
+Both routes the build note claims are closed are open. Driving a `self-upgrade` entry with
+`meta.schema` set, one `patch` change naming `electron/lib/./autonomyStop.cjs` with a correct
+`baseSha256`, and a tier-0 user through `applyWith` against a fixture repo: the applier raised no
+refusal and the file on disk afterwards read `function isStopped(){return false;}`. The same string in
+`meta` passes `fileProposal`'s scan. On the renderer side the create fence returns no refusal either,
+and since `autonomyStop.cjs` is not in `loyaltyGuard.PROTECTED_FILES`, nothing downstream objects —
+`timeline.cjs`'s SELF_MODIFY applier writes `changes[].path` verbatim, which is already a printed
+residual.
 
-When `store.load` returns nothing the route sends `"Nothing stored for this symbol. Call again with
-sync=true to fetch it, which reaches back as far as the provider chain allows."` with `stored: 0`. That
-lands in `nothing-yet`, whose headline is composed — `No 30m bars stored for NIFTY50 over 1Y.` — and the
-note is not rendered anywhere: the band is now gated on drawn candles, and `nothing-yet` has no field
-that carries it. Nothing false is shown — the composed sentence also names the interval and the range the
-route's note omits, and the fetch button replaces the `sync=true` advice. What is lost is the
-provider-reach clause, and `hint` only substitutes for it on capped intervals — for `1d`,
-`describeLimit` returns null, so a daily chart with an empty store shows no equivalent. Section 126's
-claim that "the note is never suppressed when the renderer has nothing truer to say" is stronger than
-what the code does on this branch.
+I6 is still intact: this needs a recorded master approval and a diff master reads. But the whole point
+of the fence is that the diff should never have been fileable, and the build note's §2 explicitly
+narrows FR-14 to "unreachable by **this design's applier** and by **the renderer create path**" — both
+halves of the narrowed claim are false as shipped.
 
-### Actions that can help, and one that cannot
+`loyaltyGuard` refuses `electron/lib/./loyaltyGuard.cjs` and `electron/lib/../lib/loyaltyGuard.cjs` on
+the same input, so the covenant itself is unaffected and the correct matching already exists in the tree
+to copy.
 
-`✗ clear dates` is wired to `onDates('', '')`, and the window really does widen: `setDates` writes both
-dates and the effect on `[sym, exchange, barInterval, fromDate, toDate]` refires `loadBars`. The button
-is gated on `onDates`, so the pop-out — `onFetch` and no `onDates` — renders no action rather than an
-inert one, and the suite pins the pop-out to sending no dates so threading them later fails first.
+### `revert-own-apply: L0` turns into "no applies at all"
 
-The gap is on the failure side. `denyUnless` returns `{ok: false, error: 'Access denied: "stockmind.view"
-is not available to …'}` with no diagnosis, which `failureState` renders as a named failure with
-`action: {id: 'fetch', label: '↻ Try again'}`. Retrying a denial cannot change its outcome. The same
-user reaches it by clicking the overlay's fetch button, which is the one chart control not disabled on
-`canView` (the two toolbar buttons are). The dead fetch button predates this tranche; the retry loop on
-top of it is new.
+`revert-own-apply` is not permanent. Its floor and ceiling are both L4, which means the data file can
+only move it down — and the module presents that as a feature: *"A present file may RESTRICT an editable
+class below its floor — that is how master puts Rāma offline, or turns the automatic revert off"*, and
+again, *"setting `revert-own-apply` to L0 in the data file still genuinely disables the automatic
+revert."*
 
-### Threading, and what the source-level assertions buy
+Neither sentence holds. With `shared/autonomy-policy.json` present and `{"revert-own-apply": "L0"}`,
+the file validates clean (`source=file`, `rejected=false`) and the applier's entry gate refuses:
 
-`PopoutPanel.jsx:173`, `StockMind.jsx:873` and `StockMind.jsx:964` are the only `<PriceChart` elements in
-`src`, and all three carry all three props, each defaulting to `null` in the signature — I11 holds. The
-chart tab's inline `{first, last}` object was replaced by the shared `coverage` memo, so two charts drawn
-from one reply can no longer bound their pickers differently. `replyNote` rather than `note` avoids
-shadowing the inline note editor's state, and the suite asserts the shorter name cannot come back.
+```
+autonomy policy: "revert-own-apply" is L0 (forbidden); L4 (apply-after-approval) required
+for a master-driven act
+```
 
-The threading assertions are source-text matches, which is unavoidable — no behavioural test of a pure
-function can see a missing JSX attribute — but they are now written so that the thing they are meant to
-catch actually fails them: call sites are discovered by scanning every `.jsx` under
-`src/pages/StockMind`, each discovered site is required to carry all three attributes, and the patterns
-match attribute names rather than whole expressions. A fourth chart in a new file reintroducing the
-one-of-three defect goes red. That closes NIT 5 from the prior pass.
+So the edit blocks every master-approved apply of this kind — the exact failure the first assertions of
+`verifyUpgradeApplier.cjs` were written to catch, reachable again through a documented, validator-
+accepted edit. And `revert()` reads neither the policy nor the stop by design, so the automatic revert
+the edit was supposed to disable keeps running. The suite's shipped-state rows all exercise the
+absent-file branch, and §4 of the build note concedes the live `load()` path has only ever taken that
+branch, so nothing covers this.
 
-### What the suites assert
+Compounding it mildly: `current()` caches the first load for the process lifetime and `reload()` has no
+production caller, so undoing the edit by deleting the file does not take effect until a restart.
 
-Sections 1–6 of `verifyChartEmptyState.mjs` call `emptyState()` and assert behaviour, not string
-presence: precedence (`busy` outranks a stale failure, a failure outranks a full store), the action id
-per state, the absence of `/No .* bars stored for/` whenever `stored > 0`, `composed` flipping with the
-note's presence, the remedy reaching the screen exactly once across both failure shapes, all four engine
-failure modes producing a reason and a remedy, and junk input returning a renderable object with every
-key present. The detail-line assertions are the sharpest: they require that an absent `storedLastBar` is
-not rendered as `now`, not invented as a date, and not left as a dangling arrow — the exact defect the
-prior pass found, with the false `→ now` expression demonstrably red.
+### Behaviour versus string existence, row by row
 
-Re-run in the worktree: `verifyChartEmptyState` 96/0, `verifyChartTime` 197/0 (unmoved),
-`verifyChartDrawings` 232/0, `verifyChartSessions` 109/0, `auditRenderer` clean, `verifyInvariants` ALL
-PASS, `verifyLoyaltyTripwire` 12/0 byte-for-byte, and the whole `npm run verify` chain exits 0. No
-`console.log` and no TODO/FIXME in any shipped file touched (the new suite prints like every other suite
-in `scripts/`); no dependency added and nothing range-pinned; no protected file touched, which the
-tripwire confirms rather than my reading it.
+The load-bearing rows drive real state. The fail-safe matrix writes seven malformed allow-files plus a
+directory at the allow path and checks `isStopped()` for each. The revert rows inject an `fs` whose
+`writeFileSync` fails for the second target once (transient — reverted) and then forever (fatal —
+`fatal.json` written, stop engaged, prior allow-file preserved inside the stopped-record). Section 9
+registers the real ledger through `guardLedgerIpc` and calls the captured `proposals:create` handler, so
+the I11 row and the kind fence are exercised rather than read.
 
-Not tested, and not testable here: anything on a screen — colour, contrast of `var(--amber)` on the
-overlay, the collapsed `engine output` affordance, and whether the two-line headline plus detail plus
-hint plus `<details>` fits the 260px workspace panel before `overflow: auto` starts scrolling. The
-`matched == 0` reply is a fixture copied from the route's source, so a wording change in `main.py` would
-not be caught — correctly, since nothing asserts on its words, only on its being used verbatim.
+The source-shape rows are confined to unreachable behaviour: the record-then-unlink ordering in
+`engage()` is also proved behaviourally, the equivalent ordering inside `lift()` is not. `ignoreStop`
+having exactly one consumer is a regex over the module plus a scan of every other file in
+`electron/lib`, which is the right shape for a "nobody else may borrow this" claim.
 
-### Prior-pass findings
+The gap is `lift()`. Its empty-note refusal, the allow-file contents, the write ordering and the halt
+clearing are all regex over source text, because `lift()` reaches for `require('./capability.cjs')`
+directly with no injection point — unlike `upgradeApplier`'s `io` — so the suite cannot construct a
+passing case even artificially. When master adds `system.suspend-autonomy`, the first real execution of
+the function that enables autonomy is in production.
 
-All five findings from the previous review are closed on the branch: the `→ now` detail line (HIGH 1),
-the ungated StockMind band that doubled the failure report (MEDIUM 2), the missing Section 126 and
-Section 28 ledger row 146 (MEDIUM 3), the pop-out's actionless `nothing-in-window` (NIT 4), and the
-count-based threading assertions (NIT 5). `## DEFERRED BY THE ORCHESTRATOR` is present at the end of
-`docs/research/FETCH_AND_STORE.md`, and the queue, gap kinds, the fill affordance, lazy paging and
-`describeRequest` are correctly absent from the code.
+### The I11 half, and what `isHalted()` governs today
+
+`isHalted()` has no consumer other than `status()`/`statusText()`. The four `PRE_EXISTING` entries say
+`haltedByEngage: false` with a per-entry reason and `statusText()` prints "Still ARMED, because this
+build does not tear them down", so nothing misreports — but it means the stop currently halts exactly
+one thing, `fileProposal`, which has no caller in the shipped tree. The fence is built and untravelled,
+which is the stated intent.
+
+`engage()`'s one production caller is the fatal-revert path in `upgradeApplier`. There is no tray entry
+and no IPC channel for `status()`, `statusText()` or `policyStatus()`, so master has no in-app view of
+any of this — within the scope cut, and listed as deferred.
 
 </details>
 
 <details>
-<summary>Files</summary>
+<summary>File map</summary>
 
-- `src/pages/StockMind/chartEmptyState.js` — new pure four-state empty-chart module.
-- `src/pages/StockMind/PriceChart.jsx` — `replyNote` and `failure` props; overlay renders the decided
-  state instead of composing one.
-- `src/pages/StockMind/StockMind.jsx` — whole failed reply kept in `barsFail`, one shared `coverage`
-  memo, both charts threaded, message band gated on drawn candles.
-- `src/pages/StockMind/PopoutPanel.jsx` — keeps the reply's meta and the diagnosis; same band gating.
-- `scripts/verifyChartEmptyState.mjs` — new suite, 96 assertions.
-- `package.json` — `verify:empty-state` script, appended to the `verify` chain.
-- `RAMA_AGI_MASTER_SPEC.md` — Section 126 and Section 28 ledger row 146.
-- `docs/research/FETCH_AND_STORE.md`, `design-review.*`, `build-verification.md` — design record and the
-  deferred list.
+| File | What changed |
+|---|---|
+| `electron/lib/autonomyStop.cjs` | new — the two predicates, `engage`/`lift`, five frozen coverage lists, `status`/`statusText` |
+| `electron/lib/autonomyPolicy.cjs` | new — fifteen classes over frozen floors/ceilings/permanent, whole-file loader, `require`/`requireMasterDriven` |
+| `electron/lib/autonomyGate.cjs` | new — `guardLedgerIpc` seam, `fileProposal`, the kind and path fences |
+| `electron/lib/upgradeApplier.cjs` | new — entry validation, derived snapshot dir, verified snapshot, revert, retention |
+| `electron/main.cjs` | two edits — ledger registered through the gate wrapper, applier added after it |
+| `package.json` | two new verify scripts, both appended to the `verify` chain |
+| `scripts/verifyAutonomyStop.cjs` | new — 147 assertions, 1 residual |
+| `scripts/verifyUpgradeApplier.cjs` | new — 124 assertions, 3 residuals |
+| `docs/research/SELF_UPGRADE.md` | new — the full design, with the orchestrator's deferral section |
+| `docs/research/self-upgrade-build.md` | new — build note, design claims measured false, NOT VERIFIED list |
+| `docs/research/design-review.md`, `design-review.json` | new — the prior design-pass review artifacts |
 
-Full diff: `git diff 9669eea` on `chart/fetch-and-store`.
+Diff reviewed: `git diff d949b18..HEAD` on `model/self-upgrade-loop` (Phase 0 excluded).
+Suites re-run in the worktree: `verifyAutonomyStop` 147/0, `verifyUpgradeApplier` 124/0,
+`verifyLoyaltyTripwire` 12/0 ALL PASS, `verifyInvariants` ALL PASS, `node --check` clean on all seven
+touched `.cjs`. `npx vite build` genuinely cannot run — `node_modules` is absent from the worktree and
+no `.jsx` changed.
 
 </details>

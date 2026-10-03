@@ -322,8 +322,8 @@ check('the four frozen constants really are frozen',
   Object.isFrozen(policy.CLASSES) && Object.isFrozen(policy.FLOORS)
   && Object.isFrozen(policy.CEILINGS) && Object.isFrozen(policy.PERMANENT));
 const status = policy.policyStatus();
-check('six permanent, nine editable, and the arithmetic is printed',
-  status.counts.permanent === 6 && status.counts.editable === 9
+check('seven permanent, eight editable, and the arithmetic is printed',
+  status.counts.permanent === 7 && status.counts.editable === 8
   && status.counts.permanent + status.counts.editable === 15);
 check('exactly four classes are raisable at all, and only to L3',
   status.counts.raisable === 4
@@ -333,9 +333,10 @@ check('exactly four classes are raisable at all, and only to L3',
 // ─── 12. THE ROW THAT GOES RED IF A PERMANENT CLASS IS MADE EDITABLE ──────────
 console.log('\n  the permanent classes are mechanically unraisable');
 const EXPECTED_PERMANENT = [
-  'apply-source', 'release-classify', 'capability-grant', 'loyalty-core', 'master-record', 'autonomy-policy',
+  'apply-source', 'revert-own-apply', 'release-classify', 'capability-grant', 'loyalty-core',
+  'master-record', 'autonomy-policy',
 ];
-check('the permanent set is exactly the six expected ids — moving one out turns this RED',
+check('the permanent set is exactly the seven expected ids — moving one out turns this RED',
   EXPECTED_PERMANENT.length === policy.PERMANENT.size
   && EXPECTED_PERMANENT.every(c => policy.PERMANENT.has(c)),
   [...policy.PERMANENT].join(', '));
@@ -446,8 +447,13 @@ console.log('\n  require() names what it needed; requireMasterDriven() is a two-
   const polCode = read('electron/lib/autonomyPolicy.cjs').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
   check('ignoreStop has exactly one consumer in the whole module',
     (polCode.match(/ignoreStop:\s*true/g) || []).length === 1);
+  // Bounded by the NEXT function declaration rather than by a character count, so growing the body of
+  // requireMasterDriven cannot turn this row red while the claim it makes is still true.
+  const mdStart = polCode.indexOf('function requireMasterDriven');
+  const mdNext = polCode.indexOf('\nfunction ', mdStart + 1);
+  const mdBody = polCode.slice(mdStart, mdNext === -1 ? undefined : mdNext);
   check('and that consumer is requireMasterDriven',
-    /function requireMasterDriven[\s\S]{0,400}ignoreStop:\s*true/.test(polCode));
+    mdStart !== -1 && /ignoreStop:\s*true/.test(mdBody));
   const libDir = path.join(ROOT, 'electron', 'lib');
   const borrowers = fs.readdirSync(libDir).filter((f) => {
     if (!f.endsWith('.cjs') || f === 'autonomyPolicy.cjs') return false;
@@ -477,6 +483,175 @@ if (unprotected.length) {
 }
 check('the tripwire manifest is one of the self-governing paths',
   policy.SELF_GOVERNING_PATHS.some(p => p.path === 'shared/loyalty-tripwire.json'));
+
+// ─── 16. MASTER'S OWN ACT IS NOT GOVERNABLE BY A FILE ─────────────────────────
+// The defect this section exists to catch: with `revert-own-apply` merely EDITABLE, a validated,
+// documented data edit lowering it to L0 made the applier's entry gate refuse A MASTER-APPROVED APPLY
+// again — the same defect the first rows of verifyUpgradeApplier.cjs exist to catch, reached through a
+// different door. Both MASTER_ACT classes are PERMANENT now, and the two sets cannot drift apart
+// quietly because requireMasterDriven refuses to resolve a MASTER_ACT class that is not permanent.
+console.log('\n  master\'s own act cannot be governed by a data edit');
+check('every MASTER_ACT class is also PERMANENT — this is the structural half of the fence',
+  [...policy.MASTER_ACT].every(c => policy.PERMANENT.has(c)),
+  [...policy.MASTER_ACT].filter(c => !policy.PERMANENT.has(c)).join(', '));
+check('revert-own-apply is one of them, so the data file is not read for it at all',
+  policy.PERMANENT.has('revert-own-apply') && policy.MASTER_ACT.has('revert-own-apply'));
+check('a data file lowering revert-own-apply to L0 is rejected WHOLE rather than accepted',
+  policy.validate({ version: 1, levels: { 'revert-own-apply': 'L0' } }).ok === false);
+check('and so is one that only lowers it alongside legitimate edits',
+  policy.validate({ version: 1, levels: { 'research-network': 'L1', 'revert-own-apply': 'L0' } }).ok === false);
+{
+  const mdCode = read('electron/lib/autonomyPolicy.cjs').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+  const start = mdCode.indexOf('function requireMasterDriven');
+  const next = mdCode.indexOf('\nfunction ', start + 1);
+  const body = mdCode.slice(start, next === -1 ? undefined : next);
+  check('requireMasterDriven refuses outright for a MASTER_ACT class that is not PERMANENT',
+    /PERMANENT\.has\(classId\)/.test(body) && /throw new Error/.test(body));
+}
+{
+  // And the behavioural end of it, through the LIVE loader rather than a fixture: a real data file on
+  // disk at policy.DATA_FILE, which §4 of the build note had to concede was a path the suite never took.
+  const root = scratch('livefile');
+  writeAllow(root, { allowed: true, by: 'master', at: 'now', note: 'allowed' });
+  stop.configure({ userDataRoot: root });
+  if (fs.existsSync(policy.DATA_FILE)) {
+    residual(`${policy.DATA_FILE} already exists, so the live-loader rows were SKIPPED rather than `
+      + 'overwrite master\'s own policy file. Move it aside and re-run to exercise them.');
+  } else {
+    try {
+      policy.reload();
+      check('with no data file, propose-question is permitted at its L3 floor',
+        policy.require('propose-question', 'L3') === null);
+      fs.writeFileSync(policy.DATA_FILE,
+        JSON.stringify({ version: 1, levels: { 'propose-question': 'L1' } }, null, 2), 'utf8');
+      check('a hand-written restriction takes effect at the next gate with NO reload call and NO restart',
+        policy.require('propose-question', 'L3')?.blocked === true);
+      check('and the loader reports the file as the source, so the live present-file branch really ran',
+        policy.policyStatus().source === 'file');
+      check('master\'s own apply is STILL permitted while that file is in place',
+        policy.requireMasterDriven('revert-own-apply', 'L4') === null
+        && policy.requireMasterDriven('apply-source', 'L4') === null);
+
+      fs.writeFileSync(policy.DATA_FILE,
+        JSON.stringify({ version: 1, levels: { 'revert-own-apply': 'L0' } }, null, 2), 'utf8');
+      check('a real file lowering revert-own-apply is rejected whole by the live loader',
+        policy.policyStatus().rejected === true && /revert-own-apply/.test(policy.policyStatus().why || ''));
+      check('AND MASTER\'S APPROVED APPLY IS STILL PERMITTED — the second door is shut',
+        policy.requireMasterDriven('revert-own-apply', 'L4') === null);
+
+      fs.unlinkSync(policy.DATA_FILE);
+      check('deleting the file restores the floors live, without a restart',
+        policy.require('propose-question', 'L3') === null && policy.policyStatus().source === 'absent');
+    } finally {
+      try { fs.unlinkSync(policy.DATA_FILE); } catch { /* already gone, which is the shipped state */ }
+      policy.reload();
+    }
+    check('and the data file is absent again, exactly as it ships',
+      fs.existsSync(policy.DATA_FILE) === false);
+  }
+}
+
+// ─── 17. lift()'s SUCCESS path, executed rather than read ─────────────────────
+// It is the only writer of `allowed: true` — the single act that enables autonomy — and with the real
+// capability module it cannot succeed for anyone, so every one of these facts used to be asserted by
+// regex over the function's own source text. The injected module is not a weakening: isStopped() reads
+// a plain unsigned JSON file, so anything that could pass a fake here could already write the allow-file
+// directly. What holds that line is the asserted absence of callers, below.
+console.log('\n  lift() — the success path, with the capability module injected');
+{
+  const root = scratch('liftreal');
+  stop.configure({ userDataRoot: root });
+  const granting = { deny: () => null, can: () => true };
+  const master = { name: 'master', tier: 0 };
+
+  check('the install starts stopped', stop.isStopped() === true);
+  stop.engage('something went wrong', 'verifyAutonomyStop');
+  check('and halted, with a record on disk', stop.isHalted() === true);
+
+  check('an empty note is refused even when the capability is granted',
+    stop.lift(master, '   ', { capability: granting }).ok === false);
+  check('and it is refused for being a note, not for being a capability',
+    /requires a note/.test(stop.lift(master, '', { capability: granting }).error));
+  check('a string user is refused before the injected module is ever consulted',
+    stop.lift('master', 'because', { capability: granting }).ok === false);
+  check('and so is a user with no numeric tier',
+    stop.lift({ name: 'x' }, 'because', { capability: granting }).ok === false);
+  check('autonomy is still stopped after all four refusals', stop.isStopped() === true);
+
+  const lifted = stop.lift(master, 'master allowed it, for this reason', { capability: granting });
+  check('with the capability granted and a note, lift() SUCCEEDS', lifted.ok === true, lifted.error);
+  check('it wrote a valid allow-file to the derived path',
+    JSON.parse(fs.readFileSync(stop.allowPath(), 'utf8')).allowed === true);
+  check('the file records WHO and WHY, not just that it happened',
+    lifted.allow.by === 'master (tier 0)' && lifted.allow.note === 'master allowed it, for this reason');
+  check('and the note on disk matches the one returned',
+    JSON.parse(fs.readFileSync(stop.allowPath(), 'utf8')).note === 'master allowed it, for this reason');
+  check('isStopped() now reports autonomy as allowed', stop.isStopped() === false);
+  check('the halt was cleared rather than left undoable',
+    lifted.haltCleared === true && stop.isHalted() === false
+    && fs.existsSync(stop.stoppedRecordPath()) === false);
+  check('and statusText() says allowed, by whom, instead of still saying stopped',
+    /loop is allowed \(master \(tier 0\)/.test(stop.statusText()), stop.statusText());
+
+  check('a denying capability module still refuses, so the seam does not bypass the check',
+    stop.lift(master, 'again', { capability: { deny: () => ({ error: 'nope' }), can: () => false } }).ok === false);
+
+  const dirs = [['electron', 'lib'], ['electron', 'ipc'], ['electron']];
+  const overriders = [];
+  for (const parts of dirs) {
+    let names = [];
+    try { names = fs.readdirSync(path.join(ROOT, ...parts)).filter(f => f.endsWith('.cjs')); } catch { names = []; }
+    for (const name of names) {
+      if (name === 'autonomyStop.cjs') continue;
+      const src = read(path.join(...parts, name)).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+      if (/\.lift\s*\([^)]*capability/.test(src)) overriders.push(path.join(...parts, name));
+    }
+  }
+  check('no module in the shipped tree passes a capability override to lift()',
+    overriders.length === 0, overriders.join(', '));
+  check('the seam is a parameter with a default, so the production path is the real module',
+    /function lift\(user, note, \{ capability: injectedCapability = null \} = \{\}\)/.test(stopSrc)
+    && /if \(!capability\) \{/.test(stopCode));
+}
+
+// ─── 18. a degraded create fence is visible where autonomy is reported ────────
+// The stop is fail-safe; the create fence is fail-open by design, so that a gate that cannot load never
+// costs the ledger its channels (I11). safeRequire records that in the BOOT LOG, which is not the
+// autonomy surface — so status() and statusText() would have gone on describing a fence that was not
+// in place.
+console.log('\n  the create fence reports its own absence');
+{
+  const root = scratch('fence');
+  stop.configure({ userDataRoot: root });
+  const fence = stop.status().createFence;
+  check('status() reports the create fence as its own field, with the module named',
+    fence.module === 'electron/lib/autonomyGate.cjs' && typeof fence.loaded === 'boolean');
+  check('and declares that it is fail-open, rather than leaving that to be inferred',
+    fence.failOpen === true && typeof fence.governs === 'string');
+  check('on this machine the gate loads, so the fence IS in place',
+    fence.loaded === true && stop.gateLoaded() === true);
+  check('and statusText() says so', /create fence on proposals:create is in place/.test(stop.statusText()));
+
+  // The degraded branch, EXECUTED: a cached module that is not the fence. This is the shape a partial
+  // or shadowed load leaves behind, and it is the state the warning exists for.
+  const gatePath = require.resolve('../electron/lib/autonomyGate.cjs');
+  const realExports = require.cache[gatePath].exports;
+  require.cache[gatePath].exports = {};
+  try {
+    check('a module that loaded but is not the fence reports NOT LOADED',
+      stop.gateLoaded() === false && stop.status().createFence.loaded === false);
+    const degraded = stop.statusText();
+    check('and statusText() warns that every create is reaching the ledger unvalidated',
+      /NOT IN PLACE/.test(degraded) && /unvalidated/.test(degraded), degraded);
+    check('and names both fences that are missing, so the degradation is specific',
+      /kind fence/.test(degraded) && /path fence/.test(degraded));
+    check('and still says what the loop itself is doing — the two facts stay separate',
+      /loop is stopped/.test(degraded));
+  } finally {
+    require.cache[gatePath].exports = realExports;
+  }
+  check('the fence reports as in place again once the real module is back', stop.gateLoaded() === true);
+}
 
 }
 

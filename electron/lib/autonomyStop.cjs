@@ -177,8 +177,9 @@ const MASTER_DRIVEN_ENTRIES = Object.freeze([
     module: 'electron/lib/upgradeApplier.cjs',
     fn:     'applyWith',
     reason: 'applying or undoing a change master already approved is master\'s act; the level comes '
-          + 'from policy.requireMasterDriven over the frozen MASTER_ACT subset, and "Rāma does not '
-          + 'start an apply" is held by the asserted absence of in-process callers of proposals.apply',
+          + 'from policy.requireMasterDriven over the frozen MASTER_ACT subset, whose members are also '
+          + 'PERMANENT so no data edit can refuse master either, and "Rāma does not start an apply" is '
+          + 'held by the asserted absence of in-process callers of proposals.apply',
   }),
 ]);
 
@@ -296,17 +297,36 @@ function engage(reason, by = 'unknown') {
  *
  * ORDERING: the allow-file is written FIRST, the stopped-record removed SECOND, so a crash between
  * them leaves "allowed but still halted" — the recoverable direction.
+ *
+ * ── WHY THE CAPABILITY MODULE IS INJECTABLE, AND WHY THAT IS NOT A WEAKENING ──────────────────────
+ *
+ * `system.suspend-autonomy` is absent from the matrix, so with the real module this function CANNOT
+ * SUCCEED FOR ANYONE — which meant its success path, the only act in the system that writes
+ * `allowed: true`, had no behavioural coverage at all: the note refusal, the contents of the file it
+ * writes, the write-then-unlink ordering and the halt clearing were asserted by regex over this
+ * function's own source text, and the first real execution would have been in production on the day
+ * master added the key. So `{capability}` is injectable, in the same shape `upgradeApplier` uses for
+ * `io`, and the suite runs the real thing.
+ *
+ * That adds no reach for anything. `isStopped()` reads a plain JSON file with no signature, so any
+ * in-process caller that could pass a fake capability here could already write `allowed: true` to
+ * `allowPath()` directly and skip this function entirely. The capability check is the gate on the
+ * in-app control, not a containment boundary against code already running inside the main process —
+ * what holds that line is the asserted ABSENCE of in-process callers, and the suite asserts no module
+ * passes an override either.
  */
-function lift(user, note) {
+function lift(user, note, { capability: injectedCapability = null } = {}) {
   if (typeof user === 'string') {
     return { ok: false, error: `Lifting the stop requires an authenticated user — "${user}" is a label, not an identity` };
   }
   if (!user || typeof user.tier !== 'number') {
     return { ok: false, error: 'Lifting the stop requires an authenticated user' };
   }
-  let capability;
-  try { capability = require('./capability.cjs'); }
-  catch { return { ok: false, error: 'Lifting the stop requires the capability matrix, which could not be loaded' }; }
+  let capability = injectedCapability;
+  if (!capability) {
+    try { capability = require('./capability.cjs'); }
+    catch { return { ok: false, error: 'Lifting the stop requires the capability matrix, which could not be loaded' }; }
+  }
 
   const denied = capability.deny(user, 'system.suspend-autonomy');
   if (denied) {
@@ -341,6 +361,26 @@ function lift(user, note) {
 
 // ─── Reporting ────────────────────────────────────────────────────────────────
 
+/**
+ * Did the create fence's module load?
+ *
+ * The stop is fail-safe; the create fence is deliberately FAIL-OPEN at its wiring site. `main.cjs`
+ * registers the ledger with the bare recorder when `autonomyGate.cjs` cannot be required, so a broken
+ * fence never costs the ledger its channels (I11). Fail-open is the right call there and the wrong
+ * thing to leave silent: `safeRequire` records the failure in `loadFailures()`, which is the boot log,
+ * not the autonomy surface — so `status()` would have gone on describing a fence that was not in place.
+ * It is derived here, by attempting the require, and `statusText()` says so in words.
+ *
+ * The require is attempted lazily, INSIDE this function: `autonomyGate.cjs` requires this module at its
+ * own module scope, so a module-scope require in the other direction would be a cycle.
+ */
+function gateLoaded() {
+  try {
+    const gate = require('./autonomyGate.cjs');
+    return typeof gate?.guardLedgerIpc === 'function' && typeof gate?.inspectCreate === 'function';
+  } catch { return false; }
+}
+
 /** Every field carries its own truth; nothing is inferred by the caller. */
 function status() {
   let allowRaw = null;
@@ -369,6 +409,12 @@ function status() {
       at: record?.at ?? null,
       reason: record?.reason ?? null,
       by: record?.by ?? null,
+    },
+    createFence: {
+      module: 'electron/lib/autonomyGate.cjs',
+      loaded: gateLoaded(),
+      failOpen: true,
+      governs: 'the kind fence and the path fence on every proposals:create',
     },
     chokepoints: CHOKEPOINTS,
     deferredChokepoints: DEFERRED_CHOKEPOINTS,
@@ -406,7 +452,14 @@ function statusText() {
   const third = 'Lifting the stop in-app needs the "system.suspend-autonomy" capability, which is not '
     + 'in shared/capabilities.json, so only master writing the allow-file by hand can allow autonomy.';
 
-  return `${first} ${second} ${third}`;
+  const fourth = s.createFence.loaded
+    ? `The create fence on proposals:create is in place (${s.createFence.module}).`
+    : `WARNING: the create fence is NOT IN PLACE — ${s.createFence.module} could not be loaded, so `
+      + 'every proposals:create is reaching the ledger unvalidated: the kind fence and the path fence '
+      + 'are both absent. That degradation is deliberate, so a broken fence never costs the ledger its '
+      + 'channels, and it is reported here rather than only in the boot log.';
+
+  return `${first} ${second} ${third} ${fourth}`;
 }
 
 module.exports = {
@@ -420,5 +473,5 @@ module.exports = {
   // acts
   engage, lift,
   // reporting
-  status, statusText,
+  gateLoaded, status, statusText,
 };
