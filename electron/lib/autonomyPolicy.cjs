@@ -1,0 +1,363 @@
+'use strict';
+
+/**
+ * autonomyPolicy.cjs — the ladder. What has Rāma earned, as declared data over frozen code.
+ *
+ * The capability matrix answers *"may this USER do this?"*. Nothing answered *"has RĀMA earned this?"*
+ * — Section 124's finding was that the components exist and there is no ladder. This is that ladder,
+ * in the shape the Anthropic RSP / OpenAI Preparedness Framework use: rungs declared in advance, each
+ * naming the safeguard it requires, a rung entered only when an evaluation says so, and **an
+ * undetermined evaluation defaulting to the stricter rung**.
+ *
+ * ── THE ONE QUESTION THIS FILE HAS TO ANSWER MECHANICALLY ─────────────────────────────────────────
+ *
+ * *If the policy table lives in a data file, what stops Rāma proposing an edit to that file which
+ * raises a permanent class?*
+ *
+ * **The data file carries no authority over permanent classes, because the loader never reads them
+ * from it.** For a permanent class the file is not merely overridden — it is not consulted. A
+ * `"master-record": "L4"` key is not a value that loses a `min()`; it is a key with no reader. Raising
+ * one therefore requires editing THIS FILE, which is a source change needing an approval recorded in
+ * `proposals.cjs` (I6), visible in a diff. `scripts/verifyAutonomyStop.cjs` goes RED if a permanent
+ * class is moved into the editable set.
+ *
+ * ── THE FLOOR IS A FALLBACK, NOT A MINIMUM ───────────────────────────────────────────────────────
+ *
+ * `shared/autonomy-policy.json` SHIPS ABSENT, so the floor is the shipped level. A present file may
+ * RESTRICT an editable class below its floor — that is how master puts Rāma offline, or turns the
+ * automatic revert off — and may RAISE one only as far as its ceiling. It can do neither to a permanent
+ * class. **That last half-sentence must travel with the first: master cannot lower `master-record` or
+ * `loyalty-core` by data either, only by a source edit under an I6 approval.**
+ *
+ * ── AND THE STOP DOMINATES ───────────────────────────────────────────────────────────────────────
+ *
+ * `effective()`'s first line is the stop, so on a shipped install every class is `L0` before the
+ * resolver ever looks at the data file. The floors describe what the policy resolves to ONCE MASTER HAS
+ * ALLOWED AUTONOMY AT ALL — not what a fresh install does.
+ *
+ * `effective(c, {ignoreStop: true})` has EXACTLY ONE consumer, `requireMasterDriven`, which throws for
+ * any class outside the frozen two-member `MASTER_ACT` subset. Without that containment a shipped
+ * install — permanently stopped by design, no allow-file — would REFUSE A MASTER-APPROVED APPLY,
+ * because the applier's entry gate resolves `revert-own-apply` against the `L0` the stop forces. An
+ * option any caller may pass is an option every future caller will pass, so there is one door and it
+ * refuses to open for anything but the two classes that describe MASTER's act.
+ */
+
+const fs     = require('fs');
+const path   = require('path');
+const crypto = require('crypto');
+
+// ─── The levels ───────────────────────────────────────────────────────────────
+/**
+ * L5 is declared and UNREACHABLE. A ladder that stopped at L4 would make autonomous application a new
+ * concept to be invented later, which is exactly how a stop gets retrofitted onto a running loop.
+ * Declaring it and refusing it means the thing that would have to change is one value in one frozen
+ * constant, visible in a diff, with a suite row that currently asserts it is impossible.
+ */
+const LEVELS = Object.freeze({
+  L0: 'forbidden',
+  L1: 'observe',
+  L2: 'research',
+  L3: 'propose-only',
+  L4: 'apply-after-approval',
+  L5: 'apply-autonomous',
+});
+const ORDER = Object.freeze(['L0', 'L1', 'L2', 'L3', 'L4', 'L5']);
+
+/** No class may hold L5 and the loader rejects it anywhere in the data file. */
+const UNREACHABLE_LEVEL = 'L5';
+
+function rank(level) { return ORDER.indexOf(level); }
+function min(a, b)   { return rank(a) <= rank(b) ? a : b; }
+
+// ─── The fifteen classes ──────────────────────────────────────────────────────
+const CLASSES = Object.freeze([
+  'observe', 'research-local', 'research-network', 'propose-question',
+  'propose-source', 'dependency-change', 'build-repair', 'author-change',
+  'revert-own-apply', 'apply-source', 'release-classify', 'capability-grant',
+  'loyalty-core', 'master-record', 'autonomy-policy',
+]);
+
+/** Frozen in code: the level a class holds whenever the data file is absent, rejected, or silent. */
+const FLOORS = Object.freeze({
+  'observe':           'L1',
+  'research-local':    'L1',
+  'research-network':  'L2',   // its honest current level: ollama-catalog and dependency-review do this daily
+  'propose-question':  'L3',   // dependencyAdvisor already files these daily
+  'propose-source':    'L1',
+  'dependency-change': 'L1',
+  'build-repair':      'L1',
+  'author-change':     'L1',
+  'revert-own-apply':  'L4',   // a safety net's "configuration absent" level must be "works"
+  'apply-source':      'L4',
+  'release-classify':  'L0',
+  'capability-grant':  'L0',
+  'loyalty-core':      'L0',
+  'master-record':     'L3',
+  'autonomy-policy':   'L0',
+});
+
+/** Frozen in code: the highest level the data file can ever reach for that class. */
+const CEILINGS = Object.freeze({
+  'observe':           'L1',
+  'research-local':    'L1',
+  'research-network':  'L2',
+  'propose-question':  'L3',
+  'propose-source':    'L3',   // I6 pins it at L3
+  'dependency-change': 'L3',   // I12's posture: dependencyAdvisor never upgrades
+  'build-repair':      'L3',   // a repair is still a source change
+  'author-change':     'L3',   // authoring is not applying
+  'revert-own-apply':  'L4',
+  'apply-source':      'L4',   // permanent-at-L4 means it can never become L5
+  'release-classify':  'L0',
+  'capability-grant':  'L0',
+  'loyalty-core':      'L0',
+  'master-record':     'L3',
+  'autonomy-policy':   'L0',
+});
+
+/**
+ * The classes the data file is NOT READ FOR AT ALL.
+ *
+ * `master-record` is here because of spec Section 127: **Rāma may never widen its own retention window
+ * or capture scope for what is recorded about master.** The other five are I6, I17, I8, I15/I16 and the
+ * policy's own authority.
+ */
+const PERMANENT = Object.freeze(new Set([
+  'apply-source',       // I6
+  'release-classify',   // I17 — master alone
+  'capability-grant',   // I8 + protected file + the tripwire
+  'loyalty-core',       // I15 / I16
+  'master-record',      // spec Section 127
+  'autonomy-policy',    // Rāma may not propose its own promotion
+]));
+
+/** DERIVED, never restated — a second list is how two lists come to disagree. */
+const EDITABLE = Object.freeze(CLASSES.filter(c => !PERMANENT.has(c)));
+
+/**
+ * The classes whose action RĀMA INITIATES. The "no floor above L3" bound is asserted over THIS set and
+ * not over CLASSES, because `apply-source` and `revert-own-apply` have L4 floors by design and describe
+ * master applying, or undoing, something he already approved.
+ */
+const RAMA_INITIATED = Object.freeze([
+  'observe', 'research-local', 'research-network', 'propose-question',
+  'propose-source', 'dependency-change', 'build-repair', 'author-change', 'master-record',
+]);
+
+/**
+ * MASTER'S ACTS, not Rāma's autonomy. The ONLY classes that may ignore the stop, and the only ones
+ * `requireMasterDriven()` accepts. A third member turns the suite RED.
+ */
+const MASTER_ACT = Object.freeze(new Set(['apply-source', 'revert-own-apply']));
+
+/**
+ * The paths no proposal of this design's kinds may name, in a change or in its metadata. Declared HERE,
+ * in the policy module, and not in the consumer — the thing being protected is the policy's authority,
+ * and a list that lived with the consumer could be narrowed by a change to the consumer alone.
+ */
+const SELF_GOVERNING_PATHS = Object.freeze([
+  Object.freeze({ path: 'shared/autonomy-policy.json',     optional: true  }),   // ships absent by design
+  Object.freeze({ path: 'electron/lib/autonomyPolicy.cjs', optional: false }),
+  Object.freeze({ path: 'electron/lib/autonomyStop.cjs',   optional: false }),
+  Object.freeze({ path: 'shared/loyalty-tripwire.json',    optional: false }),
+]);
+
+const DATA_FILE = path.join(__dirname, '..', '..', 'shared', 'autonomy-policy.json');
+
+// ─── Loading the data file ────────────────────────────────────────────────────
+
+let loaded = null;   // { levels, rejected, why, source, fileSha256 }
+
+/**
+ * Validate the WHOLE file, and reject it WHOLE.
+ *
+ * A partial accept teaches whoever wrote the file which edits are silently dropped and lets the rest
+ * through — so a file mixing one forbidden raise with four legitimate lowerings would land four of five
+ * and look like it landed nothing. Whole-file rejection is loud, fails safe, and makes validity a
+ * single binary the UI can show. Same reasoning `claimGate` uses when it marks the WHOLE answer
+ * unattributed if any finding was withheld.
+ */
+function validate(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, why: 'the policy file must be a JSON object' };
+  }
+  const keys = Object.keys(raw);
+  const extra = keys.filter(k => k !== 'version' && k !== 'levels');
+  if (extra.length) return { ok: false, why: `unknown top-level key(s): ${extra.join(', ')}` };
+  if (raw.version !== 1) return { ok: false, why: `version must be 1 (found ${JSON.stringify(raw.version)})` };
+  if (!raw.levels || typeof raw.levels !== 'object' || Array.isArray(raw.levels)) {
+    return { ok: false, why: 'levels must be an object of classId -> level' };
+  }
+  const levels = {};
+  for (const [id, level] of Object.entries(raw.levels)) {
+    if (!CLASSES.includes(id)) return { ok: false, why: `unknown class id "${id}"` };
+    if (PERMANENT.has(id)) return { ok: false, why: `"${id}" is a permanent class and may not appear in the policy file` };
+    if (typeof level !== 'string') return { ok: false, why: `the level for "${id}" must be a string` };
+    if (level === UNREACHABLE_LEVEL) return { ok: false, why: `${UNREACHABLE_LEVEL} is unreachable and may not appear anywhere` };
+    if (!Object.prototype.hasOwnProperty.call(LEVELS, level)) return { ok: false, why: `"${level}" is not a level` };
+    if (rank(level) > rank(CEILINGS[id])) {
+      return { ok: false, why: `"${id}" may not exceed its ceiling ${CEILINGS[id]} (found ${level})` };
+    }
+    levels[id] = level;
+  }
+  return { ok: true, levels };
+}
+
+/**
+ * Read and validate ONE file into a state object. Absent is the shipped path and is not an error.
+ *
+ * `file` is a parameter so a suite can resolve against a fixture WITHOUT a module-level setter that
+ * would let any caller redirect the live policy at a file it controls. The gated runtime path calls
+ * `load()`, which only ever reads `DATA_FILE`.
+ */
+function loadFrom(file) {
+  let bytes = null;
+  try { bytes = fs.readFileSync(file); }
+  catch { return { levels: {}, rejected: false, why: null, source: 'absent', fileSha256: null }; }
+
+  const fileSha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+  let parsed;
+  try { parsed = JSON.parse(bytes.toString('utf8')); }
+  catch (err) { return { levels: {}, rejected: true, why: `unparsable JSON: ${err.message}`, source: 'rejected', fileSha256 }; }
+
+  const v = validate(parsed);
+  if (!v.ok) return { levels: {}, rejected: true, why: v.why, source: 'rejected', fileSha256 };
+  return { levels: v.levels, rejected: false, why: null, source: 'file', fileSha256 };
+}
+
+/** The live load. Reads `DATA_FILE` and nothing else. */
+function load() {
+  loaded = loadFrom(DATA_FILE);
+  return loaded;
+}
+
+function current() { return loaded || load(); }
+
+/** Re-read the file. Master edits it by hand; no build and no restart is required. */
+function reload() { loaded = null; return load(); }
+
+function stop() {
+  try { return require('./autonomyStop.cjs'); }
+  catch { return { isStopped: () => true };   /* no stop module means stopped — fail-safe */ }
+}
+
+// ─── The resolver ─────────────────────────────────────────────────────────────
+
+/**
+ * A PURE RESOLVER. It carries no exception for an in-flight revert: a pure resolver cannot know a
+ * revert is in flight, so with the stop engaged `revert-own-apply` would resolve to L0 and the revert
+ * would be refused — producing exactly the stranded half-applied tree the exception exists to prevent.
+ * The carve-out is a token issued at apply entry instead (`upgradeApplier`).
+ *
+ * `ignoreStop` skips the FIRST LINE ONLY. `min(CEILINGS, levels)` is untouched, which is what keeps
+ * master's restriction authority intact while restoring his apply: setting `revert-own-apply` to L0 in
+ * the data file still genuinely disables the automatic revert.
+ */
+/**
+ * Everything AFTER the stop's line: the data file intersected against the frozen floors and ceilings.
+ * Separated so `policyStatus()` can report "what would hold if autonomy were allowed" WITHOUT passing
+ * `ignoreStop` — the suite asserts that option has exactly one consumer, and a reporting read that
+ * borrowed it would be the first step toward every caller passing it.
+ */
+function resolveWithoutStop(state, classId) {
+  if (!CLASSES.includes(classId)) return 'L0';
+  if (state?.source !== 'file') return FLOORS[classId];
+  if (PERMANENT.has(classId)) return FLOORS[classId];
+  const declared = Object.prototype.hasOwnProperty.call(state.levels, classId) ? state.levels[classId] : FLOORS[classId];
+  return min(CEILINGS[classId], declared);
+}
+
+function effectiveFrom(state, classId, opts = {}) {
+  if (!CLASSES.includes(classId)) return 'L0';
+  if (!opts.ignoreStop && stop().isStopped()) return 'L0';
+  return resolveWithoutStop(state, classId);
+}
+
+function effective(classId, opts = {}) {
+  return effectiveFrom(current(), classId, opts);
+}
+
+function gate(have, classId, need, action) {
+  if (rank(have) >= rank(need)) return null;
+  return {
+    ok: false,
+    blocked: true,
+    classId,
+    have,
+    need,
+    reason: `autonomy policy: "${classId}" is ${have} (${LEVELS[have]}); ${need} (${LEVELS[need]}) required`
+          + `${action ? ` for ${action}` : ''}`,
+  };
+}
+
+/**
+ * Shaped exactly like `capability.deny()` — `null` when allowed, the refusal object when not — because
+ * that is already the house idiom.
+ *
+ * `need` is a REQUIRED positional argument with no default, and it THROWS when absent. A gate whose
+ * level defaults is a gate whose refusal is "not allowed", which is this project's "it failed" in a
+ * different costume: the refusal has to name the class AND the level needed so master gets a sentence
+ * he can act on.
+ */
+function require_(classId, need, { action = null } = {}) {
+  if (!need) throw new Error(`policy.require("${classId}") needs an explicit level — a gate whose level defaults cannot name what it needed`);
+  if (!Object.prototype.hasOwnProperty.call(LEVELS, need)) throw new Error(`"${need}" is not a level`);
+  return gate(effective(classId), classId, need, action);
+}
+
+/**
+ * MASTER_ACT classes ONLY — it throws for anything else. This is the fence: a Rāma-initiated class
+ * cannot borrow the carve-out, because the only function that ignores the stop refuses to be called
+ * with one.
+ */
+function requireMasterDriven(classId, need) {
+  if (!MASTER_ACT.has(classId)) {
+    throw new Error(`requireMasterDriven is only for MASTER_ACT classes — "${classId}" is not one`);
+  }
+  if (!need) throw new Error(`policy.requireMasterDriven("${classId}") needs an explicit level`);
+  return gate(effective(classId, { ignoreStop: true }), classId, need, 'a master-driven act');
+}
+
+// ─── Reporting ────────────────────────────────────────────────────────────────
+
+/** Every field carries its own truth; nothing is inferred by the renderer. */
+function policyStatus() {
+  const state = current();
+  const levels = {};
+  for (const c of CLASSES) levels[c] = effective(c);
+  const floorsNow = {};
+  for (const c of CLASSES) floorsNow[c] = resolveWithoutStop(state, c);
+  return {
+    levels,                         // what holds right now, stop included
+    withoutStop: floorsNow,         // what would hold if autonomy were allowed
+    floors: FLOORS,
+    ceilings: CEILINGS,
+    permanent: [...PERMANENT],
+    editable: EDITABLE,
+    ramaInitiated: RAMA_INITIATED,
+    masterAct: [...MASTER_ACT],
+    selfGoverningPaths: SELF_GOVERNING_PATHS,
+    dataFile: DATA_FILE,
+    source: state.source,
+    rejected: state.rejected,
+    why: state.why,
+    fileSha256: state.fileSha256,
+    stopped: stop().isStopped(),
+    counts: {
+      classes: CLASSES.length,
+      permanent: PERMANENT.size,
+      editable: EDITABLE.length,
+      pinned: CLASSES.filter(c => FLOORS[c] === CEILINGS[c]).length,
+      raisable: CLASSES.filter(c => rank(FLOORS[c]) < rank(CEILINGS[c])).length,
+    },
+  };
+}
+
+module.exports = {
+  LEVELS, ORDER, UNREACHABLE_LEVEL,
+  CLASSES, FLOORS, CEILINGS, PERMANENT, EDITABLE, RAMA_INITIATED, MASTER_ACT, SELF_GOVERNING_PATHS,
+  DATA_FILE,
+  rank, validate, load, loadFrom, reload, effective, effectiveFrom, policyStatus,
+  require: require_, requireMasterDriven,
+};

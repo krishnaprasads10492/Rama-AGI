@@ -64,6 +64,11 @@ const nucleusSealer    = safeRequire('./nucleusSealer.cjs',      'Nucleus (ident
 const ipcEncryption    = safeRequire('./ipcEncryption.cjs',      'IPC encryption');
 // ─── Shared foundations (one HTTP client, one approval ledger) ────────────────
 const proposalLedger   = safeRequire('./lib/proposals.cjs',      'Approval ledger');
+// The autonomy fence. `proposals.cjs` is protected, so the policy and the stop are consulted at the two
+// seams that exist: the ledger's IPC registration, and a registered applier. See SELF_UPGRADE.md §E.1/§E.2
+// and docs/research/self-upgrade-build.md.
+const autonomyGate     = safeRequire('./lib/autonomyGate.cjs',   'Autonomy gate');
+const upgradeApplier   = safeRequire('./lib/upgradeApplier.cjs', 'Upgrade applier');
 // ─── Genome / Instance layer (holonic architecture) ───────────────────────────
 const genomeIPC        = safeRequire('./genome.cjs',             'Genome');
 const genomeApplier    = safeRequire('./lib/genomeApplier.cjs',  'Genome applier');
@@ -1813,7 +1818,15 @@ app.whenReady().then(async () => {
     ['Self-modification',     () => codeRegenIPC.register(ipcRec)],
     ['Nucleus (identity)',    () => nucleusSealer.register(ipcRec)],
     ['IPC encryption',        () => ipcEncryption.register(ipcRec)],
-    ['Approval ledger',       () => proposalLedger.register(ipcRec)],
+    // The ledger's own `proposals:create` handler consults neither the autonomy policy nor the stop,
+    // and `proposals.cjs` is protected. So the recorder it is given is wrapped: the create channel is
+    // validated before it is reached, every other channel is forwarded verbatim. If the gate failed to
+    // load, the ledger registers exactly as it did before — degraded, never unregistered (I11).
+    ['Approval ledger',       () => proposalLedger.register(
+      isStub(autonomyGate) ? ipcRec : autonomyGate.guardLedgerIpc(ipcRec))],
+    // Entry validation for the one kind that writes Rāma's own source under this design. Registered
+    // after the ledger so `registerApplier` exists, and it adds a kind rather than replacing one.
+    ['Upgrade applier',       () => { if (!isStub(upgradeApplier)) upgradeApplier.register(proposalLedger); }],
     // Closes the gap where GENOME proposals could not be applied
     ['Genome applier',        () => genomeApplier.register()],
     // Dormant until master declares baseline and cuts a release — Sections 39, 60

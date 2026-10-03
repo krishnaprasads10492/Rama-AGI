@@ -1,178 +1,161 @@
 {
   "verdict": "CHANGES_REQUESTED",
-  "reviewDoc": "c:\\CodeBase\\Velvet_UI\\Velvet\\Rama_AGI\\.worktrees\\fetch-store\\docs\\research\\design-review.md",
-  "reviewedDesign": "docs/research/FETCH_AND_STORE.md",
-  "reviewedSections": "PHASE 3 §3.0–§3.15 (revision 3)",
-  "head": "9669eea",
-  "counts": { "HIGH": 6, "MEDIUM": 12, "NIT": 6 },
+  "summary": "3 HIGH, 7 MEDIUM, 5 NIT. Shape, fence and stage decomposition are sound: I6 and I17 hold, the policy table is declared data over frozen classes/floors/ceilings/permanent, the record differs from an autonomous apply by one field, registerApplier is the extension point with proposals.cjs sha-asserted unchanged, and blast radius is computed part by part with a stated limit per part. Blocking: FR-14's 'unreachable by any proposal' is measurably false (timeline.cjs's SELF_MODIFY applier writes changes[].path verbatim and shared/autonomy-policy.json is not protected); the only reachable EDITS entry reads row.target, which does not exist on a dependencyAdvisor row; and lift() never clears autonomy.stopped.json, so an engaged halt cannot be undone in-app and criterion 22a contradicts isHalted().",
+  "counts": { "high": 3, "medium": 7, "nit": 5 },
   "findings": [
     {
       "id": 1,
       "severity": "HIGH",
-      "where": "§3.4 (fetchQueue.js is pure, no IPC; settle() step 3 \"start the next job in each free lane\"), §3.13 StockMind.jsx row",
-      "problem": "Both start() and settle() move a job to `running`, and both are pure functions with no IPC. Nothing in the design says who issues window.rama.marketIntel.ohlcv(...) for a job that has become `running`. loadBars can dispatch the job master pressed a button for, but the next job in a lane — every job after the first of a `fill all`, and anything started by settle() step 3 — has no specified caller, so it would be marked running and never sent. The obvious implementation (a useEffect on queue) has an unspecified double-dispatch hazard: React 19 StrictMode double-invokes effects in development and the setQueue inside the dispatch re-runs the effect.",
-      "fix": "Specify the pump in §3.4: a single useEffect([queue]) in StockMind.jsx that, for each job whose state is 'running' and whose id is not already in a `dispatchedRef` Set, adds the id, awaits the ohlcv call, then setQueue(q => settle(q, job.id, reply, selectionRef.current)) and calls setBars/setBarsMeta only when r.wrote, finally deleting the id. State that start()/settle() only AUTHORISE a dispatch and never perform one, and that dispatchedRef (not queue state) is the idempotence guard. Add §3.12 assertions: settle() leaves at most one `running` job per lane, and exactly one `ohlcv(` call site exists in StockMind.jsx."
+      "title": "FR-14's \"the STOP and the policy table are unreachable by any proposal\" is false, and the argument given for it is the wrong argument",
+      "where": "FR-14, FR-13a, §E.2.2, §E.10 row \"The policy's own authority\", §I.2",
+      "problem": "Measured: loyaltyGuard.PROTECTED_FILES (electron/lib/loyaltyGuard.cjs:64-72) lists exactly seven paths and does not include shared/autonomy-policy.json, and inspectChanges applies no root confinement — so a hand-built proposal naming the policy data file passes assertChangesSafe at creation. Separately, electron/ipc/timeline.cjs:195-210 registers the pre-existing SELF_MODIFY applier whose body is fs.mkdirSync(path.dirname(change.path)) + fs.writeFileSync(change.path, change.content) plus fs.rmSync for deletes, with no resolve-then-compare, no root check and no lstat — so an absolute path is written wherever the process can write, including <userData>/rama/autonomy.allow. The design's premise that the stop's state is unnameable because changes[].path cannot address a file outside the repo root is a property of this design's own applier, not of the system. The design closes both routes only for kind 'self-upgrade'.",
+      "fix": "Three parts. (a) Restate FR-14 with its real scope: unreachable by THIS design's proposer and applier, NOT by every proposal, naming timeline.cjs:199-207 and the fact that shared/autonomy-policy.json is unprotected. (b) Add criterion 19c: plant a kind 'self-modify' proposal naming shared/autonomy-policy.json and an absolute path to the allow-file, assert proposals.create accepts both today, and PRINT the residual rather than leaving it to prose. (c) Widen §I.2's ask to master to include shared/autonomy-policy.json in PROTECTED_FILES and the tripwire manifest, and offer the cheap mechanical close as master's decision: timeline.cjs is NOT a protected file, so applying §E.9's resolve-then-compare + lstat rule inside that applier and refusing action 'delete' is available — as a declared 20th changed file, raised in Part I rather than left to implementer discretion."
     },
     {
       "id": 2,
       "severity": "HIGH",
-      "where": "§3.4 conflicts(a,b) and the `superseded` row of the states table; §3.2 enqueueAll; E16; §3.12 (\"enqueueAll with 12 windows and 8 free slots accepting 8\")",
-      "problem": "conflicts() returns true for any two provider-class jobs on the same symbol/exchange/interval, so two `gap` jobs for DIFFERENT windows conflict. Since enqueue() supersedes conflicting jobs, enqueueAll(state, [12 windows]) supersedes each window as it adds the next and ends with exactly one live job. MAX_QUEUE = 8 becomes unreachable, E16's \"8 of 12 gaps were queued\" cannot happen, and §3.12's assertion would fail against the design's own conflicts(). The same rule also silently retires a running full-interval sync the moment master presses ⇠ older.",
-      "fix": "Redefine conflict as subsumption, not same-interval: `if (a.symbol!==b.symbol||a.exchange!==b.exchange) return false; if (a.mode==='disk'||b.mode==='disk') return a.mode===b.mode; if (a.interval!==b.interval) return false; if (a.mode==='provider'||b.mode==='provider') return true; return a.from===b.from && a.to===b.to;` — a full-interval `provider` sync subsumes (and is subsumed by) any windowed job on that interval, while two windowed jobs with different windows coexist. Add a §3.12 assertion that twelve `gap` jobs with twelve distinct windows produce twelve non-superseded jobs before MAX_QUEUE is applied."
+      "title": "The only reachable EDITS entry reads a field that does not exist on a dependencyAdvisor row",
+      "where": "§E.4.1 ADAPTERS table, row dependencyAdvisor; §E.4.2a pin-version",
+      "problem": "The adapter is (row) => ({editId:'pin-version', params:{name: row.name, version: row.target}}). Measured, dependencyAdvisor.assess() returns {name, pinned, latest, jump, jumpWhy, sensitive, security, diskDeltaBytes, signals, concerns, recommend, urgency, meaning} (electron/lib/dependencyAdvisor.cjs:189-205) and review() maps assess over its entries (:241-248). There is no 'target' field. So params.version is undefined, pin-version's no-range precondition is evaluated against undefined, and the single edit the loop can author either throws or writes \"name\": \"undefined\" into package.json. The headline claim 'today this loop can author exactly one kind of change' is unreachable as written, and criterion 41's diff assertion could only pass against a fixture carrying a field production never produces.",
+      "fix": "Use the measured field and handle the two states that must not pin: dependencyAdvisor: (row) => (row.jump === 'current' || row.jump === 'downgrade' || !row.latest ? null : {editId:'pin-version', params:{name: row.name, version: row.latest}}). jump === 'downgrade' must yield null because buildMeaning reads that state as 'the release was withdrawn, so this needs looking at rather than upgrading'. Extend criterion 90a to assert every ADAPTERS output names only fields present on a real assess() return, built from a registrySources.collect fixture."
     },
     {
       "id": 3,
       "severity": "HIGH",
-      "where": "§3.4 (\"retry(state, key) creates a new job with the same key and attempt = prev.attempt + 1\"), settle(state, key, reply, selection), cancel(key), lanes holding \"the key currently holding each lane\", §3.5(d) onCancel(key)/onRetry(key)",
-      "problem": "`key` is the identity used by settle, cancel and both lane tokens, and a retry deliberately duplicates it. Cancel-then-retry: job A (attempt 1, running, lane token = key) is cancelled and goes terminal with the lane still reserved; master presses ↻ and job B (attempt 2, same key) is enqueued; A's reply then arrives and settle(state, key, ...) matches the lane token and resolves \"the job with this key\" ambiguously. If it resolves to B (non-terminal, current) then A's discarded reply is written as B's outcome, violating the design's own cancel rule 2 and the invariant §3.9 assigns to isCurrent + settle. cancel(key) and onCancel(key) are ambiguous the same way.",
-      "fix": "Separate identity from conflict. Keep `key` for dedupe and conflicts(); add `job.id = `${job.key}#${job.attempt}``; make lanes hold an id, and key settle(state, id, reply, selection), cancel(id), retry(state, id), onCancel(id), onRetry(id) and the queue strip's rows on id. Add a §3.12 assertion: cancel attempt 1, retry to attempt 2, deliver attempt 1's reply → wrote === false, attempt 2 still live, lane released exactly once."
+      "title": "lift() does not clear the stopped-record, so an engaged halt cannot be undone in-app and criterion 22a contradicts isHalted()",
+      "where": "§E.2.4, §E.2.1's isHalted(), §E.2.3, criterion 22a",
+      "problem": "isHalted() is presence-based (fs.accessSync(stoppedRecordPath()) => true) and engage() writes that record; nothing in the document ever deletes it. lift() is specified only as the writer of allowed:true. So after any engage — tray, env, or the automatic one on a fatal revert — a successful lift() leaves isHalted() true, and refreshScheduler.runNow, selfCare.runHealthSweep, marketIntel.tickResolveOutcomes and tickSyncNews all carry in-function isHalted() checks and stay no-ops. Criterion 22a's 'startAudit() re-arms it on lift' is satisfiable only for the one dispatcher with no in-function check, so a lift resumes one of five behaviours while the panel, reading the still-present record, keeps reporting them halted. lift() is also never specified to call refreshScheduler.start(), startSweep() or startScheduler(), so the resume path is asymmetric with engage()'s teardown and the asymmetry is undeclared. The tray 'Resume' item therefore cannot undo what the tray engaged, even once master adds system.suspend-autonomy.",
+      "fix": "Specify the resume and assert it, mirroring engage()'s ordering rule: lift(user, note) writes the allow-file FIRST, THEN unlinks <userData>/rama/autonomy.stopped.json, THEN calls refreshScheduler.start(), metaCognition.startAudit(), selfCare.startSweep(), marketIntel.startScheduler() — and declares that agents and sandbox children are NOT respawned, with the reason. Order 1-before-2 so a crash leaves 'allowed but still halted', the recoverable direction. Extend criterion 22d with a sixth state: after lift(), isHalted() is false, the stopped-record is gone, counting fakes prove runNow('ollama-catalog') calls task.run() and runHealthSweep() calls checkInstanceFailover again, and statusText() names all four as running; a planted mutation removing the unlink turns the row RED. If master prefers a halt be undoable only by hand, that is a valid answer — but then the tray 'Resume' item and criterion 22a's re-arm sentence must both go, and the choice belongs in Part I."
     },
     {
       "id": 4,
-      "severity": "HIGH",
-      "where": "§3.5(d) states table (`nothing-yet`: \"no bars, no failure, nothing ever stored\"); E15; §3.5 \"Who owns a failure\" (barsNote \"is suppressed while the canvas is showing a non-`none` empty state\")",
-      "problem": "E15 routes \"a sync that stored 400 bars none of which fall in master's window\" to `nothing-yet`, whose trigger is \"nothing ever stored\" and whose headline is verified verbatim at PriceChart.jsx:2105-2110 as \"No 30m bars stored for NIFTY50.\" — false when 400 bars are stored. The one true sentence, the route's own note at main.py:638-645 (\"N bars are stored, but none fall between X and Y. Widen the dates, or fetch more history.\"), arrives as res.data.note, becomes barsNote, and is then SUPPRESSED by the ownership rule because the canvas is non-`none`. The offered action is ⇩ Fetch & store them, which is fact 9's un-followable remedy. Master gets a false headline, a useless button, and no sign of the accurate sentence on the payload.",
-      "fix": "Add a sixth canvas state `nothing-in-window`, triggered by no bars + no failure + coverage.stored > 0, whose headline IS the route's note verbatim, which also shows coverage.first → coverage.last as the window that does exist, and whose action is ✕ clear dates (the existing onDates('','')) plus, only when supportsWindowedSync, ⇩ fetch this window — never a bare ⇩ Fetch & store them. Narrow `nothing-yet` to !(coverage?.stored > 0) so §3.12's Section 107 no-regression assertion still holds, and restrict the barsNote suppression rule to the case where the canvas headline IS barsNote."
+      "severity": "MEDIUM",
+      "title": "pin-version edits package.json and never package-lock.json, and nothing in the plan can see the divergence",
+      "where": "§E.4.2a EDITS table; §E.1.2 class 6 (\"package.json / package-lock.json diffs\"); §E.5.2 plan table",
+      "problem": "The class is defined over both files; the transform touches one. A changed pin without the matching lockfile entry makes npm ci fail, and the verification plan for this change is JSON.parse plus a dependency-count row because node --check is meaningless for JSON. So the one authorable change is the one whose failure mode the plan is structurally unable to detect, in a tree where §124 already measured that an offline rebuild is impossible.",
+      "fix": "Pick one and write it into the table with the reason. (a) Recommended: changes[] stays length one over package.json and the weighing carries a mandatory con — 'package-lock.json is not updated by this change; npm ci will refuse until the lockfile is regenerated on the build machine' — with verdict needs-master-decision whenever the package is in dependencyAdvisor.SENSITIVE or a lockfile exists on disk. (b) Add a lockfile-sync precondition refusing pin-version while package-lock.json exists, which makes the edit unreachable in this repository and should be said rather than discovered. Either way add a criterion asserting the changes[] paths and the presence of the lockfile con."
     },
     {
       "id": 5,
-      "severity": "HIGH",
-      "where": "§3.5(d) prop contract (eight new props) versus its own emptyState({ bars, busy, failure, meta, syncInfo, intervalId, symbol, rangeId, contract }) and §3.3's describeFreshness(meta, syncInfo, receivedAt, now); §3.13 PriceChart.jsx row; §3.2 coverage superset",
-      "problem": "emptyState requires `meta` and `syncInfo`; PriceChart is given neither. Verified: the prop list (PriceChart.jsx:256-281) has no meta, no syncInfo and no note, and the coverage superset adds only stored/fetchedAt/source/truncated/ranges. So inside PriceChart, `nothing-upstream` is UNREACHABLE — its sole trigger is syncInfo.reason === 'no provider returned data' and its body needs providersTried — which removes one of the three canvas states Decision 5 and Phase 2 row 4 both require; and describeFreshness cannot be called with its specified signature, so `attributed` (gated on syncInfo.fetched === true) can never be true, though §3.12 asserts that branch.",
-      "fix": "Either add two optional props `meta = null` and `syncInfo = null` (both defaulting to null, so every existing call site keeps working — I11), keeping both function signatures as specified; or fold reason/providersTried/fetched/barsAdded/clamped into the coverage superset and change both signatures to take coverage. State that `supports` remains its own prop because it is page-retained rather than per-reply, and add a §3.12 assertion that `nothing-upstream` is reachable from props alone."
+      "severity": "MEDIUM",
+      "title": "NOTICE's suite sensor is unspecified in four ways, including a prose parse the design forbids elsewhere",
+      "where": "§E.4.1 sensor table row 'suite'; §E.4.0's upgrade-notice-suites admission",
+      "problem": "Four decisions are missing from a sensor that spawns processes and feeds a fingerprint: which suites (18 files match scripts/verify*.cjs in this worktree); whether admission is one admit() per sweep or per spawn (ADMISSION declares a single 128 MB label described as 'a spawned Node process', singular); the per-suite timeout (specified for verification steps and for nothing in NOTICE); and how 'the failing row name' is extracted. The house suites print '    PASS  <msg>' / '    FAIL  <msg>' under a '\\n  <id> — <title>' header (scripts/verifyInvariants.cjs:66-73) and nothing declares that shape as a contract — so the measurement field is parsed out of free-form stdout, which is what FR-56 forbids for remedies, and a misparse silently changes the one value deduplication depends on.",
+      "fix": "Declare the sensor as frozen data the way ADAPTERS is declared: SUITE_SENSOR = {suites:['verifyInvariants.cjs','verifyLoyaltyTripwire.cjs'], rowPattern:/^\\s*FAIL\\s{2}(.+?)\\s*$/m, sectionPattern:/^\\s{2}(\\S+)\\s+—\\s+(.+)$/m, timeoutMs:120000, admitPerSuite:true}, with field = '<id>/<row>'. State the two refusals: a suite exiting non-zero whose stdout matches no FAIL row yields sensorsAbsent['suite:<name>'] and NO finding (unchecked is not a finding), and a timeout is sensorsAbsent, never a suite-red finding. Add to criterion 26 a fixture of real captured suite stdout with two failing rows, asserting two findings with distinct fingerprints."
     },
     {
       "id": 6,
-      "severity": "HIGH",
-      "where": "§3.2 \"Filled.\" (describeCoverage(model, intervalId, { supports, listMax }), actions gated on supportsWindowedSync only) and the three-kind table; §3.1's retention clamp (applied in olderWindow only); E16",
-      "problem": "Two parts. (a) The retention clamp §3.1 argues is load-bearing is applied to ⇠ older and not to fill: describeCoverage takes no `now` and consults no horizon, so once §3.10 lands a fill button appears for every hole. The design's own hole-formation scenario (fact 11) puts intraday holes OUTSIDE the rolling window by construction — fetch 30m covering D−21…D, return 42 sessions later, the provider serves D+21…D+42, and the hole sits 21–42 sessions back, beyond a 21-session rolling cap. So on capped intraday intervals, the only interval class where holes form, fill is almost never servable: fact 9 recreated by the affordance the design calls its most important guard. (b) `hole` (\"between two stored runs\") and `beyond-cap` (\"older than PROVIDER_CAP_SESSIONS sessions\") overlap for a hole 25 sessions old on 30m, with no precedence rule and no stated anchor for \"older than N sessions\".",
-      "fix": "State the anchor as `now` and give beyond-cap precedence over hole: compute horizonYmd = capSessions == null ? null : ymdMinusSessions(toYmd(now), capSessions) and set kind = (horizonYmd && gap.toYmd < horizonYmd) ? 'beyond-cap' : 'hole'. Change the signature to describeCoverage(model, intervalId, { supports, listMax, now = new Date() }) and emit an action only when supportsWindowedSync(supports) AND kind === 'hole'; for beyond-cap runs put describeLimit(intervalId) in `text` and leave `actions` empty, the same treatment §3.1 gives beyond-retention. Record in §3.14 that on capped intraday intervals the band is the deliverable and the button is rare. Assert in §3.12: a 30-session-old hole on 30m yields kind 'beyond-cap', no action and describeLimit's sentence; the same hole on 1d yields kind 'hole' with an action."
+      "severity": "MEDIUM",
+      "title": "meta.autonomy has two incompatible shapes, and it is the field the \"no schema change\" claim rests on",
+      "where": "§E.3 (autonomy: {appliedBy, autonomousApply}) versus §E.5.0 check 0 and §E.5.1a (meta.autonomy = {flag, recordedAt}); FR-54; criterion 83a; §E.9's opts row",
+      "problem": "Implemented as written the applier overwrites meta.autonomy, destroying appliedBy and autonomousApply — the two fields the forward-compatibility argument and the audit trail both depend on. FR-54, criterion 83a and §E.9 all say 'recorded into meta.autonomy' without naming a shape, so neither reading is privileged and a coder picks.",
+      "fix": "One shape carrying both facts, merged not assigned. Declare in §E.3: autonomy: {appliedBy:'master'|'rama', autonomousApply:false, flagFromOpts:false, recordedAt:'<ISO>'}. In §E.5.0 check 0: meta.autonomy = {...(meta.autonomy||{}), appliedBy:'master', flagFromOpts: opts?.autonomous === true, recordedAt: now}. Keeping the received flag under its own key is what makes 'what the caller claimed' and 'what the system decided' two auditable facts — collapsing them is how the renderer-supplied flag got mistaken for a gate. Extend criterion 83a to assert appliedBy and autonomousApply survive an apply."
     },
     {
       "id": 7,
       "severity": "MEDIUM",
-      "where": "§3.2 coverageRanges(candles, intervalId, opts) and the \"Two injected inputs\" table; the returned shape (source: 'bars'|'store', leftEdge: 'store'|'payload-ceiling', kind: 'asked-absent'); §3.12 (\"truncated → left edge payload-ceiling\")",
-      "problem": "The function is declared to take exactly two injected inputs (opts.ymd, opts.starts), and neither supplies `truncated` (needed for leftEdge), the requested window plus the store's first/last bar (needed for asked-absent, defined as \"between the window master requested and the first/last stored bar\"), or the store's own ranges (the only way source: 'store' could be returned — §3.10 item 5). An implementer following §3.2 literally cannot satisfy §3.12.",
-      "fix": "Widen the declared opts and mark each optional: coverageRanges(candles, intervalId, { ymd, starts, truncated = false, storedFirst = null, storedLast = null, requestedFrom = null, requestedTo = null, ranges = null, now = new Date() }), stating that `ranges` present implies source === 'store' and that `now` is the beyond-cap/horizon anchor (finding 6)."
+      "title": "Criterion 25 asserts a measurement.source field the schema does not define",
+      "where": "Criterion 25 versus §E.3, §E.9 and criterion 23",
+      "problem": "Three places define measurement as {sensor, field, value, at} and notice() is specified to throw on a malformed one; criterion 25 asserts a fifth field, measurement.source. Either the validator rejects what the criterion requires or the schema is wrong, and the suite is what decides — so it surfaces as a red row rather than a decision.",
+      "fix": "Restate criterion 25 in the declared vocabulary: '... yields exactly one finding, whose measurement.sensor is \"selfModel.limits\" and whose measurement.field is \"fixable\", and whose remedy is null BY DECLARATION (§E.4.1's ADAPTERS)'. If a provenance string genuinely adds something over sensor + field, add 'source' to §E.3, §E.9 and criterion 23 together — but ADAPTERS already owns that mapping, so it does not."
     },
     {
       "id": 8,
       "severity": "MEDIUM",
-      "where": "§3.2 (enqueueAll's note: \"4 of 12 gaps were queued…\") versus E16 and §3.15 row 10 (\"8 of 12 gaps were queued…\", \"accepting 8, reporting 4\")",
-      "problem": "With twelve windows and eight free slots, accepted is 8 and rejected is 4. §3.2's example sentence reports the rejected count as the queued count. §3.12 asserts the E16 wording, so a test written from §3.2 and one written from E16 contradict each other — and this is the one string master reads.",
-      "fix": "Correct §3.2 to E16's wording and state the template once: `${accepted} of ${total} gaps were queued; the fetch queue holds ${MAX_QUEUE} at a time, so press ⇩ fill all again when these finish.`"
+      "title": "The halted skip inside refreshScheduler.runNow has an unspecified interaction with the state it writes",
+      "where": "FR-12 and §E.2.5 (\"isHalted() check before await task.run()\", line 133) against refreshScheduler.cjs:125-159",
+      "problem": "runNow is also the recorder: every path writes state[name] = {lastRunAt, lastOk, failures, ...} then writeState(state), and status() derives lastRunAt, failures, nextDueAt, overdue, backingOff and staleness from it. The design says where the check goes and not what it does to the record. A halted skip recording lastOk:true makes the task look freshly run and not overdue — a label lying about work that did not happen, in the scheduler's own status surface; one recording ok:false inflates failures and drives the x2-to-x32 backoff so that lifting the halt leaves the task artificially deferred.",
+      "fix": "Specify the third outcome and assert it: runNow returns {ok:false, halted:true, reason} BEFORE readState(), touching no state, so a halt neither refreshes lastRunAt nor increments failures and status() keeps reporting the real staleness and backoff. Criterion 22a gains an eleventh assertion: with the halt engaged, runNow('ollama-catalog') leaves the persisted task state byte-identical."
     },
     {
       "id": 9,
       "severity": "MEDIUM",
-      "where": "§3.3 (`const wantBars = fromDate ? raw : (cap ?? raw);` and \"this figure is what the SENTENCE may print\"); §3.12 (asserts only the default 30m view)",
-      "problem": "Verified: limitForDates returns MAX_BARS (20000) whenever `from` is falsy (timeframes.js:259-263) and capBarsFor returns null for 1d/1wk/1mo (timeframes.js:93-99). So on 1d with no dates — a common view — wantBars is 20,000 and the stated rule permits printing it. The design identifies this exact trap for the capped case and re-opens it for the uncapped case, and the test matrix closes only the capped half.",
-      "fix": "Make the absence of a printable ceiling explicit: `const wantBars = fromDate ? raw : (cap ?? null);` with a comment that no window and no provider cap means the depth is the engine's want_years, not a bar count. Extend §3.12: for each of 1d/1wk/1mo with no dates, wantBars === null and `text` contains no bar figure and no 20,000/20000."
+      "title": "The two renderer surfaces are specified as new PAGES entries but have no component files, no loaders, and no host file in the changed-file table",
+      "where": "§E.0.1 (\"two new PAGES entries\"; registry.js changed; Evolution.jsx changed) and §E.12",
+      "problem": "Measured, a PAGES entry is half a page: registry.js holds a parallel LOADERS map of import('@pages/<X>/<X>.jsx'), lazyFor(id) returns null without one, routablePages() filters them out, and registryIssues() reports 'page \"<id>\" has no loader' (src/config/registry.js:255-309). The design declares two new entries with no new .jsx file, no LOADERS additions, and no change to src/pages/Settings/Settings.jsx — so the Autonomy panel has no host file at all. As written the work either produces two registry issues or the surfaces are panels inside existing pages, needing no PAGES entries and a Settings.jsx row in the file table. Separately, PAGES entries carry minTier plus a descriptive free-text capabilities[] array, NOT matrix keys, so §E.12's 'both at tiers the matrix already defines' conflates minTier with shared/capabilities.json — which matters because §E.13 asks master to add autonomy.view and the panel must gate on it itself.",
+      "fix": "Take the panel reading §E.12 actually describes: delete 'two new PAGES entries' and the I7 claim, leave src/config/registry.js UNCHANGED, add src/pages/Settings/Settings.jsx to the changed-file table ('a new Autonomy panel, gated on autonomy.view with the §E.13 degradation text when the capability is absent'), keep Evolution.jsx, and restate the tier sentence as 'both render inside pages the registry already defines at their existing minTier; the Autonomy panel additionally gates on autonomy.view, which is not in the matrix, so until master adds it the panel renders the §E.13 sentence and nothing else'. If master wants real pages instead, the file table needs two .jsx files, two LOADERS entries, two PAGES entries with ids/routes/minTier and a criterion asserting registryIssues() is empty — a bigger change than §E.0.1's 'nothing else changes', so master's call."
     },
     {
       "id": 10,
       "severity": "MEDIUM",
-      "where": "§3.5(d) (\"failure.error (reason AND remedy — diagnoseFailure and §3.5(b)'s sentences both put both in it)\"); §3.5 opening (\"diagnoseFailure is total — every input yields a reason and a remedy\")",
-      "problem": "Verified at marketIntel.cjs:44-56: the start-failure branch of ensureBackendRunning does NOT call diagnoseFailure. It builds its own object with diagnosis: { reason: started.error || 'the engine could not be started', remedy: '' }, and error appends the remedy only `if (diagnosis.remedy)`. So on that branch the headline is \"StockMind's engine could not be started: <raw spawn error>\" — a reason, no remedy, raw error promoted to the headline — and stderrTail is []. That is the branch that fires when the Python interpreter is missing, the likeliest engine-down shape on master's machine, and the step requires the existing diagnosis to be routed through rather than a generic failure.",
-      "fix": "Preferred: at §3.5(b)'s gate boundary, when gate.diagnosis?.remedy is empty, call aiProcess.diagnoseFailure({ stderr: [], exit: null, running: false }) and rebuild `error` as \"StockMind's engine is not running: ${diagnosis.reason}.\" + remedy, demoting the raw spawn error into `detail`. Alternative: state in §3.5(d)/§3.8 that error carries a remedy on the poll-timeout and transport paths and may carry reason only on the start-failure path, and assert exactly that in verifyEngineDiagnosis.cjs. Either way the blanket claim must go."
+      "title": "FR-28 requires the plan to be re-run after a revert; no section implements it and no outcome is defined for a post-revert failure",
+      "where": "FR-28 against §E.5.2a's verdict object, §E.5.3's flow, §E.5.5's fatal case and §E.8 rows 20-22",
+      "problem": "The verdict object is {verified, reverted, revertAttested, causeId, cause, remedy, plan, planDrift, snapshotDir} — no field for a second plan run; §E.5.3 goes straight from failure to naming a cause; §E.5.5's fatal branch is reached only by a digest mismatch. So FR-28's third clause is unimplemented and the state it exists to detect has no handling: if the plan still fails after a successful, digest-attested revert, the tree was already red before the apply, the causeId attributed to this change is wrong, and §E.5.4 would file a corrected proposal chasing a defect the apply did not cause.",
+      "fix": "Name the step, the field and the outcome. revert(token) is followed by ONE re-run of the SAME re-derived plan. The verdict gains postRevertVerified: true|false|'not-run', with 'not-run' declared so it never renders as 'passed' (§E.5.2's needed/run rule). postRevertVerified:false => causeId 'pre-existing-red', confident:false, NO corrected proposal, and a question carrying both runs' evidence ('the tree did not verify before this change either') — the fourteenth id, in unrecognised-exit's confident:false precedent. Criterion 46 gains the fixture: an already-red temp repo, a clean revert, and assertions on postRevertVerified:false, causeId 'pre-existing-red', and that nothing was re-proposed."
     },
     {
       "id": 11,
-      "severity": "MEDIUM",
-      "where": "§3.5(c) (\"It calls ensureBackendRunning() … and reaches no provider and spends no engine time\"), askWhy, §3.7's engineDiagnosis row, E17",
-      "problem": "Verified at marketIntel.cjs:40-56: ensureBackendRunning() calls aiProcess.startPythonBackendPublic() when the process is not running, then polls /health for up to 8 seconds. So pressing `why?` attempts to START the Python process and blocks for up to ~8s. Three unstated consequences: why? is not a read; no pending/disabled state is specified, so master can queue start attempts by pressing it repeatedly; and E17's {ok:true} → \"the engine is answering now\" can be true BECAUSE why? just started it, while the design presents it as an observation about something that changed on its own.",
-      "fix": "Pick one and write it down. (a) Diagnose without starting: engineDiagnosis() reads aiProcess.getRunningStatus(), returns {ok:true} when py.running, else builds the gate shape from py.diagnosis || py.notAnswering || aiProcess.diagnoseFailure({...}) with stderrTail = py.lastStderr.slice(-4) — a question that does not change what it asks about. (b) Keep ensureBackendRunning() and say so: add a whyBusy state disabling why? while the call is out, and word describeDiagnosis's {ok:true} case as \"Rāma asked its engine manager and the engine is answering now — it may have started when you asked.\""
+      "severity": "NIT",
+      "title": "§B.3's \"nine derivations ... seven of the nine\" is eight",
+      "where": "§B.3",
+      "problem": "Measured: electron/lib/selfModel.cjs contains eight limit(...) calls (lines 210, 216, 222, 228, 241, 248, 255, 263), seven with a non-null fixable (the nucleus one has none).",
+      "fix": "Read: 'Eight derivations exist today ... fixable is a non-null string on seven of the eight.' The design's conclusions are unaffected — ADAPTERS declares null for this sensor by decision — but the inventory is what later sessions trust."
     },
     {
       "id": 12,
-      "severity": "MEDIUM",
-      "where": "§3.5(b) transportKind (\"return 'transport'; // status 0, no status, 'Response too large', a refusal\"); §3.7's \"connection refused, socket error, oversized body\" row",
-      "problem": "Verified at http.cjs:129-131: the size cap trips while reading a response the engine is already sending — reject(new Error('Response too large')) inside res.on('data'). The engine answered. Routing that to diagnoseFailure, whose branches key on stderr, exit code and `running`, yields the cold-start-wait remedy for a live engine — precisely the \"confidently wrong rather than vague\" failure §3.5(b) was rewritten to remove, left in place for this one case. The remedy master needs is \"narrow the window\", which the design already writes for `timeout`.",
-      "fix": "Add one rule ahead of the status rule: `if (/^Response too large$/.test(msg)) return 'engine-error';` and one sentence in transportReason: \"The engine answered with more data than Rāma will accept in one reply. Narrow the window or pick a coarser interval; nothing was stored for this request.\" with res.error demoted into detail. Correct §3.7's row so `transport` means \"no answer at all\"."
+      "severity": "NIT",
+      "title": "Three stale line citations, one of them the kind revision pass 3 corrected elsewhere",
+      "where": "§H.23; §E.5.0 and §H.28; §E.5.1a, §D.2 and §H.28",
+      "problem": "§H.23 still reads 'agent.killFn at 634' while §E.2.5, §E.0.1 and §H.28 say 637 and explain why 634 pointed at a different caller (measured: killFn at 122, 140, 359, 637). proposals.cjs's authorise(opts.user, 'self-modify.apply') is at 219, not 215. The proposals:apply IPC handler is at 269, not 272. (applier(p, opts) at 235 and preload.cjs 680 are both correct.)",
+      "fix": "Fix the three citations. The 634 one matters most: a coder reading Part H first copies the wrong line, which is review-3 finding 17's failure mode surviving in the section that records it."
     },
     {
       "id": 13,
-      "severity": "MEDIUM",
-      "where": "§3.12 (\"the bar for this tranche is … plus auditRenderer.cjs, verifyGlossary.mjs, …\"); §3.14, which calls out vite build but not this",
-      "problem": "Verified: auditRenderer.cjs:194-197 requires @babel/parser and @babel/traverse, and node_modules does not exist in this worktree (only in the main workspace). So the one suite that would catch the new preload.cjs method without its market:engine-diagnosis handler — findIpcMismatches/auditIpcParity — is unrunnable here, exactly as vite build is. The design's own standard is that an admitted gap beats a plausible claim.",
-      "fix": "Move auditRenderer.cjs out of the in-worktree bar and into §3.14 beside vite build, stating that it needs @babel/parser from node_modules and therefore runs only in the main workspace after this branch merges. Add a source-reading assertion to verifyEngineDiagnosis.cjs pairing preload's marketIntel.engineDiagnosis with market:engine-diagnosis being a key of the readOnly map, so the coverage is not simply dropped."
+      "severity": "NIT",
+      "title": "\"25 suites\" is unsourced; the tree has 18 scripts/verify*.cjs",
+      "where": "Part F spec block",
+      "problem": "Measured: 18 files match scripts/verify*.cjs in this worktree; Section 124 recorded '22 JS suites' across the tree. Neither is 25, and this number lands in the master spec where it becomes the next session's baseline.",
+      "fix": "Say '18 scripts/verify* suites' or cite §124's 22 with its scope."
     },
     {
       "id": 14,
-      "severity": "MEDIUM",
-      "where": "§3.4 classifyOutcome (`if (count === 0) return 'nothing-read'`) and the nothing-read wording (\"Rāma reached the engine and the engine did not reach the provider for this one.\"); the two-lane table",
-      "problem": "classifyOutcome(reply) sees only the reply, not the job's mode. Verified at main.py:598-604: the automatic mount and filter-effect disk reads (sync: false) on a never-stored instrument return count: 0 with syncInfo = {\"fromStore\": true}. So every first view of a new instrument produces a terminal nothing-read job whose sentence complains the provider was not reached — for a job whose own contract (§3.3's disk text: \"Reads what is already on this machine. No network, no provider call, nothing stored.\") is that it never asks the provider. Two sentences about the same job contradict each other.",
-      "fix": "Keep classifyOutcome a pure function of the reply and make the SENTENCE mode-aware: an outcomeText(job, reply) in fetchQueue.js that for job.mode === 'disk' and state 'nothing-read' says \"Nothing is stored on this machine for this one yet — that is a fact about the store, not a failure. ⇩ Fetch & store them reaches the provider.\" and otherwise keeps the existing wording. Assert both in §3.12."
+      "severity": "NIT",
+      "title": "§B.5's inventory row still says \"four outbound paths\", omitting evolutionEngine",
+      "where": "§B.5 table row for voiceEngine/browserEngine/codeRegenEngine/intelligenceEngine",
+      "problem": "That row describes 'Four outbound paths carrying text' while §E.0.1, §E.7.4, FR-33 and §I.8 all carry the corrected count — five files, seven paths, ten request sites, with evolutionEngine named as the fifth. Part B is read first.",
+      "fix": "Add evolutionEngine.cjs to the row's file list and change 'Four' to 'Seven paths across five files (§E.7.4 counts them; criterion 54a asserts the count)'."
     },
     {
       "id": 15,
-      "severity": "MEDIUM",
-      "where": "§3.4 (MAX_QUEUE = 8 \"counting provider-reaching jobs only\"; capacity(state) \"is the one place that arithmetic lives\"); §3.2 enqueueAll; §3.3's blocked \"the fetch queue is full\"",
-      "problem": "Terminal jobs must stay in `jobs` because ↻ on a failed job is a specified affordance, but whether capacity() counts them is never said. If it does, eight failures permanently block the fetch button with the sentence \"the fetch queue holds 8 provider requests at a time\", which would be false. And nothing bounds `jobs`, which grows unboundedly over a session of automatic disk reads — the same class of thing the design was careful to remove when it deleted MAX_SUPPORTS_KEYS.",
-      "fix": "State both rules in §3.4: `const LIVE = new Set(['queued','running']);` and `capacity(state) = MAX_QUEUE - state.jobs.filter(j => j.mode !== 'disk' && LIVE.has(j.state)).length`, with the comment that a terminal job is a record and not a reservation; plus `MAX_JOBS = 40` with oldest TERMINAL jobs dropped first and live jobs never dropped. Assert the eight-failures case in §3.12."
-    },
-    {
-      "id": 16,
-      "severity": "MEDIUM",
-      "where": "§3.2 (\"opts.ymd is built inside the same useMemo that builds candles, from the raw bar that produced each candle\"); §3.15 row 20",
-      "problem": "The alignment reasoning is correct and verified — PriceChart.jsx:533-544 maps bars, drops bars with an unusable time or non-finite prices, then de-duplicates consecutive equal times, so candles[i] and bars[i] diverge after the first drop. But that memo returns a bare array and candles is consumed by volumes, starts, countRef, last/prev, the aria text and the data effect. Producing ymd from inside it requires changing its return shape and every consumer, or adding a second memo that re-implements the drop/dedupe filter — the exact drift the design is avoiding. Neither is specified.",
-      "fix": "Name the refactor in §3.13's PriceChart row: the memo becomes `const { candles, ymd } = useMemo(() => { ... }, [bars])`, built in one loop that pushes the candle and sets dates.set(time, String(b.date).slice(0,10)) for the raw bar that produced it, with a comment that a parallel array built in a second pass would drift from this one's filters. Add a §3.12 source-reading assertion that PriceChart.jsx contains exactly one toChartTime( call site."
-    },
-    {
-      "id": 17,
-      "severity": "MEDIUM",
-      "where": "§3.3 describeRequest({ intervalId, fromDate, toDate, rangeId, mode, supports, queue, selection }); §3.0 (\"PriceChart computes its own request contract from its own props\"); §3.5(d) (\"There is no contract prop\")",
-      "problem": "Nothing in §3.3's rules reads `selection`: the blocked table needs the provider lane's occupancy (from queue) and whether a symbol is selected. And PriceChart cannot build a selection — verified, its prop list has `symbol` but no `exchange`. Passing a whole queue object into a pure contract function also couples it to the queue's internal shape for one boolean.",
-      "fix": "Reduce the signature to the scalars the rules use: describeRequest({ intervalId, fromDate, toDate, rangeId, mode, supports, hasSymbol = true, providerLaneFull = false }). StockMind.jsx passes capacity(queue) <= 0; PriceChart passes queue ? capacity(queue) <= 0 : false."
-    },
-    {
-      "id": 18,
-      "severity": "MEDIUM",
-      "where": "§3.4 states table (`queued` — \"accepted, nothing in flight\", no wording); the cancel rules (the provider lane stays reserved until the abandoned promise settles); E7; §3.12 (\"every TERMINAL state carries a sentence\")",
-      "problem": "After a cancel, the provider lane stays reserved for up to 90 seconds. A new fetch in that window is accepted, is not blocked (the queue is not full), and sits `queued` — while isBusyFor is true, so the loading overlay says \"Fetching 30m bars…\" with nothing in flight. The design's own standard is that a disabled control with no stated cause is a dead end, and this is fact 20 inverted. E7 says \"the queue strip says so\" but specifies no wording, and §3.12 asserts sentences only for terminal states.",
-      "fix": "Specify two queued sentences and assert them: lane free, FIFO position n → \"Queued — n ahead of it.\"; lane held by a terminal (cancelled or superseded) job → \"Queued — waiting for an earlier request Rāma stopped waiting for. The engine may still be finishing it; this starts as soon as it ends.\" Change §3.12 to \"every state, live or terminal, carries a sentence\"."
-    },
-    {
-      "id": 19,
       "severity": "NIT",
-      "where": "§3.4's standalone selectionRef effect versus §3.5's second clear effect, both on [sym, exchange, barInterval]",
-      "problem": "Two different effects with identical dependency lists both write selectionRef.current. Harmless but ambiguous about which is the single writer, and §3.4's own comment already says \"written by the same effect that clears the series\".",
-      "fix": "Delete the standalone effect in §3.4 and cross-reference §3.5's second clear effect as the single writer of selectionRef."
-    },
-    {
-      "id": 20,
-      "severity": "NIT",
-      "where": "§3.1's subscription snippet, which calls setNearLeftEdge(...) above the existing quarter-pixel dedupe",
-      "problem": "Placing the edge test above the dedupe is correct (verified: PriceChart.jsx:757-762 early-returns on an unchanged px-per-bar, which a pure pan does not change), but the dedupe exists because \"a drag fires this every frame, and sixty identical state updates a second is a way to make a chart stutter\". React bails out on an identical useState value, so this is cheap rather than free — the design should not silently reintroduce the thing the comment above it warns about.",
-      "fix": "Guard with a ref so the setter fires only on a transition: `const nearEdge = from !== null && from <= OLDER_PROMPT_BARS; if (nearEdge !== nearEdgeRef.current) { nearEdgeRef.current = nearEdge; setNearLeftEdge(nearEdge); }`"
-    },
-    {
-      "id": 21,
-      "severity": "NIT",
-      "where": "§3.1 (`const horizon = ymdMinusSessions(toYmd(now), capSessions);`) versus the anchor `String(rawBars[0].date).slice(0, 10)`",
-      "problem": "Verified: intraday stored stamps are naive UTC (chartTime.js header, store.py Section 73) so the anchor slice is a UTC date, while toYmd is explicitly local (timeframes.js:236). In IST those differ by a day between 00:00 and 05:30 local. The +3-day slack in the session→calendar conversion absorbs it and §3.12's datesForRange drift assertion still holds, but the mixing is unstated and is the shape of master's last three reports.",
-      "fix": "Add one sentence to §3.1 stating that the horizon is local to agree with datesForRange and the date inputs while the anchor is a UTC stamp slice, and that the one-day worst case is inside ymdMinusSessions' +3-day slack by design. Add a §3.12 assertion that olderWindow is stable for the same bars across a `now` of 23:00 and 01:00 local."
-    },
-    {
-      "id": 22,
-      "severity": "NIT",
-      "where": "§3.6's table (\"coverage from its own reply, failure from its own reply\"); §3.13's PopoutPanel.jsx row",
-      "problem": "Verified: PopoutPanel.jsx:99-107 keeps only res.data?.bars and res.error; there is no meta/barsMeta state to build a coverage object from, and §3.13's row does not add one. The popout also receives no onFillGap, so whatever describeCoverage returns in `actions` has no handler there.",
-      "fix": "Add to §3.13's PopoutPanel row: a new barsMeta state set from res.data on every settle, from which coverage is built; and state that onFillGap is deliberately not passed, so describeCoverage's actions are not rendered in a popout and its `text` carries the reason — beside the existing no-asked-absent sentence."
-    },
-    {
-      "id": 23,
-      "severity": "NIT",
-      "where": "§3.8 (\"stderrTail … non-array → [], and the <details> block is not rendered\"); §3.5(d)'s could-not-ask row",
-      "problem": "Read literally the rule covers a non-array input but not a genuinely empty array — which is exactly what ensureBackendRunning's start-failure branch returns (verified, marketIntel.cjs:54). An \"engine output\" disclosure that opens to nothing is a control that lies about having something.",
-      "fix": "Reword to \"absent, non-array OR empty → the <details> block is not rendered at all\", and assert the empty case in §3.12 beside the failure.detail === null assertion."
-    },
-    {
-      "id": 24,
-      "severity": "NIT",
-      "where": "§3.4 states table (`superseded`: \"a conflicting job replaced it\") versus cancel rule 4's careful wording",
-      "problem": "Once finding 2's conflicts() is narrowed, the remaining supersede case for a RUNNING provider job is a genuine subsumption — but master is told it was \"replaced\" while the engine may still be fetching and storing. The cancel sentence already has the right words for this.",
-      "fix": "Give superseded-while-running the cancel sentence's second half: \"Replaced by a newer request. The engine may still finish this one, and anything it stored will appear on the next read from disk.\" Keep superseded-while-queued as \"Replaced before it started.\""
+      "title": "§E.0.1 places codeRegenEngine's gate call at a line that describes one of its three requests",
+      "where": "§E.0.1 codeRegenEngine row versus §E.7.4 row 3",
+      "problem": "§E.0.1 says 'before researchFix's DuckDuckGo URL at ~49' while §E.7.4 correctly says 'top of researchFix ~44' covering 49, 69 and 87 (DDG, npm registry, GitHub search — all three measured at those lines). Placing it at 49 happens to precede all three in the same function, so behaviour survives, but the file table should match the gate table.",
+      "fix": "Read: 'at the top of researchFix (~44), covering its three requests at 49, 69 and 87'."
     }
-  ]
+  ],
+  "verifiedAssumptions": [
+    "proposals.cjs:235 calls applier(p, opts) with two arguments — FR-57's closure + exported applyWith is the only available seam",
+    "proposals.apply authorises opts.user before the applier runs (:219), so the applier's masterDriven derivation is tautologically true there — the design's move to criterion 21c's asserted absence is correct",
+    "capability.can reads only user.tier and returns false for an unknown capability for every tier (capability.cjs:25-31), so {tier:0} is forgeable in-process and lift() genuinely cannot succeed until master adds system.suspend-autonomy",
+    "summarise() does not carry result (:297-308), so mirroring the verdict into meta is the only way it reaches the list channel",
+    "DURABLE_STATUSES = {pending, approved} (:338) and the id is crypto.randomBytes(10).toString('hex') (:117) — /^[0-9a-f]{20}$/ is exact and the record is not a rollback source",
+    "registerApplier is appliers.set(kind, fn) on an unconstrained Map (:85) and create() accepts any kind",
+    "loyaltyGuard.PROTECTED_FILES is exactly the seven named (:64-72); inspectChanges matches by normalised equality, /-suffix or basename-plus-dirname (:220-232), so calling the guard rather than intersecting a set is required",
+    "refreshScheduler has one dispatcher: schedule()'s timer calls runNow (:204-216), runNow awaits task.run() at 133, stop() at 220 clears every timer",
+    "selfCare arms its 120s sweep at BOTH 345 and 396, kicks one at 395, runHealthSweep at 200 calls checkInstanceFailover (defined 125, invoked 224)",
+    "marketIntel: tickResolveOutcomes 731, tickSyncNews 748, timers 784-785, startScheduler/stopScheduler exported (:816)",
+    "agentOrchestrator: governor interval at 630, agent.killFn() invoked at 637 inside it; reaper-only characterisation accurate (assimilates before GC)",
+    "registrySources.collect returns {rows, failures} (:118, :188) with per-package failure reasons (:138, :143, :163)",
+    "dependencyAdvisor.SENSITIVE is exported (:307); review() with no argument returns empty",
+    "aiProcess.diagnoseFailure has exactly eight branches (:290ff) and returns {reason, remedy, silent?} with no causeId — §E.5.3a's eight-over-seven mapping is accurate",
+    "astEngine.analyzeImpact is a substring scan (code.includes at :240, line numbers at :242) returning path.join absolutes — over-reports, never under-reports, and needs the normalisation the design specifies",
+    "localUpdateEngine.classifyChange exists and is exported (:53, :330)",
+    "dataStore.DOMAINS is the nine-entry array at :44 and markAllDirty() iterates it and returns DOMAINS.length, so a context domain inherits I14's re-key by construction",
+    "customProviders.isPrivateHost is internal, not exported (:83, :232), and PRIVATE_HOST_PATTERNS covers other machines — a separate exported isLoopbackHost is the right call",
+    "House suite output is '    PASS  <msg>' / '    FAIL  <msg>' under a '\\n  <id> — <title>' header (verifyInvariants.cjs:66-73)",
+    "Section 28 words I6 and I17 as the design quotes them, and Section 124's R-L4 specifies tier-0 system.suspend-autonomy, tray-reachable, unreachable by any proposal, fail-safe — the two-predicate split is an argued, printed, master-raised departure for the four pre-existing dispatchers only",
+    "verifyLoyaltyTripwire.cjs has exactly one fs.writeFileSync (:155, the --approve manifest write), so FR-1's declared exception overstates rather than understates what the suites write"
+  ],
+  "unverifiedOrWrongAssumptions": [
+    "WRONG: row.target on a dependencyAdvisor row — the shape is {name, pinned, latest, jump, ...} with no target (finding 2)",
+    "WRONG: 'the STOP's state is unnameable by any changes[].path' and 'the policy table is unreachable by any proposal' — timeline.cjs's SELF_MODIFY applier writes changes[].path verbatim with no root confinement, and shared/autonomy-policy.json is not in PROTECTED_FILES (finding 1)",
+    "WRONG: criterion 22a's 'startAudit() re-arms it on lift' as a description of resumption — with the stopped-record present, isHalted() stays true and three of the four dispatchers stay no-ops (finding 3)",
+    "WRONG: §B.3's nine selfModel derivations — measured eight (finding 11)",
+    "WRONG: three line citations — killFn 634, proposals.cjs 215 and 272 (finding 12)",
+    "WRONG: '25 suites' — 18 scripts/verify*.cjs on disk (finding 13)",
+    "UNVERIFIED and correctly declared by Part H, accepted as stated: nothing implemented; vite build cannot run here; the six source-change causeId recognisers have never seen real output; the vectorMemory dimension defect was found by reading; the re-key has not been run with a context domain; no Ollama daemon has ever been present so ollamaCatalog.classify is fixture-tested only; no EDITS transform has produced a byte; no timer has been observed stopping or re-arming; the 64 KB dossier cap, the 20-entry/30-day snapshot budget and the 90-day criterion window are declared budgets; requireMasterDriven's two-class carve-out is a reasoned argument no row in the document can falsify, and §I.11 is the right place for it",
+    "UNVERIFIED by this review: that modelRouter.chatCompletion is the single switch every chat/completion call reaches its provider through. The reasoning and the destinationOf design were read; every caller of every provider branch was not enumerated. It is central to Addendum A §A.2(2), and criterion 54's fake-eighth-provider assertion is the right shape to prove it"
+  ],
+  "reviewDoc": "c:\\CodeBase\\Velvet_UI\\Velvet\\Rama_AGI\\.worktrees\\self-upgrade\\docs\\research\\design-review.md"
 }
