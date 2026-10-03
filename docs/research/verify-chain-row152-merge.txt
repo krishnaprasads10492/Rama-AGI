@@ -307,7 +307,7 @@
 ΓöÇΓöÇ SIM 9  a zero-byte "installer"
 
 ΓöÇΓöÇ SIM 10  one channel read by 200 installs at mixed versions
-     95 would update, 105 already current or ahead ΓÇö 0 incorrect
+     84 would update, 116 already current or ahead ΓÇö 0 incorrect
 
 ΓöÇΓöÇ SIM 11  fuzzing the manifest, 400 iterations (seed auto)
 
@@ -317,7 +317,7 @@
 ΓöÇΓöÇ SIM 13  a read-only / unreachable channel
 
 ======================================================================
-  164 passed, 0 failed   (fuzz seed 1865441280)
+  164 passed, 0 failed   (fuzz seed 48687616)
 ======================================================================
 
 --- one folder must have exactly one identity ---
@@ -934,10 +934,10 @@ the keyed Ollama Cloud path ΓÇö asserted, not trusted
     PASS  and no call to net.request ΓÇö only post/get, which serialise INSIDE lib/http.cjs
     PASS  the only outbound calls are post and get on the one client
     PASS  egressBoundary.cjs requires no HTTP client at all
-    PASS  webSearch refuses a bare-string query with ZERO HTTP calls
 [ollama-cloud] search refused: level=null where=query
-[ollama-cloud] search refused: level=private where=query
+    PASS  webSearch refuses a bare-string query with ZERO HTTP calls
     PASS  and refuses a private query with ZERO HTTP calls
+[ollama-cloud] search refused: level=private where=query
     PASS  ΓÇö the modelRouter IPC surface registered the three new channels
 
   (g1) a refusal is TERMINAL for every backend ΓÇö bing.com is no less of a network
@@ -952,8 +952,8 @@ the keyed Ollama Cloud path ΓÇö asserted, not trusted
   (g2) the gate runs ΓÇö and a missing wire-up never reads as "master lacks permission"
 [ollama-cloud] no user supplied to a gated cloud call
     PASS  chat with NO user returns gateError ΓÇö a programming error, not a policy outcome
-[ollama-cloud] no user supplied to a gated cloud call
     PASS  chat made zero HTTP calls in that case
+[ollama-cloud] no user supplied to a gated cloud call
     PASS  listModels with NO user returns gateError ΓÇö a programming error, not a policy outcome
     PASS  listModels made zero HTTP calls in that case
 [ollama-cloud] no user supplied to a gated cloud call
@@ -966,8 +966,8 @@ the keyed Ollama Cloud path ΓÇö asserted, not trusted
     PASS  webSearch with user:null is DENIED, and says which capability
     PASS  webSearch made zero HTTP calls in that case too
     PASS  a master-tier user REACHES the transport
-    PASS  chatCompletion dispatches a cloud model with all four arguments and reaches the transport
 [ollama-cloud] no user supplied to a gated cloud call
+    PASS  chatCompletion dispatches a cloud model with all four arguments and reaches the transport
     PASS  while omitting the user throws a gateError rather than making an ungated cloud call
     PASS  without models.use-cloud in the matrix, the fallback gate is models.use and status says so
     PASS  with it present, the dedicated tier-1 gate applies with no code change
@@ -1000,8 +1000,8 @@ the keyed Ollama Cloud path ΓÇö asserted, not trusted
 [ollama-cloud] gemma4:31b-cloud is a daemon tag; the keyed API wants gemma4:31b
     PASS  row 4: a DAEMON tag sent to the keyed API is refused BEFORE any request
     PASS  and the reason names both the tag and what the keyed API wants
-    PASS  the :cloud form is refused too, with zero calls
 [ollama-cloud] gemma4:cloud is a daemon tag; the keyed API wants gemma4
+    PASS  the :cloud form is refused too, with zero calls
 [ollama-cloud] payload refused: level=private where=parts index=0
     PASS  row 5: a refused payload never reaches the wire
 [ollama-cloud] Ollama rejected the credential ΓÇö replace the key in Models ΓåÆ Cloud
@@ -1010,21 +1010,21 @@ the keyed Ollama Cloud path ΓÇö asserted, not trusted
     PASS  row 9: a model not on this plan is reported as planError and NEVER as ok
 [ollama-cloud] gemma4:31b unknown to the keyed API ΓÇö that is the daemon tag
     PASS  row 10: an unknown model is reported as modelError and NEVER as ok
-[ollama-cloud] the keyed API is unreachable ΓÇö the LOCAL daemon path is untouched
     PASS  row 14: unreachable is reported as offline and NEVER as ok
-[ollama-cloud] gpt-oss:120b is not on this plan
+[ollama-cloud] the keyed API is unreachable ΓÇö the LOCAL daemon path is untouched
     PASS  row 9 NAMES the model and makes no substitute
-[ollama-cloud] the keyed API returned a non-JSON body
     PASS  row 15: a non-JSON body is a shapeError with at most 200 characters echoed
-[ollama-cloud] the response did not match the /api/chat shape
     PASS  row 16: a response missing message.content is a shapeError, not an empty answer
-[ollama-cloud] the keyed API reported an error on a 200
     PASS  row 17: an error on a 200 is still a failure
-[ollama-cloud] Ollama rejected the credential ΓÇö replace the key in Models ΓåÆ Cloud
     PASS  after a 401 the next attempt is SUPPRESSED and the stub records no second call
     PASS  row 6: admission denied is deferred, with the reason, and no request
     PASS  row 7: no slot is deferred, with no request and no slot leaked
     PASS  row 18: a throw inside the request still releases the slot ΓÇö a leaked slot on a 1-slot row is a permanent outage
+[ollama-cloud] gpt-oss:120b is not on this plan
+[ollama-cloud] the keyed API returned a non-JSON body
+[ollama-cloud] the response did not match the /api/chat shape
+[ollama-cloud] the keyed API reported an error on a 200
+[ollama-cloud] Ollama rejected the credential ΓÇö replace the key in Models ΓåÆ Cloud
     PASS  no row in the table degrades to a different model or a shortened payload
 
   (d2) models:chat ΓÇö a substitution is DECLARED, and nothing says "All models failed"
@@ -2086,7 +2086,7 @@ ALL PASS ΓÇö 107 passed, 0 failed
   PASS  the StockMind directory was found
   PASS  every InfoTip and info= names a term that exists
   PASS  the components actually reference terms
-(node:7580) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/CodeBase/Velvet_UI/Velvet/Rama_AGI/src/pages/StockMind/glossary.js is not specified and it doesn't parse as CommonJS.
+(node:36300) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/CodeBase/Velvet_UI/Velvet/Rama_AGI/src/pages/StockMind/glossary.js is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
 To eliminate this warning, add "type": "module" to C:\CodeBase\Velvet_UI\Velvet\Rama_AGI\package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
@@ -2675,7 +2675,7 @@ the conversation role ΓÇö R─üma talking with master, and his name staying 
 
   ALL PASS ΓÇö and masterΓÇÖs name never reached an outbound payload in this run
 
-(node:34972) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/CodeBase/Velvet_UI/Velvet/Rama_AGI/src/pages/StockMind/chartDrawings.js is not specified and it doesn't parse as CommonJS.
+(node:5564) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/CodeBase/Velvet_UI/Velvet/Rama_AGI/src/pages/StockMind/chartZoom.js is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
 To eliminate this warning, add "type": "module" to C:\CodeBase\Velvet_UI\Velvet\Rama_AGI\package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
@@ -3228,11 +3228,11 @@ chart drawings ΓÇö master's marks, not R─üma's
 
   232 passed, 0 failed
 
-(node:25040) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/CodeBase/Velvet_UI/Velvet/Rama_AGI/src/pages/StockMind/chartDrawings.js is not specified and it doesn't parse as CommonJS.
+(node:4400) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/CodeBase/Velvet_UI/Velvet/Rama_AGI/src/pages/StockMind/chartDrawings.js is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
 To eliminate this warning, add "type": "module" to C:\CodeBase\Velvet_UI\Velvet\Rama_AGI\package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:32332) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/CodeBase/Velvet_UI/Velvet/Rama_AGI/src/pages/StockMind/chartSessions.js is not specified and it doesn't parse as CommonJS.
+(node:28452) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/CodeBase/Velvet_UI/Velvet/Rama_AGI/src/pages/StockMind/chartTime.js is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
 To eliminate this warning, add "type": "module" to C:\CodeBase\Velvet_UI\Velvet\Rama_AGI\package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
@@ -3374,7 +3374,7 @@ chart sessions ΓÇö the boundary is the information
 
   109 passed, 0 failed
 
-(node:33256) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/CodeBase/Velvet_UI/Velvet/Rama_AGI/src/pages/StockMind/timeframes.js is not specified and it doesn't parse as CommonJS.
+(node:14140) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/CodeBase/Velvet_UI/Velvet/Rama_AGI/src/pages/StockMind/chartEmptyState.js is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
 To eliminate this warning, add "type": "module" to C:\CodeBase\Velvet_UI\Velvet\Rama_AGI\package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
@@ -3499,7 +3499,7 @@ chart empty state ΓÇö the sentence has to be true
 
   96 passed, 0 failed
 
-(node:33044) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/CodeBase/Velvet_UI/Velvet/Rama_AGI/src/pages/StockMind/timeframes.js is not specified and it doesn't parse as CommonJS.
+(node:36392) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/CodeBase/Velvet_UI/Velvet/Rama_AGI/src/pages/StockMind/chartProjection.js is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
 To eliminate this warning, add "type": "module" to C:\CodeBase\Velvet_UI\Velvet\Rama_AGI\package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
@@ -3655,7 +3655,7 @@ chart projection ΓÇö a distribution drawn as a bar, and never as a direction
 
 ALL PASS ΓÇö 127 passed, 0 failed
 
-(node:32960) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/CodeBase/Velvet_UI/Velvet/Rama_AGI/src/pages/StockMind/timeframes.js is not specified and it doesn't parse as CommonJS.
+(node:14748) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/CodeBase/Velvet_UI/Velvet/Rama_AGI/src/pages/StockMind/chartTime.js is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
 To eliminate this warning, add "type": "module" to C:\CodeBase\Velvet_UI\Velvet\Rama_AGI\package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
