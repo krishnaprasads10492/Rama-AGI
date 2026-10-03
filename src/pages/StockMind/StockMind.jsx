@@ -205,6 +205,13 @@ export default function StockMind() {
   const [inventory, setInventory] = useState([]);
   const [cone, setCone] = useState(null);
   const [coneOn, setConeOn] = useState(false);
+  // THE FORECAST REPLY'S SIBLING OBJECTS, which this page used to drop. `entitlement` and `horizon`
+  // carry whether a model may speak and which bars were actually measured, and neither is on the cone
+  // — so without this the chart could not state its own entitlement however it was written.
+  const [coneMeta, setConeMeta] = useState(null);
+  // How many bars ahead master asked for. null means the horizon's own default, which is what the
+  // engine used before there was a control.
+  const [horizonBars, setHorizonBars] = useState(null);
   const [held, setHeld] = useState(null);   // the tracked position in this symbol, if any
 
   const canRequest = canDo ? canDo('stockmind.request') : false;
@@ -354,9 +361,23 @@ export default function StockMind() {
       horizon: horizonName || (showsClock(barInterval) ? 'intraday' : 'swing'),
       stop: held?.thesis?.stopPrice ?? null,
       target: held?.thesis?.targetPrice ?? null,
+      // The bridge has always forwarded `bars` and the engine has always honoured it; nothing sent it.
+      bars: horizonBars || null,
     });
-    setCone(res?.ok === false ? { error: res.error } : (res.data?.cone || null));
-  }, [sym, exchange, currentUser, barInterval,
+    if (res?.ok === false) {
+      setCone({ error: res.error });
+      // Cleared rather than left behind: meta from the last successful reply would describe a moment
+      // that has passed, which is the defect `chartEmptyState.js` names for coverage on a failure.
+      setConeMeta(null);
+      return;
+    }
+    setCone(res.data?.cone || null);
+    setConeMeta({
+      entitlement: res.data?.entitlement || null,
+      horizon: res.data?.horizon || null,
+      caveat: res.data?.caveat || null,
+    });
+  }, [sym, exchange, currentUser, barInterval, horizonBars,
     held?.thesis?.stopPrice, held?.thesis?.targetPrice]);
 
   const loadNews = useCallback(async () => {
@@ -420,11 +441,13 @@ export default function StockMind() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exchange]);
 
+  // `horizonBars` is a dependency because the horizon control is only a control if changing it
+  // refetches — the cone is computed by the engine, not reshaped in the renderer.
   useEffect(() => {
     if (coneOn) loadCone();
-    else setCone(null);
+    else { setCone(null); setConeMeta(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coneOn, sym, barInterval]);
+  }, [coneOn, sym, barInterval, horizonBars]);
 
   const runPredict = async () => {
     if (!inElectron) {
@@ -888,7 +911,10 @@ far as the provider allows, which for intraday is a few days to two years.">
                                             // meant widening it worked and heightening it did nothing.
                                             fillHeight
                                             height={260}
-                                            cone={coneOn ? cone : null} />,
+                                            cone={coneOn ? cone : null}
+                                            projectionMeta={coneOn ? coneMeta : null}
+                                            horizonBars={horizonBars}
+                                            onHorizonBars={setHorizonBars} />,
                 },
                 {
                   id: 'signals',
@@ -983,6 +1009,9 @@ far as the provider allows, which for intraday is a few days to two years.">
               fills={held?.fills || []}
               thesis={held?.thesis || null}
               cone={cone}
+              projectionMeta={coneMeta}
+              horizonBars={horizonBars}
+              onHorizonBars={setHorizonBars}
             />
             {cone?.error && (
               <div style={{ fontSize: '12px', color: 'var(--amber)', padding: '2px' }}>
@@ -1092,8 +1121,16 @@ far as the provider allows, which for intraday is a few days to two years.">
                   <Stat label="CENTRE" info="coneTilted"
                         value={cone.tilted ? 'MODEL-TILTED' : 'FLAT'}
                         color={cone.tilted ? 'var(--accent)' : 'var(--muted)'} />
-                  <Stat label="HORIZON" info="horizon" value={cone.horizon || '—'} />
-                  <Stat label="BARS AHEAD" value={String((cone.points || []).length || '—')} />
+                  {/* THIS STAT HAS ALWAYS READ '—'. It asked the cone for a horizon key the cone
+                      does not have: the horizon is a SIBLING of the cone on the reply, and this page
+                      discarded it. It reads the threaded meta now, and the bars figure shows the
+                      engine's cap beside the count so a clamped horizon is visible here too. */}
+                  <Stat label="HORIZON" info="horizon"
+                        value={coneMeta?.horizon?.label
+                          || coneMeta?.horizon?.measuredInterval || '—'} />
+                  <Stat label="BARS AHEAD" info="projectionHorizon"
+                        value={`${(cone.points || []).length || '—'} of `
+                          + `${cone.maxBarsAhead || '—'}`} />
                 </div>
                 <div style={{ fontSize: '12.5px', color: 'var(--text-dim, var(--muted))',
                   lineHeight: 1.7 }}>

@@ -79,6 +79,17 @@ export const TERMS = {
       + 'carrying that badge; fetch real history first.',
     seeAlso: ['fetchProvider'],
   },
+  claimClass: {
+    term: 'Claim class', group: 'concepts',
+    short: 'What kind of statement a number is: grounded, reflex or prose. Never a percentage.',
+    long: 'Grounded means it came from stored records and can be pointed at. Reflex means it was '
+      + 'measured by a stated procedure over a stated lookback — the projection cone is one. Prose '
+      + 'means it was written rather than computed, and anything that cannot name its own source is '
+      + 'not shown at all. A class is deliberately not a score: a confidence figure invites you to '
+      + 'multiply by it, while a class tells you what sort of thing you are reading and where to go '
+      + 'to check it.',
+    seeAlso: ['projection', 'acceptanceGate'],
+  },
 
   // ── Instrument and data ───────────────────────────────────────────────────
   instrument: {
@@ -153,7 +164,7 @@ export const TERMS = {
     long: 'History is kept on disk once fetched, so it is available offline and the store only ever '
       + 'grows. The ● marker in the instrument list and the "n stored from <date>" line above the '
       + 'chart both refer to this.',
-    seeAlso: ['fromDisk', 'fetchProvider'],
+    seeAlso: ['fromDisk', 'fetchProvider', 'marketState'],
   },
   fromDisk: {
     term: 'From disk', group: 'instrument',
@@ -289,7 +300,7 @@ export const TERMS = {
     long: 'Not a forecast of direction. It draws where price would sit if it moved by a typical amount '
       + 'for this instrument. When no model has cleared the acceptance gate the centre line is flat '
       + 'and drawn grey — meaning "last price extended", not "we expect no change".',
-    seeAlso: ['coneTilted', 'acceptanceGate'],
+    seeAlso: ['coneTilted', 'acceptanceGate', 'projectedCandle', 'projectionHorizon'],
   },
   coneTilted: {
     term: 'Tilted cone', group: 'chart',
@@ -297,6 +308,38 @@ export const TERMS = {
     long: 'A tilted centre gets the accent colour because a model that cleared the gate moved it. A '
       + 'flat centre stays grey and dotted. The visual weight tracks the evidence on purpose.',
     seeAlso: ['projection', 'acceptanceGate'],
+  },
+  projectedCandle: {
+    term: 'Projected candle', group: 'chart',
+    short: 'A future bar drawn as a range — the body is the middle half of outcomes, the wicks the '
+      + 'wide bounds.',
+    long: 'A bar that has not happened has no open, high, low or close; it has a spread. So the body '
+      + 'spans the quartiles of that spread and the wicks reach the two-sigma bounds, with the centre '
+      + 'left to the cone line that already draws it. The open is always the lower edge, so one of '
+      + 'these can never read as a down bar, and it is drawn hollow in a single colour because no '
+      + 'direction is being claimed. It is not drawn on a Heikin-Ashi chart, where the open and close '
+      + 'are themselves averages of earlier bars.',
+    seeAlso: ['projection', 'projectionHorizon', 'candles'],
+  },
+  projectionHorizon: {
+    term: 'Projection horizon', group: 'chart',
+    short: 'How many bars ahead the cone reaches. Forty is the engine\'s ceiling.',
+    long: 'Measured in bars rather than days, because the width grows with the square root of the '
+      + 'number of bars and that is what the engine actually computes. Each preset shows what it is '
+      + 'in time for the interval on screen. Asking beyond the ceiling is not refused silently: the '
+      + 'request is clamped and the chart says what was asked for, what the limit is, and what was '
+      + 'drawn instead.',
+    seeAlso: ['projection', 'projectedCandle', 'horizon'],
+  },
+  marketState: {
+    term: 'Market state', group: 'instrument',
+    short: 'Whether the exchange is inside its scheduled hours, and how old the newest stored bar is.',
+    long: 'Derived from the published session times and from the age of what is on disk — there is no '
+      + 'tick feed behind it, so it never claims to be live. A trading holiday falls inside scheduled '
+      + 'hours and will therefore read as an open session; that limit is stated rather than hidden. '
+      + 'Age is only called stale while the session is open, because outside it an old bar is the '
+      + 'correct answer.',
+    seeAlso: ['priceStale', 'storedLocally'],
   },
   yourFills: {
     term: 'Your fills', group: 'chart',

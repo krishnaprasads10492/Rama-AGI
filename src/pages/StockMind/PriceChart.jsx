@@ -23,6 +23,9 @@ import { createDrawingLayer } from './ChartDrawingLayer.js';
 import { sessionBands, describeBands } from './chartSessions.js';
 import { createSessionLayer } from './ChartSessionLayer.js';
 import { emptyState } from './chartEmptyState.js';
+import {
+  projectionMode, quantileBars, projectionState, projectionInputs, horizonChoices,
+} from './chartProjection.js';
 import InfoTip from './InfoTip.jsx';
 
 /**
@@ -294,12 +297,27 @@ export default function PriceChart({
   // is a parse error the renderer audit catches. `replyNote` says whose sentence it is.
   replyNote = null,         // the route's own sentence about THIS reply (`res.data.note`)
   failure = null,           // {error, diagnosis:{reason, remedy}, detail, stderrTail} — all failure modes
+  /**
+   * ── The projection's horizon and its own state ──
+   *
+   * All three optional and defaulting to null, so the three existing call sites keep working (I11).
+   * `projectionMeta` carries the forecast reply's SIBLING objects — `entitlement`, `horizon`,
+   * `caveat` — which the page used to discard, and without which entitlement and the measured
+   * interval cannot reach this canvas however the renderer is written.
+   */
+  horizonBars = null,       // how many bars ahead master asked for; null means the engine's default
+  onHorizonBars = null,     // supplying this renders the horizon control
+  projectionMeta = null,    // {entitlement, horizon, caveat} from the forecast reply
 }) {
   const holder = useRef(null);
   const chartRef = useRef(null);
   const priceRef = useRef(null);
   const volRef = useRef(null);
   const coneRefs = useRef({});
+  // The projected quantile bars: a SECOND NATIVE SERIES rather than a third series primitive, because
+  // the pane-view API cannot be exercised without a screen and `verifyChartSessions.mjs` pins the
+  // primitive count at two. It lives beside `coneRefs` so creation and disposal stay in one effect.
+  const projBarsRef = useRef(null);
   const overlayRefs = useRef([]);
   const markersRef = useRef(null);
   const linesRef = useRef([]);
@@ -809,6 +827,7 @@ export default function PriceChart({
       priceRef.current = null;
       volRef.current = null;
       coneRefs.current = {};
+      projBarsRef.current = null;
       overlayRefs.current = [];
       markersRef.current = null;
       linesRef.current = [];
@@ -1124,6 +1143,10 @@ export default function PriceChart({
       try { chart.removeSeries(s); } catch { /* already disposed */ }
     }
     coneRefs.current = {};
+    if (projBarsRef.current) {
+      try { chart.removeSeries(projBarsRef.current); } catch { /* already disposed */ }
+      projBarsRef.current = null;
+    }
 
     const points = cone?.points || [];
     if (!layers.cone || !cone?.ok || points.length === 0) return;
@@ -1153,7 +1176,10 @@ export default function PriceChart({
       return;
     }
 
-    const build = (field, width, style, color) => {
+    // `title` is what puts a name on the price axis at the band's own end. Only the outer bands and
+    // the centre get one: labelling ±1σ as well would stack four tags on one axis and the band ends
+    // are the two numbers the cone is actually read for.
+    const build = (field, width, style, color, title = null) => {
       const data = seed.concat(points
         .map((p) => {
           const t = toChartTime(p.time);
@@ -1163,20 +1189,58 @@ export default function PriceChart({
       if (data.length < 2) return;
       const s = chart.addSeries(LineSeries, {
         color, lineWidth: width, lineStyle: style,
-        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        priceLineVisible: false, lastValueVisible: !!title, title: title || '',
+        crosshairMarkerVisible: false,
       }, 0);
       s.setData(data);
       coneRefs.current[field] = s;
     };
 
-    build('upper2', 1, LineStyle.Dotted, `${bandColor}88`);
-    build('lower2', 1, LineStyle.Dotted, `${bandColor}88`);
+    build('upper2', 1, LineStyle.Dotted, `${bandColor}88`, '+2σ');
+    build('lower2', 1, LineStyle.Dotted, `${bandColor}88`, '−2σ');
     build('upper1', 1, LineStyle.Dashed, bandColor);
     build('lower1', 1, LineStyle.Dashed, bandColor);
     // The centre only earns a visible line when a model was allowed to move it. A flat centre is
     // just the last price extended, and drawing it boldly would imply a forecast of no change.
     build('mid', tilted ? 2 : 1, tilted ? LineStyle.Solid : LineStyle.Dotted,
-      tilted ? theme.accent : `${theme.muted}55`);
+      tilted ? theme.accent : `${theme.muted}55`, 'centre');
+
+    // ── THE PROJECTION AS BARS, IN THE TYPE MASTER SELECTED ──────────────────────────────────────
+    //
+    // The mapping and the refusals live in `chartProjection.js`, tested; this only draws the rows.
+    // One hue for both directions and a near-hollow body, because a projected bar is a RANGE: green
+    // or red would claim a direction the engine never stated, and `upColor === downColor` is asserted
+    // at source level so it cannot drift back.
+    const projRows = quantileBars(cone, { chartType, candleTime });
+    if (projRows.length > 1) {
+      const proj = projectionMode(chartType);
+      const shared = { lastValueVisible: false, priceLineVisible: false };
+      let projSeries = null;
+      if (proj.mode === 'quantile-candles') {
+        projSeries = chart.addSeries(CandlestickSeries, {
+          ...shared,
+          upColor: `${bandColor}1f`, downColor: `${bandColor}1f`,
+          borderUpColor: `${bandColor}cc`, borderDownColor: `${bandColor}cc`,
+          wickUpColor: `${bandColor}99`, wickDownColor: `${bandColor}99`,
+          borderVisible: true,
+        }, 0);
+      } else if (proj.mode === 'quantile-bars') {
+        projSeries = chart.addSeries(BarSeries, {
+          ...shared,
+          upColor: `${bandColor}aa`, downColor: `${bandColor}aa`, thinBars: true,
+        }, 0);
+      }
+      if (projSeries) {
+        projSeries.setData(projRows);
+        // One marker at the first projected bar, so the boundary between what traded and what is
+        // derived is on the canvas rather than only in a footer.
+        createSeriesMarkers(projSeries, [{
+          time: projRows[0].time, position: 'aboveBar', color: bandColor,
+          shape: 'arrowUp', text: 'projected →',
+        }]);
+        projBarsRef.current = projSeries;
+      }
+    }
   }, [cone, layers.cone, candles.length, chartType]);
 
   const empty = candles.length === 0;
@@ -1186,6 +1250,21 @@ export default function PriceChart({
   const vacancy = useMemo(() => emptyState({
     bars: candles.length, busy, failure, note: replyNote, coverage, interval, symbol, rangeId,
   }), [candles.length, busy, failure, replyNote, coverage, interval, symbol, rangeId]);
+
+  // ── The projection's own state, its input ledger and the horizons on offer ───────────────────
+  //
+  // All three are decided in `chartProjection.js` so a suite can read them. A sentence composed inside
+  // JSX is a sentence nothing can test, which is the defect `chartEmptyState.js` was extracted to end.
+  const projState = useMemo(
+    () => (cone?.ok ? projectionState(cone, projectionMeta, { chartType, interval }) : null),
+    [cone, projectionMeta, chartType, interval],
+  );
+  const projLedger = useMemo(
+    () => (cone?.ok ? projectionInputs(cone, projectionMeta) : []),
+    [cone, projectionMeta],
+  );
+  const horizons = useMemo(() => horizonChoices(interval), [interval]);
+
   const toggle = (k) => setLayers((s) => ({ ...s, [k]: !s[k] }));
 
   // One step wider or narrower. `+1` is narrower because the list runs comfortable → dense.
@@ -2101,10 +2180,29 @@ export default function PriceChart({
           </button>
         )}
         {cone?.ok && (
-          <button type="button" onClick={() => toggle('cone')} style={chip(layers.cone)}
-                  aria-pressed={layers.cone}>
-            projection {cone.tilted ? '' : '(flat)'}
-          </button>
+          <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+            <button type="button" onClick={() => toggle('cone')} style={chip(layers.cone)}
+                    aria-pressed={layers.cone}>
+              projection {cone.tilted ? '' : '(flat)'}
+            </button>
+            <InfoTip id="projectedCandle" />
+          </span>
+        )}
+
+        {/* HOW FAR AHEAD, AS A BAR COUNT, because a bar count is what the engine clamps. Rendered only
+            when the page supplies a handler, so the two charts that cannot refetch do not offer a
+            control that would do nothing. The cap carries a ⌈ and says so in its title. */}
+        {cone?.ok && onHorizonBars && horizons.length > 0 && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+            {horizons.map((h) => (
+              <button key={h.bars} type="button" onClick={() => onHorizonBars(h.bars)}
+                      style={chip(horizonBars === h.bars)}
+                      aria-pressed={horizonBars === h.bars} title={h.title}>
+                {h.label}{h.atCap ? ' ⌈' : ''}
+              </button>
+            ))}
+            <InfoTip id="projectionHorizon" />
+          </span>
         )}
       </div>
 
@@ -2350,6 +2448,68 @@ export default function PriceChart({
           <span style={{ color: cone.tilted ? 'var(--accent)' : 'var(--text-dim)' }}>
             {cone.tiltReason}
           </span>
+        </div>
+      )}
+
+      {/* ── THE PROJECTION'S OWN STATE, as a CLASS and never a confidence (spec 123.5 item 8) ──
+          Every clause here is composed in `chartProjection.js`, so each one is asserted rather than
+          trusted. The amber cases are the two that change what the cone means: an interval that is
+          not the chart's, and a horizon the engine shortened. */}
+      {cone?.ok && layers.cone && projState && (
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', padding: '2px',
+          fontSize: '12px', lineHeight: 1.6, color: 'var(--muted)' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center',
+            color: projState.modal ? 'var(--accent)' : 'var(--text-dim, var(--muted))' }}>
+            {projState.cite}{projState.modal ? ' · modal' : ''}
+            <InfoTip id="claimClass" />
+          </span>
+          <span title={projState.entitlementReason}>
+            {projState.entitled ? 'model entitled' : 'no entitled model'} — {projState.entitlementReason}
+          </span>
+          <span style={{ color: projState.tilted ? 'var(--accent)' : 'var(--muted)' }}>
+            {projState.tilted ? 'centre tilted' : 'centre flat'}
+          </span>
+          <span style={{ color: projState.intervalMatches ? 'var(--muted)' : 'var(--amber)' }}>
+            measured on {projState.measuredInterval || 'an interval the reply did not name'}
+            {projState.intervalMatches ? '' : ` · the chart is ${projState.chartInterval}`}
+          </span>
+          {projState.measuredBars !== null && (
+            <span>{projState.measuredBars} bars asked of the engine</span>
+          )}
+          <span style={{ color: projState.capped ? 'var(--amber)' : 'var(--muted)' }}>
+            {projState.barsAhead ?? '—'} of {projState.maxBarsAhead} bars ahead
+          </span>
+          <span style={{ color: projState.mode === 'refused' ? 'var(--amber)' : 'var(--muted)' }}>
+            {projState.mode}: {projState.modeReason}
+          </span>
+        </div>
+      )}
+
+      {/* THE CLAMP IS SHOWN, NEVER SILENT. `capped` has been on the cone object all along and nothing
+          read it, so a horizon the engine shortened looked like the one master chose. */}
+      {cone?.ok && layers.cone && projState && (
+        <div style={{ fontSize: '12px', padding: '2px', lineHeight: 1.6,
+          color: cone.capped ? 'var(--amber)' : 'var(--muted)' }}>
+          {cone.capped && projState.requestedBars !== null
+            ? `You asked for ${projState.requestedBars} bars ahead. The engine's ceiling is `
+              + `${cone.maxBarsAhead || projState.maxBarsAhead}, so this cone is `
+              + `${projState.barsAhead ?? cone.maxBarsAhead} bars and not ${projState.requestedBars}.`
+            : `${cone.maxBarsAhead || projState.maxBarsAhead} bars is the engine's ceiling for a `
+              + 'projection; it will not be asked for more.'}
+        </div>
+      )}
+
+      {/* WHICH FACTS FED IT, AND WHICH DID NOT. "absent" rather than "neutral": news and derivatives
+          were not read and found to say nothing, they are not inputs to a volatility cone at all. */}
+      {cone?.ok && layers.cone && projLedger.length > 0 && (
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', padding: '2px 2px 4px',
+          fontSize: '12px', lineHeight: 1.6 }}>
+          {projLedger.map((row) => (
+            <span key={row.id} title={row.text}
+                  style={{ color: row.used ? 'var(--text-dim, var(--muted))' : 'var(--muted)' }}>
+              {row.label}: {row.text}
+            </span>
+          ))}
         </div>
       )}
 
