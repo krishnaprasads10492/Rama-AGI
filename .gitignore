@@ -37,6 +37,16 @@ secrets/
 # here does not stop it shipping.
 shared/buildManifest.json
 
+# Agent and workflow scratch. `.agents/` holds per-run plans, review verdicts and
+# task metadata; `.worktrees/` holds git worktrees for in-flight workflow runs.
+# Both are working state, not source: a worktree is a second checkout of this very
+# repository, so a `git add .` with these untracked would commit a whole duplicate
+# tree. Research documents that the spec CITES are committed under docs/research/
+# instead — the copies that appear under .agents/ are duplicates of those, so
+# ignoring this directory loses no cited source.
+.agents/
+.worktrees/
+
 # Runtime data — encrypted stores, salt, verifier, scenario memory, logs.
 # Never committed: rama.salt and rama.verify are per-machine, and the .enc
 # domains are the user's data. Committing them would also let an attacker
