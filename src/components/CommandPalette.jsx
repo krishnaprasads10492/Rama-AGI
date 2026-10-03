@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useUIStore }   from '@store/uiStore.js';
 import { useRamaStore } from '@store/ramaStore.js';
 import {
-  VoiceEngine, MIC_MODES, MIC_MODE_LABELS, modesForLevel,
+  VoiceEngine, MIC_MODES, MIC_MODE_LABELS, modesForLevel, registerVoiceEngine,
 } from '@services/voiceEngine.js';
 
 
@@ -514,9 +514,12 @@ export default function CommandPalette({ extraPages = [] }) {
     });
 
     voiceRef.current = engine;
+    // Published so screens that need Rāma to SPEAK — the Chat page's conversation replies — reach this
+    // engine instead of constructing a second one that would fight it for the microphone.
+    const unregister = registerVoiceEngine(engine);
     engine.init();
 
-    return () => engine.stop();
+    return () => { unregister(); engine.stop(); };
   }, []);  // eslint-disable-line
 
   // ── Mute controls ─────────────────────────────────────────────────────────

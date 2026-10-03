@@ -86,6 +86,24 @@ const ROLES = Object.freeze({
     why: 'reading a chart or a screenshot master pastes in',
     needCaps: ['vision'], sensitive: false,
   },
+  conversation: {
+    label: 'Conversation',
+    why: 'talking with master — the turn he is sitting in front of, waiting for',
+    minParamsB: 7, preferRemote: true, sensitive: false,
+    note: 'SENSITIVE IS FALSE ON THIS ROLE AND MUST STAY FALSE. The gate for conversation is PER-TURN '
+      + 'on the PAYLOAD (lib/conversationRole.cjs, through lib/egressBoundary.cjs), not per-role, '
+      + 'because one conversation carries both "what is the rupee doing" and "should I sell my '
+      + 'position": a table-level flag can only be right for one of them, and set true it would refuse '
+      + 'a cloud model on EVERY turn and quietly end the cloud conversation master asked for. A turn that IS '
+      + 'sensitive routes local by passing requirePrivate — the same gate, reached from the call site '
+      + 'instead of the table. NO minCtxK, deliberately: ollamaCloud.toRegistryEntries sets ctxK null '
+      + 'on every keyed cloud row because the keyed API exposes no measured window, and evaluate() '
+      + 'EXCLUDES an unknown window — so a context floor here would refuse every cloud model and invert '
+      + 'the behaviour it was added to protect. NO needCaps: Ollama reports no "chat" cap at all, so a '
+      + 'cap requirement would exclude a model master pulled an hour ago; the embedding split already '
+      + 'refuses an embedder. The 7B floor is the same published threshold tool-calling uses — below it '
+      + 'multi-turn instruction following degrades into restating the question.',
+  },
   narration: {
     label: 'Narration about master\'s money',
     why: 'the why/book text that describes real positions',
@@ -229,7 +247,16 @@ function selectForRole(roleId, models = [], opts = {}) {
     const fitRank = x => (x.fit === 'declared' ? 0 : 1);
     if (fitRank(a) !== fitRank(b)) return fitRank(a) - fitRank(b);
     const priv = x => (x.model.private === true ? 0 : 1);
-    if (priv(a) !== priv(b)) return priv(a) - priv(b);
+    // PRIVATE-BEFORE-COST IS INVERTED FOR `preferRemote` ROLES ONLY, and `conversation` is the only
+    // one that sets it. MEASURED before the flag existed: with a local and a cloud model both fit, a
+    // declared conversation role picked the LOCAL model on every turn and never touched cloud — the
+    // absence of sensitive:true is NOT enough to get cloud-first behaviour, because privacy outranks
+    // cost and a local model is private by definition. Cost cannot do this work either: a local pull
+    // is costTier 0 against a keyed cloud row's 1, so cost agrees with privacy here rather than
+    // opposing it. Latency is what master actually feels in a conversation, and on a bandwidth-starved
+    // 16GB CPU machine the cloud model is the fast one. EVERY OTHER ROLE IS BYTE-IDENTICAL: narration
+    // still refuses a cloud model outright at the fitness gate, well above this comparator.
+    if (priv(a) !== priv(b)) return role.preferRemote ? priv(b) - priv(a) : priv(a) - priv(b);
     // An unknown cost sorts last, not first: unknown must never look like free.
     const cost = x => (num(x.model.costTier) ?? 9);
     if (cost(a) !== cost(b)) return cost(a) - cost(b);
@@ -345,6 +372,10 @@ function describeRequirement(role) {
   for (const c of role.needCaps ?? []) parts.push(`reports "${c}"`);
   if (role.needEmbedding) parts.push('is an embedding model, not a chat model');
   if (role.sensitive) parts.push('runs locally — this prompt must not leave the machine');
+  // Said out loud in the row master reads, because a role that prefers cloud is the one place in this
+  // table where the usual local-first reading of a selection would be wrong.
+  if (role.preferRemote) parts.push('prefers a cloud model — latency is the cost master feels here, '
+    + 'and a turn classified sensitive is still routed locally');
   return parts.join('; ') || 'no hard requirement beyond being usable';
 }
 

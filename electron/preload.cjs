@@ -798,6 +798,17 @@ const RAMA_API = {
     getPrimary:       ()           => ipcRenderer.invoke('models:get-primary'),
     route:            (taskType)   => ipcRenderer.invoke('models:route', taskType),
     chat:             (opts)       => ipcRenderer.invoke('models:chat', opts),
+    // The conversation path (Section 133). STREAMED, so the first word arrives while the rest is still
+    // being generated — `onToken` is called per delta and the promise still resolves with the whole
+    // reply, so a caller that passes no callback behaves exactly like `chat`. Same listener-plus-invoke
+    // idiom as `ollamaPull`, including the `finally` that removes the listener: without it every turn
+    // would leave a live listener behind and master would hear the same tokens N times.
+    converse:         (opts, onToken) => {
+      const handler = (_e, data) => { if (typeof onToken === 'function') onToken(data); };
+      ipcRenderer.on('models:converse-token', handler);
+      const promise = ipcRenderer.invoke('models:converse', opts);
+      return promise.finally(() => ipcRenderer.removeListener('models:converse-token', handler));
+    },
     checkCredentials: ()           => ipcRenderer.invoke('models:check-credentials'),
     // Models master could enable but has not pulled, cloud-first by default because disk is his
     // binding constraint. Returns the tradeoff alongside the list (Section 92).

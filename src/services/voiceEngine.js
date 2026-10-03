@@ -687,6 +687,12 @@ export class VoiceEngine {
   }
 
   // ── Speech synthesis (independent of recognition, always available) ─────────
+  /**
+   * Rāma's voice. `window.speechSynthesis` over the OS voices — free, private, zero-install, and the
+   * only part of the voice ladder that needs no model at all. Honours `speechMuted`, which is why
+   * callers outside this class go through the module-level `speak()` below rather than touching
+   * `speechSynthesis` themselves: a second TTS call site would be a second place the mute is ignored.
+   */
   speak(text, opts = {}) {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return false;
     if (this.speechMuted) return false;   // muted means silent, not quieter
@@ -750,6 +756,32 @@ export class VoiceEngine {
       transcript
     );
   }
+}
+
+// ─── The mounted engine ───────────────────────────────────────────────────────
+/**
+ * ONE engine is constructed in the app, in CommandPalette, because it owns the microphone and a second
+ * one would fight it for the device. Other screens that need Rāma to SPEAK — the Chat page, now that
+ * conversation replies can be voiced — need a reference to it without constructing their own.
+ *
+ * A registry rather than a second `speechSynthesis` call: the engine's `speak()` is what honours
+ * `speechMuted` and sets the hands-free cool-down that stops Rāma transcribing its own voice back as a
+ * command. A screen calling `window.speechSynthesis` directly would skip both.
+ *
+ * `speak()` returns false when nothing is mounted, so a caller can tell silence from success.
+ */
+let mountedEngine = null;
+
+export function registerVoiceEngine(engine) {
+  mountedEngine = engine;
+  return () => { if (mountedEngine === engine) mountedEngine = null; };
+}
+
+export function getVoiceEngine() { return mountedEngine; }
+
+export function speak(text, opts = {}) {
+  if (!mountedEngine || typeof text !== 'string' || !text.trim()) return false;
+  return mountedEngine.speak(text, opts);
 }
 
 // ─── Command matching ─────────────────────────────────────────────────────────

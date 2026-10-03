@@ -657,6 +657,140 @@ async function chat({ messages, apiModel, user, priority, options = null,
   }
 }
 
+// ─── chatStream ───────────────────────────────────────────────────────────────
+
+/**
+ * The same request path as `chat()`, token by token.
+ *
+ * WHY A SECOND FUNCTION AND NOT A FLAG ON `chat()`: every existing caller of `chat()` awaits one
+ * string, and `scripts/verifyOllamaCloud.cjs` pins the assembled envelope's `stream` to false. A flag
+ * would make that assertion conditional on an argument, which is how a pinned shape stops being
+ * pinned. `chat()` is untouched here — byte-identical, same gates, same returns (I11).
+ *
+ * EVERY GATE IS THE SAME ONE, IN THE SAME ORDER: capability, name pre-flight, the egress boundary as
+ * the one body constructor, credential, base URL, admission, slot, send, shape, record. The only
+ * differences are `stream: true` into `egressBoundary.assemble` and `postStreamingJsonLines` out of
+ * the one HTTP client — the same helper `models:ollama-pull` has used since Section 92.
+ *
+ * `onToken` is called with each delta as it arrives. It is wrapped, because a throwing renderer
+ * callback must not abort a request that is already spending master's allowance.
+ */
+async function chatStream({ messages, apiModel, user, priority, options = null, onToken = null,
+                            timeout = 120000, parts = null, allowInternal = false } = {}) {
+  const gated = gateUser(user);
+  if (gated) return gated;
+
+  const name = String(apiModel ?? '');
+  if (!name || name.length > 120 || !NAME_RE.test(name)) {
+    console.error(`[ollama-cloud] "${name}" is not a usable model name`);
+    return { ok: false, nameError: true, path: 'cloud',
+             reason: `"${name}" is not a usable model name for the keyed API` };
+  }
+  if (isDaemonCloudTag(name)) {
+    const api = apiNameFor(name);
+    console.error(`[ollama-cloud] ${name} is a daemon tag; the keyed API wants ${api ?? 'a cloud-list name'}`);
+    return { ok: false, nameError: true, path: 'cloud',
+             reason: `${name} is a daemon tag; the keyed API wants ${api ?? 'a cloud-list name'}` };
+  }
+
+  const gate = egressBoundary.assemble({
+    kind: 'chat', messages, parts, model: name, stream: true, options, allowInternal,
+  });
+  if (!gate.ok) {
+    console.warn(`[ollama-cloud] payload refused: level=${gate.level} where=${gate.where} index=${gate.index}`);
+    return { ok: false, refused: true, path: 'cloud',
+             level: gate.level, reason: gate.reason, where: gate.where, index: gate.index };
+  }
+
+  const cred = credentialState();
+  if (!cred.present) { noteUnconfigured(cred); return unconfiguredShape(cred); }
+
+  if (Date.now() < credRejectedUntil) {
+    return { ok: false, credentialRejected: true, suppressed: true, path: 'cloud',
+             reason: 'Ollama rejected this credential recently; attempts are suppressed for 10 minutes' };
+  }
+
+  const base = resolveBaseUrl();
+  const orch = orchestrator();
+  const prio = clampPriority(priority, 2);
+
+  const verdict = orch.admit({ aiProvider: PROVIDER, label: 'ollama cloud conversation', ramMB: 32, priority: prio });
+  if (!verdict.allow) return { ok: false, deferred: true, path: 'cloud', reason: verdict.reason };
+
+  const slot = await orch.reserveSlot(PROVIDER, { priority: prio, waitMs: 20000 });
+  if (!slot.ok) {
+    if (slot.timedOut) console.warn(`[ollama-cloud] ${slot.reason}`);
+    return { ok: false, deferred: true, timedOut: slot.timedOut === true, path: 'cloud', reason: slot.reason };
+  }
+
+  let content = '';
+  let promptTok = null;
+  let evalTok = null;
+  let reported = null;
+  let tokens = 0;
+
+  try {
+    const res = await httpClient().postStreamingJsonLines(`${base.url}${CHAT_PATH}`, gate.body, (line) => {
+      if (!line || typeof line !== 'object') return;
+      if (typeof line.error === 'string') { reported = line.error; return; }
+      const delta = line.message?.content;
+      if (typeof delta === 'string' && delta.length) {
+        content += delta;
+        tokens += 1;
+        if (typeof onToken === 'function') {
+          try { onToken(delta); }
+          catch { /* a throwing renderer callback must not abort a paid request */ }
+        }
+      }
+      if (line.done === true) {
+        const p = Number(line.prompt_eval_count);
+        const e = Number(line.eval_count);
+        if (Number.isFinite(p)) promptTok = p;
+        if (Number.isFinite(e)) evalTok = e;
+      }
+    }, { headers: authHeader(), timeout: clampTimeout(timeout) });
+
+    // `postStreamingJsonLines` carries no response text, so `classifyFailure` sees an empty string and
+    // falls to its status rows — which is correct for 401/402/404/429/5xx/0 and is why it is reused
+    // rather than duplicated with a streaming-shaped twin.
+    if (!res?.ok) return classifyFailure(res, name);
+
+    if (reported) {
+      console.warn('[ollama-cloud] the keyed API reported an error mid-stream');
+      return { ok: false, path: 'cloud', reason: String(reported).slice(0, 300) };
+    }
+    if (!content.length) {
+      console.warn('[ollama-cloud] the stream carried no message content');
+      return { ok: false, shapeError: true, path: 'cloud',
+               reason: 'the stream carried no message.content lines' };
+    }
+
+    const total = (promptTok ?? 0) + (evalTok ?? 0);
+    if (total > 0) orch.recordApiUse(PROVIDER, total);
+
+    return {
+      ok: true,
+      content,
+      // A streamed response may omit the counts entirely, so an absent usage is reported as absent
+      // rather than as zero — the same rule `monthlyBudget` follows.
+      usage: (promptTok !== null || evalTok !== null)
+        ? { promptTokens: promptTok, completionTokens: evalTok, totalTokens: total }
+        : null,
+      chunks: tokens,
+      streamed: true,
+      maxLevel: gate.maxLevel,
+      path: 'cloud',
+      endpoint: `${base.url}${CHAT_PATH}`,
+      apiModel: name,
+      via: 'ollama-cloud-keyed',
+      credentialSource: 'vault',
+    };
+  } finally {
+    // MANDATORY. A leaked slot on a maxConcurrent:1 row is a permanent outage.
+    orch.releaseSlot(PROVIDER);
+  }
+}
+
 // ─── listModels ───────────────────────────────────────────────────────────────
 
 /**
@@ -800,7 +934,7 @@ module.exports = {
   // registry
   toRegistryEntries,
   // transport
-  chat, listModels, webSearch,
+  chat, chatStream, listModels, webSearch,
   // seams for tests
   useVault, useStore, useHttp, useOrchestrator, _resetNotices,
   // constants

@@ -12,6 +12,7 @@ const net = require('../lib/http.cjs');
 const customProviders = require('../lib/customProviders.cjs');
 const claimGate = require('../lib/claimGate.cjs');
 const modelRoles = require('../lib/modelRoles.cjs');
+const conversationRole = require('../lib/conversationRole.cjs');
 
 // ─── Model registry ────────────────────────────────────────────────────────────
 const MODEL_REGISTRY = {
@@ -487,6 +488,111 @@ function register(ipcMain) {
     return res;
   });
 
+  // ── Converse with master ──────────────────────────────────────────────────
+  /**
+   * The conversation path (Section 133). SEPARATE FROM `models:chat` ON PURPOSE, and additive: with no
+   * cloud key and no fit install this handler refuses with a reason and `models:chat` keeps working
+   * exactly as it did (I11).
+   *
+   * THE FOUR THINGS IT DOES THAT `models:chat` CANNOT:
+   *
+   *   1. It selects by ROLE, so there is a requirement floor, a cheapest-sufficient choice and a
+   *      declared/substitute/none verdict on every turn.
+   *   2. IT HONOURS `fit: 'none'`. `models:chat` walks FALLBACK_CHAIN, so a refusal there becomes a
+   *      silent downgrade to whatever is first and available — master cannot tell "I asked the big
+   *      model" from "I quietly got the small one". Here a refusal is returned AS a refusal, with the
+   *      reason and the exclusion list, and NO second model is tried.
+   *   3. Every payload is built by `conversationRole.assembleTurn` and by nothing here, so the
+   *      persona variant is chosen by destination rather than by a call site.
+   *   4. It streams, so there is no dead pause before the first word.
+   *
+   * It does NOT run the claim gate. `claimGate` REFUSES the `unattributed` class, and ordinary
+   * conversation is unattributed prose by nature — enforcing it here would withhold every reply. The
+   * gate stays where Section 111 put it, on the paths that make factual claims.
+   */
+  ipcMain.handle('models:converse', async (event, { text, turns = [], revealedPrompt = null,
+                                                    user, sensitive = false, diskBudgetBytes = null,
+                                                    allowInternal = false } = {}) => {
+    const capability = require('../lib/capability.cjs');
+    if (!capability.can(user, 'models.use')) {
+      return { ok: false, error: 'Access denied: "models.use" required' };
+    }
+
+    await refreshOllamaModels();
+
+    const pick = conversationRole.selectModel(conversationCandidates(), { sensitive, diskBudgetBytes });
+    if (!pick.model) {
+      // THE REFUSAL SURFACES. No FALLBACK_CHAIN, no primaryModel, no quiet substitution.
+      return {
+        ok: false, refused: true, role: pick.role, fit: 'none',
+        error: pick.why, reason: pick.why, excluded: pick.excluded ?? [],
+        remedy: sensitive
+          ? 'a sensitive turn needs a local model of at least 7B — pull one in Models → Ollama'
+          : 'add an Ollama Cloud key in Models → Cloud, or pull a local model of at least 7B',
+      };
+    }
+
+    const row = modelInfo(pick.model);
+    const destination = conversationRole.destinationFor(row);
+
+    // A CROSS-CHECK, not a second gate: the destination comes from the row's privacy and the transport
+    // from its provider, and the two disagreeing means something is mis-wired upstream. Refusing is
+    // the only safe answer — sending a cloud api name to the loopback daemon is merely loud, but
+    // sending a local payload over the wire is not recoverable.
+    const isCloudRow = row?.provider === 'ollama-cloud';
+    if ((destination === 'cloud') !== isCloudRow) {
+      return { ok: false, refused: true, role: pick.role, model: pick.model,
+               error: `${pick.model} is a ${isCloudRow ? 'cloud' : 'local'} row routed to ${destination} — refusing rather than guessing`,
+               reason: 'the model row and its destination disagree' };
+    }
+
+    const assembled = conversationRole.assembleTurn({
+      destination, model: destination === 'cloud' ? row.apiModel : pick.model.replace('ollama/', ''),
+      text, turns, revealedPrompt, sensitive, stream: true, allowInternal,
+    });
+    if (!assembled.ok) {
+      return { ok: false, refused: true, role: pick.role, model: pick.model, destination,
+               error: assembled.reason, reason: assembled.reason,
+               level: assembled.level ?? null, where: assembled.where ?? null };
+    }
+
+    const onToken = (delta) => {
+      try { event.sender.send('models:converse-token', { delta, model: pick.model, destination }); }
+      catch { /* the window closed mid-stream; the awaited return still carries the whole reply */ }
+    };
+
+    const res = destination === 'cloud'
+      ? await require('../lib/ollamaCloud.cjs').chatStream({
+        messages: assembled.body.messages, apiModel: assembled.body.model, user, onToken })
+      : await ollamaStream(assembled.body, onToken);
+
+    if (!res.ok) {
+      return { ...res, ok: false, role: pick.role, model: pick.model, destination,
+               error: res.error || res.reason || 'the conversation model did not answer' };
+    }
+
+    return {
+      ok: true,
+      content: res.content,
+      model: pick.model,
+      // WHICH MODEL ANSWERED AND WHY, on every turn. This project treats hiding a substitution as a
+      // defect, so `fit` and `why` ride alongside the text rather than being available on request.
+      role: pick.role,
+      fit: pick.fit,
+      why: pick.why,
+      unverified: pick.unverified ?? [],
+      destination,
+      personaVariant: assembled.variant,
+      maxLevel: assembled.maxLevel,
+      wouldRefuseOnCloud: assembled.wouldRefuseOnCloud,
+      path: res.path ?? destination,
+      streamed: res.streamed === true,
+      usage: res.usage ?? null,
+      endpoint: res.endpoint ?? null,
+      via: res.via ?? null,
+    };
+  });
+
   // ── List Ollama models ────────────────────────────────────────────────────
   ipcMain.handle('models:ollama-list', async () => {
     await refreshOllamaModels();
@@ -550,6 +656,64 @@ function roleNoteFor(taskType) {
   if (!modelRoles.ROLE_IDS.includes(String(taskType))) return {};
   const pick = modelRoles.selectForRole(String(taskType), Object.values(discoveredOllama));
   return { role: pick.role, roleFit: pick.fit, roleWhy: pick.why, roleExcluded: pick.excluded };
+}
+
+/**
+ * The candidate set for the CONVERSATION role, and the only role whose candidates are widened.
+ *
+ * Every other role call site passes `Object.values(discoveredOllama)` — so a keyed cloud row has
+ * always been selectable by `selectModel` and never able to fill a role (Section 131's NEXT names
+ * feeding them in as the open item). Conversation is where that absence actually bites: with no cloud
+ * row in the candidate list a cloud-first role cannot pick a cloud model however it ranks them.
+ *
+ * `checkAvailable` ends at `!!getCredential('OLLAMA_API_KEY')` for these rows, so this widening is
+ * INERT with no key stored AND inert with the vault merely locked. `models:roles`, `models:route` and
+ * `selectModel` are untouched: narration's refusal of a cloud model is asserted over the narrow set
+ * and stays asserted over it.
+ */
+function conversationCandidates() {
+  const local = Object.values(discoveredOllama);
+  const cloud = Object.entries(allModels())
+    .filter(([id, m]) => m.provider === 'ollama-cloud' && checkAvailable(id))
+    .map(([, m]) => m);
+  return [...local, ...cloud];
+}
+
+/**
+ * The LOCAL daemon, streamed. `localhost:11434` needs no auth and carries no credential, and the body
+ * arrives already built by `conversationRole.assembleTurn` — nothing is composed here, which is the
+ * whole point of having one chokepoint.
+ */
+async function ollamaStream(body, onToken) {
+  let content = '';
+  let reported = null;
+  let chunks = 0;
+
+  const res = await net.postStreamingJsonLines(`${ollamaBaseUrl}/api/chat`, body, (line) => {
+    if (!line || typeof line !== 'object') return;
+    if (typeof line.error === 'string') { reported = line.error; return; }
+    const delta = line.message?.content;
+    if (typeof delta === 'string' && delta.length) {
+      content += delta;
+      chunks += 1;
+      if (typeof onToken === 'function') {
+        try { onToken(delta); }
+        catch { /* a throwing renderer callback must not abort the daemon read */ }
+      }
+    }
+  }, { timeout: 120000 });
+
+  if (!res?.ok) {
+    return { ok: false, path: 'local', offline: res?.status === 0,
+             reason: res?.error || `Ollama HTTP ${res?.status ?? 0}`,
+             remedy: 'start the local Ollama daemon, or add an Ollama Cloud key in Models → Cloud' };
+  }
+  if (reported) return { ok: false, path: 'local', reason: String(reported).slice(0, 300) };
+  if (!content.length) {
+    return { ok: false, shapeError: true, path: 'local',
+             reason: 'the daemon stream carried no message.content lines' };
+  }
+  return { ok: true, content, chunks, streamed: true, path: 'local' };
 }
 
 /**
@@ -960,6 +1124,9 @@ function credentialStatus() {
 module.exports = {
   register, selectModel, chatCompletion, checkAvailable, credentialStatus,
   allModels, modelInfo, MODEL_REGISTRY,
+  // Exported so the conversation suite can assert the candidate widening is INERT with no credential
+  // rather than reading the filter and believing it.
+  conversationCandidates,
   // FALLBACK_CHAIN is destructured by resourceOrchestrator.selectOptimalModel out of a require that
   // SUCCEEDS — so the catch default never applied, the binding was `undefined`, and
   // `for (const id of undefined)` threw TypeError on EVERY call to that function. Exporting it is

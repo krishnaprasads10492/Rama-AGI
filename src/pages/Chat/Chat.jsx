@@ -6,6 +6,7 @@ import { resolveReflex } from '@services/cognition.js';
 import { useNavigate }  from 'react-router-dom';
 import { useUserStore } from '@store/userStore.js';
 import { getSystemPromptAsync, shouldRevealIdentity, getIdentityDisclosure, recordInteraction } from '@services/consciousness.js';
+import { speak }        from '@services/voiceEngine.js';
 import RamaOrb          from '@components/RamaOrb.jsx';
 
 // ─── Ambient particle field ───────────────────────────────────────────────────
@@ -98,6 +99,18 @@ function MessageBubble({ message }) {
         }}>
           {new Date(message.id || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </div>
+
+        {/* WHICH MODEL ANSWERED, AND WHY. "I asked the big model" and "I quietly got the small one"
+            are different facts, so a conversation reply shows its model, its fit and where it ran
+            rather than leaving master to infer any of it. */}
+        {!isUser && message.model && (
+          <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px', lineHeight: '1.5' }}>
+            {message.model}
+            {message.destination ? ` · ${message.destination}` : ''}
+            {message.fit ? ` · ${message.fit}` : ''}
+            {message.why ? <><br />{message.why}</> : null}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -145,11 +158,15 @@ export default function Chat() {
   } = useRamaStore();
 
   // Reflex skills can navigate and change mute state, so Chat needs both
-  const { masterAuthenticated, setMicMuted, setSpeechMuted } = useUIStore();
+  const { masterAuthenticated, setMicMuted, setSpeechMuted,
+          ramaSpeaks, toggleRamaSpeaks } = useUIStore();
   const { currentUser } = useUserStore();
   const navigate = useNavigate();
 
   const [input, setInput]   = useState('');
+  // Tokens as they arrive, held here rather than in the session store: a half-finished reply is not a
+  // message yet, and writing one per delta would put hundreds of partial rows into the history.
+  const [streamText, setStreamText] = useState('');
   const messagesEndRef       = useRef(null);
   const textareaRef          = useRef(null);
 
@@ -164,7 +181,7 @@ export default function Chat() {
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isThinking]);
+  }, [messages, isThinking, streamText]);
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
@@ -209,6 +226,54 @@ export default function Chat() {
 
     // Build messages with nucleus system prompt (encrypted identity — never from source)
     const systemPrompt = await getSystemPromptAsync('', currentUser);
+
+    // ── The conversation path (Section 133) ──────────────────────────────────
+    // Tried first, required by nothing. `revealedPrompt` is handed over but is used ONLY when the turn
+    // is answered LOCALLY — a cloud turn is given the cloud-safe persona, composed in the main process,
+    // so master's name never reaches the payload. A refusal is SURFACED rather than retried; any other
+    // failure falls through to the models:chat path below, which is unchanged (I11).
+    const converse = typeof window !== 'undefined' ? window.rama?.models?.converse : null;
+    if (converse) {
+      const retained = messages
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .map(m => ({ role: m.role, text: m.content }));
+      setStreamText('');
+      try {
+        const res = await converse(
+          { text, turns: retained, revealedPrompt: systemPrompt, user: currentUser },
+          (chunk) => { if (chunk?.delta) setStreamText(prev => prev + chunk.delta); },
+        );
+
+        if (res?.ok) {
+          setStreamText('');
+          addMessage({
+            role: 'assistant', content: res.content, id: Date.now(),
+            model: res.model, fit: res.fit, why: res.why,
+            destination: res.destination, personaVariant: res.personaVariant,
+          });
+          recordInteraction({ prompt: text, response: res.content, model: res.model, satisfied: null });
+          if (ramaSpeaks) speak(res.content);
+          setThinking(false);
+          return;
+        }
+
+        setStreamText('');
+        // A REFUSAL IS A FACT, NOT A PROMPT TO TRY SOMETHING ELSE. Falling through here would recreate
+        // exactly the silent downgrade the conversation role exists to end.
+        if (res?.refused) {
+          addMessage({
+            role: 'assistant',
+            content: `[Refused] ${res.error || res.reason}` + (res.remedy ? `\n\n${res.remedy}` : ''),
+            id: Date.now(),
+          });
+          setThinking(false);
+          return;
+        }
+      } catch {
+        setStreamText('');
+      }
+    }
+
     const allMessages  = [
       { role: 'system', content: systemPrompt },
       ...messages.filter(m => m.role !== 'system'),
@@ -247,7 +312,8 @@ export default function Chat() {
     } finally {
       setThinking(false);
     }
-  }, [input, isThinking, messages, provider, model, activeSessionId, currentUser, addMessage, setThinking]);
+  }, [input, isThinking, messages, provider, model, activeSessionId, currentUser, addMessage,
+      setThinking, ramaSpeaks]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -292,6 +358,29 @@ export default function Chat() {
         </div>
         <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {/* Rāma speaking its replies aloud. DEFAULT OFF: this is the one preference whose "on" state
+              makes noise in a room the app cannot see, so it is master's choice to make and not a
+              default to discover. Needs no model and no key — the OS voices do the work. */}
+          <button
+            type="button"
+            onClick={toggleRamaSpeaks}
+            aria-pressed={ramaSpeaks}
+            aria-label={ramaSpeaks ? 'Rāma speaks replies aloud — turn off' : 'Rāma replies in text only — turn on voice'}
+            title={ramaSpeaks ? 'Voice on — Rāma speaks its replies' : 'Voice off — text only'}
+            style={{
+              background:   ramaSpeaks ? 'rgba(119,0,255,0.12)' : 'transparent',
+              border:       `1px solid ${ramaSpeaks ? 'var(--violet)' : 'var(--border)'}`,
+              borderRadius: 'var(--radius)',
+              color:        ramaSpeaks ? 'var(--violet)' : 'var(--muted)',
+              fontFamily:   'var(--font)',
+              fontSize:     '10px',
+              letterSpacing: '0.06em',
+              padding:      '4px 8px',
+              cursor:       'pointer',
+            }}
+          >
+            {ramaSpeaks ? 'VOICE ON' : 'VOICE OFF'}
+          </button>
           <span className="badge badge-violet">{provider.toUpperCase()}</span>
           <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{model}</span>
         </div>
@@ -335,7 +424,11 @@ export default function Chat() {
           <MessageBubble key={msg.id} message={msg} />
         ))}
 
-        {isThinking && <ThinkingIndicator />}
+        {/* Tokens as they arrive. The three dots only stand in for the gap BEFORE the first one — once
+            text is streaming, the text itself is the progress indicator. */}
+        {streamText
+          ? <MessageBubble message={{ role: 'assistant', content: streamText, id: 0 }} />
+          : isThinking && <ThinkingIndicator />}
         <div ref={messagesEndRef} />
       </div>
 

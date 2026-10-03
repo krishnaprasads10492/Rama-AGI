@@ -92,6 +92,24 @@ export const useUIStore = create((set, get) => ({
     return next;
   },
 
+  // Does Rāma SPEAK its conversation replies? DEFAULTS OFF, and that is deliberate rather than
+  // cautious: this is the only preference in the app whose "on" state makes noise in a room the app
+  // cannot see. `speechMuted` is a separate, older switch meaning "stop talking now" and still wins —
+  // two independent controls, the same way mic mute and speech mute are independent (spec section 31).
+  ramaSpeaks: loadPref('rama.ramaSpeaks', false),
+
+  setRamaSpeaks: (v) => {
+    savePref('rama.ramaSpeaks', !!v);
+    set({ ramaSpeaks: !!v });
+  },
+
+  toggleRamaSpeaks: () => {
+    const next = !get().ramaSpeaks;
+    savePref('rama.ramaSpeaks', next);
+    set({ ramaSpeaks: next });
+    return next;
+  },
+
   // ── Identity / Consciousness ───────────────────────────────────────────────
   masterAuthenticated: false,
   consciousnessActive: false,
