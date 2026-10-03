@@ -55,13 +55,37 @@ function AppearancePanel() {
   const [zoom, setZoom] = useState(1);
   const [info, setInfo] = useState(null);
   const [busy, setBusy] = useState(false);
+  // 'unset' | 'auto' | 'master' — whether this is still the first-run display fit or master's own
+  // choice. Shown, because "140% because Rāma measured your screen" and "140% because you set it"
+  // are different facts and only one of them should feel like a setting to revisit.
+  const [source, setSource] = useState(null);
   const live = typeof window !== 'undefined' && !!window.rama?.appearance;
+
+  /**
+   * THE FIELD IS `zoom`, AND READING THE WRONG NAME IS WHY THIS LOOKED BROKEN.
+   *
+   * `appearance:get-zoom` returns `{ok, zoom, min, max, source, fittedFor}` — `main.cjs` reads it
+   * straight off `webContents.getZoomFactor()`. This panel used to look for `r.factor` and then
+   * `r.data`, neither of which the handler has ever sent, so the slider never showed the zoom
+   * actually in force: it sat at its initial `1` whatever the window was really doing, and a reset
+   * left it stale. SETTING the zoom worked the whole time — only the readback was wrong, which is
+   * the worst shape for a bug like this, because the control appears not to work while silently
+   * working, and the obvious next move is to drag it again.
+   *
+   * `appearanceState.cjs`'s own header records that this setting has already been reported broken
+   * once before, for a different reason (the value was never persisted). A second cause behind the
+   * same symptom is exactly the kind of thing a field-name mismatch produces.
+   */
+  const readZoom = (r) => (typeof r?.zoom === 'number' ? r.zoom : null);
 
   useEffect(() => {
     if (!live) return;
     window.rama.appearance.getZoom().then((r) => {
-      if (typeof r?.factor === 'number') setZoom(r.factor);
-      else if (typeof r?.data === 'number') setZoom(r.data);
+      const z = readZoom(r);
+      if (z !== null) setZoom(z);
+      // No `else`: a failed read leaves the last known value rather than asserting 1.0, because
+      // claiming 100% when the window is at 140% is the same lie in the other direction.
+      if (r && r.ok !== false) setSource(r.source ?? null);
     }).catch(() => {});
     window.rama.appearance.displayInfo().then((r) => setInfo(r?.data || r)).catch(() => {});
   }, [live]);
@@ -71,7 +95,12 @@ function AppearancePanel() {
     setZoom(clamped);
     if (!live) return;
     setBusy(true);
-    await window.rama.appearance.setZoom(clamped).catch(() => {});
+    // The reply carries the value main actually applied after its own clamp, which is the one that
+    // counts — the slider follows the window rather than the window following the slider.
+    const r = await window.rama.appearance.setZoom(clamped).catch(() => null);
+    const z = readZoom(r);
+    if (z !== null) setZoom(z);
+    if (r && r.ok !== false) setSource(r.source ?? 'master');
     setBusy(false);
   };
 
@@ -79,8 +108,10 @@ function AppearancePanel() {
     if (!live) return;
     setBusy(true);
     const r = await window.rama.appearance.resetZoom().catch(() => null);
-    const f = r?.factor ?? r?.data;
-    if (typeof f === 'number') setZoom(f);
+    const z = readZoom(r);
+    if (z !== null) setZoom(z);
+    // Back under the automatic display fit until master moves the slider again.
+    if (r && r.ok !== false) setSource(r.source ?? 'auto');
     setBusy(false);
   };
 
@@ -112,6 +143,19 @@ function AppearancePanel() {
             {Math.round(zoom * 100)}%
           </span>
         </div>
+
+        {/* WHOSE 140% IS IT. The panel previously showed a percentage with no provenance, so an
+            automatic first-run fit was indistinguishable from a setting master had chosen — and
+            with the readback broken it was often neither. */}
+        {source && (
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-dim)', marginTop: 8 }}>
+            {source === 'master'
+              ? 'Your setting — Rāma will not change it.'
+              : source === 'auto'
+                ? 'Fitted to this display automatically. Moving the slider makes it yours.'
+                : 'Not yet decided — the first run fits it to your display.'}
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
           {[1, 1.15, 1.3, 1.5].map((f) => (
