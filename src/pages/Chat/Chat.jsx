@@ -111,6 +111,17 @@ function MessageBubble({ message }) {
             {message.why ? <><br />{message.why}</> : null}
           </div>
         )}
+
+        {/* VOICE ON THAT PRODUCED NO SOUND SAYS SO. `speak()` returns false when no engine is mounted
+            or when Rāma's speech is separately muted, and that return used to be discarded — so the
+            toggle could read VOICE ON and nothing would ever be heard, with no way to tell a silent
+            machine from a silent Rāma. */}
+        {!isUser && message.voiceSilent && (
+          <div style={{ fontSize: '10px', color: 'var(--amber)', marginTop: '2px', lineHeight: '1.5' }}>
+            voice is on but nothing spoke — open the command palette once (Ctrl+K) to bring the voice
+            engine up, and check that Rāma&rsquo;s speech is not muted
+          </div>
+        )}
       </div>
     </div>
   );
@@ -148,6 +159,22 @@ function ThinkingIndicator() {
     </div>
   );
 }
+
+/**
+ * How much history a conversation turn carries.
+ *
+ * THE CAP LIVES HERE BECAUSE THE DECISION LIVES HERE. `conversationRole.assembleTurn` enforces the
+ * egress boundary's 200-message ceiling by REFUSING above it, which is right — the one honest payload
+ * constructor must not drop history quietly. But this page used to send the WHOLE session and the
+ * session store never trims, so a review found that at 199 user/assistant messages every further turn
+ * in that session refused, permanently, while the older `models:chat` path would still have answered
+ * it. A long-lived session going unanswerable is a capability removed rather than added (I11).
+ *
+ * 24 is twelve exchanges — enough for "and tomorrow?" to resolve against what came before, and an
+ * order of magnitude below the ceiling so no plausible drift in either number can reach it. Cross-turn
+ * memory beyond this window is Sections 127/130 and deliberately not built.
+ */
+const RETAINED_TURNS = 24;
 
 // ─── Main Chat page ───────────────────────────────────────────────────────────
 export default function Chat() {
@@ -234,25 +261,36 @@ export default function Chat() {
     // failure falls through to the models:chat path below, which is unchanged (I11).
     const converse = typeof window !== 'undefined' ? window.rama?.models?.converse : null;
     if (converse) {
+      // BOUNDED, at the call site. `slice(-RETAINED_TURNS)` keeps the most recent exchanges and drops
+      // the oldest, so the payload can never reach the ceiling that would refuse the whole session.
       const retained = messages
         .filter(m => m.role === 'user' || m.role === 'assistant')
+        .slice(-RETAINED_TURNS)
         .map(m => ({ role: m.role, text: m.content }));
+      // One id for this turn, so a delta that belongs to another turn cannot land in this bubble.
+      const turnId = `turn-${userMsg.id}`;
       setStreamText('');
       try {
         const res = await converse(
-          { text, turns: retained, revealedPrompt: systemPrompt, user: currentUser },
-          (chunk) => { if (chunk?.delta) setStreamText(prev => prev + chunk.delta); },
+          { text, turns: retained, revealedPrompt: systemPrompt, user: currentUser, turnId },
+          (chunk) => {
+            if (chunk?.turnId && chunk.turnId !== turnId) return;
+            if (chunk?.delta) setStreamText(prev => prev + chunk.delta);
+          },
         );
 
         if (res?.ok) {
           setStreamText('');
+          // SPOKEN OR NOT IS A FACT WORTH KEEPING. `speak()` returns false with no mounted engine or
+          // with speech muted; discarding that return is how VOICE ON becomes silence with no reason.
+          const spoken = ramaSpeaks ? speak(res.content) : null;
           addMessage({
             role: 'assistant', content: res.content, id: Date.now(),
             model: res.model, fit: res.fit, why: res.why,
             destination: res.destination, personaVariant: res.personaVariant,
+            voiceSilent: spoken === false,
           });
           recordInteraction({ prompt: text, response: res.content, model: res.model, satisfied: null });
-          if (ramaSpeaks) speak(res.content);
           setThinking(false);
           return;
         }

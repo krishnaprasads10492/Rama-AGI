@@ -1,0 +1,60 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "id": 1,
+      "blocking": true,
+      "confidence": "confirmed",
+      "label": "Unbounded retained history turns into a permanent refusal with no fallback",
+      "where": "src/pages/Chat/Chat.jsx:237 (retained built from the whole session), src/store/ramaStore.js:61 (no trimming), electron/lib/conversationRole.cjs:254 (tooManyTurns), src/pages/Chat/Chat.jsx:263 (refused is terminal)",
+      "detail": "Chat.jsx sends every user/assistant message in the session as retained turns and nothing bounds the list. At 199 retained messages, retained.length + 2 > egressBoundary.MAX_MESSAGES (200) so assembleTurn refuses with REASON.tooManyTurns. Chat.jsx treats res.refused as terminal by design and does NOT fall through to models:chat, which on dev would still have answered that session. So an ordinary long-lived session becomes permanently unanswerable, and the refusal carries no remedy because remedy is only attached to the selection refusal at modelRouter.cjs:529. This is the one state where the branch removes a capability rather than adding one (additive rule / I11). No suite row exercises tooManyTurns through the handler.",
+      "action": "Cap retained at the call site (e.g. the last N exchanges) so the ceiling is never reached, rather than trimming inside assembleTurn, which would make the one honest constructor silently drop history. If tooManyTurns can still occur, give it a remedy string, and add an assertion covering it."
+    },
+    {
+      "id": 2,
+      "blocking": false,
+      "confidence": "confirmed",
+      "label": "The per-turn sensitivity gate has no producer",
+      "where": "src/pages/Chat/Chat.jsx:241 (no sensitive, no classification), electron/ipc/modelRouter.cjs:514 (sensitive defaults false), electron/lib/modelRoles.cjs ROLES.conversation.note",
+      "detail": "The role note justifies sensitive:false on the table because the real gate is per-turn on the payload, reached from the call site. The mechanism is complete and well asserted from assembleTurn/selectModel inward, but no call site passes sensitive or any turn classification, so every turn today - including master's holdings - is classified public and crosses to a cloud model. CONVERSATION.md section 13 notes this in passing; section 11 (RAISED FOR MASTER) and NEXT do not.",
+      "action": "Either add a producer (a sensitivity classifier or a per-turn UI control) or record the absence explicitly in CONVERSATION.md section 11 / NEXT as master's decision."
+    },
+    {
+      "id": 3,
+      "blocking": false,
+      "confidence": "confirmed",
+      "label": "Cheapest-sufficient picks ministral-3:8b, not the brief's gemma4:31b",
+      "where": "scripts/verifyConversation.cjs (cloud selection row), docs/research/CONVERSATION.md section 11.3",
+      "detail": "Fourteen keyed cloud rows clear the 7B floor, so the table's declared cheapest-sufficient rule picks ollama-cloud/ministral-3:8b for a non-sensitive turn rather than gemma4:31b. The brief's direction (non-sensitive -> cloud, sensitive -> local) is satisfied and both directions are asserted with real selections; only the specific row differs. Already raised for master in iteration 1 and judged non-blocking then.",
+      "action": "Master decides: leave cheapest-sufficient, or add a preferLargest role flag as a deliberate behaviour change."
+    },
+    {
+      "id": 4,
+      "blocking": false,
+      "confidence": "likely",
+      "label": "The revealed template is quoted verbatim in the new module's header",
+      "where": "electron/lib/conversationRole.cjs:11-12",
+      "detail": "The header reproduces 'Your master is Krishna Prasad...' and the AUTHENTICATED status line in prose to explain where the leak originates. It never reaches a payload, and the name already appears in thirteen places on dev, so this is existing practice rather than a new exposure - but this codebase feeds its own source into upgrade proposals.",
+      "action": "Refer to NUCLEUS_TEMPLATE.identity by name and describe the shape instead of reproducing the sentence."
+    },
+    {
+      "id": 5,
+      "blocking": false,
+      "confidence": "confirmed",
+      "label": "speak() fails silently when no engine is mounted",
+      "where": "src/pages/Chat/Chat.jsx:255, src/services/voiceEngine.js (module-level speak returns false with no mountedEngine)",
+      "detail": "Chat.jsx ignores the boolean return of speak(), which is false whenever CommandPalette is not mounted, so VOICE ON can be on and produce nothing with no indication to master.",
+      "action": "Surface the false return, or gate the toggle's enabled state on getVoiceEngine()."
+    },
+    {
+      "id": 6,
+      "blocking": false,
+      "confidence": "possible",
+      "label": "Token events carry no turn id",
+      "where": "electron/ipc/modelRouter.cjs (models:converse-token send), electron/preload.cjs converse",
+      "detail": "Deltas are scoped to the sending window but not to a turn, so two in-flight turns in one window would interleave into a single streamText. Unreachable through the UI today because handleSend returns early on isThinking.",
+      "action": "Add a turn id to the event payload if the path is ever invoked from outside Chat.jsx."
+    }
+  ],
+  "reviewDoc": "c:\\CodeBase\\Velvet_UI\\Velvet\\Rama_AGI\\.worktrees\\conversation/docs/research/conversation-review.md"
+}

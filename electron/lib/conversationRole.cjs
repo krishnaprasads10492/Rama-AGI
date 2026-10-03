@@ -9,9 +9,15 @@
  * Master chose to converse through a cloud model. The thing that must not reach a cloud model is not
  * his words — those are the whole point — it is his IDENTIFIER. And today the identifier arrives
  * BEFORE he types anything: `src/pages/Chat/Chat.jsx` prepends `nucleus:get-prompt` to every turn, and
- * for an authenticated master that is the revealed template, which carries verbatim
- * `Your master is Krishna Prasad. You are absolutely loyal to him.` and
- * `Master: Krishna Prasad | Status: AUTHENTICATED`. So the leak is in the SYSTEM PROMPT, not the chat.
+ * for an authenticated master that is the revealed template — `NUCLEUS_TEMPLATE.identity` in
+ * `electron/nucleusSealer.cjs` — whose loyalty sentence and whose status line BOTH interpolate the
+ * master's real name. So the leak is in the SYSTEM PROMPT, not the chat.
+ *
+ * THAT NAME IS NOT REPRODUCED ANYWHERE IN THIS FILE, not even in a comment explaining the leak: this
+ * codebase feeds its own source into upgrade proposals, so a source file is an egress surface of its
+ * own and the shape of the template is enough to understand the problem. The literal strings live in
+ * the sealed nucleus and, as fixtures, in scripts/verifyConversation.cjs, where being the forbidden
+ * text is the point of them.
  *
  * ── WHY A THIRD VARIANT, AND WHY IT IS COMPOSED AND NOT REDACTED ─────────────────────────────────
  *
@@ -251,6 +257,14 @@ function assembleTurn(spec = {}) {
     }
     retained.push({ role: t.role, text: t.text, level: cls.level });
   }
+  // THE CEILING REFUSES AND DOES NOT TRIM, AND THE CAP THAT KEEPS IT OUT OF REACH BELONGS TO THE
+  // CALLER. A defect review found this reachable in ordinary use: `Chat.jsx` sent the WHOLE session as
+  // retained turns and the store never trims, so at 199 of them every further turn in that session
+  // refused — permanently, for that session, where `models:chat` would still have answered. That is a
+  // capability removed rather than added (I11). The fix is the caller's window (`RETAINED_TURNS` in
+  // Chat.jsx), NOT silent trimming here: this is the one function that is supposed to be honest about
+  // what it sends, and a constructor that quietly drops history is the opposite of that. So the
+  // refusal stays, and `models:converse` attaches a remedy to it.
   if (retained.length + 2 > egressBoundary.MAX_MESSAGES) {
     return refuse(REASON.tooManyTurns, { destination, variant: null });
   }

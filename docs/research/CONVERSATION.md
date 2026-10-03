@@ -19,6 +19,7 @@ identifier, so the cloud-safe variant costs nothing in character.
 | 4 | **Cloud-first for conversation only** — the privacy comparator is inverted for `preferRemote` roles; every other role is byte-identical | `electron/lib/modelRoles.cjs` |
 | 5 | **`fit: 'none'` honoured** — `models:converse` returns a refusal with its reason and exclusion list, and tries no second model | `electron/ipc/modelRouter.cjs` |
 | 6 | **Immediacy and voice** — streaming on both destinations through `http.postStreamingJsonLines`, and `voiceEngine.speak()` behind a toggle that defaults **OFF** | `electron/lib/ollamaCloud.cjs`, `electron/ipc/modelRouter.cjs`, `electron/preload.cjs`, `src/services/voiceEngine.js`, `src/store/uiStore.js`, `src/pages/Chat/Chat.jsx`, `src/components/CommandPalette.jsx` |
+| 7 | **A bounded retained window** — `RETAINED_TURNS = 24` at the call site, so the chokepoint's 200-message ceiling is never reached; the ceiling itself still refuses rather than trims, and now carries a remedy (review iteration 2, §14) | `src/pages/Chat/Chat.jsx`, `electron/ipc/modelRouter.cjs` |
 
 New files: `electron/lib/conversationRole.cjs`, `scripts/verifyConversation.cjs`,
 `docs/research/CONVERSATION.md`.
@@ -210,6 +211,30 @@ as they were written):
   boolean. `selectModel` cannot refuse — it has to return a model — so there an unrecognised value
   resolves to **sensitive**, which costs a cloud turn and never costs a disclosure.
 
+### The ceiling, and where the window belongs
+
+The second review found the one state in which this branch **removed** a capability instead of adding
+one. `Chat.jsx` sent the *whole* session as retained turns and `ramaStore` never trims, so at 199
+user/assistant messages `retained.length + 2` passed `egressBoundary.MAX_MESSAGES` (200) and
+`assembleTurn` refused `tooManyTurns` — permanently, for that session, while `models:chat` would still
+have answered it. The refusal also carried no remedy, because `remedy` was attached only to the
+*selection* refusal.
+
+**The ceiling is not relaxed and `assembleTurn` still does not trim.** A payload constructor that
+silently drops history is the opposite of what this module is for, and trimming there would make the one
+honest builder quietly lossy. The window belongs to the caller, which is the place that decides what
+history is worth sending: `RETAINED_TURNS = 24` in `Chat.jsx` — twelve exchanges — applied as
+`.slice(-RETAINED_TURNS)`. And `models:converse` now attaches `assemblyRemedy(reason)` to **every**
+assembly refusal: the ceiling names a new session, and the rest say plainly that the payload was refused
+before it was sent and nothing left the machine. A refusal master cannot act on is only half-honest.
+
+Asserted: the refusal at the ceiling with its reason, one turn below it still assembling (so the ceiling
+is a ceiling and not an off-by-one), the module still containing no `.slice(` of its own, the handler
+surfacing the refusal **with** a remedy, zero `/api/chat` calls on a refused turn, a malformed-caller
+refusal also carrying a remedy, and the arithmetic that keeps the two numbers apart — `cap + 2 <
+MAX_MESSAGES` and `cap * 4 < MAX_MESSAGES`, so neither drifting can reach the other — plus the bounded
+turn still being answered end to end rather than merely assembling.
+
 ---
 
 ## 6. A refusal stays a refusal
@@ -264,6 +289,22 @@ honours `speechMuted` and sets the hands-free cool-down that stops Rāma transcr
 as a command; a screen calling `window.speechSynthesis` directly would skip both. `Chat.jsx` contains no
 reference to `speechSynthesis`, asserted.
 
+**VOICE ON that produced no sound now says so.** `speak()` returns `false` whenever no engine is mounted
+(the one engine lives in `CommandPalette`, so a session that never opened the palette has none) or
+speech is separately muted, and `Chat.jsx` discarded that return — so the toggle could read VOICE ON and
+master would hear nothing with no way to tell a silent machine from a silent Rāma. The reply now carries
+`voiceSilent: spoken === false` and the bubble prints one amber line naming the two causes. The toggle
+itself is **not** disabled when no engine is mounted: an engine can mount at any moment, and a control
+that greys itself out explains less than a reply that says what happened.
+
+**Each delta carries its turn id.** `models:converse-token` was scoped to the sending window, which is
+not the same as scoped to a *turn*: two turns in flight in one window would interleave their tokens into
+one bubble. That is unreachable through the UI today (`isThinking` blocks a second send), so the fix is
+the cheap half — the caller correlates instead of trusting arrival order. `Chat.jsx` passes
+`turn-<id>`, the handler echoes it on every delta and on the result when it is a string or a number and
+`null` otherwise, and the renderer drops a delta whose id is not its own. A caller that passes nothing
+gets `null` and the previous behaviour exactly.
+
 **Speech-to-text is out of scope and stays out.** Ollama serves no STT model, so listening would need a
 local runtime, which is a separate decision. Printed as a residual by the suite rather than left as an
 absence. Also out of scope and not built: the context DB and cross-turn memory retrieval (Sections
@@ -312,25 +353,29 @@ node --check electron/lib/conversationRole.cjs    -> clean
 node --check electron/lib/ollamaCloud.cjs         -> clean
 node --check electron/ipc/modelRouter.cjs         -> clean
 node --check scripts/verifyConversation.cjs       -> clean
-node scripts/verifyConversation.cjs               -> 151 passed, 0 failed, 3 HELD BY HAND
-npm run verify  (every chain command, in order)   -> 28 reporting suites, 2,976 assertions, 0 failures
+node scripts/verifyConversation.cjs               -> 179 passed, 0 failed, 3 HELD BY HAND
+npm run verify  (every chain command, in order)   -> 28 reporting suites, 3,004 assertions, 0 failures
 ```
 
 | | suites | assertions | failures |
 |---|---|---|---|
 | before (`102c459`) | 27 | 2,825 | 0 |
 | after iteration 1 (`c07e9b5`) | 28 | 2,953 | 0 |
-| after the review fixes | **28** | **2,976** | **0** |
+| after the iteration-1 review fixes (`b5a4255`) | 28 | 2,976 | 0 |
+| after the iteration-2 review fixes | **28** | **3,004** | **0** |
 
-Delta against mainline: +1 suite, +151 assertions. The review fixes added **+23** assertions to
-`verifyConversation.cjs` (128 → 151) and changed no other suite's count. Counts were taken by summing
-every `N passed, M failed` line in the chain output. The per-suite totals are in
-`docs/research/verify-chain-iter2.txt` (a summary — the full console run was ~188 KB and was not
-committed) and the whole conversation suite run, every row, is in
-`docs/research/verify-conversation-iter2.txt`. The chain was run **command by command in chain order**
-so a non-zero exit anywhere would be visible per suite; `auditRenderer.cjs` exits 0 and prints no total,
-which is why 29 commands produce 28 reporting suites. `verifyLoyaltyTripwire.cjs` is green at the end of
-it — no protected file was touched.
+Delta against mainline: +1 suite, +179 assertions. The iteration-2 fixes added **+28** assertions to
+`verifyConversation.cjs` (151 → 179) and changed no other suite's count. Counts were taken by summing
+every `N passed, M failed` line in the chain output. The per-suite totals for this run are in
+`docs/research/verify-chain-iter3.txt` (iteration 2's are in `verify-chain-iter2.txt`), and the whole
+conversation suite run, every row, is in `docs/research/verify-conversation-iter3.txt`. The chain was run
+**command by command in chain order** so a non-zero exit anywhere would be visible per suite;
+`auditRenderer.cjs` exits 0 and prints no total, which is why 29 commands produce 28 reporting suites.
+`verifyLoyaltyTripwire.cjs` is green at the end of it — no protected file was touched.
+
+The `.cjs` files touched in iteration 2 and `node --check`ed again: `electron/lib/conversationRole.cjs`,
+`electron/ipc/modelRouter.cjs`, `scripts/verifyConversation.cjs`. `src/pages/Chat/Chat.jsx` was the only
+renderer file changed; `auditRenderer.cjs` is green over it.
 
 `.cjs` files touched and `node --check`ed: `electron/lib/modelRoles.cjs`,
 `electron/lib/conversationRole.cjs`, `electron/lib/ollamaCloud.cjs`, `electron/ipc/modelRouter.cjs`,
@@ -353,7 +398,8 @@ unchanged; `verify:conversation` was added as its own script.
 - **Nothing was seen on a screen.** `node_modules` is absent from this worktree, so `npx vite build` and
   `npm run build` **cannot** run here and no claim is made that they pass — the build runs from the main
   workspace at merge time. The app was never launched. The streaming bubble, the model/fit/why line
-  under each reply, the `VOICE ON` / `VOICE OFF` button and the spoken reply were **not observed**.
+  under each reply, the `VOICE ON` / `VOICE OFF` button, the amber "voice is on but nothing spoke" line
+  and the spoken reply were **not observed**.
   `auditRenderer.cjs` proves the preload surface and every `window.rama.*` call resolve, and the suite
   proves one token event per delta — neither proves anything about paint timing or audible output.
 - **Whether a cloud model's prose actually reads like JARVIS** is a quality judgement no assertion here
@@ -395,6 +441,26 @@ unchanged; `verify:conversation` was added as its own script.
    reach for the largest row within budget, that is a **new role flag** (`preferLargest`, say) and a
    behaviour change master should choose, not a tweak — raised rather than taken.
 4. **Promoting `I-SECRETS` to a numbered `I18`** is still open from Section 131 and is untouched here.
+5. **THE PER-TURN SENSITIVITY GATE HAS NO PRODUCER, AND THAT IS NOW A RECORDED DECISION RATHER THAN AN
+   OMISSION.** §2 keeps `sensitive: false` on the role *because* the real gate is per-turn on the
+   payload. That gate is built and asserted from `assembleTurn` and `selectModel` inward — a sensitive
+   turn selects the local row, a sensitive turn aimed at cloud refuses, a non-boolean flag refuses at
+   the chokepoint and resolves to sensitive in selection. **What does not exist is a caller that sets
+   it.** `modelRouter` defaults `sensitive = false`, `Chat.jsx` passes neither `sensitive` nor any
+   `classification`, and nothing else invokes `models:converse`. So in the shipped product **every turn
+   is classified `public` and a non-sensitive turn crosses to a cloud model — including "should I sell
+   my position"**. That is consistent with the documented decision that master's typed words default to
+   `public` (§5), and the second review confirmed it non-blocking, but it is master's call and not a
+   defect to quietly close. The three options, with what each costs:
+   - **Leave it.** Everything master types goes to the cloud model, as he asked for. Cheapest, and the
+     local path is always one `sensitive: true` away for a caller that knows.
+   - **A per-turn control in the chat box** — a "keep this one local" toggle beside VOICE. Explicit,
+     zero false positives, and it changes what master sees, so it is not a change to make inside a
+     review loop.
+   - **A classifier.** Cheap keyword rules would mis-route both ways, and a model-based classifier
+     would have to read the turn *before* the turn is gated, which is the thing being gated.
+   Recommendation: **the per-turn control**, as its own tranche, since it is a UI decision and a
+   sensitivity classifier is the sort of thing that is wrong quietly. Nothing was added here.
 
 ---
 
@@ -456,13 +522,35 @@ already routed it local, and a row whose `private` flag is neither true nor fals
 because a loud model-not-found from the daemon is a far better failure than a prompt that cannot be
 recalled.
 
+**THE CEILING REFUSES, AND THE WINDOW BELONGS TO THE CALLER.** `assembleTurn` enforces
+`egressBoundary.MAX_MESSAGES` by REFUSING above it and never by trimming — a payload constructor that
+silently drops history is the opposite of what it is for. The second review found that ceiling REACHABLE
+IN ORDINARY USE and it was the one state where this work REMOVED a capability instead of adding one
+(I11): `Chat.jsx` sent the WHOLE session as retained turns and the session store never trims, so at 199
+user/assistant messages every further turn in that session refused, permanently, while `models:chat`
+would still have answered it — and the refusal carried no remedy, because `remedy` was attached only to
+the SELECTION refusal. **THE BOUND IS NOW AT THE CALL SITE, WHICH IS WHERE THE DECISION LIVES:**
+`RETAINED_TURNS = 24` in `Chat.jsx`, twelve exchanges, applied as `.slice(-RETAINED_TURNS)`, with the
+arithmetic asserted so neither number can drift into the other (`cap + 2 < MAX_MESSAGES` and
+`cap * 4 < MAX_MESSAGES`); and `models:converse` attaches `assemblyRemedy(reason)` to EVERY assembly
+refusal — the ceiling names a new session, every other reason says plainly that the payload was refused
+before it was sent and nothing left this machine. **A REFUSAL MASTER CANNOT ACT ON IS ONLY
+HALF-HONEST.** Cross-turn memory beyond this window is Sections 127/130 and deliberately not built.
+
 **`ROLES.conversation` IS THE TENTH ROLE, AND `sensitive` IS FALSE ON IT ON PURPOSE.** The note in the
 table says so in as many words, because a later session reading "conversation reaches the cloud" will
 reach for that flag first. One conversation carries both *"what is the rupee doing"* and *"should I sell
 my position"*; a table-level flag can only be right for one of them, and set true it refuses a cloud
 model on EVERY turn and quietly ends the thing master asked for. **THE GATE IS PER-TURN ON THE PAYLOAD**,
 and a sensitive turn routes local by passing `requirePrivate` — the SAME gate, reached from the call site
-instead of the table. **NO `minCtxK`, AND THIS IS THE FIELD MOST LIKELY TO BE "HELPFULLY" ADDED LATER:**
+instead of the table. **AND THAT GATE HAS NO PRODUCER YET, WHICH IS RECORDED AND NOT HIDDEN:** the
+mechanism is complete and asserted from `assembleTurn` and `selectModel` inward, but no caller sets
+`sensitive` — `modelRouter` defaults it false and `Chat.jsx` passes neither it nor any `classification` —
+so TODAY EVERY TURN IS `public` AND CROSSES TO A CLOUD MODEL, a holdings question included. That follows
+from the decision that master's typed words default to `public`, and the recommendation RAISED FOR
+MASTER is a per-turn "keep this one local" control beside the VOICE toggle as its own tranche, because a
+keyword classifier would mis-route quietly and a model-based one would have to read the turn before the
+turn is gated. **NO `minCtxK`, AND THIS IS THE FIELD MOST LIKELY TO BE "HELPFULLY" ADDED LATER:**
 `toRegistryEntries` sets `ctxK: null` on every keyed cloud row because the keyed API exposes no measured
 window, and `evaluate()` EXCLUDES an unknown window — so a context floor here would refuse every cloud
 model and invert the behaviour the role exists to produce; asserted both ways, the same row being
@@ -524,7 +612,17 @@ TTS call site — the engine's own `speak()` is what honours `speechMuted` AND s
 cool-down that stops Rāma transcribing its own voice back as a command, both of which a direct
 `window.speechSynthesis` call would skip; `Chat.jsx` contains no reference to `speechSynthesis`,
 asserted. The brief's `voiceEngine.speak()` was a CLASS METHOD with its only instance inside
-`CommandPalette`, so there was nothing for the Chat page to call until the registry existed.
+`CommandPalette`, so there was nothing for the Chat page to call until the registry existed. **VOICE ON
+THAT PRODUCED NO SOUND NOW SAYS SO:** `speak()` returns false with no mounted engine or with speech
+muted, that return used to be discarded, and the toggle could therefore read VOICE ON while master heard
+nothing with no way to tell a silent machine from a silent Rāma — the reply now carries
+`voiceSilent: spoken === false` and the bubble names both causes. The toggle is deliberately NOT disabled
+when no engine is mounted: an engine can mount at any moment, and a greyed control explains less than a
+reply that says what happened. **AND EVERY DELTA CARRIES ITS TURN ID** — the channel was scoped to the
+sending window, which is not the same as scoped to a TURN, so two turns in flight in one window would
+interleave into one bubble; unreachable through the UI today because `isThinking` blocks a second send,
+so the caller now correlates instead of trusting arrival order, with a non-string non-number id
+normalised to `null` rather than echoed back.
 **SPEECH-TO-TEXT IS OUT OF SCOPE AND STAYS OUT:** Ollama serves no STT model, so listening needs a local
 runtime and that is a separate decision — printed by the suite as a residual rather than left as an
 absence. Also not built: the context DB and cross-turn memory retrieval (Sections 127/130, recording
@@ -541,8 +639,9 @@ assertion makes — the persona was never sent to a model. `loyaltyCore` is seal
 so `displayIdentity()` returned no name, and that row is a residual. TTS voice availability is the OS's
 and was not enumerated on master's machine.
 
-**TWO DEFECTS FOUND IN REVIEW, FIXED, AND NOT TO BE REINTRODUCED — both the same shape, strict equality
-used in the direction that fails open.** (1) `levelOf` returned `'public'` for ANY `classification` the
+**THREE DEFECTS FOUND IN TWO REVIEWS, FIXED, AND NOT TO BE REINTRODUCED.** The first two are the same
+shape — strict equality used in the direction that fails open — and the third is the unbounded caller
+above, which is the only one of the three that cost a capability rather than risking a disclosure. (1) `levelOf` returned `'public'` for ANY `classification` the
 lattice did not contain, so a retained turn marked `'secret'`, `'confidential'` or `'PRIVATE'` was
 stripped of the concern and crossed to a cloud payload, and `egressBoundary` — which has
 `REASON.unclassified` for exactly that element shape — was handed an already-clean `'public'` and never
@@ -559,24 +658,31 @@ flagged it and a later session reading labels to learn what is guaranteed would 
 opposite of the truth; the label and the assertion now describe the same behaviour, across seven bogus
 classification values and five non-boolean flags.
 
-Files: `electron/lib/conversationRole.cjs` and `scripts/verifyConversation.cjs` (new, 151 assertions),
+Also NOT NAMED IN SOURCE: the revealed template is described by its nucleus field,
+`NUCLEUS_TEMPLATE.identity`, rather than quoted in `conversationRole.cjs` — this codebase feeds its own
+source into upgrade proposals, so a source file is an egress surface of its own, and the module is
+asserted to contain no identifier anywhere, comments included.
+
+Files: `electron/lib/conversationRole.cjs` and `scripts/verifyConversation.cjs` (new, 179 assertions),
 `electron/lib/modelRoles.cjs`, `electron/lib/ollamaCloud.cjs`, `electron/ipc/modelRouter.cjs`,
 `electron/preload.cjs`, `src/services/voiceEngine.js`, `src/store/uiStore.js`,
 `src/components/CommandPalette.jsx`, `src/pages/Chat/Chat.jsx`, `package.json`,
-`docs/research/CONVERSATION.md`. Suites 27 → 28, assertions 2,825 → 2,976, 0 failures.
+`docs/research/CONVERSATION.md`. Suites 27 → 28, assertions 2,825 → 3,004, 0 failures.
 
 **NEXT:** observe one real turn end to end from the main workspace after a `vite build` — the streaming
-bubble, the VOICE toggle and the model/fit/why line are the three things no assertion here covers;
-reconcile the thirteen inferred `apiModel` values against a live keyed `GET /api/tags` so a cloud
-conversation cannot 404 on a name; decide `identity.cloudSafePersona`; decide whether conversation should
-prefer the largest row within budget instead of the cheapest sufficient one; decide `chat.send`'s tier;
-feed `ollama-cloud/*` into the role engine for roles OTHER than conversation, which is still open.
+bubble, the VOICE toggle, the amber voice-silent line and the model/fit/why line are the four things no
+assertion here covers; decide the per-turn sensitivity control, without which every turn crosses as
+`public`; reconcile the thirteen inferred `apiModel` values against a live keyed `GET /api/tags` so a
+cloud conversation cannot 404 on a name; decide `identity.cloudSafePersona`; decide whether conversation
+should prefer the largest row within budget instead of the cheapest sufficient one; decide
+`chat.send`'s tier; feed `ollama-cloud/*` into the role engine for roles OTHER than conversation, which
+is still open.
 ```
 
 ### Ledger row 153
 
 ```markdown
-| 153 | Rāma converses with master, and master's name stays on this machine | done | Section 133. Master: *"yes, just like jarvis in iron man movie, RAMA should be able to converse the optimal way."* **BUILT.** **A FORM OF ADDRESS IS A ROLE, NOT AN IDENTIFIER** — JARVIS says "sir", not "Tony Stark" — so the cloud-safe persona costs NOTHING in character: full persona fidelity, zero identifier. **THE LEAK WAS NEVER IN MASTER'S WORDS, IT WAS IN THE SYSTEM PROMPT** that `Chat.jsx` prepends to every turn, which for an authenticated master carries `Your master is Krishna Prasad. You are absolutely loyal to him.` before he types anything. **COMPOSED, NEVER REDACTED:** a redactor is a list of patterns and the first pattern nobody thought of is a leak that looks like a pass, so the persona is a frozen array of eight whole sentences in the new `electron/lib/conversationRole.cjs`, asserted structurally to contain no `.replace(`, nothing matching `redact|scrub|sanitis`, and no reference to `nucleusSealer` or `loyaltyCore` at all. **BOTH HALVES ASSERTED, because a prompt that leaked nothing by saying nothing would pass a one-sided test** — negative: no `Krishna`, no `Prasad`, no case variant, no `@`, no 24+ character opaque token, conditionally not whatever `loyaltyCore.displayIdentity()` returns; positive: still names Rāma, still addresses "master", still states the loyalty, still discloses the AI when sincerely asked. The conditional row is a DECLARED RESIDUAL, not a quiet pass, because the core is sealed in the suite's process. `nucleusSealer.cjs` is PROTECTED so the variant lives beside it; `identity.cloudSafePersona` is SPECIFIED FOR MASTER with a recommendation to leave it in source, since eight sentences of behavioural instruction are engineering rather than identity and a diff is reviewable where a sealed blob is not. **ONE CHOKEPOINT, AND THE ONE PLACE IT CANNOT BE `egressBoundary`:** `assembleTurn` is the only builder of a conversation payload; the CLOUD body is built by `egressBoundary.assemble` and nothing else, but the LOCAL body cannot be — **the boundary refuses `private` UNCONDITIONALLY AND BY DESIGN, the revealed prompt IS private, and forcing it through would mean calling it `public`, a lie told to the one component whose job is classification.** So the local body is derived in the same function from the same classified elements and **the module PROVES its own honesty rather than asserting it in prose**: every local result carries `wouldRefuseOnCloud`, computed by really running those elements through the boundary and recording the refusal WITH THE BOUNDARY'S OWN REASON STRING, compared literally; plus two anti-drift rows, identical key sets between the two bodies and no cloud key beyond `messages,model,stream`. **MASTER'S TYPED WORDS DEFAULT TO `public` AND IT IS A DECISION:** he chose to converse through a cloud model, so refusing his text by default would refuse the feature; the IDENTIFIER is what is withheld, and the cloud variant never contains one. The defence is MEASURED OVER THE SERIALISED BYTES — the revealed template handed to the assembler on the same call, the assembled cloud body carrying none of its identifiers, AND master's own words still crossing, so the feature was not disabled to pass the test. **ON ANY UNCERTAINTY, LOCAL OR REFUSE, NEVER CLOUD:** unknown destination refuses, a sensitive turn aimed at cloud refuses AT the chokepoint even though selection already routed it local, and a row whose `private` flag is neither true nor false resolves LOCAL — a loud model-not-found beats a prompt that cannot be recalled. **THAT RULE WAS NOT APPLIED IN TWO PLACES AND REVIEW CAUGHT BOTH; THEY ARE FIXED AND MUST NOT COME BACK, BECAUSE THEY ARE THE SAME SHAPE — STRICT EQUALITY POINTED AT THE UNSAFE SIDE.** (1) `levelOf` returned `'public'` for ANY `classification` outside the lattice, so a retained turn marked `'secret'`, `'confidential'` or `'PRIVATE'` had the concern STRIPPED and crossed to a cloud payload, and `egressBoundary` — which carries `REASON.unclassified` for precisely that element shape — was handed an already-clean `'public'` and never saw the original. **ABSENT AND UNRECOGNISED ARE DIFFERENT FACTS:** absent (or `undefined`) stays `'public'`, the deliberate decision that keeps the feature usable; anything else outside the lattice, INCLUDING `null` AND `''` WHICH THE BOUNDARY ALSO REFUSES, now REFUSES — on the LOCAL destination too, because a classification the module cannot read is a caller it cannot read and the local body would otherwise rank a level absent from `RANK` — carrying the boundary's own `unclassified` string rather than a second wording. (2) All three sensitivity decisions tested `sensitive === true`, so `'true'`, `1` or `'yes'` arriving over `models:converse` produced a NON-sensitive turn on every one of them: cloud destination allowed, text classified `public`, `requirePrivate` false. It was the ONE input to `assembleTurn` that was not validated while `destination`, `model`, `text` and every retained turn were each refused when malformed. `assembleTurn` now REFUSES a non-boolean `sensitive`; `selectModel` cannot refuse because it has to return a model, so there an unrecognised value resolves to SENSITIVE — which costs a cloud turn and never costs a disclosure. **AND THE SUITE ROW COVERING THE FIRST DEFECT ASSERTED THE OPPOSITE OF ITS OWN LABEL:** it read "is refused" over an assertion of `.ok === true`, it was GREEN so nothing flagged it, and a later session reading labels to learn what is guaranteed would have concluded the opposite of the truth — a green row that documents a leak as if it were the fix is worse than no row. Label and assertion now describe the same behaviour, over seven bogus classification values and five non-boolean flags, plus a row pinning `convo.REASON.unclassified` to the boundary's own string and a row proving an ABSENT classification still crosses, so the fix cannot be mistaken for "refuse everything". **`ROLES.conversation` IS THE TENTH ROLE AND `sensitive` IS FALSE ON IT ON PURPOSE, said in the note so a later session does not "fix" it:** one conversation carries both "what is the rupee doing" and "should I sell my position", a table flag can only be right for one, and set true it refuses cloud on EVERY turn; the gate is PER-TURN ON THE PAYLOAD and a sensitive turn routes local via `requirePrivate` — the same gate from the call site instead of the table. **NO `minCtxK`, the field most likely to be helpfully added later:** keyed cloud rows report `ctxK: null` by construction and `evaluate()` EXCLUDES an unknown window, so a floor would refuse every cloud model and invert the behaviour — asserted both ways, the same row `fit:'none'` for `long-context` and `declared` for `conversation`. No `needCaps` because Ollama reports no "chat" cap. `minParamsB: 7` is `tool-calling`'s published threshold and is low enough that the local `lfm2.5:8b-a1b-q4_K_M` clears it, so conversation works with NO credential. **THE BRIEF'S CLOUD-FIRST MECHANISM WAS WRONG IN A WAY THAT SILENTLY DOES NOTHING: INVERTING PRIVATE-BEFORE-COST CHANGES NOTHING**, because a local pull's `costTier: 0` beats a cloud row's `1` so cost AGREES with privacy — **the privacy comparator ITSELF had to be inverted**, for `preferRemote` roles only, which `conversation` alone sets; cost still breaks ties among cloud rows and `narration` refuses cloud at the fitness gate far above it. Asserted with REAL selections, both directions, order-independent, plus the rows that make it safe: `narration`, `extraction` and `tool-calling` all still prefer local and `conversation` is the only role with the flag. **AND CLOUD ROWS HAD TO REACH THE ROLE ENGINE AT ALL** — Section 131's open NEXT: `conversationCandidates()` widens the list FOR THIS ROLE ONLY and is INERT with no key stored AND with the vault merely locked, both asserted. **MEASURED CORRECTION: the registry holds FOURTEEN keyed cloud rows, not one, so cheapest-sufficient picks `ministral-3:8b` and not `gemma4:31b`** — the table's own rule, and cheaper per turn; preferring the largest within budget would be a new role flag and a behaviour change, so it is RAISED rather than taken. **A REFUSAL STAYS A REFUSAL:** `models:chat` walks `FALLBACK_CHAIN` so a refusal there becomes a silent downgrade and master cannot tell "I asked the big model" from "I quietly got the small one"; `models:converse` returns `fit:'none'` AS a refusal with role, reason, per-model exclusions and a remedy, measured at ZERO `/api/chat` calls and naming no substitute, and `Chat.jsx` renders `[Refused]` without falling through. **A CAPABILITY DENIAL IS DELIBERATELY NOT SHAPED LIKE A REFUSAL** — `models.use` is tier 3 against `chat.send`'s 5, so tiers 4–5 get a denial with no `refused` flag and fall through to `models:chat`, keeping the chat they had (I11). `claimGate` is NOT run here, because it refuses the `unattributed` class and conversation is unattributed prose, so enforcing it would withhold every reply. **IMMEDIACY: `chatStream` IS A SECOND FUNCTION, NOT A FLAG** — `verifyOllamaCloud.cjs` PINS the envelope's `stream` to false, so a flag would make a pinned shape argument-dependent; `chat()` is byte-identical and still buffered, asserted beside the streaming rows, and `chatStream` keeps the identical gate order with a mandatory `releaseSlot` in a `finally` because a leaked slot on `maxConcurrent: 1` is a permanent outage. Both destinations use the ONE client's `postStreamingJsonLines`, the local body arriving already built so nothing is composed at the transport, and preload mirrors `ollamaPull` INCLUDING the `finally` that removes the token listener — without it master hears the same tokens N times. Asserted: one event per delta in order, `stream: true` in the body, NO `Authorization` on the loopback call, the daemon-free API name with no `-cloud` suffix on the wire, and **THE CREDENTIAL LEAK SWEEP REPEATED ON THE STREAMING PATH** with the dummy only in the header, nowhere in any return or console line, and NO SUBSTRING OF LENGTH ≥ 6 elsewhere. **VOICE DEFAULTS OFF, for accuracy rather than caution:** it is the one preference whose "on" state makes noise in a room the app cannot see. `uiStore.ramaSpeaks` is independent of the older `speechMuted`, which still wins, and `voiceEngine.js` gains a REGISTRY over the ONE engine `CommandPalette` constructs rather than a second TTS call site — the engine's `speak()` is what honours the mute AND sets the hands-free cool-down that stops Rāma transcribing its own voice back as a command, both of which a direct `speechSynthesis` call would skip; `Chat.jsx` references `speechSynthesis` nowhere, asserted. The brief's `voiceEngine.speak()` was a CLASS METHOD whose only instance lives in `CommandPalette`, so the Chat page had nothing to call until the registry existed. **SPEECH-TO-TEXT STAYS OUT:** Ollama serves no STT model, printed by the suite as a residual rather than left as an absence. Also not built: the context DB and cross-turn memory (Sections 127/130, recording stays dark), and proactive speech. **NOT VERIFIED: NO LIVE AUTHENTICATED CALL TO ollama.com WAS MADE — not one;** every request is an injected stub and the only credential seen is the literal dummy, so the streaming line shape, the Bearer requirement, the thirteen inferred `apiModel` spellings, free-tier access and zero-credit behaviour are inherited assumptions. **NOTHING WAS SEEN ON A SCREEN:** `node_modules` is absent from the worktree so `vite build` CANNOT run there and no claim is made that it passes, the app was never launched, and the streaming bubble, the model/fit/why line, the VOICE toggle and the spoken reply were NOT OBSERVED. Whether the prose reads like JARVIS is a judgement no assertion makes — the persona was never sent to a model. Files: `electron/lib/conversationRole.cjs`, `scripts/verifyConversation.cjs` (new, 151 assertions), `electron/lib/modelRoles.cjs`, `electron/lib/ollamaCloud.cjs`, `electron/ipc/modelRouter.cjs`, `electron/preload.cjs`, `src/services/voiceEngine.js`, `src/store/uiStore.js`, `src/components/CommandPalette.jsx`, `src/pages/Chat/Chat.jsx`, `package.json`, `docs/research/CONVERSATION.md`. Suites 27 → 28, assertions 2,825 → 2,976, 0 failures. **NEXT:** observe one real turn end to end from the main workspace after a build — the bubble, the toggle and the model line are the three things no assertion covers; reconcile the inferred `apiModel` values against a live keyed `GET /api/tags`; decide `identity.cloudSafePersona`; decide cheapest-sufficient versus largest-within-budget for conversation; decide `chat.send`'s tier; feed `ollama-cloud/*` into the role engine for the OTHER roles, still open. |
+| 153 | Rāma converses with master, and master's name stays on this machine | done | Section 133. Master: *"yes, just like jarvis in iron man movie, RAMA should be able to converse the optimal way."* **BUILT.** **A FORM OF ADDRESS IS A ROLE, NOT AN IDENTIFIER** — JARVIS says "sir", not "Tony Stark" — so the cloud-safe persona costs NOTHING in character: full persona fidelity, zero identifier. **THE LEAK WAS NEVER IN MASTER'S WORDS, IT WAS IN THE SYSTEM PROMPT** that `Chat.jsx` prepends to every turn, which for an authenticated master carries `Your master is Krishna Prasad. You are absolutely loyal to him.` before he types anything. **COMPOSED, NEVER REDACTED:** a redactor is a list of patterns and the first pattern nobody thought of is a leak that looks like a pass, so the persona is a frozen array of eight whole sentences in the new `electron/lib/conversationRole.cjs`, asserted structurally to contain no `.replace(`, nothing matching `redact|scrub|sanitis`, and no reference to `nucleusSealer` or `loyaltyCore` at all. **BOTH HALVES ASSERTED, because a prompt that leaked nothing by saying nothing would pass a one-sided test** — negative: no `Krishna`, no `Prasad`, no case variant, no `@`, no 24+ character opaque token, conditionally not whatever `loyaltyCore.displayIdentity()` returns; positive: still names Rāma, still addresses "master", still states the loyalty, still discloses the AI when sincerely asked. The conditional row is a DECLARED RESIDUAL, not a quiet pass, because the core is sealed in the suite's process. `nucleusSealer.cjs` is PROTECTED so the variant lives beside it; `identity.cloudSafePersona` is SPECIFIED FOR MASTER with a recommendation to leave it in source, since eight sentences of behavioural instruction are engineering rather than identity and a diff is reviewable where a sealed blob is not. **ONE CHOKEPOINT, AND THE ONE PLACE IT CANNOT BE `egressBoundary`:** `assembleTurn` is the only builder of a conversation payload; the CLOUD body is built by `egressBoundary.assemble` and nothing else, but the LOCAL body cannot be — **the boundary refuses `private` UNCONDITIONALLY AND BY DESIGN, the revealed prompt IS private, and forcing it through would mean calling it `public`, a lie told to the one component whose job is classification.** So the local body is derived in the same function from the same classified elements and **the module PROVES its own honesty rather than asserting it in prose**: every local result carries `wouldRefuseOnCloud`, computed by really running those elements through the boundary and recording the refusal WITH THE BOUNDARY'S OWN REASON STRING, compared literally; plus two anti-drift rows, identical key sets between the two bodies and no cloud key beyond `messages,model,stream`. **MASTER'S TYPED WORDS DEFAULT TO `public` AND IT IS A DECISION:** he chose to converse through a cloud model, so refusing his text by default would refuse the feature; the IDENTIFIER is what is withheld, and the cloud variant never contains one. The defence is MEASURED OVER THE SERIALISED BYTES — the revealed template handed to the assembler on the same call, the assembled cloud body carrying none of its identifiers, AND master's own words still crossing, so the feature was not disabled to pass the test. **ON ANY UNCERTAINTY, LOCAL OR REFUSE, NEVER CLOUD:** unknown destination refuses, a sensitive turn aimed at cloud refuses AT the chokepoint even though selection already routed it local, and a row whose `private` flag is neither true nor false resolves LOCAL — a loud model-not-found beats a prompt that cannot be recalled. **THREE DEFECTS ACROSS TWO REVIEWS, ALL FIXED AND NONE OF THEM TO COME BACK; THE FIRST TWO ARE THE SAME SHAPE — STRICT EQUALITY POINTED AT THE UNSAFE SIDE — AND THE THIRD IS THE ONLY ONE THAT COST A CAPABILITY RATHER THAN RISKING A DISCLOSURE.** (1) `levelOf` returned `'public'` for ANY `classification` outside the lattice, so a retained turn marked `'secret'`, `'confidential'` or `'PRIVATE'` had the concern STRIPPED and crossed to a cloud payload, and `egressBoundary` — which carries `REASON.unclassified` for precisely that element shape — was handed an already-clean `'public'` and never saw the original. **ABSENT AND UNRECOGNISED ARE DIFFERENT FACTS:** absent (or `undefined`) stays `'public'`, the deliberate decision that keeps the feature usable; anything else outside the lattice, INCLUDING `null` AND `''` WHICH THE BOUNDARY ALSO REFUSES, now REFUSES — on the LOCAL destination too, because a classification the module cannot read is a caller it cannot read and the local body would otherwise rank a level absent from `RANK` — carrying the boundary's own `unclassified` string rather than a second wording. (2) All three sensitivity decisions tested `sensitive === true`, so `'true'`, `1` or `'yes'` arriving over `models:converse` produced a NON-sensitive turn on every one of them: cloud destination allowed, text classified `public`, `requirePrivate` false. It was the ONE input to `assembleTurn` that was not validated while `destination`, `model`, `text` and every retained turn were each refused when malformed. `assembleTurn` now REFUSES a non-boolean `sensitive`; `selectModel` cannot refuse because it has to return a model, so there an unrecognised value resolves to SENSITIVE — which costs a cloud turn and never costs a disclosure. **AND THE SUITE ROW COVERING THE FIRST DEFECT ASSERTED THE OPPOSITE OF ITS OWN LABEL:** it read "is refused" over an assertion of `.ok === true`, it was GREEN so nothing flagged it, and a later session reading labels to learn what is guaranteed would have concluded the opposite of the truth — a green row that documents a leak as if it were the fix is worse than no row. Label and assertion now describe the same behaviour, over seven bogus classification values and five non-boolean flags, plus a row pinning `convo.REASON.unclassified` to the boundary's own string and a row proving an ABSENT classification still crosses, so the fix cannot be mistaken for "refuse everything". (3) **THE MESSAGE CEILING WAS REACHABLE IN ORDINARY USE, AND REFUSING THERE REMOVED A CAPABILITY (I11):** `Chat.jsx` sent the WHOLE session as retained turns and the session store never trims, so at 199 user/assistant messages `assembleTurn` refused `tooManyTurns` on every further turn in that session — permanently, where `models:chat` would still have answered — and the refusal carried no remedy because `remedy` was attached only to the SELECTION refusal. **THE CEILING IS NOT RELAXED AND `assembleTurn` STILL DOES NOT TRIM**, because the one honest payload constructor must not quietly drop history; **THE BOUND BELONGS TO THE CALLER, WHICH IS WHERE THE DECISION LIVES** — `RETAINED_TURNS = 24` in `Chat.jsx`, twelve exchanges, `.slice(-RETAINED_TURNS)`, with the arithmetic asserted (`cap + 2 < MAX_MESSAGES`, `cap * 4 < MAX_MESSAGES`) so neither number can drift into the other — and `models:converse` now attaches `assemblyRemedy(reason)` to EVERY assembly refusal: the ceiling names a new session, every other reason says the payload was refused before it was sent and nothing left this machine, because a refusal master cannot act on is only half-honest. Asserted through the handler, not only at the unit: the refusal, one turn below it still assembling, zero `/api/chat` calls on a refused turn, and the bounded turn still answered end to end. **A CHOKEPOINT THAT CORRECTLY REFUSES AN UNBOUNDED INPUT NEEDS A BOUNDED CALLER** — that is the shape worth remembering. **`ROLES.conversation` IS THE TENTH ROLE AND `sensitive` IS FALSE ON IT ON PURPOSE, said in the note so a later session does not "fix" it:** one conversation carries both "what is the rupee doing" and "should I sell my position", a table flag can only be right for one, and set true it refuses cloud on EVERY turn; the gate is PER-TURN ON THE PAYLOAD and a sensitive turn routes local via `requirePrivate` — the same gate from the call site instead of the table. **AND THAT GATE HAS NO PRODUCER YET, RECORDED RATHER THAN HIDDEN:** the mechanism is asserted from `assembleTurn` and `selectModel` inward, but no caller sets `sensitive` — `modelRouter` defaults it false and `Chat.jsx` passes neither it nor any `classification` — so TODAY EVERY TURN IS `public` AND CROSSES TO A CLOUD MODEL, a holdings question included; the recommendation RAISED FOR MASTER is a per-turn "keep this one local" control beside the VOICE toggle as its own tranche, since a keyword classifier mis-routes quietly and a model-based one would have to read the turn before the turn is gated. **NO `minCtxK`, the field most likely to be helpfully added later:** keyed cloud rows report `ctxK: null` by construction and `evaluate()` EXCLUDES an unknown window, so a floor would refuse every cloud model and invert the behaviour — asserted both ways, the same row `fit:'none'` for `long-context` and `declared` for `conversation`. No `needCaps` because Ollama reports no "chat" cap. `minParamsB: 7` is `tool-calling`'s published threshold and is low enough that the local `lfm2.5:8b-a1b-q4_K_M` clears it, so conversation works with NO credential. **THE BRIEF'S CLOUD-FIRST MECHANISM WAS WRONG IN A WAY THAT SILENTLY DOES NOTHING: INVERTING PRIVATE-BEFORE-COST CHANGES NOTHING**, because a local pull's `costTier: 0` beats a cloud row's `1` so cost AGREES with privacy — **the privacy comparator ITSELF had to be inverted**, for `preferRemote` roles only, which `conversation` alone sets; cost still breaks ties among cloud rows and `narration` refuses cloud at the fitness gate far above it. Asserted with REAL selections, both directions, order-independent, plus the rows that make it safe: `narration`, `extraction` and `tool-calling` all still prefer local and `conversation` is the only role with the flag. **AND CLOUD ROWS HAD TO REACH THE ROLE ENGINE AT ALL** — Section 131's open NEXT: `conversationCandidates()` widens the list FOR THIS ROLE ONLY and is INERT with no key stored AND with the vault merely locked, both asserted. **MEASURED CORRECTION: the registry holds FOURTEEN keyed cloud rows, not one, so cheapest-sufficient picks `ministral-3:8b` and not `gemma4:31b`** — the table's own rule, and cheaper per turn; preferring the largest within budget would be a new role flag and a behaviour change, so it is RAISED rather than taken. **A REFUSAL STAYS A REFUSAL:** `models:chat` walks `FALLBACK_CHAIN` so a refusal there becomes a silent downgrade and master cannot tell "I asked the big model" from "I quietly got the small one"; `models:converse` returns `fit:'none'` AS a refusal with role, reason, per-model exclusions and a remedy, measured at ZERO `/api/chat` calls and naming no substitute, and `Chat.jsx` renders `[Refused]` without falling through. **A CAPABILITY DENIAL IS DELIBERATELY NOT SHAPED LIKE A REFUSAL** — `models.use` is tier 3 against `chat.send`'s 5, so tiers 4–5 get a denial with no `refused` flag and fall through to `models:chat`, keeping the chat they had (I11). `claimGate` is NOT run here, because it refuses the `unattributed` class and conversation is unattributed prose, so enforcing it would withhold every reply. **IMMEDIACY: `chatStream` IS A SECOND FUNCTION, NOT A FLAG** — `verifyOllamaCloud.cjs` PINS the envelope's `stream` to false, so a flag would make a pinned shape argument-dependent; `chat()` is byte-identical and still buffered, asserted beside the streaming rows, and `chatStream` keeps the identical gate order with a mandatory `releaseSlot` in a `finally` because a leaked slot on `maxConcurrent: 1` is a permanent outage. Both destinations use the ONE client's `postStreamingJsonLines`, the local body arriving already built so nothing is composed at the transport, and preload mirrors `ollamaPull` INCLUDING the `finally` that removes the token listener — without it master hears the same tokens N times. Asserted: one event per delta in order, `stream: true` in the body, NO `Authorization` on the loopback call, the daemon-free API name with no `-cloud` suffix on the wire, and **THE CREDENTIAL LEAK SWEEP REPEATED ON THE STREAMING PATH** with the dummy only in the header, nowhere in any return or console line, and NO SUBSTRING OF LENGTH ≥ 6 elsewhere. **VOICE DEFAULTS OFF, for accuracy rather than caution:** it is the one preference whose "on" state makes noise in a room the app cannot see. `uiStore.ramaSpeaks` is independent of the older `speechMuted`, which still wins, and `voiceEngine.js` gains a REGISTRY over the ONE engine `CommandPalette` constructs rather than a second TTS call site — the engine's `speak()` is what honours the mute AND sets the hands-free cool-down that stops Rāma transcribing its own voice back as a command, both of which a direct `speechSynthesis` call would skip; `Chat.jsx` references `speechSynthesis` nowhere, asserted. The brief's `voiceEngine.speak()` was a CLASS METHOD whose only instance lives in `CommandPalette`, so the Chat page had nothing to call until the registry existed. **VOICE ON THAT PRODUCED NO SOUND NOW SAYS SO:** `speak()` returns false with no mounted engine or with speech muted and that return was discarded, so the toggle could read VOICE ON while master heard nothing and could not tell a silent machine from a silent Rāma — the reply carries `voiceSilent` and the bubble names both causes; the toggle is deliberately NOT disabled when no engine is mounted, because an engine can mount at any moment and a greyed control explains less than a reply that says what happened. **EVERY DELTA NOW CARRIES ITS TURN ID** — the channel was scoped to the sending window, which is not the same as scoped to a turn, so two turns in flight in one window would interleave into one bubble; unreachable through the UI today because `isThinking` blocks a second send, so the caller correlates instead of trusting arrival order and a non-string non-number id is normalised to `null` rather than echoed back. **AND THE NEW MODULE NAMES MASTER NOWHERE, NOT EVEN IN A COMMENT:** the header described the leak by quoting the revealed template verbatim, which never reached a payload but did put the identifier into new source in a project that feeds its own source into upgrade proposals — it names `NUCLEUS_TEMPLATE.identity` and describes the shape instead, asserted over the whole file with comments included and paired with a row that the explanation still survives. **SPEECH-TO-TEXT STAYS OUT:** Ollama serves no STT model, printed by the suite as a residual rather than left as an absence. Also not built: the context DB and cross-turn memory (Sections 127/130, recording stays dark), and proactive speech. **NOT VERIFIED: NO LIVE AUTHENTICATED CALL TO ollama.com WAS MADE — not one;** every request is an injected stub and the only credential seen is the literal dummy, so the streaming line shape, the Bearer requirement, the thirteen inferred `apiModel` spellings, free-tier access and zero-credit behaviour are inherited assumptions. **NOTHING WAS SEEN ON A SCREEN:** `node_modules` is absent from the worktree so `vite build` CANNOT run there and no claim is made that it passes, the app was never launched, and the streaming bubble, the model/fit/why line, the VOICE toggle and the spoken reply were NOT OBSERVED. Whether the prose reads like JARVIS is a judgement no assertion makes — the persona was never sent to a model. Files: `electron/lib/conversationRole.cjs`, `scripts/verifyConversation.cjs` (new, 179 assertions), `electron/lib/modelRoles.cjs`, `electron/lib/ollamaCloud.cjs`, `electron/ipc/modelRouter.cjs`, `electron/preload.cjs`, `src/services/voiceEngine.js`, `src/store/uiStore.js`, `src/components/CommandPalette.jsx`, `src/pages/Chat/Chat.jsx`, `package.json`, `docs/research/CONVERSATION.md`. Suites 27 → 28, assertions 2,825 → 3,004, 0 failures. **NEXT:** observe one real turn end to end from the main workspace after a build — the bubble, the toggle, the amber voice-silent line and the model line are the four things no assertion covers; decide the per-turn sensitivity control, without which every turn crosses as `public`; reconcile the inferred `apiModel` values against a live keyed `GET /api/tags`; decide `identity.cloudSafePersona`; decide cheapest-sufficient versus largest-within-budget for conversation; decide `chat.send`'s tier; feed `ollama-cloud/*` into the role engine for the OTHER roles, still open. |
 ```
 
 ---
@@ -601,3 +707,27 @@ sends neither.
 Findings 1 and 3 are the same defect twice: `x === expected` used where the `else` branch is the
 permissive one. The module's header now names both so the next session reading it meets the defect
 before it meets the code.
+
+---
+
+## 14. Review iteration 2 — the findings, and what changed
+
+Reviewed at `b5a4255`; verdict CHANGES_REQUESTED with **one** blocking finding and five for the record.
+Nothing in the role table, the persona, the chokepoint, the cloud-first ranking, the refusal path,
+streaming or the voice default changed. The blocking fix *restores* a capability rather than changing
+one: a turn that works today still works, and a session that would have become unanswerable no longer
+does.
+
+| # | finding | status | what changed |
+|---|---|---|---|
+| 1 | Unbounded retained history turns into a permanent refusal with no fallback (**blocking**) | **fixed** | The window moved to the call site: `RETAINED_TURNS = 24` and `.slice(-RETAINED_TURNS)` in `Chat.jsx`, so the 200-message ceiling is never reached. `assembleTurn` still refuses rather than trims, as the review directed, and `models:converse` now attaches `assemblyRemedy(reason)` to **every** assembly refusal — the ceiling names a new session, the rest say nothing left the machine. Fourteen new assertions, including the ceiling through the handler, the arithmetic keeping window and ceiling apart, and the bounded turn still answered end to end. §5 |
+| 2 | The per-turn sensitivity gate has no producer (non-blocking) | **recorded as master's decision** | No code change. §11.5 now states plainly that no call site sets `sensitive`, that every turn today is therefore `public` and crosses to cloud *including* a holdings question, the three options with what each costs, and a recommendation (a per-turn control, as its own tranche). Adding a UI control or a classifier changes what master sees, so it is not a review-loop change. |
+| 3 | Cheapest-sufficient picks `ministral-3:8b`, not `gemma4:31b` (non-blocking, already raised) | **still raised, not taken** | No code change, as both reviews directed. §11.3 holds it: keep cheapest-sufficient, or add a `preferLargest` role flag as a deliberate behaviour change. |
+| 4 | The revealed template is quoted verbatim in the new module's header (non-blocking) | **fixed** | The header names `NUCLEUS_TEMPLATE.identity` and describes the shape — the loyalty sentence and the status line both interpolate the name — instead of reproducing it, and says why: this codebase feeds its own source into upgrade proposals, so a source file is an egress surface of its own. Asserted that `conversationRole.cjs` contains no identifier anywhere, comments included, *and* still names the nucleus field so the explanation survives. |
+| 5 | `speak()` fails silently when no engine is mounted (non-blocking) | **fixed** | `Chat.jsx` keeps the boolean: `voiceSilent: spoken === false` on the reply, and the bubble prints one amber line naming the two causes (no mounted engine, or speech muted). The toggle is deliberately **not** disabled on `getVoiceEngine()` — an engine can mount at any moment, and a greyed control explains less than a reply that says what happened. |
+| 6 | Token events carry no turn id (non-blocking, possible) | **fixed** | `Chat.jsx` passes `turn-<id>`; the handler echoes it on every delta and on the result when it is a string or a number, `null` otherwise; the renderer drops a delta that is not its own. A caller that passes nothing gets `null` and the old behaviour exactly. |
+
+The blocking finding was the only one in either review that was a **lost capability** rather than a
+risk, and it is worth naming as a shape: a chokepoint that correctly refuses an unbounded input needs a
+bounded caller, and the bound belongs with whoever decides what to send — not inside the one function
+whose job is to be honest about what it sent.

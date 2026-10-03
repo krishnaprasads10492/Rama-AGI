@@ -632,7 +632,7 @@ function sectionStructure() {
   check('voice is behind a toggle that defaults OFF',
     /ramaSpeaks:\s*loadPref\('rama\.ramaSpeaks',\s*false\)/.test(src('src/store/uiStore.js')));
   check('and the toggle drives the one engine\u2019s speak(), not a second speechSynthesis call',
-    /if \(ramaSpeaks\) speak\(/.test(chat)
+    /ramaSpeaks \? speak\(/.test(chat)
     && !/speechSynthesis/.test(chat));
   check('the engine registry publishes exactly one mounted engine',
     /registerVoiceEngine/.test(src('src/components/CommandPalette.jsx')));
@@ -661,6 +661,151 @@ function sectionStructure() {
     + 'local runtime that is a separate decision');
 }
 
+// ═══ (h) the second review's findings, each pinned where it was reachable ═════
+
+/**
+ * THE ONE FINDING THAT WAS A LOST CAPABILITY RATHER THAN A RISK.
+ *
+ * Iteration 2 of the review found the message ceiling reachable in ordinary use: `Chat.jsx` sent the
+ * WHOLE session as retained turns and the session store never trims, so at 199 user/assistant messages
+ * `assembleTurn` refused — and `Chat.jsx` treats a refusal as terminal, correctly, so that session
+ * could never be answered again while `models:chat` would still have answered it. Removing a
+ * capability is the one thing this branch was not allowed to do (I11).
+ *
+ * The ceiling itself is NOT relaxed and `assembleTurn` still does not trim: a payload constructor that
+ * silently drops history is the opposite of the honesty this module exists for. What changed is the
+ * CALLER's window, and the refusal now carries a remedy. Both halves are asserted here, plus the
+ * arithmetic that keeps the window clear of the ceiling — a cap that drifts up to 199 would restore
+ * the defect without changing a line of this file.
+ */
+async function sectionBoundedHistory(handlers) {
+  section('(h) the history window — bounded at the call site, refused at the chokepoint');
+
+  const manyTurns = (n) => Array.from({ length: n }, (_, i) => ({
+    role: i % 2 === 0 ? 'user' : 'assistant', text: `turn ${i}`,
+  }));
+
+  const atCeiling = convo.assembleTurn({
+    destination: 'cloud', model: 'g', text: 'and tomorrow?', turns: manyTurns(egress.MAX_MESSAGES - 1),
+  });
+  check('a payload over the boundary\u2019s message ceiling is REFUSED, not trimmed',
+    atCeiling.ok === false && atCeiling.reason === convo.REASON.tooManyTurns, util.inspect(atCeiling));
+  check('and the reason names the ceiling in numbers',
+    new RegExp(String(egress.MAX_MESSAGES)).test(convo.REASON.tooManyTurns), convo.REASON.tooManyTurns);
+  check('one turn below it still assembles, so the ceiling is a ceiling and not an off-by-one',
+    convo.assembleTurn({ destination: 'cloud', model: 'g', text: 'hi', turns: manyTurns(egress.MAX_MESSAGES - 2) })
+      .ok === true);
+  check('and the module still contains no trimming of the retained list',
+    !/\.slice\(/.test(codeOf('electron/lib/conversationRole.cjs')));
+
+  // THE REFUSAL NOW CARRIES A WAY OUT. An assembly refusal had no `remedy` at all, so the one a
+  // well-formed turn can reach read as a dead end.
+  keyAbsent();
+  localTags = { models: [{ name: LOCAL_TAG, size: 5_400_000_000 }] };
+  resetCalls();
+  const refusedTurn = await handlers['models:converse'](
+    { sender: { send() {} } },
+    { text: 'and tomorrow?', user: MASTER, revealedPrompt: REVEALED, turns: manyTurns(egress.MAX_MESSAGES - 1) });
+
+  check('the handler surfaces the ceiling refusal as a refusal',
+    refusedTurn.ok === false && refusedTurn.refused === true
+    && refusedTurn.reason === convo.REASON.tooManyTurns, util.inspect(refusedTurn));
+  check('with a remedy master can act on without reading source',
+    /start a new session/.test(String(refusedTurn.remedy)), String(refusedTurn.remedy));
+  check('and nothing was sent — no chat request went out on a refused turn',
+    !httpCalls.some(c => /api\/chat/.test(c.url)), httpCalls.map(c => c.url).join(','));
+  // EVERY assembly refusal carries one, not only the reachable one — even where the only honest
+  // remedy is "nothing left this machine", because an empty `remedy` is what sent the reviewer looking.
+  resetCalls();
+  const malformed = await handlers['models:converse'](
+    { sender: { send() {} } },
+    { text: 'hi', user: MASTER, turns: [{ role: 'user', text: 'x', classification: 'secret' }] });
+  check('a malformed-caller refusal carries a remedy too, if only to say nothing was sent',
+    malformed.refused === true && typeof malformed.remedy === 'string' && malformed.remedy.length > 0,
+    util.inspect(malformed.remedy));
+
+  // THE CALLER'S WINDOW, and the arithmetic that keeps it clear of the ceiling.
+  const chat = src('src/pages/Chat/Chat.jsx');
+  const capMatch = chat.match(/const RETAINED_TURNS = (\d+);/);
+  const cap = capMatch ? Number(capMatch[1]) : null;
+  check('Chat.jsx declares a retained window', cap !== null, String(capMatch));
+  check('and really slices the history with it, at the call site',
+    /\.slice\(-RETAINED_TURNS\)/.test(chat));
+  check('the window plus the system and user turns stays under the ceiling',
+    cap !== null && cap + 2 < egress.MAX_MESSAGES, `${cap} + 2 vs ${egress.MAX_MESSAGES}`);
+  check('by an order of magnitude, so neither number drifting can reach the other',
+    cap !== null && cap * 4 < egress.MAX_MESSAGES, `${cap} * 4 vs ${egress.MAX_MESSAGES}`);
+  check('a window that size really does assemble',
+    cap !== null
+    && convo.assembleTurn({ destination: 'cloud', model: 'g', text: 'hi', turns: manyTurns(cap) }).ok === true);
+  check('and the bounded turn is still answered end to end, not merely assembled',
+    (await handlers['models:converse'](
+      { sender: { send() {} } },
+      { text: 'good morning', user: MASTER, revealedPrompt: REVEALED, turns: manyTurns(cap) })).ok === true);
+}
+
+/** The three smaller findings from the same review: the name in source, voice silence, turn ids. */
+async function sectionReviewTwo(handlers) {
+  section('(h2) the name in new source, voice that made no sound, and a delta\u2019s turn');
+
+  // THE MODULE NAMES MASTER NOWHERE — not in code, not in a comment. The header used to quote the
+  // revealed template verbatim to explain where the leak comes from, which never reached a payload but
+  // did add the identifier to new source in a project that feeds its own source into upgrade
+  // proposals. It names NUCLEUS_TEMPLATE.identity and describes the shape instead.
+  const moduleSource = src('electron/lib/conversationRole.cjs');
+  for (const id of IDENTIFIERS) {
+    check(`conversationRole.cjs source contains no "${id}" — comments included`,
+      !moduleSource.includes(id));
+  }
+  check('nor any case variant of the two name parts anywhere in the file',
+    !/krishna|prasad/i.test(moduleSource));
+  check('while it still explains where the leak comes from, by naming the nucleus field',
+    /NUCLEUS_TEMPLATE\.identity/.test(moduleSource));
+
+  // VOICE: the false return is surfaced rather than discarded.
+  const chat = src('src/pages/Chat/Chat.jsx');
+  check('Chat.jsx keeps the result of speak() instead of discarding it',
+    /const spoken = ramaSpeaks \? speak\(/.test(chat));
+  check('and a reply that was meant to be spoken but was not says so on the bubble',
+    /voiceSilent: spoken === false/.test(chat) && /message\.voiceSilent/.test(chat));
+  check('the engine registry still reports nothing mounted as false rather than throwing',
+    /return false;/.test(src('src/services/voiceEngine.js')));
+
+  // TURN IDS on every delta.
+  keyAbsent();
+  localTags = { models: [{ name: LOCAL_TAG, size: 5_400_000_000 }] };
+  resetCalls();
+  const tagged = [];
+  const answered = await handlers['models:converse'](
+    { sender: { send: (ch, p) => { if (ch === 'models:converse-token') tagged.push(p); } } },
+    { text: 'good morning', user: MASTER, revealedPrompt: REVEALED, turnId: 'turn-7' });
+  check('a turn answers with its id echoed back', answered.ok === true && answered.turnId === 'turn-7',
+    util.inspect(answered.turnId));
+  check('and EVERY delta carries that id, so two turns in one window cannot interleave',
+    tagged.length === 3 && tagged.every(p => p.turnId === 'turn-7'),
+    tagged.map(p => String(p.turnId)).join(','));
+
+  resetCalls();
+  const untagged = [];
+  await handlers['models:converse'](
+    { sender: { send: (ch, p) => { if (ch === 'models:converse-token') untagged.push(p); } } },
+    { text: 'good morning', user: MASTER, revealedPrompt: REVEALED });
+  check('a caller that passes no turn id gets null and the old behaviour',
+    untagged.length === 3 && untagged.every(p => p.turnId === null),
+    untagged.map(p => String(p.turnId)).join(','));
+
+  resetCalls();
+  const odd = [];
+  await handlers['models:converse'](
+    { sender: { send: (ch, p) => { if (ch === 'models:converse-token') odd.push(p); } } },
+    { text: 'good morning', user: MASTER, revealedPrompt: REVEALED, turnId: { nested: 'object' } });
+  check('a turn id that is neither string nor number is normalised to null, not echoed back',
+    odd.length === 3 && odd.every(p => p.turnId === null), util.inspect(odd[0]?.turnId));
+
+  check('and the renderer drops a delta belonging to another turn rather than appending it',
+    /chunk\.turnId !== turnId\) return;/.test(chat));
+}
+
 // ═══ Run ══════════════════════════════════════════════════════════════════════
 
 (async () => {
@@ -678,6 +823,8 @@ function sectionStructure() {
   await sectionRefusal(handlers);
   await sectionStreaming(handlers);
   sectionStructure();
+  await sectionBoundedHistory(handlers);
+  await sectionReviewTwo(handlers);
 
   console.log(`\n  ${pass} passed, ${fail} failed`);
   if (residuals.length > 0) {

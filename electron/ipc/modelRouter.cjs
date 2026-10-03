@@ -512,7 +512,7 @@ function register(ipcMain) {
    */
   ipcMain.handle('models:converse', async (event, { text, turns = [], revealedPrompt = null,
                                                     user, sensitive = false, diskBudgetBytes = null,
-                                                    allowInternal = false } = {}) => {
+                                                    allowInternal = false, turnId = null } = {}) => {
     const capability = require('../lib/capability.cjs');
     if (!capability.can(user, 'models.use')) {
       return { ok: false, error: 'Access denied: "models.use" required' };
@@ -551,13 +551,25 @@ function register(ipcMain) {
       text, turns, revealedPrompt, sensitive, stream: true, allowInternal,
     });
     if (!assembled.ok) {
+      // EVERY REFUSAL CARRIES ITS WAY OUT. The selection refusal above has had a remedy since the
+      // first build; an ASSEMBLY refusal had none, so the message ceiling — the one assembly refusal a
+      // well-behaved turn can actually reach — read as a dead end with no action in it. A refusal
+      // master cannot act on is only half-honest.
       return { ok: false, refused: true, role: pick.role, model: pick.model, destination,
                error: assembled.reason, reason: assembled.reason,
-               level: assembled.level ?? null, where: assembled.where ?? null };
+               level: assembled.level ?? null, where: assembled.where ?? null,
+               remedy: assemblyRemedy(assembled.reason) };
     }
 
+    // THE TURN ID TRAVELS WITH EVERY DELTA. The channel is already scoped to the sending window, which
+    // is not the same as being scoped to a TURN: two turns in flight in one window would interleave
+    // their tokens into one bubble. The UI cannot reach that state today (`isThinking` blocks a second
+    // send), so this is the cheap half of the fix — the caller correlates rather than trusting arrival
+    // order. Echoed back exactly as given when it is a string or a number, and null otherwise, so a
+    // caller that passes nothing gets nothing to match against and keeps the old behaviour.
+    const turnTag = (typeof turnId === 'string' || typeof turnId === 'number') ? turnId : null;
     const onToken = (delta) => {
-      try { event.sender.send('models:converse-token', { delta, model: pick.model, destination }); }
+      try { event.sender.send('models:converse-token', { delta, model: pick.model, destination, turnId: turnTag }); }
       catch { /* the window closed mid-stream; the awaited return still carries the whole reply */ }
     };
 
@@ -582,6 +594,7 @@ function register(ipcMain) {
       why: pick.why,
       unverified: pick.unverified ?? [],
       destination,
+      turnId: turnTag,
       personaVariant: assembled.variant,
       maxLevel: assembled.maxLevel,
       wouldRefuseOnCloud: assembled.wouldRefuseOnCloud,
@@ -677,6 +690,27 @@ function conversationCandidates() {
     .filter(([id, m]) => m.provider === 'ollama-cloud' && checkAvailable(id))
     .map(([, m]) => m);
   return [...local, ...cloud];
+}
+
+/**
+ * The one actionable sentence for an assembly refusal.
+ *
+ * `assembleTurn` refuses rather than repairs, by design, so every reason it can return needs an answer
+ * master can take. The ceiling is the one a well-formed turn can reach — a review found it reachable
+ * in ordinary use before `Chat.jsx` bounded its retained window — so it names the window. The others
+ * mean a caller sent something malformed, which master cannot fix from the chat box; for those the
+ * remedy says what it is rather than inventing an action, because a remedy that cannot be acted on is
+ * worse than an admitted dead end.
+ */
+function assemblyRemedy(reason) {
+  if (reason === conversationRole.REASON.tooManyTurns) {
+    return `this turn carried more history than one payload may hold (${require('../lib/egressBoundary.cjs').MAX_MESSAGES} messages) — `
+      + 'start a new session, or reduce the retained window the chat page sends';
+  }
+  if (reason === conversationRole.REASON.sensitiveCloud) {
+    return 'a sensitive turn needs a local model of at least 7B — pull one in Models → Ollama';
+  }
+  return 'the payload was refused before it was sent — nothing left this machine';
 }
 
 /**
