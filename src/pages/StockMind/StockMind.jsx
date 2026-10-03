@@ -212,6 +212,9 @@ export default function StockMind() {
   // How many bars ahead master asked for. null means the horizon's own default, which is what the
   // engine used before there was a control.
   const [horizonBars, setHorizonBars] = useState(null);
+  // WHEN THE LAST REPLY LANDED, so the chart can say it rather than imply freshness. Null until a
+  // reply arrives, and the chart reads that as "not recorded this session" — not as "never fetched".
+  const [barsFetchedAt, setBarsFetchedAt] = useState(null);
   const [held, setHeld] = useState(null);   // the tracked position in this symbol, if any
 
   const canRequest = canDo ? canDo('stockmind.request') : false;
@@ -271,6 +274,9 @@ export default function StockMind() {
       return;
     }
     setEngineDetail(null);
+    // A reply that ARRIVED is a fetch that completed, even if it carried no bars — the bar age speaks
+    // for the data, and this speaks only for the round trip. Not set on a failure, which did not land.
+    if (res?.ok) setBarsFetchedAt(Date.now());
     setBars(res.data?.bars || []);
     setBarsMeta(res.data || null);
     if (res.data?.note) setBarsNote(res.data.note);
@@ -904,6 +910,7 @@ far as the provider allows, which for intraday is a few days to two years.">
                                             coverage={coverage}
                                             replyNote={barsMeta?.note || null}
                                             failure={barsFail}
+                                            fetchedAt={barsFetchedAt}
                                             busy={barsBusy} onFetch={() => loadBars(true)}
                                             basePrice={held?.avgCost ?? null}
                                             // FILLS THE PANEL instead of a hard 260px (Section 121).
@@ -1001,6 +1008,7 @@ far as the provider allows, which for intraday is a few days to two years.">
               coverage={coverage}
               replyNote={barsMeta?.note || null}
               failure={barsFail}
+              fetchedAt={barsFetchedAt}
               chartId="sm-chart"
               busy={barsBusy}
               onFetch={() => loadBars(true)}

@@ -26,6 +26,7 @@ import { emptyState } from './chartEmptyState.js';
 import {
   projectionMode, quantileBars, projectionState, projectionInputs, horizonChoices,
 } from './chartProjection.js';
+import { liveReading } from './marketClock.js';
 import InfoTip from './InfoTip.jsx';
 
 /**
@@ -189,6 +190,15 @@ const CHART_TYPES = [
       + 'levels — a stop taken off an HA body sits at a price that never existed.' },
 ];
 
+// The market-state chip's colour, by the tone `marketClock.js` decided. Green is only ever the open
+// session: a derived state that reads as confidently as a price would be the whole defect.
+const MARKET_TONE = {
+  open: 'var(--green)',
+  'pre-open': 'var(--amber)',
+  closed: 'var(--muted)',
+  unknown: 'var(--muted)',
+};
+
 const SCALE_MODES = [
   { id: 'normal', label: 'LIN', mode: PriceScaleMode.Normal,
     title: 'Linear price scale' },
@@ -297,6 +307,13 @@ export default function PriceChart({
   // is a parse error the renderer audit catches. `replyNote` says whose sentence it is.
   replyNote = null,         // the route's own sentence about THIS reply (`res.data.note`)
   failure = null,           // {error, diagnosis:{reason, remedy}, detail, stderrTail} — all failure modes
+  /**
+   * When the last successful reply landed, as `Date.now()` at the call site.
+   *
+   * OPTIONAL AND DEFAULTING TO NULL (I11), so all three call sites keep working — and null is not
+   * "never fetched": it reads as *not recorded this session*, which is the true statement.
+   */
+  fetchedAt = null,
   /**
    * ── The projection's horizon and its own state ──
    *
@@ -1265,6 +1282,19 @@ export default function PriceChart({
   );
   const horizons = useMemo(() => horizonChoices(interval), [interval]);
 
+  // ── WHETHER THE MARKET IS TRADING — DERIVED, and never claimed (plan D4) ──
+  // There is no tick stream, so the session state comes from the published IST hours, the bar age from
+  // what is stored, and the fetch time from the call site. Every clause is composed in
+  // `marketClock.js` where the suite can assert it. `now` is this render, which is what the chip's
+  // title says; it needs only props that default, so it draws at all three call sites.
+  const marketLive = useMemo(() => liveReading({
+    newest: candles.length > 0 ? candles[candles.length - 1].time : null,
+    barCount: candles.length,
+    interval,
+    busy,
+    fetchedAt,
+  }), [candles, interval, busy, fetchedAt]);
+
   const toggle = (k) => setLayers((s) => ({ ...s, [k]: !s[k] }));
 
   // One step wider or narrower. `+1` is narrower because the list runs comfortable → dense.
@@ -1744,6 +1774,18 @@ export default function PriceChart({
           </span>
         )}
         {busy && <span style={{ color: 'var(--accent)' }}>loading…</span>}
+
+        {/* ── WHETHER THE MARKET IS TRADING, said as DERIVED ──────────────────────────────────────
+               Nothing here is observed: the chip is the scheduled session, the age of the newest
+               stored bar and when the last reply landed. The word for it is the state, never "live",
+               and the holiday blind spot travels with it in the title and in the readout row below. */}
+        <span style={{
+          display: 'inline-flex', alignItems: 'center',
+          color: MARKET_TONE[marketLive.tone] || 'var(--muted)',
+        }} title={`${marketLive.text}\n\n${marketLive.sentence}\n\nRead at this chart's last redraw, `
+          + `not from a feed.\n\n${marketLive.caveats.join('\n\n')}`}>
+          {marketLive.chip}<InfoTip id="marketState" />
+        </span>
         <span style={{ flex: 1 }} />
         <button type="button" onClick={resetZoom} style={chip(false)}
                 title="Back to a readable candle width (r)">reset zoom</button>
@@ -2422,6 +2464,13 @@ export default function PriceChart({
             F fullscreen. Click the chart first.
           </span>
         )}
+
+        {/* THE DERIVED STATE IN FULL, AND WHAT IT CANNOT SEE. The header chip is three words; the
+            reading and its caveats belong where a canvas's facts already go for assistive technology,
+            and the holiday blind spot is one of those caveats rather than a footnote nobody reads. */}
+        <span style={{ flexBasis: '100%', color: 'var(--muted)', lineHeight: 1.6 }}>
+          {marketLive.text} {marketLive.caveats.join(' ')}
+        </span>
       </div>
 
       {/* The provider served less than was asked for. Said plainly, because master can now select a

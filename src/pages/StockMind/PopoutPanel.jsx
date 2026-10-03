@@ -73,6 +73,9 @@ export default function PopoutPanel({ params }) {
   // sentence about an empty window, and reported an engine that never started as "no bars stored".
   const [meta, setMeta] = useState(null);
   const [fail, setFail] = useState(null);
+  // This window refreshes itself, so without its own record the one chart that fetches on its own
+  // would be the one that could not say when the last reply landed.
+  const [fetchedAt, setFetchedAt] = useState(null);
 
   const title = `${symbol} · ${String(panel || '').toUpperCase()}`;
 
@@ -107,6 +110,9 @@ export default function PopoutPanel({ params }) {
         user, symbol, exchange, interval, limit: limitForDates(interval, null, null),
       });
       if (res?.ok) {
+        // A reply that arrived is a fetch that completed, whatever it carried; the bar age speaks for
+        // the data.
+        setFetchedAt(Date.now());
         setBars(Array.isArray(res.data?.bars) ? res.data.bars : []);
         setMeta(res.data || null);
       } else {
@@ -178,6 +184,7 @@ export default function PopoutPanel({ params }) {
                       stored: Number.isFinite(meta.stored) ? meta.stored : 0,
                     } : null}
                     replyNote={meta?.note || null}
+                    fetchedAt={fetchedAt}
                     failure={fail} />
       </Frame>
     );
