@@ -742,22 +742,20 @@ Deleting it stops everything again, needs no running Rāma, and cannot be taken 
 > `Select-String -Path RAMA_AGI_MASTER_SPEC.md -Pattern '^## SECTION 13[0-9]'` and
 > `Select-String -Path RAMA_AGI_MASTER_SPEC.md -Pattern '^\| 15[0-9] \|'`.
 >
-> **STATE AFTER THE FOURTH BUILD REVIEW:** **Block B (ledger row 152) HAS BEEN INSERTED** into
-> SECTION 28, as a single line after row 146, with nothing else in that section touched — by the second
-> round, at `518a759`. **THE LINE NOW IN THE SPEC IS THE ROUND-2 TEXT AND IS STALE: it says
-> `2518 → 3035` and *"Two build-review rounds"*. Round 3 raised the staleness, round 4 was graded a NIT
-> for it (finding 3), and BOTH rounds were instructed not to modify `RAMA_AGI_MASTER_SPEC.md`, so
-> neither did. Block B below is the CORRECTED line — `verifyUpgradeApplier.cjs` **483**,
-> `2518 → 3198`, **four** build-review rounds, with `fs.realpathSync.native` named as what closed the
-> path fence — and applying it is a one-line replacement of the existing row 152, nothing more.
-> **Re-measure before pasting:** `npm run verify` printed **3198 passed, 0 failed** across 28
-> counting scripts at `HEAD` of this branch, and `dev` has moved since this worktree was cut.**
-> **Block A (Section 132) is STILL PASTE-READY and is deliberately not in the spec:** this worktree's copy of
-> `RAMA_AGI_MASTER_SPEC.md` was cut at `c595342` and `dev` has since added sections 129, 130, 131, 133
-> and 135, so a new section inserted here writes into the region `dev` has grown. Paste it on `dev`,
-> after Section 131, and confirm 132 is still free first. The ledger row states in its own first
-> sentence that the section is not in the document yet and where it lives, so the pointer is honest
-> rather than dangling.
+> **STATE AFTER THE MERGE ONTO `dev` — BOTH BLOCKS ARE NOW IN THE SPEC, so the two blocks below are
+> the SOURCE of what is there and no longer an instruction to paste anything.** Ledger row 152 went in
+> at `518a759` as a single line, was corrected in place at `476f5d9`, and sits between rows 151 and 153
+> with nothing else in SECTION 28 touched and the I1–I17 block untouched. Section 132's prose was
+> pasted in during the merge, between Sections 131 and 133 — it was held out of the branch's copy of
+> `RAMA_AGI_MASTER_SPEC.md` deliberately, because that copy was cut at `c595342` and `dev` had since
+> grown Sections 129, 130, 131, 133, 134 and 135 into the same region.
+>
+> **The numbers in Block B below are the BRANCH's numbers and are superseded by the spec's.** The
+> branch measured `3198 passed, 0 failed` across 28 counting scripts; after the rebase onto `dev` the
+> merged chain measured **4021 passed, 0 failed across 33 counting scripts, 34 chain entries**, with
+> `verifyAutonomyStop.cjs` 197 and `verifyUpgradeApplier.cjs` 483 unchanged. Row 152 in the spec
+> carries both figures. `npm run build` PASSED in 24.89 s from the main workspace. Read the spec row,
+> not this block, for what holds today.
 
 ### Block A — the spec section
 
