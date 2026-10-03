@@ -185,7 +185,10 @@ const MASTER_DRIVEN_ENTRIES = Object.freeze([
     reason: 'applying or undoing a change master already approved is master\'s act; the level comes '
           + 'from policy.requireMasterDriven over the frozen MASTER_ACT subset, whose members are also '
           + 'PERMANENT so no data edit can refuse master either, and "Rāma does not start an apply" is '
-          + 'held by the asserted absence of in-process callers of proposals.apply',
+          + 'held by every proposals.apply call site sitting inside an ipcMain.handle — two today, '
+          + 'electron/ipc/evolutionEngine.cjs and electron/lib/proposals.cjs, with the suite red on a '
+          + 'third or on one reached from a timer or a loop. It is NOT an absence of callers: there '
+          + 'are two, and the asserted property is where they sit',
   }),
 ]);
 

@@ -286,8 +286,12 @@ async function applyWith(io, proposal, opts = {}) {
   // and is therefore RENDERER-SUPPLIED, not merely forgeable by code already inside the main process.
   // That hole is pre-existing and lives in a protected file, so this build can only decline to depend
   // on it: what the check buys is that the applier does not assume `proposals.cjs` ran its own gate,
-  // and what guarantees Rāma does not START an apply is the asserted ABSENCE of in-process callers of
-  // `proposals.apply`. Binding that user to the authenticated session is on the "FOR MASTER" list.
+  // and what guarantees Rāma does not START an apply is that every `proposals.apply` call site sits
+  // inside an `ipcMain.handle` — two today, `electron/ipc/evolutionEngine.cjs` and `electron/lib/
+  // proposals.cjs`, asserted in `verifyUpgradeApplier.cjs` and red on a third or on one reached from a
+  // timer or a loop. NOT an absence of callers: there are two. (`autonomyStop.lift()` IS a genuine
+  // absence and is asserted as one; the two cases are easy to conflate.) Binding that user to the
+  // authenticated session is on the "FOR MASTER" list.
   const user = opts?.user;
   const masterDriven = !!(user && typeof user.tier === 'number' && capability.can(user, 'self-modify.apply'));
   if (!masterDriven) throw new Error('apply requires an authenticated tier-0 user (I6)');

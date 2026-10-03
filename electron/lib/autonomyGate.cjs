@@ -218,9 +218,25 @@ function normalisePath(p) {
  * the plain call: `fs.realpathSync('…/AUTONO~1.CJS')` returns the SHORT PATH UNCHANGED and is useless
  * here, while `fs.realpathSync.native('…/AUTONO~1.CJS')` returns `…/electron/lib/autonomyStop.cjs` AND
  * `fs.realpathSync.native('…/autonomyStop.cjs::$DATA')` returns that same canonical long path. One call
- * therefore closes the short basename and the stream suffix together, and closes any further
- * FILESYSTEM SYNONYM — a junction, a hard link's other name, a case variant — without being told about
- * it first. That is the falsifiable difference between this round and the three before it.
+ * therefore closes the short basename and the stream suffix together, and closes any further synonym
+ * that is a different SPELLING OF THE SAME PATH — a junction, a case variant — without being told
+ * about it first. That is the falsifiable difference between this round and the three before it.
+ *
+ * WHAT IT DOES NOT CLOSE, because the distinction is the whole limit of the method: `realpathSync.native`
+ * answers which PATH a name resolves to, NOT which FILE. A HARD LINK is therefore still open. Measured
+ * on this platform: an alias of `autonomyStop.cjs` has `nlink=2` and an identical `(dev,ino)` pair, yet
+ * `.native` reports the two names as DIFFERENT canonical paths, `lstat().isSymbolicLink()` is false so
+ * the symlink refusal does not see it, and `baseSha256` read through the alias matches the real file so
+ * the drift check passes — a master-approved patch through the alias rewrites the governed bytes. It is
+ * NOT a live hole: no `linkSync` or `symlinkSync` exists anywhere in `electron/`, `src/` or `scripts/`
+ * outside `buildInstaller.cjs`'s tmpdir probe and the applier suite's own fixture, so creating the link
+ * needs a write inside the repository root that every other gate already governs, and Rāma's own route
+ * cannot reach it even with an allow-file present because `classFor` sends a diff-bearing filing to
+ * `propose-source`, whose L1 floor is below the L3 this would need. `scripts/verifyUpgradeApplier.cjs`
+ * §13 records it as a residual and marks it UNTESTED; that residual and this header are the same claim.
+ * Closing it means comparing file IDENTITY rather than path text — refusing a patch target whose
+ * `(dev,ino)` matches a governed entry, or fail-closed, any target with `nlink > 1`. That is a
+ * behavioural change and is deliberately NOT in this slice.
  *
  * Three things this is careful about:
  *
