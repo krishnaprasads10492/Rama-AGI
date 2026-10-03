@@ -355,6 +355,122 @@ listing**. Asserting the wrong one of those two would have been a green row over
 
 ---
 
+## 1D. THE FOURTH BUILD-REVIEW ROUND — AND THE ROUND THAT RETIRED THE METHOD
+
+`docs/research/build-review.json` returned **CHANGES_REQUESTED** a fourth time: **1 HIGH, 1 MEDIUM,
+1 NIT.** No module was re-implemented. `+50` assertions in `verifyUpgradeApplier.cjs`, none anywhere
+else; **no existing row was rewritten, weakened or removed**, and two existing source-shape rows were
+widened only to the extent that `realpathSync?.native` is spelled with an optional chain.
+
+### Finding 1 (HIGH) — an NTFS 8.3 SHORT BASENAME, and why no fifth transform was written
+
+This was the **fourth** spelling class the path fence failed to canonicalise in four rounds: round 1 was
+unresolved structure, round 2 a trailing dot and space, round 3 the `::$DATA` stream suffix. The first
+three were each arguably "one more character case". This one is not, and that is the finding's real
+content: `AUTONO~1.CJS` shares a **six-character prefix** with `autonomyStop.cjs` and nothing else, so
+**no transform over the characters can recover the governed name.** A fifth filesystem synonym — another
+hard link, a junction, a case-folding quirk — would have defeated a character fence the same way.
+
+8.3 generation is **live on this volume for the real worktree**, not only for a scratch fixture.
+Measured with `dir /x`: `electron/lib` reports `AUTONO~1.CJS autonomyStop.cjs`,
+`AUTONO~2.CJS autonomyPolicy.cjs`, `AUTONO~3.CJS autonomyGate.cjs`, and `shared/` reports
+`LOYALT~1.JSO loyalty-tripwire.json`. Before the fix: `gate.namesGovernedPath('electron/lib/AUTONO~1.CJS')`
+returned `null`, `spellingRefusal` returned `null`, `readFileSync` through the spelling returned the real
+file's bytes so the `baseSha256` base-drift check **passed rather than catching it**,
+`loyaltyGuard.inspectChanges` refused nothing — and a master-approved `patch` **applied**. The reviewer
+also measured the reach, which is what made this worse than round 3: at origin `ipc` **the long name was
+refused and the short name was ALLOWED**, so the renderer route was LIVE rather than latent, and
+`electron/ipc/timeline.cjs`'s pre-existing `SELF_MODIFY` applier writes `changes[].path` with no root
+confinement.
+
+**THE METHOD CHANGED. The fence now asks the FILESYSTEM which file a path names.** Measured on this
+machine, which is why `.native` and not the plain call:
+
+| Call | `…/electron/lib/AUTONO~1.CJS` | `…/autonomyStop.cjs::$DATA` |
+|---|---|---|
+| `fs.realpathSync` | returns the **short path unchanged** — useless here | — |
+| `fs.realpathSync.native` | `…/electron/lib/autonomyStop.cjs` | `…/electron/lib/autonomyStop.cjs` |
+
+One call closes the short basename and the stream suffix **together**, and closes any further filesystem
+synonym without being told about it first. That is the falsifiable difference between this round and the
+three before it: the previous fixes each enumerated a spelling, and this one asks a question.
+
+Three places, which is the split the reviewer prescribed and the second one is the half that matters:
+
+1. **`upgradeApplier.canonicalPathOf` + `validatePath`.** After the existing resolve-and-confine, the
+   target is canonicalised and **the canonical form is confined too**. An EXISTING file is asked
+   directly and a failure is **refused by name**, not shrugged off; a `create` has no leaf to ask about,
+   so the **nearest existing ancestor** is canonicalised and the remainder appended — the same walk
+   `writabilityOf` already does. The resolved path is still what is WRITTEN, because a write must land
+   where master's approved change said it would; the canonical path is what is COMPARED, carried on the
+   target as `canonical`/`canonicalRel`.
+2. **`autonomyGate.canonicalPath`, consulted by `namesGovernedPath` at BOTH origins.** Round 3's fix
+   left the long name refused at `ipc` and the short name allowed, which is exactly why this was live.
+   The comparison now runs over **two** spellings — the character canonicalisation and the filesystem's
+   answer — and either one naming a governed token is a refusal. Neither subsumes the other: the
+   character route still answers for a name that addresses nothing yet (a `create` with no existing
+   ancestor, a trailing dot that makes a NEW directory entry here), and the filesystem route is the only
+   thing that catches a synonym of an existing file.
+3. **Step 2's covenant re-run is handed both spellings too.** `loyaltyGuard.cjs` is NOT one of the
+   `SELF_GOVERNING_PATHS`, so step 3 never looks at it — step 2 was the only thing between
+   `electron/lib/LOYALT~1.CJS` and the covenant file's own bytes, and it compared characters. The guard
+   itself was not touched; what changed is what it is given.
+
+**`spellingRefusal` and `stripSpellings` were KEPT, unchanged.** They are the cheap refusal for a name
+that is not yet a synonym of anything, and the colon strip stays out of `normalise` for the measured
+meta-blob reason already in the code. This round is **additive**, not a replacement.
+
+**The suite rows discover the short name at RUNTIME and let the FILESYSTEM CONFIRM it.** `~1` versus
+`~2` depends on the order a directory's entries were created — `LOYALT~1.CJS` names `loyaltyCore.cjs` in
+the real worktree and `loyaltyGuard.cjs` in a fixture built in a different order — so a hardcoded row
+would have been a row about this machine's history. The candidates are the documented 8.3 shape, and
+each is accepted **only when `realpathSync.native` of it returns the same canonical path as the long
+name**, so every row runs against a synonym the filesystem has agreed to. Verified to agree with
+`dir /x` for every file tested. A volume with 8.3 generation disabled matches nothing and the row is
+**SKIPPED with a printed RESIDUAL, never a silent pass.** No shell is spawned: `cmd /c for … %~sI`
+through `execFileSync` returned a mangled argument on this machine, and parsing `dir /x` is
+locale-dependent.
+
+Rows added: the filesystem resolution itself, **and the row stating that the character route alone still
+reads the spelling as naming nothing** — which is the row that says why the fix was needed; both create
+origins per governed path; the applier against the fixture's own root; the covenant through its short
+name; a refusal when the filesystem will not canonicalise an existing file; the degraded path when an
+injected `fs` has no `realpathSync.native` at all; and **the control** — an UNGOVERNED file reached
+through *its* short basename must still APPLY, with the bytes landing in the long-named file, so a green
+section cannot be satisfied by a fence that refuses anything with a tilde in it.
+
+### Finding 2 (MEDIUM) — a forged `appliedBy` surviving onto an entry persisted FAILED
+
+The merge at the applier's entry spread `proposal.meta.autonomy` and then overwrote four keys.
+`appliedBy` and `appliedAt` were **not among them**, so a pre-seeded pair survived onto an entry that
+`proposals.cjs` then persists **FAILED** — the exact contradiction that moving the assignment below the
+write loop was supposed to end, reached through the spread instead of through the assignment. Measured:
+seeded with `{appliedBy:'master', appliedAt:'2020-01-01T00:00:00.000Z', autonomousApply:true,
+note:'forged'}` and refused at step 3 or step 4, the entry kept `appliedBy: 'master'` and the forged
+timestamp. `autonomousApply` was already forced to `false`, which is the field the
+forward-compatibility argument rests on — so this was **an audit-trail integrity defect, not an
+authorisation one**. No byte was written and I6 held.
+
+Fixed the minimal way the finding offered, deliberately: the two fields are **deleted immediately after
+the spread**, so the only place either can be set is the success path below the write loop. The
+alternative — rebuilding the record from a whitelist — would have dropped the unrecognised-but-innocent
+fields that an existing row asserts are preserved, and weakening a passing assertion to fix a MEDIUM is
+the wrong trade. §17 pre-seeds the forgery, forces a refusal at **three different steps**, and asserts
+neither field survives while `autonomousApply` is false and `note` is untouched — plus the control that
+a SUCCESSFUL apply still records both, so the fix cannot degenerate into "delete them always".
+
+### Finding 3 (NIT) — ledger row 152 understating its own build
+
+The row in the spec said `verifyUpgradeApplier.cjs (320)` and `2518 → 3035`, two build-review rounds.
+Re-measured by the reviewer and again here, it was **433** and **3148** at the time, three rounds. The
+instruction for this round is again **not to modify `RAMA_AGI_MASTER_SPEC.md`**, so it was not modified.
+**Block B in §6 is the corrected one-line replacement and it now carries this round's numbers — 197 and
+483, 2518 → 3198, four build-review rounds — with `fs.realpathSync.native` named as what closed the
+fence.** The staleness is raised here rather than quietly edited, exactly as round 3 did, and applying
+it stays a one-line replacement that rebases onto `dev`.
+
+---
+
 ## 2. EVERY DESIGN CLAIM MEASURED **FALSE** AGAINST SOURCE
 
 | Claim in the design | Measured | What was built instead |
@@ -377,6 +493,8 @@ listing**. Asserting the wrong one of those two would have been a green row over
 | `upgradeApplier.cjs`'s step-0 comment: *"a `{tier: 0}` object is forgeable **in-process**"* | **UNDERSTATED.** `proposals:apply` is `ipcMain.handle('proposals:apply', (_e, id, opts) => apply(id, opts \|\| {}))` at **269**, and `apply()` authorises `opts.user` at **219** — the user object arrives with the IPC request. | The comment says renderer-supplied, and the fix is on the FOR MASTER list because `proposals.cjs` is protected. |
 | **This note's own §2 row 1 again, and the in-scope claim *"the STOP unreachable by any proposal"*** | **FALSE A SECOND TIME, for a different spelling class.** An NTFS alternate-data-stream suffix is a SYNONYM for the primary stream, not a neighbouring file: `namesGovernedPath('electron/lib/autonomyStop.cjs::$DATA')` returned `null`, `path.resolve` kept the suffix so confinement passed, `lstat` said regular file, `readFileSync` through it returned the real file's **25255 bytes** so the `baseSha256` base-drift check **PASSED**, and a master-approved `patch` APPLIED — the stop module afterwards read `function isStopped(){return false;}`. `shared/loyalty-tripwire.json` was replaced the same way. | Refused as a SPELLING CLASS in `upgradeApplier.spellingRefusal` (any `:` outside a leading drive designator, any control character) before anything resolves it, **and** canonicalised in `autonomyGate.stripSpellings` so the governed-path fence reports it at both origins and at step 3. `+113` assertions: ten spellings × four governed paths × three gates, the applier, an ungoverned control that distinguishes the two refusals, and a protected-file pass over all ten. |
 | **`upgradeApplier.cjs`'s step-2 header: *"the loyalty guard, RE-RUN rather than trusted from creation"*** | **FALSE for the stream spelling.** `loyaltyGuard.normalise` (**209–214**) swaps separators, strips a leading `./` and lower-cases; it neither resolves structure nor strips a stream suffix. `guard.inspectChanges` returned `{ok: true, refused: []}` for `electron/lib/loyaltyGuard.cjs::$DATA`, a spelling that reads and writes the real file's bytes. The blind spot is **pre-existing** and `loyaltyGuard.cjs` is protected. | The applier canonicalises each change's path through `gate.normalisePath` **before** handing it to the guard, one change at a time so the refusal still names the spelling master wrote. All ten spellings of a protected file are now refused **at step 2, by the covenant.** The guard itself was not touched; what changed is what it is given. |
+| **This note's own §2 row 1 and the in-scope claim *"the STOP unreachable by any proposal"*, a THIRD time — and `autonomyGate`'s own header claim that the fence canonicalises every spelling** | **FALSE for a FOURTH spelling class: an NTFS 8.3 SHORT BASENAME, and this one is not a respelling at all.** `dir /x` reports `AUTONO~1.CJS autonomyStop.cjs`, `AUTONO~2.CJS autonomyPolicy.cjs` and `LOYALT~1.JSO loyalty-tripwire.json` **in the real worktree**. `namesGovernedPath('electron/lib/AUTONO~1.CJS')` returned `null`, `spellingRefusal` returned `null`, `readFileSync` through the spelling returned the real file's bytes so the base-drift check **PASSED**, and a master-approved `patch` APPLIED. Measured reach: at origin `ipc` the long name was refused and **the short name was ALLOWED**, so the renderer route was LIVE. `AUTONO~1.CJS` shares a six-character prefix with the long name and nothing else, so **no character transform could have fixed it.** | **The method was retired, not extended.** `fs.realpathSync.native` — measured: the plain call returns a short path unchanged, `.native` resolves both the short basename and `::$DATA` to the same canonical long path — is consulted in `upgradeApplier.canonicalPathOf`/`validatePath` (which confines the canonical form too), in `autonomyGate.canonicalPath` so `namesGovernedPath` reports it **at both origins**, and in step 2's covenant re-run. `spellingRefusal` and `stripSpellings` are unchanged and still run. `+50` assertions, the short name **discovered at runtime and confirmed by the filesystem**, with a control proving an ungoverned file reached through its own short name still applies. |
+| **`upgradeApplier.cjs`'s entry comment: *"`appliedBy`/`appliedAt` are written on the success path only"*** | **FALSE for a CALLER-SUPPLIED one.** The merge spread `proposal.meta.autonomy` and overwrote four keys; these two were not among them. Measured: an entry seeded with `appliedBy: 'master'` and refused at step 3 or step 4 persisted **FAILED while still claiming master applied it**. `autonomousApply` WAS correctly forced to false, so this was an audit-trail defect and not an authorisation one. | Both fields are **deleted immediately after the spread**, above every validation, so the success path below the write loop is the only writer. §17 forces a refusal at three steps with the forgery pre-seeded and asserts neither survives — plus a control that a successful apply still records both. |
 | The build review's own fix note: *"canonicalise by resolution … the way the pre-existing `loyaltyGuard` already does"* | **FALSE as to mechanism, true as to outcome.** `loyaltyGuard.normalise` (**209–214**) is byte-for-byte the same non-resolving function. What makes it refuse `electron/lib/./loyaltyGuard.cjs` is a *third* clause in `inspectChanges` at **229** — `p.endsWith(basename(prot)) && p.includes(dirname(prot))` — which is basename-plus-dirname matching, not resolution. | The prescribed fix was adopted anyway, because it is the better one: resolution is exact where basename matching is a heuristic that would also refuse an unrelated file of the same name in the same directory tree. Recorded because *"copy what loyaltyGuard does"* would have reproduced the hole. |
 
 **One thing the design claimed and source confirmed, worth recording because the whole slice rests on
@@ -395,13 +513,19 @@ disturb the tripwire. Both asserted.
 | **After the first build review** | 29 | 28 | **2949** | 0 |
 | **After the second build review** | 29 | 28 | **3035** | 0 |
 | **After the third build review** | 29 | 28 | **3148** | 0 |
+| **After the fourth build review** | 29 | 28 | **3198** | 0 |
 
 Both numbers in the last row were measured by summing every `N passed, M failed` line the chain prints,
-once with the three changed files stashed and once with them restored: **3035 → 3148, `+113`, 0 failures
-either way.**
+before the round's edits and again after them: **3148 → 3198, `+50`, 0 failures either way**, across
+**28** scripts that print a count. `verifyUpgradeApplier.cjs` is **433 → 483**;
+`verifyAutonomyStop.cjs` is unchanged at **197**; `verifyInvariants.cjs` and
+`verifyLoyaltyTripwire.cjs` are both **ALL PASS**, and the tripwire's `--approve` was **not run**.
 
-The slice is `+630` in total: `+197` from `verifyAutonomyStop.cjs` and `+433` from
-`verifyUpgradeApplier.cjs`. The third review round added `+113`, all of them in the applier suite, and
+The slice is `+680` in total: `+197` from `verifyAutonomyStop.cjs` and `+483` from
+`verifyUpgradeApplier.cjs`. The fourth review round added `+50`, all of them in the applier suite,
+appended inside §13 and as a new §17 at the end, and **rewrote no row** — the two source-shape rows it
+touched were widened only to accept `realpathSync?.native`'s optional chain. The third review round
+added `+113`, all of them in the applier suite, and
 rewrote one row in place — the `variants` coverage count, seven spellings → ten. The second review round
 added `+86` (`+10` and `+76`), rewrote
 three rows in place — the `Object.isFrozen(PERMANENT)` clause, the regex over `requireMasterDriven`'s
@@ -524,6 +648,40 @@ print across the two suites on every run and are counted out loud rather than hi
   `require` and registers no applier at all, which is the safe direction and is **not** the fail-open
   behaviour the create fence's wiring site has.
 
+### Added by the fourth build review
+
+- **The 8.3 short-basename measurement is WINDOWS-ONLY, and so is the fix's necessity.** That
+  `electron/lib/AUTONO~1.CJS` is a synonym for `autonomyStop.cjs` — on this volume, for the real
+  worktree — was measured here and nowhere else. On a POSIX host there are no 8.3 names and
+  `realpathSync.native` resolves symlinks and nothing more, so the second spelling the fence compares is
+  simply the resolved path. The fix is therefore **inert on POSIX and necessary here**, and if a future
+  platform has a synonym mechanism `realpathSync.native` does not report, this fence misses it again.
+- **`fs.realpathSync.native` is now on the gating path, and it is a SYSCALL per change path.** Unmeasured
+  cost, on top of the `accessSync` probe. Both are stat-class calls on a handful of paths at a rate of
+  one per proposal filing or apply, so it is almost certainly irrelevant — nobody has timed it. More
+  importantly: it means the governed-path fence now **depends on the filesystem being answerable**. A
+  create gate called for a path on a disconnected network volume gets `''` back and falls through to the
+  character comparison, which is the pre-existing behaviour and the safe direction, but it is a
+  degradation the suite does not exercise.
+- **The ancestor walk is bounded at 64 levels and that bound is arbitrary.** A path deeper than 64
+  segments canonicalises to `''` in the gate and is refused outright in the applier. No real source path
+  is that deep; the number was chosen, not derived.
+- **A FIFTH synonym class is not excluded, and this is recorded as an OPEN RESIDUAL rather than repaired
+  on a guess.** Four rounds of character transforms were the wrong approach; asking the filesystem closes
+  everything the filesystem will admit to. If something addresses a governed file and
+  `realpathSync.native` still reports a different canonical path for it — a hard link's second name in
+  another directory is the obvious candidate, since it genuinely IS a different path to the same inode —
+  **this fence misses it.** A hard link to a governed file inside the repository root has not been tested
+  and `fs.lstatSync().nlink` is not consulted. Stated here so the next reviewer grades a known gap rather
+  than discovering an unknown one.
+- **The MEDIUM was fixed by deletion, not by a whitelist, and that is a bounded choice.** Anything a
+  caller puts in `meta.autonomy` other than `appliedBy`/`appliedAt`/`autonomousApply` still survives onto
+  the persisted entry — `note: 'forged'` is asserted to survive, on purpose, because an existing passing
+  row depends on it. So the guarantee is narrow and exact: **no field on a FAILED entry claims the apply
+  happened.** It is not "the audit record is authored solely by the applier".
+- **`npx vite build` still has not been run and still cannot be run from this worktree.** `node_modules`
+  is absent. No `.jsx` was touched in this round either.
+
 ---
 
 ## 5. FOR MASTER — the entries this build cannot add
@@ -584,13 +742,16 @@ Deleting it stops everything again, needs no running Rāma, and cannot be taken 
 > `Select-String -Path RAMA_AGI_MASTER_SPEC.md -Pattern '^## SECTION 13[0-9]'` and
 > `Select-String -Path RAMA_AGI_MASTER_SPEC.md -Pattern '^\| 15[0-9] \|'`.
 >
-> **STATE AFTER THE THIRD BUILD REVIEW:** **Block B (ledger row 152) HAS BEEN INSERTED** into
+> **STATE AFTER THE FOURTH BUILD REVIEW:** **Block B (ledger row 152) HAS BEEN INSERTED** into
 > SECTION 28, as a single line after row 146, with nothing else in that section touched — by the second
 > round, at `518a759`. **THE LINE NOW IN THE SPEC IS THE ROUND-2 TEXT AND IS STALE: it says
-> `2518 → 3035` and *"Two build-review rounds"*. The third round was instructed not to modify
-> `RAMA_AGI_MASTER_SPEC.md`, so it did not, and it is RAISING the staleness here instead of quietly
-> editing it. Block B below is the CORRECTED line — `2518 → 3148`, three rounds — and applying it is a
-> one-line replacement of the existing row 152, nothing more.**
+> `2518 → 3035` and *"Two build-review rounds"*. Round 3 raised the staleness, round 4 was graded a NIT
+> for it (finding 3), and BOTH rounds were instructed not to modify `RAMA_AGI_MASTER_SPEC.md`, so
+> neither did. Block B below is the CORRECTED line — `verifyUpgradeApplier.cjs` **483**,
+> `2518 → 3198`, **four** build-review rounds, with `fs.realpathSync.native` named as what closed the
+> path fence — and applying it is a one-line replacement of the existing row 152, nothing more.
+> **Re-measure before pasting:** `npm run verify` printed **3198 passed, 0 failed** across 28
+> counting scripts at `HEAD` of this branch, and `dev` has moved since this worktree was cut.**
 > **Block A (Section 132) is STILL PASTE-READY and is deliberately not in the spec:** this worktree's copy of
 > `RAMA_AGI_MASTER_SPEC.md` was cut at `c595342` and `dev` has since added sections 129, 130, 131, 133
 > and 135, so a new section inserted here writes into the region `dev` has grown. Paste it on `dev`,
@@ -650,7 +811,7 @@ a diff against the stop's own module was fileable at both origins and at the app
 precedes comparison, with a control proving the fence resolves paths rather than rejecting
 unusual-looking ones.
 
-**The path fence failed three times, on three different spellings, and the third one mattered most.**
+**The path fence failed FOUR times, on four different spellings, and the fourth one retired the method.**
 Round 1 was unresolved structure. Round 2 was a trailing dot and space, which `path.posix.normalize`
 leaves alone — graded a NIT because those are genuinely distinct files here, so the governed bytes
 survived. Round 3 was an **NTFS alternate data stream**, and that is not a respelling: `file::$DATA` is a
@@ -664,9 +825,23 @@ are now refused as a SPELLING CLASS in the applier before anything resolves them
 the gate so the fence reports them; and the applier hands the loyalty guard the canonical path, because
 the guard is protected and its own comparison does not resolve either.** Ten spellings × four governed
 paths × every gate, plus a protected-file pass, and every row asserts the governed file is
-**byte-identical afterwards** — the assertion whose absence let round 2 grade this class a NIT. **The
-lesson, recorded because it is the reusable part: a path fence must be proven by EXECUTING the attack and
-reading the bytes back, not by reading the comparison.**
+**byte-identical afterwards** — the assertion whose absence let round 2 grade this class a NIT.
+
+Round 4 was an **NTFS 8.3 short basename**, and it is the one that ended the approach. `dir /x` reports
+`AUTONO~1.CJS autonomyStop.cjs` and `LOYALT~1.JSO loyalty-tripwire.json` **in the real tree**, the short
+name shares a six-character prefix with the long one and nothing else, and at origin `ipc` the long name
+was refused while the short name was **allowed** — so the renderer route was live, not latent. **No
+fifth character transform was written.** The fence now asks the filesystem:
+`fs.realpathSync.native` — measured, the plain call returns a short path unchanged — resolves the short
+basename *and* `::$DATA` to the same canonical long path, so one question closes all four classes and
+any further synonym the filesystem will admit to. It is consulted in the applier's `validatePath`
+(which confines the canonical form too), in the gate so the fence reports the spelling **at both
+origins**, and in the covenant re-run. The character canonicalisers were kept and still run, because
+they answer for a name that addresses nothing yet. **The lesson, recorded because it is the reusable
+part: a path fence must be proven by EXECUTING the attack and reading the bytes back, not by reading the
+comparison — and after the second miss, stop enumerating spellings and ask the authority that owns the
+namespace.** One residual is stated rather than guessed at: a hard link's second name is a different
+canonical path to the same inode, `nlink` is not consulted, and that case is untested.
 
 **Nothing autonomous was unlocked.** `author-change` and `propose-source` sit at L1, L5 is declared and
 unreachable, `fileProposal` has no caller, and the five stage functions are asserted ABSENT so the
@@ -688,5 +863,5 @@ shipped applier.
 ### Block B — the ledger row
 
 ```markdown
-| 152 | The stop, the policy table, and the gate on `proposals:create` — built before there is anything autonomous | done | Section 132 — **the section's prose is NOT in this document yet; it is paste-ready in `docs/research/self-upgrade-build.md` §6 Block A**, held out of this file deliberately so this row is a one-line insertion that rebases cleanly onto `dev`. **THE LOCKED DECISION, master's option 1: I6 and I17 stay INTACT — Rāma proposes, master approves, and nothing in this slice applies a source change without a recorded approval. No autonomy rung was climbed.** The STOP is built BEFORE anything is autonomous, because a stop retrofitted onto a running loop is the one thing that must not be retrofitted. **BUILT: four modules — `electron/lib/autonomyStop.cjs` (the fail-safe switch), `autonomyPolicy.cjs` (fifteen classes over frozen floors/ceilings/permanence), `autonomyGate.cjs` (the create fence) and `upgradeApplier.cjs` (entry validation plus a byte snapshot) — and two suites, `verifyAutonomyStop.cjs` (197) and `verifyUpgradeApplier.cjs` (433), appended to the end of the `verify` chain and never reordered. 2518 → 3148 assertions, 0 failures.** **TWO PREDICATES, AND THE ASYMMETRY IS THE DECISION: `isStopped()` is fail-safe — no `<userData>/rama/autonomy.allow`, an unreadable file, invalid JSON, `"true"`, `1`, `{}`, `null` or a directory there all mean STOPPED — and it governs NEW autonomous action only. `isHalted()` is true only on an explicit `engage()` or `RAMA_AUTONOMY=stop` and is the predicate the four PRE-EXISTING dispatchers will consult when a teardown is built; NOTHING CALLS IT YET and the module says so. Governing those four with the fail-safe predicate would have deleted five shipping behaviours on every install until master hand-created a file nobody had told him about — `ollama-catalog`, `dependency-review`, the metacognition audit, selfCare's 120s sweep including `checkInstanceFailover`, and marketIntel's two ticks — a regression wearing a fail-safe argument, which I11 has no exception for. A counting fake proves a default install still dispatches.** **SEVEN PERMANENT POLICY CLASSES THE DATA FILE IS NOT READ FOR AT ALL** (`apply-source`, `revert-own-apply`, `release-classify`, `capability-grant`, `loyalty-core`, `master-record` — Section 127 — and `autonomy-policy`), with the editable eight DERIVED from them so two lists cannot disagree; `shared/autonomy-policy.json` ships ABSENT so the floors are the shipped levels, and a file that so much as names a permanent class is rejected WHOLE. **THE DEFECT TWO REVISIONS EACH THOUGHT THEY HAD FIXED: on a shipped install every class resolves to L0, so an unconditional `policy.require('revert-own-apply','L4')` at the applier's entry REFUSED A MASTER-APPROVED APPLY on every install — hidden because the row testing it used an allow-file fixture. The level now comes from `requireMasterDriven` over the frozen two-member `MASTER_ACT` subset, both members also PERMANENT so no data edit can refuse master either, and the first assertions in the suite run in the state a real install boots into: no allow-file, no policy file, master's apply SUCCEEDS.** **THE HOLE A LATER SESSION COULD NOT RECONSTRUCT, FOUND BY EXECUTING THE ATTACK RATHER THAN READING THE CODE: `autonomyGate.normalise` swapped separators and stripped a leading `./` but NEVER RESOLVED PATH STRUCTURE, so `electron/lib/./autonomyStop.cjs`, `electron//lib/autonomyStop.cjs`, `electron/lib/../lib/autonomyStop.cjs` and the backslash form all read as naming nothing governed — a `self-upgrade` proposal with a correct `baseSha256` passed the create gate at BOTH origins and the applier's step 3, and the stop module on disk afterwards read `function isStopped(){return false;}`. `autonomyStop.cjs` is not in `PROTECTED_FILES`, so nothing downstream objected. I6 still held — the apply needed master's recorded approval — but the diff should never have been fileable. FIXED BY RESOLVING BEFORE COMPARING (`path.posix.normalize`), plus per-segment trimming of a trailing dot or space, which `normalize` does not collapse and which on this platform left `autonomyStop.cjs.` and `autonomyStop.cjs ` readable as ungoverned. Ten spellings × four governed paths × every gate, with a control proving the fence RESOLVES paths rather than refusing odd-looking ones.** **THE SAME FENCE FAILED A THIRD TIME, ON THE ONE SPELLING THAT IS NOT A RESPELLING: an NTFS alternate data stream. `file::$DATA` is a SYNONYM for the primary stream, so `path.resolve` kept the suffix, `lstat` said regular file, `readFileSync` through it returned the real file's 25255 bytes — and the `baseSha256` base-drift check, whose entire job is to notice the file is not the file the change was computed from, PASSED instead of catching it. A master-approved patch left `autonomyStop.cjs` reading `function isStopped(){return false;}`; the same spelling replaced `shared/loyalty-tripwire.json` and carried a patch of `loyaltyGuard.cjs` past step 2's covenant re-run with `inspectChanges` returning `{ok:true,refused:[]}`. Round 2 graded the trailing-dot class a NIT because the governed bytes SURVIVED; this is the first class where they did not. FIXED IN TWO PLACES AND A THIRD NOBODY ASKED FOR: `upgradeApplier.spellingRefusal` refuses a `:` outside a leading drive designator and any control character for EVERY path before anything resolves it, so the revert path — whose own failure is fatal and revokes master's allow-file — is never entered for it; `autonomyGate.stripSpellings`/`normalisePath` canonicalise the same two so `namesGovernedPath` reports them at both origins and at step 3; and the applier now hands `loyaltyGuard.inspectChanges` the CANONICAL path, because that guard's own comparison does not resolve structure or strip a stream suffix either and it is a protected file this build cannot fix. The colon strip is deliberately NOT in `normalise`: `normalise` is applied to the stringified `meta` blob and JSON is full of colons — measured, folding it in turns `{"plan":"then patch electron/lib/x.cjs"}` into `{"plan"/lib/x.cjs"}` and the meta scan MISSES a path it catches today. Every variant row now asserts the governed file is BYTE-IDENTICAL afterwards, which is the assertion whose absence let round 2 grade this class a NIT.** **OPEN GAP, STATED PLAINLY RATHER THAN ASSUMED COVERED: `shared/autonomy-policy.json`, `electron/lib/autonomyPolicy.cjs`, `electron/lib/autonomyStop.cjs` and `shared/loyalty-tripwire.json` are NOT in `loyaltyGuard.PROTECTED_FILES` (seven entries, tripwire-asserted), so they are not tamper-evident by that route — the create fence and the applier's entry validation are the only mechanical guards on them today. `loyaltyGuard.cjs` and `shared/capabilities.json` are protected and invariant-adjacent, so this build ASKS: add those four paths to `PROTECTED_FILES` and the tripwire manifest, and add `"system.suspend-autonomy": 0` and `"autonomy.view": 1` to the matrix. Until the capability exists, `lift()` cannot succeed for anyone including master, and the refusal names the file he writes by hand instead of rendering a dead button.** Three build-review rounds were fixed in place rather than re-implemented: round 1 (1 HIGH / 2 MEDIUM / 3 NIT, +160), round 2 (1 MEDIUM / 7 NIT, +86) and round 3 (1 HIGH, +113) — the frozen `Set`s that were mutable because `Object.freeze` freezes properties and not internal slots, a fence asserted by regex and now executed, both master-driven classes resolved instead of only the revert net, `appliedBy` no longer written onto an entry refused at the door, and an unwritable destination refused as an environment problem instead of becoming a FATAL revert that revoked master's allow-file. **`node_modules` is absent from the worktree, so `vite build` was NOT run — no `.jsx` changed. NOT VERIFIED: the app has never booted with these modules loaded, `app.getPath('userData')` has never been resolved (every row injects a scratch root), `fileProposal` has no caller in the shipped tree, `engage()` tears down nothing by design, `lift()` has never succeeded against the real capability matrix, and a torn read of a hand-edited policy file falls back to the floors.** **NEXT STEP: the five-stage NOTICE/RESEARCH/WEIGH/PROPOSE/ANALYSE loop and `upgradeAuthor.cjs`, both DEFERRED and blocked on design-review findings 2 and 5 — see `docs/research/SELF_UPGRADE.md` § DEFERRED BY THE ORCHESTRATOR for the full deferred list with the finding id gating each item. Before any of it: paste Section 132 from the build note, and decide the two protected-file/capability additions above, because the loop files proposals and the fence on its own state is not complete without them.** |
+| 152 | The stop, the policy table, and the gate on `proposals:create` — built before there is anything autonomous | done | Section 132 — **the section's prose is NOT in this document yet; it is paste-ready in `docs/research/self-upgrade-build.md` §6 Block A**, held out of this file deliberately so this row is a one-line insertion that rebases cleanly onto `dev`. **THE LOCKED DECISION, master's option 1: I6 and I17 stay INTACT — Rāma proposes, master approves, and nothing in this slice applies a source change without a recorded approval. No autonomy rung was climbed.** The STOP is built BEFORE anything is autonomous, because a stop retrofitted onto a running loop is the one thing that must not be retrofitted. **BUILT: four modules — `electron/lib/autonomyStop.cjs` (the fail-safe switch), `autonomyPolicy.cjs` (fifteen classes over frozen floors/ceilings/permanence), `autonomyGate.cjs` (the create fence) and `upgradeApplier.cjs` (entry validation plus a byte snapshot) — and two suites, `verifyAutonomyStop.cjs` (197) and `verifyUpgradeApplier.cjs` (483), appended to the end of the `verify` chain and never reordered. 2518 → 3198 assertions, 0 failures across 28 counting scripts; `verifyInvariants.cjs` and `verifyLoyaltyTripwire.cjs` both ALL PASS and the tripwire's `--approve` was never run.** **TWO PREDICATES, AND THE ASYMMETRY IS THE DECISION: `isStopped()` is fail-safe — no `<userData>/rama/autonomy.allow`, an unreadable file, invalid JSON, `"true"`, `1`, `{}`, `null` or a directory there all mean STOPPED — and it governs NEW autonomous action only. `isHalted()` is true only on an explicit `engage()` or `RAMA_AUTONOMY=stop` and is the predicate the four PRE-EXISTING dispatchers will consult when a teardown is built; NOTHING CALLS IT YET and the module says so. Governing those four with the fail-safe predicate would have deleted five shipping behaviours on every install until master hand-created a file nobody had told him about — `ollama-catalog`, `dependency-review`, the metacognition audit, selfCare's 120s sweep including `checkInstanceFailover`, and marketIntel's two ticks — a regression wearing a fail-safe argument, which I11 has no exception for. A counting fake proves a default install still dispatches.** **SEVEN PERMANENT POLICY CLASSES THE DATA FILE IS NOT READ FOR AT ALL** (`apply-source`, `revert-own-apply`, `release-classify`, `capability-grant`, `loyalty-core`, `master-record` — Section 127 — and `autonomy-policy`), with the editable eight DERIVED from them so two lists cannot disagree; `shared/autonomy-policy.json` ships ABSENT so the floors are the shipped levels, and a file that so much as names a permanent class is rejected WHOLE. **THE DEFECT TWO REVISIONS EACH THOUGHT THEY HAD FIXED: on a shipped install every class resolves to L0, so an unconditional `policy.require('revert-own-apply','L4')` at the applier's entry REFUSED A MASTER-APPROVED APPLY on every install — hidden because the row testing it used an allow-file fixture. The level now comes from `requireMasterDriven` over the frozen two-member `MASTER_ACT` subset, both members also PERMANENT so no data edit can refuse master either, and the first assertions in the suite run in the state a real install boots into: no allow-file, no policy file, master's apply SUCCEEDS.** **THE HOLE A LATER SESSION COULD NOT RECONSTRUCT, FOUND BY EXECUTING THE ATTACK RATHER THAN READING THE CODE: `autonomyGate.normalise` swapped separators and stripped a leading `./` but NEVER RESOLVED PATH STRUCTURE, so `electron/lib/./autonomyStop.cjs`, `electron//lib/autonomyStop.cjs`, `electron/lib/../lib/autonomyStop.cjs` and the backslash form all read as naming nothing governed — a `self-upgrade` proposal with a correct `baseSha256` passed the create gate at BOTH origins and the applier's step 3, and the stop module on disk afterwards read `function isStopped(){return false;}`. `autonomyStop.cjs` is not in `PROTECTED_FILES`, so nothing downstream objected. I6 still held — the apply needed master's recorded approval — but the diff should never have been fileable. FIXED BY RESOLVING BEFORE COMPARING (`path.posix.normalize`), plus per-segment trimming of a trailing dot or space, which `normalize` does not collapse and which on this platform left `autonomyStop.cjs.` and `autonomyStop.cjs ` readable as ungoverned. Ten spellings × four governed paths × every gate, with a control proving the fence RESOLVES paths rather than refusing odd-looking ones.** **THE SAME FENCE FAILED A THIRD TIME, ON THE ONE SPELLING THAT IS NOT A RESPELLING: an NTFS alternate data stream. `file::$DATA` is a SYNONYM for the primary stream, so `path.resolve` kept the suffix, `lstat` said regular file, `readFileSync` through it returned the real file's 25255 bytes — and the `baseSha256` base-drift check, whose entire job is to notice the file is not the file the change was computed from, PASSED instead of catching it. A master-approved patch left `autonomyStop.cjs` reading `function isStopped(){return false;}`; the same spelling replaced `shared/loyalty-tripwire.json` and carried a patch of `loyaltyGuard.cjs` past step 2's covenant re-run with `inspectChanges` returning `{ok:true,refused:[]}`. Round 2 graded the trailing-dot class a NIT because the governed bytes SURVIVED; this is the first class where they did not. FIXED IN TWO PLACES AND A THIRD NOBODY ASKED FOR: `upgradeApplier.spellingRefusal` refuses a `:` outside a leading drive designator and any control character for EVERY path before anything resolves it, so the revert path — whose own failure is fatal and revokes master's allow-file — is never entered for it; `autonomyGate.stripSpellings`/`normalisePath` canonicalise the same two so `namesGovernedPath` reports them at both origins and at step 3; and the applier now hands `loyaltyGuard.inspectChanges` the CANONICAL path, because that guard's own comparison does not resolve structure or strip a stream suffix either and it is a protected file this build cannot fix. The colon strip is deliberately NOT in `normalise`: `normalise` is applied to the stringified `meta` blob and JSON is full of colons — measured, folding it in turns `{"plan":"then patch electron/lib/x.cjs"}` into `{"plan"/lib/x.cjs"}` and the meta scan MISSES a path it catches today. Every variant row now asserts the governed file is BYTE-IDENTICAL afterwards, which is the assertion whose absence let round 2 grade this class a NIT.** **OPEN GAP, STATED PLAINLY RATHER THAN ASSUMED COVERED: `shared/autonomy-policy.json`, `electron/lib/autonomyPolicy.cjs`, `electron/lib/autonomyStop.cjs` and `shared/loyalty-tripwire.json` are NOT in `loyaltyGuard.PROTECTED_FILES` (seven entries, tripwire-asserted), so they are not tamper-evident by that route — the create fence and the applier's entry validation are the only mechanical guards on them today. `loyaltyGuard.cjs` and `shared/capabilities.json` are protected and invariant-adjacent, so this build ASKS: add those four paths to `PROTECTED_FILES` and the tripwire manifest, and add `"system.suspend-autonomy": 0` and `"autonomy.view": 1` to the matrix. Until the capability exists, `lift()` cannot succeed for anyone including master, and the refusal names the file he writes by hand instead of rendering a dead button.** **THE FENCE FAILED A FOURTH TIME AND THE METHOD WAS RETIRED RATHER THAN EXTENDED: an NTFS 8.3 SHORT BASENAME. 8.3 generation is live on this volume for the REAL worktree — `dir /x` reports `AUTONO~1.CJS autonomyStop.cjs`, `AUTONO~2.CJS autonomyPolicy.cjs`, `LOYALT~1.JSO loyalty-tripwire.json` — and `AUTONO~1.CJS` shares a six-character prefix with the long name and NOTHING ELSE, so no transform over the characters could ever have recovered the governed name; a fifth filesystem synonym would have defeated the fence the same way. Measured before the fix: `namesGovernedPath` returned null, `spellingRefusal` returned null, `readFileSync` through the spelling returned the real file's bytes so the base-drift check PASSED, and a master-approved patch APPLIED. And the reach was worse than round 3: at origin `ipc` the LONG name was refused while the SHORT name was ALLOWED, so the renderer route was LIVE rather than latent. FIXED BY ASKING THE FILESYSTEM INSTEAD OF THE CHARACTERS — measured on this platform, `fs.realpathSync` returns a short path UNCHANGED and is useless, while `fs.realpathSync.native` resolves BOTH `AUTONO~1.CJS` and `autonomyStop.cjs::$DATA` to the same canonical long path, so one call closes all four spelling classes and any further synonym the filesystem will admit to. Consulted in `upgradeApplier.canonicalPathOf`/`validatePath` (which confines the canonical form too, canonicalising the ROOT on the same call because `os.tmpdir()` is itself a short path here, and refusing by name when the filesystem will not canonicalise an existing file), in `autonomyGate.canonicalPath` so `namesGovernedPath` reports the spelling AT BOTH ORIGINS, and in step 2's covenant re-run — `loyaltyGuard.cjs` is not a SELF_GOVERNING_PATH, so step 2 was the only thing between `LOYALT~1.CJS` and the covenant file's own bytes. `spellingRefusal` and `stripSpellings` are UNCHANGED and still run: they are the cheap refusal for a name that is not yet a synonym of anything. The suite discovers the short name AT RUNTIME and accepts a candidate only when `realpathSync.native` of it returns the same canonical path as the long name — `~1` versus `~2` depends on directory creation order, which is why `LOYALT~1.CJS` names `loyaltyCore.cjs` in the worktree and `loyaltyGuard.cjs` in a fixture — and SKIPS with a printed residual on a volume where 8.3 generation is off, never a silent pass. A control row proves an UNGOVERNED file reached through its own short basename still applies, with the bytes landing in the long-named file. OPEN RESIDUAL, STATED RATHER THAN GUESSED AT: a hard link's second name inside the repository root genuinely IS a different canonical path to the same inode, `nlink` is not consulted, and that case is untested — the next review should grade a known gap rather than discover an unknown one.** Four build-review rounds were fixed in place rather than re-implemented: round 1 (1 HIGH / 2 MEDIUM / 3 NIT, +160), round 2 (1 MEDIUM / 7 NIT, +86), round 3 (1 HIGH, +113) and round 4 (1 HIGH / 1 MEDIUM / 1 NIT, +50) — the frozen `Set`s that were mutable because `Object.freeze` freezes properties and not internal slots, a fence asserted by regex and now executed, both master-driven classes resolved instead of only the revert net, `appliedBy` no longer written onto an entry refused at the door, an unwritable destination refused as an environment problem instead of becoming a FATAL revert that revoked master's allow-file, and a CALLER-SUPPLIED `appliedBy` deleted at entry because the merge spread an untrusted `meta.autonomy` and a seeded `{appliedBy:'master'}` survived onto an entry persisted FAILED — an audit-trail defect rather than an authorisation one, since `autonomousApply` was already forced to false and no byte was written. **`node_modules` is absent from the worktree, so `vite build` was NOT run — no `.jsx` changed. NOT VERIFIED: the app has never booted with these modules loaded, `app.getPath('userData')` has never been resolved (every row injects a scratch root), `fileProposal` has no caller in the shipped tree, `engage()` tears down nothing by design, `lift()` has never succeeded against the real capability matrix, and a torn read of a hand-edited policy file falls back to the floors.** **NEXT STEP: the five-stage NOTICE/RESEARCH/WEIGH/PROPOSE/ANALYSE loop and `upgradeAuthor.cjs`, both DEFERRED and blocked on design-review findings 2 and 5 — see `docs/research/SELF_UPGRADE.md` § DEFERRED BY THE ORCHESTRATOR for the full deferred list with the finding id gating each item. Before any of it: paste Section 132 from the build note, and decide the two protected-file/capability additions above, because the loop files proposals and the fence on its own state is not complete without them.** |
 ```

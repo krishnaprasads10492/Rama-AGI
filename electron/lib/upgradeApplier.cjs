@@ -24,7 +24,9 @@
  *    (`preload.cjs` 680 → `proposals.cjs` 235) untouched, so a predicate built on it is supplied by the
  *    party the stop exists to stop, and a future autonomous applier would bypass it by OMITTING A
  *    FIELD. It is recorded into `meta.autonomy` as a datum for the audit, MERGED rather than assigned so
- *    `autonomousApply` and anything already recorded survive beside it. What is recorded at ENTRY says
+ *    `autonomousApply` and anything already recorded survive beside it — except `appliedBy`/`appliedAt`,
+ *    which are DELETED at entry, because `meta` is caller-supplied and a seeded one survived the spread
+ *    onto an entry that was then persisted FAILED. What is recorded at ENTRY says
  *    `attemptedBy`/`attemptedAt`; `appliedBy`/`appliedAt` are written on the success path only, because
  *    an entry refused at the door is persisted FAILED by `proposals.cjs` and must not carry a field
  *    claiming master applied it.
@@ -137,9 +139,51 @@ function spellingRefusal(p) {
 }
 
 /**
+ * Ask the FILESYSTEM which file this resolved path names, rather than asking its characters.
+ *
+ * Measured on this platform: `fs.realpathSync` returns an 8.3 short path UNCHANGED, while
+ * `fs.realpathSync.native` resolves `…/AUTONO~1.CJS` and `…/autonomyStop.cjs::$DATA` to the same
+ * canonical long path. So `.native` is the call, and it is the one that closes a filesystem synonym this
+ * build was never told about — the class that defeated four rounds of character transforms.
+ *
+ * An EXISTING file is asked directly and a failure is REFUSED, not shrugged off: if the filesystem will
+ * not say what file this is, nothing downstream can claim to know either. A `create` has no leaf to ask
+ * about, so the nearest existing ancestor is canonicalised and the remainder appended — the same walk
+ * `writabilityOf` does, for the same reason. An `fs` with no `realpathSync.native` at all (an injected
+ * partial, a future platform) degrades to the resolved path and says so through `asked: false`, because
+ * a missing API is an environment fact and not an attack.
+ */
+function canonicalPathOf(fs, target, existed) {
+  const native = fs?.realpathSync?.native;
+  if (typeof native !== 'function') return { ok: true, canonical: target, asked: false };
+  if (existed) {
+    try { return { ok: true, canonical: native(target), asked: true }; }
+    catch (err) { return { ok: false, why: `the filesystem would not canonicalise it (${err.code || err.message})` }; }
+  }
+  let dir = path.dirname(target);
+  const tail = [path.basename(target)];
+  for (let depth = 0; depth < 64; depth += 1) {
+    try { return { ok: true, canonical: path.join(native(dir), ...tail), asked: true }; }
+    catch { /* the directory does not exist yet — climb */ }
+    const up = path.dirname(dir);
+    if (up === dir) break;
+    tail.unshift(path.basename(dir));
+    dir = up;
+  }
+  return { ok: false, why: 'no ancestor directory of it could be canonicalised by the filesystem' };
+}
+
+/**
  * Resolve, then compare — and `lstat`, because a symlink whose resolved path is inside the root still
  * writes outside it. Refuses a target that is a symlink, and a target whose existing parent directory
  * resolves outside the repository root.
+ *
+ * Then CANONICALISE, and confine the canonical form too. The resolved path is what is written, because a
+ * write must land where master's approved change said it would; the canonical path is what is COMPARED,
+ * and it is carried on the returned target as `canonical`/`canonicalRel` so the covenant re-run and the
+ * governed-path fence can both compare the file rather than the spelling. The root is canonicalised on
+ * the same call: `os.tmpdir()` here is itself a short path, so comparing a canonical target against a
+ * short root would read every fixture as "outside the repository root".
  */
 function validatePath(fs, repoRoot, p) {
   if (!p || typeof p !== 'string') return { ok: false, why: 'a change needs a string path' };
@@ -166,7 +210,27 @@ function validatePath(fs, repoRoot, p) {
     }
   } catch { /* the parent does not exist yet — a create under a new directory */ }
 
-  return { ok: true, resolved, existed, rel: path.relative(root, resolved).split(path.sep).join('/') };
+  const canon = canonicalPathOf(fs, resolved, existed);
+  if (!canon.ok) {
+    return { ok: false, why: `"${p}" could not be canonicalised — ${canon.why}` };
+  }
+  let canonRoot = root;
+  if (canon.asked) {
+    try { canonRoot = fs.realpathSync.native(root); } catch { canonRoot = root; }
+  }
+  const canonical = canon.canonical;
+  if (canonical !== canonRoot && !canonical.toLowerCase().startsWith((canonRoot + path.sep).toLowerCase())) {
+    return { ok: false, why: `"${p}" canonicalises to a file outside the repository root` };
+  }
+
+  return {
+    ok: true,
+    resolved,
+    existed,
+    rel: path.relative(root, resolved).split(path.sep).join('/'),
+    canonical,
+    canonicalRel: path.relative(canonRoot, canonical).split(path.sep).join('/'),
+  };
 }
 
 /**
@@ -253,6 +317,17 @@ async function applyWith(io, proposal, opts = {}) {
   // carrying a field that said master applied it: the badge-label mismatch, in the audit trail of the
   // one component that writes source. Recording the attempt has value, so it stays where it is and
   // says what it is; `appliedBy` and `appliedAt` are set on the SUCCESS PATH ONLY, below.
+  //
+  // AND THE MERGE IS NOT A BLANK CHEQUE. The spread preserves what a prior attempt recorded, which has
+  // value — but `meta` is renderer-supplied at `proposals.create`, persisted, and rehydrated by
+  // `restore()` on an id check alone, so a CALLER can pre-seed this object. Measured: an entry seeded
+  // with `{appliedBy:'master', appliedAt:'2020-01-01T00:00:00.000Z', autonomousApply:true}` and refused
+  // at step 3 or step 4 persisted FAILED while still carrying `appliedBy: 'master'` — the exact
+  // contradiction the move below the write loop was supposed to end, reached through the spread instead
+  // of through the assignment. `autonomousApply` was already forced to false, so this was never an
+  // authorisation defect; it was a FAILED entry whose audit trail said master applied it. The two fields
+  // that make that claim are therefore deleted here, immediately, and the ONLY place either is set is
+  // the success path below the write loop.
   proposal.meta.autonomy = {
     ...(proposal.meta.autonomy || {}),
     attemptedBy: 'master',
@@ -260,6 +335,8 @@ async function applyWith(io, proposal, opts = {}) {
     flagFromOpts: opts?.autonomous === true,
     attemptedAt: at,
   };
+  delete proposal.meta.autonomy.appliedBy;
+  delete proposal.meta.autonomy.appliedAt;
 
   // ── the id, and the DERIVED snapshot directory ─────────────────────────────────────────────────
   if (!PID.test(String(proposal?.id ?? ''))) throw new Error('malformed proposal id');
@@ -283,17 +360,28 @@ async function applyWith(io, proposal, opts = {}) {
   // One change at a time, so the refusal can name the spelling MASTER WROTE rather than the canonical
   // form this re-run compared — the guard echoes back the path it was given, and a message that silently
   // renamed the path master is looking at would be the harder bug to read.
+  //
+  // TWO spellings are handed to it, not one: the character canonicalisation and the FILESYSTEM'S answer
+  // to which file this is. Measured, with only the first: `electron/lib/LOYALT~1.CJS` — the 8.3 short
+  // name `dir /x` reports for the protected `loyaltyGuard.cjs` on this volume — passed this re-run
+  // untouched, and `loyaltyGuard.cjs` is not one of the SELF_GOVERNING_PATHS, so step 3 did not catch it
+  // either. The covenant file's own bytes were the ones that would have been clobbered. The filesystem
+  // answer catches it, and the character route still catches a name that is not a synonym of anything.
   const covenantRefused = [];
   for (const change of changes) {
-    const probe = guard.inspectChanges([{ ...change, path: gate.normalisePath(change?.path) }]);
-    if (probe.refused.length > 0) covenantRefused.push(String(change?.path));
+    const spellings = [gate.normalisePath(change?.path), gate.canonicalPath(change?.path, { fs, repoRoot })];
+    const refused = spellings.some(spelling => spelling
+      && guard.inspectChanges([{ ...change, path: spelling }]).refused.length > 0);
+    if (refused) covenantRefused.push(String(change?.path));
   }
   if (covenantRefused.length > 0) {
     throw new Error(`refused: these files constitute the loyalty covenant (I15): ${covenantRefused.join(', ')}`);
   }
 
   // ── 3. nothing may name the policy's own authority, or the stop's own state ────────────────────
-  const governed = gate.governedPathsNamed(proposal);
+  // `io` is handed over so the comparison is made against the root these writes would land in, and so
+  // the filesystem half of the fence asks about the right volume rather than about this install.
+  const governed = gate.governedPathsNamed(proposal, { fs, repoRoot });
   if (governed.length > 0) {
     throw new Error('refused: a change may not name the files that govern the autonomy policy or the stop: '
       + governed.map(g => `${g.token} (in ${g.where})`).join(', '));
@@ -506,5 +594,5 @@ function evictSnapshots({ fs, root, keep = null, now = Date.now() }) {
 module.exports = {
   KIND, SCHEMA, PID, ALLOWED_ACTIONS, RECOGNISED_OPTS,
   SNAPSHOT_MAX_ENTRIES, SNAPSHOT_MAX_AGE_MS,
-  register, applyWith, revert, spellingRefusal, validatePath, writabilityOf, evictSnapshots,
+  register, applyWith, revert, spellingRefusal, canonicalPathOf, validatePath, writabilityOf, evictSnapshots,
 };

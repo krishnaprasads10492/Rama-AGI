@@ -40,6 +40,15 @@
  *     ANY kind. That is additive — nothing shipped names them — and it closes the renderer half of the
  *     "the stop's state is unreachable by any proposal" claim, which was measurably false.
  *
+ * ── THE PATH FENCE ASKS THE FILESYSTEM, NOT THE CHARACTERS ────────────────────────────────────────
+ *
+ * Four review rounds found four spellings that addressed a governed file without naming it, the last of
+ * them an 8.3 short basename that shares a six-character prefix with the long name and nothing else. A
+ * fifth character transform would have been the fourth guess, so `canonicalPath` below puts the question
+ * to `fs.realpathSync.native` instead and the comparison runs against BOTH the character form and the
+ * filesystem's answer. See its header for what was measured. The refusal reports the spelling the caller
+ * wrote, because that is the string master is looking at.
+ *
  * ── THE RESIDUAL, PRINTED RATHER THAN IMPLIED ─────────────────────────────────────────────────────
  *
  * In-process `proposals.create()` is NOT gated: it is reached directly by five existing callers and
@@ -49,10 +58,17 @@
  * change the behaviour of a shipped applier. `scripts/verifyUpgradeApplier.cjs` prints both residuals.
  */
 
+const fs     = require('fs');
 const path   = require('path');
 
 const policy = require('./autonomyPolicy.cjs');
 const stop   = require('./autonomyStop.cjs');
+
+/** Where a repo-relative `changes[].path` is rooted when no `io` is injected: the install itself. */
+const REPO_ROOT = path.resolve(__dirname, '..', '..');
+
+/** How far the ancestor walk below will climb before it gives up. A path deeper than this is not real. */
+const CANON_MAX_DEPTH = 64;
 
 /** The kinds this design owns. Nothing outside the main process may file one. */
 const KIND = Object.freeze({
@@ -181,6 +197,83 @@ function normalisePath(p) {
 }
 
 /**
+ * ── ASK THE FILESYSTEM WHICH FILE A PATH NAMES, INSTEAD OF ASKING THE CHARACTERS ──────────────────
+ *
+ * This fence missed a spelling class in each of four review rounds: unresolved structure, a trailing dot
+ * and a trailing space, an NTFS `::$DATA` stream suffix, and then an **8.3 SHORT BASENAME**. The first
+ * three were each arguably one more character case. The fourth is not, and it is what retired the
+ * method: measured on this volume, `dir /x` in `electron/lib` reports `AUTONO~1.CJS autonomyStop.cjs`,
+ * `AUTONO~2.CJS autonomyPolicy.cjs` and in `shared/` `LOYALT~1.JSO loyalty-tripwire.json` — and
+ * `AUTONO~1.CJS` shares a six-character PREFIX with the governed name and nothing else. No transform
+ * over the characters can recover `autonomystop.cjs` from it, so no fifth transform was written.
+ *
+ * Measured before this existed: `namesGovernedPath('electron/lib/AUTONO~1.CJS')` returned null at BOTH
+ * origins, `readFileSync` through the spelling returned the real file's bytes so the applier's
+ * `baseSha256` base-drift check PASSED rather than catching it, and a master-approved `patch` APPLIED —
+ * `electron/lib/autonomyStop.cjs` afterwards read `function isStopped(){return false;}`. The same held
+ * for the PROTECTED `loyaltyGuard.cjs` via `LOYALT~1.CJS` and for the tamper-evidence baseline
+ * `shared/loyalty-tripwire.json` via `LOYALT~1.JSO`.
+ *
+ * So the question is put to the filesystem. Measured on this platform, which is why `.native` and not
+ * the plain call: `fs.realpathSync('…/AUTONO~1.CJS')` returns the SHORT PATH UNCHANGED and is useless
+ * here, while `fs.realpathSync.native('…/AUTONO~1.CJS')` returns `…/electron/lib/autonomyStop.cjs` AND
+ * `fs.realpathSync.native('…/autonomyStop.cjs::$DATA')` returns that same canonical long path. One call
+ * therefore closes the short basename and the stream suffix together, and closes any further
+ * FILESYSTEM SYNONYM — a junction, a hard link's other name, a case variant — without being told about
+ * it first. That is the falsifiable difference between this round and the three before it.
+ *
+ * Three things this is careful about:
+ *
+ *   - **The root is canonicalised too.** `os.tmpdir()` here is `C:\Users\KRISHN~1.SEE\AppData\Local\Temp`
+ *     — itself a short path. Comparing a canonical target against a short root would make every fixture
+ *     path read as "outside the root", so both sides are asked the same question.
+ *   - **A path that does not exist yet still canonicalises.** `native` throws ENOENT for a `create`, so
+ *     the NEAREST EXISTING ANCESTOR is canonicalised and the remainder appended — the same walk
+ *     `upgradeApplier.writabilityOf` already does. There is nothing to recover in a leaf that does not
+ *     exist, and an ancestor spelled short is recovered.
+ *   - **It never throws and never refuses.** An empty string, a missing `realpathSync.native`, an
+ *     injected partial `fs`, or a path whose every ancestor is unreadable all yield `''`, and the caller
+ *     falls back to the character comparison — which is still the cheap refusal for a name that is not
+ *     yet a synonym of anything. This is ADDITIVE: `stripSpellings` and `normalisePath` are unchanged,
+ *     and the colon strip stays out of `normalise` for the measured meta-blob reason above.
+ *
+ * @returns {string} the canonical path, repo-relative when inside the root, `normalise`d — or `''`
+ */
+function canonicalPath(p, io = {}) {
+  const raw = String(p ?? '');
+  if (!raw) return '';
+  const fsmod = io.fs || fs;
+  const native = fsmod?.realpathSync?.native;
+  if (typeof native !== 'function') return '';
+  const repoRoot = path.resolve(io.repoRoot || REPO_ROOT);
+
+  let resolved;
+  try { resolved = path.resolve(repoRoot, raw); } catch { return ''; }
+
+  let root = repoRoot;
+  try { root = native(repoRoot); } catch { root = repoRoot; }
+
+  let dir = resolved;
+  const tail = [];
+  for (let depth = 0; depth < CANON_MAX_DEPTH; depth += 1) {
+    let real = null;
+    try { real = native(dir); } catch { real = null; }
+    if (real !== null) {
+      const full = tail.length ? path.join(real, ...tail) : real;
+      let out = full;
+      if (full === root) out = '';
+      else if (full.toLowerCase().startsWith((root + path.sep).toLowerCase())) out = path.relative(root, full);
+      return normalise(out.split(path.sep).join('/'));
+    }
+    const up = path.dirname(dir);
+    if (up === dir) return '';
+    tail.unshift(path.basename(dir));
+    dir = up;
+  }
+  return '';
+}
+
+/**
  * The basenames of the stop's own state, which live OUTSIDE the repository root. `changes[].path` cannot
  * address them relatively — it can address them absolutely, which is the whole point of fencing on the
  * basename rather than on the root.
@@ -198,16 +291,30 @@ function selfGoverningRelPaths() {
 
 /**
  * Does this text name something that governs the policy or the stop?
+ *
+ * TWO spellings are compared, not one: the character canonicalisation, and the FILESYSTEM'S OWN answer
+ * to "which file is this". Either one naming a governed token is a refusal. The character route is kept
+ * because it answers for a name that addresses nothing yet — a `create` of a path with no existing
+ * ancestor, a trailing dot that makes a NEW directory entry here — and the filesystem route is what
+ * catches a synonym of an existing file, which is the class that no transform over the characters can
+ * recover. Neither subsumes the other, so both are asked.
+ *
+ * @param {string} text   a PATH. The `meta` blob goes through `normalise` instead; it is text.
+ * @param {object} [io]   `{fs, repoRoot}` — injected by the applier so the comparison is made against
+ *                        the root the write would land in, rather than against this install's.
  * @returns {string|null} the token it named, or null
  */
-function namesGovernedPath(text) {
-  const p = normalisePath(text);
-  if (!p) return null;
-  for (const rel of selfGoverningRelPaths()) {
-    if (p === rel || p.endsWith(`/${rel}`)) return rel;
-  }
-  for (const name of STOP_STATE_NAMES) {
-    if (p === name || p.endsWith(`/${name}`) || p.includes(`/${name}/`)) return name;
+function namesGovernedPath(text, io) {
+  const spellings = [normalisePath(text), canonicalPath(text, io)];
+  const governed = selfGoverningRelPaths();
+  for (const p of spellings) {
+    if (!p) continue;
+    for (const rel of governed) {
+      if (p === rel || p.endsWith(`/${rel}`)) return rel;
+    }
+    for (const name of STOP_STATE_NAMES) {
+      if (p === name || p.endsWith(`/${name}`) || p.includes(`/${name}/`)) return name;
+    }
   }
   return null;
 }
@@ -217,10 +324,10 @@ function namesGovernedPath(text) {
  * `meta` is scanned because it is persisted, rehydrated on an id check alone, and was the door through
  * which a snapshot directory once became a write destination.
  */
-function governedPathsNamed(def) {
+function governedPathsNamed(def, io) {
   const hits = [];
   for (const change of def?.changes ?? []) {
-    const hit = namesGovernedPath(change?.path);
+    const hit = namesGovernedPath(change?.path, io);
     if (hit) hits.push({ where: 'changes[].path', value: change?.path, token: hit });
   }
   let metaText = '';
@@ -251,15 +358,16 @@ function classFor(def) {
 
 /**
  * @param {object} def       the proposal definition
- * @param {object} ctx       `{origin}` — a LITERAL written at the call site, never read from `def`
+ * @param {object} ctx       `{origin, io}` — `origin` is a LITERAL written at the call site, never read
+ *                           from `def`; `io` is optional and only moves which root paths resolve against
  * @returns {object|null}    a refusal, or null when the create may proceed
  */
-function inspectCreate(def, { origin } = {}) {
+function inspectCreate(def, { origin, io } = {}) {
   if (!ORIGINS.includes(origin)) {
     throw new Error(`autonomyGate.inspectCreate needs a derived origin (${ORIGINS.join(' | ')}) — "${origin}" is not one`);
   }
 
-  const governed = governedPathsNamed(def);
+  const governed = governedPathsNamed(def, io);
   if (governed.length) {
     return {
       ok: false,
@@ -349,7 +457,8 @@ function guardLedgerIpc(ipc) {
 }
 
 module.exports = {
-  KIND, OWNED_KINDS, SCHEMA, DIFF_CLASSES, ORIGINS, STOP_STATE_NAMES,
-  trimSegments, normalise, stripSpellings, normalisePath, namesGovernedPath, governedPathsNamed, classFor,
+  KIND, OWNED_KINDS, SCHEMA, DIFF_CLASSES, ORIGINS, STOP_STATE_NAMES, REPO_ROOT,
+  trimSegments, normalise, stripSpellings, normalisePath, canonicalPath,
+  namesGovernedPath, governedPathsNamed, classFor,
   inspectCreate, fileProposal, guardLedgerIpc,
 };

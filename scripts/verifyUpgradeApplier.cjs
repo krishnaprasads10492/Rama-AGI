@@ -857,6 +857,220 @@ console.log('\n  the path fence resolves structure — every spelling of a gover
   check('a drive designator is a drive, not a stream, so an absolute path to the allow-file still names it',
     gate.namesGovernedPath('C:\\Users\\k\\AppData\\Roaming\\Rama AGI\\rama\\autonomy.allow::$DATA')
       === 'autonomy.allow');
+
+  // (vii) THE FOURTH SPELLING IN FOUR ROUNDS, AND THE ONE THAT RETIRED THE METHOD: an NTFS **8.3 SHORT
+  // BASENAME**. 8.3 generation is live on this volume for the real worktree, not only for a fixture —
+  // `dir /x` in electron/lib reports `AUTONO~1.CJS autonomyStop.cjs`, `AUTONO~2.CJS autonomyPolicy.cjs`
+  // and in shared/ `LOYALT~1.JSO loyalty-tripwire.json`.
+  //
+  // Measured end to end before the fix, in a scratch repository root with the real policy, capability
+  // and loyaltyGuard modules, master-approved, action `patch`, `baseSha256` read through the spelling:
+  // `namesGovernedPath('electron/lib/AUTONO~1.CJS')` returned null, `spellingRefusal` returned null,
+  // `readFileSync` through the spelling returned the real file's bytes so the base-drift check PASSED
+  // rather than catching it, `loyaltyGuard.inspectChanges` refused nothing — and the apply APPLIED,
+  // leaving `electron/lib/autonomyStop.cjs` reading `function isStopped(){return false;}`. The renderer
+  // half was LIVE rather than latent: at origin `ipc` the long name was refused and the short name was
+  // ALLOWED, and `electron/ipc/timeline.cjs`'s pre-existing SELF_MODIFY applier writes `changes[].path`
+  // with no root confinement.
+  //
+  // This spelling is why no fifth character transform was written. `AUTONO~1.CJS` shares a
+  // six-character PREFIX with the long name and nothing else, so nothing done to the characters can
+  // recover `autonomystop.cjs`. The fence asks `fs.realpathSync.native` instead, which on this platform
+  // resolves the short basename AND the `::$DATA` suffix to the same canonical long path — so these rows
+  // close a class, not a case, and a sixth synonym would be caught by the same call rather than by a
+  // sixth repair.
+  //
+  // The short basename is DISCOVERED AT RUNTIME AND CONFIRMED BY THE FILESYSTEM, never hardcoded: `~1`
+  // versus `~2` depends on the order the directory's entries were created, which is why `LOYALT~1.CJS`
+  // names loyaltyCore.cjs in the real worktree and loyaltyGuard.cjs in a fixture built in a different
+  // order. The candidates are the documented 8.3 shape — six characters of the stem, uppercased, `~N`,
+  // three of the extension — and each is accepted ONLY when `realpathSync.native` of it returns the same
+  // canonical path as the long name, so the row runs against a synonym the filesystem has agreed to and
+  // never against a guess. Verified to agree with `dir /x` for every file tested. On a volume with 8.3
+  // generation DISABLED nothing matches and the row is SKIPPED with a printed RESIDUAL, never a silent
+  // pass. No shell is spawned: `cmd /c for ... %~sI` through `execFileSync` returned a mangled argument
+  // on this machine, and parsing `dir /x` is locale-dependent.
+  function shortBasenameOf(absPath) {
+    if (process.platform !== 'win32') return null;
+    let real;
+    try { real = fs.realpathSync.native(absPath); } catch { return null; }
+    const dir = path.win32.dirname(absPath);
+    const long = path.win32.basename(absPath);
+    const ext = path.win32.extname(long);
+    const stem = long.slice(0, long.length - ext.length).replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 6);
+    const tail = ext.replace(/[^A-Za-z0-9.]/g, '').toUpperCase().slice(0, 4);
+    for (let n = 1; n <= 9; n += 1) {
+      const cand = `${stem}~${n}${tail}`;
+      if (cand.toLowerCase() === long.toLowerCase()) continue;
+      try { if (fs.realpathSync.native(path.join(dir, cand)) === real) return cand; }
+      catch { /* that ordinal belongs to another file, or to none */ }
+    }
+    return null;
+  }
+
+  const gateCode2 = strip(read('electron/lib/autonomyGate.cjs'));
+  const applierCode2 = strip(read('electron/lib/upgradeApplier.cjs'));
+  check('the fence asks the FILESYSTEM which file a path names, through the native call',
+    /realpathSync\??\.native/.test(gateCode2) && /realpathSync\??\.native/.test(applierCode2));
+  check('and the plain realpathSync is never what the comparison rests on, because it returns a short path unchanged here',
+    !/realpathSync[^?.]/.test(gateCode2.replace(/realpathSync\??\.native/g, '')));
+  check('the gate roots a relative path at this install, so the rows below measure the real worktree',
+    gate.REPO_ROOT === ROOT, `${gate.REPO_ROOT} vs ${ROOT}`);
+
+  let shortRowsRun = 0;
+  for (const entry of policy.SELF_GOVERNING_PATHS) {
+    const abs = path.join(ROOT, ...entry.path.split('/'));
+    if (!fs.existsSync(abs)) {
+      residual(`${entry.path} is absent from this install (it is ${entry.optional ? 'optional' : 'required'}), `
+        + 'so it has no 8.3 short name to spell it with and its real-tree row was SKIPPED.');
+      continue;
+    }
+    const short = shortBasenameOf(abs);
+    if (!short) {
+      residual(`the filesystem reports no 8.3 short basename for ${entry.path} on this volume, so its `
+        + 'real-tree row was SKIPPED. The fence is unchanged; it simply cannot be exercised here.');
+      continue;
+    }
+    shortRowsRun += 1;
+    const spelling = `${path.posix.dirname(entry.path)}/${short}`;
+
+    check(`the filesystem resolves "${spelling}" to ${entry.path}, which the characters cannot`,
+      gate.canonicalPath(spelling) === entry.path.toLowerCase(), gate.canonicalPath(spelling));
+    check(`and the character route alone still reads it as naming nothing — which is why it is not enough`,
+      gate.normalisePath(spelling) === spelling.toLowerCase());
+
+    const fromIpc = gate.inspectCreate(
+      { kind: 'self-modify', changes: [{ action: 'patch', path: spelling, content: PAYLOAD }] },
+      { origin: 'ipc' });
+    check(`IPC create: "${spelling}" (an 8.3 short basename) is refused — the renderer half`,
+      fromIpc?.refused === true && /govern the autonomy policy or the stop/.test(fromIpc.reason),
+      fromIpc?.reason ?? 'IT WAS ALLOWED');
+
+    const fromRama = gate.inspectCreate(
+      { kind: gate.KIND.DIFF, changes: [{ action: 'patch', path: spelling, content: PAYLOAD }] },
+      { origin: 'rama' });
+    check(`Rāma's create: "${spelling}" is refused for naming a governed path, not merely for the stop`,
+      fromRama?.refused === true && /govern the autonomy policy or the stop/.test(fromRama.reason),
+      fromRama?.reason ?? 'IT WAS ALLOWED');
+  }
+  check('at least one governed path was exercised through its real short basename, or a residual says why',
+    shortRowsRun > 0 || residuals.length > 0, String(shortRowsRun));
+
+  // And the applier, where the bytes would have landed. The lookup runs in the FIXTURE this time,
+  // because the short name belongs to the directory the file was created in.
+  for (const entry of policy.SELF_GOVERNING_PATHS) {
+    const repo = governedRepoFixture();
+    const target = path.join(repo, ...entry.path.split('/'));
+    const short = shortBasenameOf(target);
+    if (!short) {
+      residual(`no 8.3 short basename for ${entry.path} in the fixture, so its applier row was SKIPPED.`);
+      continue;
+    }
+    const spelling = `${path.posix.dirname(entry.path)}/${short}`;
+    const before = fs.readFileSync(target, 'utf8');
+    const proposal = {
+      id: pid(), kind: gate.KIND.DIFF, title: 'a governed path, spelled as the filesystem spells it',
+      meta: { schema: gate.SCHEMA },
+      changes: [{ action: 'patch', path: spelling, content: PAYLOAD, baseSha256: sha256(fs.readFileSync(target)) }],
+    };
+    let message = null;
+    try { await applier.applyWith(io(repo, userData), proposal, { user: MASTER }); }
+    catch (err) { message = err.message; }
+    check(`applyWith: "${spelling}" is refused at step 3, against the fixture's own root`,
+      message !== null && /govern the autonomy policy or the stop/.test(message), message ?? 'IT WAS APPLIED');
+    check(`and ${entry.path} is BYTE-IDENTICAL on disk afterwards`,
+      fs.readFileSync(target, 'utf8') === before);
+    check('and the create gate refuses the same spelling against that injected root too',
+      gate.inspectCreate({ kind: 'self-modify', changes: [{ action: 'patch', path: spelling, content: PAYLOAD }] },
+        { origin: 'ipc', io: { fs, repoRoot: repo } })?.refused === true);
+  }
+
+  // The covenant, through a short basename. loyaltyGuard.cjs is NOT one of the SELF_GOVERNING_PATHS, so
+  // step 3 never looks at it: step 2's re-run of the guard is the only thing between this spelling and
+  // the covenant file's bytes, and it compared characters. Measured before the fix: refused nothing.
+  {
+    const repo = governedRepoFixture();
+    const target = path.join(repo, 'electron', 'lib', 'loyaltyGuard.cjs');
+    const short = shortBasenameOf(target);
+    if (!short) {
+      residual('no 8.3 short basename for electron/lib/loyaltyGuard.cjs in the fixture, so the covenant '
+        + 'short-name row was SKIPPED.');
+    } else {
+      const spelling = `electron/lib/${short}`;
+      const before = fs.readFileSync(target, 'utf8');
+      const proposal = {
+        id: pid(), kind: gate.KIND.DIFF, title: 'the covenant, spelled as the filesystem spells it',
+        meta: { schema: gate.SCHEMA },
+        changes: [{ action: 'patch', path: spelling, content: 'module.exports = {};\n', baseSha256: sha256(fs.readFileSync(target)) }],
+      };
+      let message = null;
+      try { await applier.applyWith(io(repo, userData), proposal, { user: MASTER }); }
+      catch (err) { message = err.message; }
+      check(`covenant: the PROTECTED file spelled "${spelling}" is refused at step 2`,
+        message !== null && /loyalty covenant \(I15\)/.test(message), message ?? 'IT WAS APPLIED');
+      check('and the refusal names the spelling master wrote, rather than the canonical form',
+        message !== null && message.includes(spelling));
+      check('and electron/lib/loyaltyGuard.cjs is BYTE-IDENTICAL on disk afterwards',
+        fs.readFileSync(target, 'utf8') === before);
+    }
+  }
+
+  // THE CONTROL for this class. An UNGOVERNED file reached through ITS short basename must still APPLY,
+  // or a green section above would be satisfied by a fence that refuses anything with a tilde in it.
+  {
+    const repo = governedRepoFixture();
+    const longName = 'aVeryOrdinaryLongModuleName.cjs';
+    const target = path.join(repo, 'electron', 'lib', longName);
+    fs.writeFileSync(target, 'module.exports = 1;\n', 'utf8');
+    const short = shortBasenameOf(target);
+    if (!short) {
+      residual('no 8.3 short basename for the ungoverned control file, so the control row was SKIPPED.');
+    } else {
+      const spelling = `electron/lib/${short}`;
+      const proposal = {
+        id: pid(), kind: gate.KIND.DIFF, title: 'an ungoverned path, same spelling',
+        meta: { schema: gate.SCHEMA },
+        changes: [{ action: 'patch', path: spelling, content: 'module.exports = 2;\n', baseSha256: sha256(fs.readFileSync(target)) }],
+      };
+      let message = null;
+      try { await applier.applyWith(io(repo, userData), proposal, { user: MASTER }); }
+      catch (err) { message = err.message; }
+      check(`control: an UNGOVERNED file reached through "${spelling}" still applies`, message === null, message);
+      check('and the bytes landed in the long-named file, so the fence canonicalises rather than rejecting tildes',
+        fs.readFileSync(target, 'utf8') === 'module.exports = 2;\n');
+      check('and the create gate allows that spelling too',
+        gate.inspectCreate({ kind: 'self-modify', changes: [{ action: 'patch', path: spelling, content: 'x' }] },
+          { origin: 'ipc', io: { fs, repoRoot: repo } }) === null);
+    }
+  }
+
+  // A canonicalisation that cannot be derived for an EXISTING file is refused rather than assumed.
+  {
+    const repo = governedRepoFixture();
+    const refusingFs = Object.assign(Object.create(Object.getPrototypeOf(fs)), fs, {
+      realpathSync: Object.assign(function realpathSync(...args) { return fs.realpathSync(...args); }, {
+        native: (p) => {
+          if (String(p).endsWith('target.cjs')) { const e = new Error('EIO'); e.code = 'EIO'; throw e; }
+          return fs.realpathSync.native(p);
+        },
+      }),
+    });
+    let message = null;
+    try { await applier.applyWith(io(repo, userData, { fs: refusingFs }), diffProposal(repo), { user: MASTER }); }
+    catch (err) { message = err.message; }
+    check('a file the filesystem will not canonicalise is REFUSED, not assumed to be what it looks like',
+      message !== null && /could not be canonicalised/.test(message), message ?? 'it was applied');
+    check('and an fs with no realpathSync.native at all degrades to the resolved path rather than refusing',
+      applier.canonicalPathOf({}, path.join(repo, 'electron', 'lib', 'target.cjs'), true).asked === false);
+  }
+
+  residual('the fence now asks the filesystem, which closes every synonym the filesystem will admit to — '
+    + 'and a HARD LINK is the one it will not. A second name for a governed file\'s inode is a genuinely '
+    + 'different canonical path, so realpathSync.native reports it unchanged and this fence would read it '
+    + 'as ungoverned. nlink is not consulted and the case is UNTESTED. It is recorded as an open residual '
+    + 'rather than repaired on a guess, because four rounds of enumerating spellings is what retired the '
+    + 'character method; creating one needs a write inside the repository root, which is the thing every '
+    + 'other gate in this file already governs.');
 }
 
 // ─── 14. the data file cannot refuse master's apply either ────────────────────
@@ -1046,6 +1260,64 @@ console.log('\n  an unwritable destination is refused cleanly, and autonomy stay
     + 'missing ancestor and an app.asar root, and NOT an ACL-denied directory: for that case the write '
     + 'loop\'s catch and the revert behind it are still what responds.');
   stop.configure({ userDataRoot: userData });
+}
+
+// ─── 17. A CALLER-SUPPLIED "appliedBy" MAY NOT SURVIVE ONTO A REFUSED ENTRY ───
+// The merge at entry spreads `proposal.meta.autonomy` and then overwrites four keys. `appliedBy` and
+// `appliedAt` were not among them, so a PRE-SEEDED pair survived onto an entry that proposals.cjs then
+// persists FAILED — the exact contradiction moving the assignment below the write loop was meant to end,
+// reached through the spread instead of through the assignment. `meta` is renderer-supplied at
+// proposals.create, persisted, and rehydrated by restore() on an id check alone, so the seed has routes.
+// Measured: refused at step 4 with action `delete`, the entry kept `appliedBy: 'master'` and the forged
+// `appliedAt` while `autonomousApply` was correctly false. No byte was written and I6 held; what was
+// wrong was the audit trail of the one component that writes source.
+console.log('\n  a forged appliedBy does not survive onto an entry persisted FAILED');
+{
+  const userData = scratch('forged');
+  stop.configure({ userDataRoot: userData });
+  const seed = () => ({
+    appliedBy: 'master', appliedAt: '2020-01-01T00:00:00.000Z', autonomousApply: true, note: 'forged',
+  });
+
+  for (const [label, over, expected] of [
+    ['a delete action, refused at step 4', {
+      changes: [{ action: 'delete', path: 'electron/lib/target.cjs' }],
+    }, /only patch and create/],
+    ['a governed path, refused at step 3', {
+      changes: [{ action: 'patch', path: 'electron/lib/autonomyPolicy.cjs', content: 'x', baseSha256: 'a'.repeat(64) }],
+    }, /govern the autonomy policy or the stop/],
+    ['no schema marker, refused at step 1', { meta: { autonomy: seed() } }, /meta\.schema/],
+  ]) {
+    const repo = repoFixture();
+    const p = diffProposal(repo, over);
+    p.meta = { ...(p.meta || {}), autonomy: seed() };
+    if (over.meta) p.meta = { ...over.meta, autonomy: seed() };
+    let message = null;
+    try { await applier.applyWith(io(repo, userData), p, { user: MASTER }); }
+    catch (err) { message = err.message; }
+    check(`${label} is still refused`, message !== null && expected.test(message), message ?? 'it was applied');
+    check(`and NEITHER forged field survives — the FAILED entry does not claim master applied it (${label})`,
+      p.meta.autonomy.appliedBy === undefined && p.meta.autonomy.appliedAt === undefined,
+      JSON.stringify(p.meta.autonomy));
+    check('while the derived facts are recorded, and the forged autonomousApply is forced to false',
+      p.meta.autonomy.attemptedBy === 'master' && p.meta.autonomy.autonomousApply === false
+      && typeof p.meta.autonomy.attemptedAt === 'string');
+    check('and a field that makes no claim about the apply is still preserved by the merge',
+      p.meta.autonomy.note === 'forged');
+  }
+
+  // The control, so the fix cannot be "delete them always": a SUCCESSFUL apply still records both.
+  const repo = repoFixture();
+  const ok = diffProposal(repo);
+  ok.meta.autonomy = seed();
+  await applier.applyWith(io(repo, userData), ok, { user: MASTER });
+  check('a SUCCESSFUL apply still records appliedBy and appliedAt, written below the write loop',
+    ok.meta.autonomy.appliedBy === 'master' && typeof ok.meta.autonomy.appliedAt === 'string'
+    && ok.meta.autonomy.appliedAt !== '2020-01-01T00:00:00.000Z', JSON.stringify(ok.meta.autonomy));
+  const code = strip(read('electron/lib/upgradeApplier.cjs'));
+  check('and in source the two fields are deleted at entry, above every validation',
+    code.indexOf('delete proposal.meta.autonomy.appliedBy') > code.indexOf('attemptedBy:')
+    && code.indexOf('delete proposal.meta.autonomy.appliedBy') < code.indexOf('malformed proposal id'));
 }
 
 }
