@@ -56,6 +56,20 @@
  * resolves to LOCAL. A sensitive turn aimed at cloud REFUSES even though selection already routed it
  * local, because the cheapest place to catch a mis-wire is the chokepoint it has to pass through.
  *
+ * TWO DEFECTS FOUND IN REVIEW, BOTH THE SAME SHAPE — strict equality used in the direction that fails
+ * open — AND NEITHER IS TO BE REINTRODUCED:
+ *
+ *   1. `levelOf` returned 'public' for ANY classification the lattice did not contain, so a retained
+ *      turn a caller had marked 'secret', 'confidential' or 'PRIVATE' was stripped of the concern and
+ *      crossed to a cloud payload. `egressBoundary` has `REASON.unclassified` for exactly that element
+ *      shape and refuses it — but it was handed an already-clean 'public' and never saw the original.
+ *      ABSENT and UNRECOGNISED are different facts: absent stays 'public' (the deliberate decision
+ *      below), unrecognised now REFUSES with the boundary's own reason string.
+ *   2. All three sensitivity decisions tested `sensitive === true`, so `'true'`, `1` or `'yes'`
+ *      arriving over `models:converse` produced a NON-sensitive turn on every one of them: cloud
+ *      destination allowed, text classified public, `requirePrivate` false. Every other input to
+ *      `assembleTurn` was refused when malformed; this one was not. It is now.
+ *
  * Verified by: scripts/verifyConversation.cjs.
  */
 
@@ -107,6 +121,10 @@ const REASON = Object.freeze({
   model: 'a conversation payload needs the model that will answer it',
   tooManyTurns: `a conversation payload is limited to ${egressBoundary.MAX_MESSAGES} messages`,
   badTurn: 'a retained turn must be { role, text } with role system, user or assistant',
+  sensitiveFlag: 'the sensitive flag must be a boolean — an unrecognised value is refused, never read as not sensitive',
+  // An unrecognised classification is refused with THE BOUNDARY'S wording and not a second one of our
+  // own: one fact, one string, so a reader cannot conclude there are two different rules.
+  unclassified: egressBoundary.REASON.unclassified,
 });
 
 const TURN_ROLES = Object.freeze(['system', 'user', 'assistant']);
@@ -116,10 +134,36 @@ function refuse(reason, extra = {}) {
   return { ok: false, refused: true, reason, ...extra };
 }
 
-/** The classification of a retained turn, defaulting to the level that lets master's own words move. */
-function levelOf(turn) {
+/**
+ * The classification of a retained turn — ABSENT and UNRECOGNISED kept apart.
+ *
+ * ABSENT (the key missing, or `undefined`) is 'public', and that is the deliberate decision: master
+ * chose to converse through a cloud model and `Chat.jsx` sends turns with no classification at all,
+ * so refusing an unclassified turn would refuse the feature.
+ *
+ * ANYTHING ELSE THAT IS NOT IN THE LATTICE IS REFUSED. A caller that wrote `'secret'`, `'Private'`,
+ * `null`, `''` or a future fourth level has EXPRESSED A CONCERN about that turn; answering by
+ * discarding the concern and sending the text is the one behaviour this module exists to prevent.
+ * `null` and `''` refuse rather than counting as absent because `egressBoundary.classifyElement`
+ * refuses them too — a typo must fail closed on both sides of the seam, not one.
+ */
+function classificationOf(turn) {
   const raw = turn?.classification;
-  return egressBoundary.LEVELS.includes(raw) ? raw : 'public';
+  if (raw === undefined) return { ok: true, level: 'public' };
+  if (egressBoundary.LEVELS.includes(raw)) return { ok: true, level: raw };
+  return { ok: false, reason: REASON.unclassified };
+}
+
+/**
+ * Is this turn sensitive, where the answer is needed and a refusal is not available?
+ *
+ * `assembleTurn` can refuse a malformed flag and does. `selectModel` cannot — it has to return a
+ * model — so an unrecognised value resolves to SENSITIVE there, which costs a cloud turn and never
+ * costs a disclosure. Only a literal `false` (or an absent flag, which destructures to `false`) means
+ * not sensitive.
+ */
+function sensitiveOrUnknown(flag) {
+  return flag !== false;
 }
 
 /**
@@ -133,9 +177,9 @@ function levelOf(turn) {
  */
 function elementsFor({ systemText, systemLevel, turns, text, textLevel }) {
   const out = [{ role: 'system', text: systemText, level: systemLevel }];
-  for (const t of turns) {
-    out.push({ role: t.role, text: String(t.text), level: levelOf(t) });
-  }
+  // `turns` here is the already-validated list: role, text and LEVEL all checked by assembleTurn, so
+  // no element reaching this function carries a classification nobody recognised.
+  for (const t of turns) out.push({ role: t.role, text: t.text, level: t.level });
   out.push({ role: 'user', text, level: textLevel });
   return out;
 }
@@ -181,19 +225,33 @@ function assembleTurn(spec = {}) {
   } = spec;
 
   if (!DESTINATIONS.includes(destination)) return refuse(REASON.destination, { destination: null, variant: null });
-  if (sensitive === true && destination === 'cloud') {
+  // THE FLAG IS VALIDATED BEFORE IT IS TRUSTED. It arrives over IPC from the renderer, and a truthy
+  // non-boolean used to read as not sensitive on all three decisions below.
+  if (typeof sensitive !== 'boolean') {
+    return refuse(REASON.sensitiveFlag, { destination, variant: null, level: null });
+  }
+  if (sensitive && destination === 'cloud') {
     return refuse(REASON.sensitiveCloud, { destination, variant: null, level: 'private' });
   }
   if (typeof model !== 'string' || !model.trim()) return refuse(REASON.model, { destination, variant: null });
   if (typeof text !== 'string' || !text.trim()) return refuse(REASON.noText, { destination, variant: null });
 
   const list = Array.isArray(turns) ? turns : [];
-  for (const t of list) {
+  const retained = [];
+  for (let i = 0; i < list.length; i += 1) {
+    const t = list[i];
     if (!t || typeof t !== 'object' || !TURN_ROLES.includes(t.role) || typeof t.text !== 'string' || !t.text.length) {
-      return refuse(REASON.badTurn, { destination, variant: null });
+      return refuse(REASON.badTurn, { destination, variant: null, index: i });
     }
+    const cls = classificationOf(t);
+    if (!cls.ok) {
+      // Refused on BOTH destinations, not only cloud: a classification the module cannot read is a
+      // caller it cannot read, and the local path would go on to rank a level that is not in RANK.
+      return refuse(cls.reason, { destination, variant: null, level: null, where: 'messages', index: i });
+    }
+    retained.push({ role: t.role, text: t.text, level: cls.level });
   }
-  if (list.length + 2 > egressBoundary.MAX_MESSAGES) {
+  if (retained.length + 2 > egressBoundary.MAX_MESSAGES) {
     return refuse(REASON.tooManyTurns, { destination, variant: null });
   }
 
@@ -209,8 +267,8 @@ function assembleTurn(spec = {}) {
   const systemLevel = useRevealed ? 'private' : 'public';
 
   const elements = elementsFor({
-    systemText, systemLevel, turns: list, text,
-    textLevel: sensitive === true ? 'private' : 'public',
+    systemText, systemLevel, turns: retained, text,
+    textLevel: sensitive ? 'private' : 'public',
   });
 
   if (destination === 'cloud') {
@@ -259,7 +317,9 @@ function assembleTurn(spec = {}) {
  */
 function selectModel(models = [], { sensitive = false, diskBudgetBytes = null } = {}) {
   return modelRoles.selectForRole(ROLE, models, {
-    requirePrivate: sensitive === true,
+    // NOT `sensitive === true`. A flag that is truthy, or null, or a string, is an unknown, and an
+    // unknown here picks the private model — the one direction that cannot disclose anything.
+    requirePrivate: sensitiveOrUnknown(sensitive),
     diskBudgetBytes,
   });
 }

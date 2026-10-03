@@ -352,9 +352,45 @@ function sectionChokepoint() {
     convo.assembleTurn({ destination: 'cloud', model: 'g', text: 'hi',
       turns: [{ role: 'user', text: 'I hold 400 shares', classification: 'private' }] })
       .reason === egress.REASON.privateLevel);
-  check('an unknown classification is refused with the boundary\u2019s unclassified reason',
-    convo.assembleTurn({ destination: 'cloud', model: 'g', text: 'hi',
-      turns: [{ role: 'user', text: 'x', classification: 'secret' }] }).ok === true);
+  // THE DEFECT REVIEW CAUGHT, AND THE ROW THAT DOCUMENTED IT AS IF IT WERE THE FIX. The label used to
+  // read "is refused" over an assertion of `.ok === true`, which is green, so nothing flagged it, and
+  // a later session reading labels to learn what is guaranteed would have concluded the opposite of
+  // the truth. The label and the assertion now describe the same behaviour.
+  const unknownClass = (classification, destination = 'cloud') => convo.assembleTurn({
+    destination, model: 'g', text: 'hi', turns: [{ role: 'user', text: 'x', classification }],
+  });
+  for (const bogus of ['secret', 'confidential', 'PRIVATE', 'Private', '', null, 0]) {
+    const r = unknownClass(bogus);
+    check(`classification ${util.inspect(bogus)} is REFUSED, not rewritten to public`,
+      r.ok === false && r.refused === true && r.reason === egress.REASON.unclassified,
+      util.inspect(r));
+  }
+  check('with the boundary\u2019s own unclassified wording and not a second one',
+    convo.REASON.unclassified === egress.REASON.unclassified);
+  check('and refused on the LOCAL destination too — an unreadable caller is not a cloud-only problem',
+    unknownClass('secret', 'local').reason === egress.REASON.unclassified);
+  check('the refusal says which message it was, so master is not told to go looking',
+    unknownClass('secret').where === 'messages' && unknownClass('secret').index === 0);
+  check('while an ABSENT classification is still public and still crosses — absent and unrecognised '
+    + 'are different facts',
+    (() => {
+      const r = convo.assembleTurn({ destination: 'cloud', model: 'g', text: 'hi',
+        turns: [{ role: 'user', text: 'the rupee' }] });
+      return r.ok === true && JSON.stringify(r.body).includes('the rupee');
+    })());
+
+  // THE OTHER HALF OF THE SAME DEFECT: `sensitive` was the one input to assembleTurn nobody validated,
+  // and all three of its decisions tested `=== true`, so a truthy non-boolean read as NOT sensitive.
+  for (const truthy of ['true', 'yes', 1, {}, null]) {
+    const r = convo.assembleTurn({ destination: 'cloud', model: 'g', text: 'should I sell', sensitive: truthy });
+    check(`sensitive: ${util.inspect(truthy)} is REFUSED rather than read as not sensitive`,
+      r.ok === false && r.reason === convo.REASON.sensitiveFlag, util.inspect(r));
+  }
+  check('and a non-boolean flag is refused on the local destination too, not quietly normalised',
+    convo.assembleTurn({ destination: 'local', model: LOCAL_TAG, text: 'hi', sensitive: 1 })
+      .reason === convo.REASON.sensitiveFlag);
+  check('an explicit false is still the ordinary non-sensitive turn',
+    convo.assembleTurn({ destination: 'cloud', model: 'g', text: 'hi', sensitive: false }).ok === true);
 
   // destinationFor: the safe default on uncertainty.
   check('a private row routes local', convo.destinationFor(localRow()) === 'local');
@@ -384,6 +420,17 @@ function sectionCloudFirst() {
     closed.excluded.some(e => /ollama-cloud/.test(e.id)));
   check('for the privacy reason and not for size',
     /not private/.test(closed.excluded.map(e => e.why).join()));
+
+  // SELECTION CANNOT REFUSE — it has to return a model — so an unrecognised flag resolves to the
+  // PRIVATE model here. `sensitive === true` used to send every one of these to the cloud row.
+  for (const truthy of ['true', 'yes', 1, {}, null]) {
+    check(`selection treats sensitive: ${util.inspect(truthy)} as sensitive and stays LOCAL`,
+      convo.selectModel(both, { sensitive: truthy }).model === `ollama/${LOCAL_TAG}`,
+      convo.selectModel(both, { sensitive: truthy }).model);
+  }
+  check('and only a literal false (or an absent flag) opens the cloud row',
+    convo.selectModel(both, { sensitive: false }).model === 'ollama-cloud/gemma4:31b'
+    && convo.selectModel(both, {}).model === 'ollama-cloud/gemma4:31b');
 
   // Order independence — a comparator that only works in one input order is not a comparator.
   check('the cloud model wins whichever order the rows arrive in',
