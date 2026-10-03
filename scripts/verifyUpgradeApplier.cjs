@@ -157,15 +157,41 @@ console.log('\n  opts.autonomous is a datum for the audit, not a gate');
     a.applied.length === b.applied.length && a.verification === b.verification && a.masterDriven === b.masterDriven);
   check('the claim is RECORDED', withFlag.meta.autonomy.flagFromOpts === true);
   check('and what the system decided is recorded separately, so both are auditable',
-    withFlag.meta.autonomy.appliedBy === 'master' && withFlag.meta.autonomy.autonomousApply === false);
+    withFlag.meta.autonomy.attemptedBy === 'master' && withFlag.meta.autonomy.autonomousApply === false);
+  check('a SUCCESSFUL apply records that it happened, and when',
+    withFlag.meta.autonomy.appliedBy === 'master' && typeof withFlag.meta.autonomy.appliedAt === 'string');
   check('and an absent flag records false rather than nothing', without.meta.autonomy.flagFromOpts === false);
   const repoC = repoFixture();
   const preserved = diffProposal(repoC);
-  preserved.meta.autonomy = { appliedBy: 'someone', autonomousApply: true, note: 'pre-existing' };
+  preserved.meta.autonomy = { attemptedBy: 'someone', autonomousApply: true, note: 'pre-existing' };
   await applier.applyWith(io(repoC, userData), preserved, { user: MASTER });
   check('a field already in meta.autonomy survives the apply', preserved.meta.autonomy.note === 'pre-existing');
   check('and the two the audit depends on are set by the applier, not inherited',
-    preserved.meta.autonomy.appliedBy === 'master' && preserved.meta.autonomy.autonomousApply === false);
+    preserved.meta.autonomy.attemptedBy === 'master' && preserved.meta.autonomy.autonomousApply === false);
+
+  // THE BADGE-LABEL RULE, in the audit trail of the one component that writes source. meta.autonomy is
+  // merged above every validation and it mutates the LEDGER'S OWN entry object, so when a validation
+  // throws, proposals.cjs sets status = FAILED and persists that same object (244-248). Writing
+  // `appliedBy: 'master'` at entry therefore left an entry refused at the door carrying a field saying
+  // master applied it. The attempt is still recorded — that has value — but it says `attempted`.
+  {
+    const repoD = repoFixture();
+    const refused = diffProposal(repoD, { meta: {} });   // no schema marker: refused at step 1
+    let message = null;
+    try { await applier.applyWith(io(repoD, userData), refused, { user: MASTER }); }
+    catch (err) { message = err.message; }
+    check('an entry refused at the door still throws', message !== null && /meta\.schema/.test(message), message);
+    check('and NOTHING on it claims the apply happened — no appliedBy, no appliedAt',
+      refused.meta.autonomy.appliedBy === undefined && refused.meta.autonomy.appliedAt === undefined,
+      JSON.stringify(refused.meta.autonomy));
+    check('while the attempt itself IS recorded, so a FAILED entry still says who tried and when',
+      refused.meta.autonomy.attemptedBy === 'master' && typeof refused.meta.autonomy.attemptedAt === 'string');
+    const code = strip(read('electron/lib/upgradeApplier.cjs'));
+    const entryAt = code.indexOf('attemptedBy:');
+    const appliedAt = code.indexOf('autonomy.appliedBy =');
+    check('and in source the only appliedBy assignment is BELOW the write loop',
+      entryAt !== -1 && appliedAt > entryAt && appliedAt > code.indexOf('evictSnapshots({'));
+  }
   const code = strip(read('electron/lib/upgradeApplier.cjs'));
   check('meta.autonomy is MERGED, not assigned, so nothing already recorded is destroyed',
     /autonomy = \{\s*\n\s*\.\.\.\(proposal\.meta\.autonomy \|\| \{\}\)/.test(code));
@@ -609,16 +635,27 @@ console.log('\n  the path fence resolves structure — every spelling of a gover
     return root;
   }
 
-  /** The spellings that reduce to the same file. Generated from the path, so a fifth path is covered too. */
+  /**
+   * The spellings that reduce to the same file. Generated from the path, so a fifth path is covered too.
+   *
+   * The third element is the ACTION the attack has to use. `path.posix.normalize` does not strip a
+   * trailing dot or space from a segment, so `autonomyStop.cjs.` and `autonomyStop.cjs ` used to read as
+   * naming nothing governed — and those two are genuinely DISTINCT FILES here (measured: `lstat` of the
+   * trailing-dot name is ENOENT, and a write creates a second directory entry beside the real file). So
+   * a `patch` of them is refused for the wrong reason, "there is nothing to patch", and the shape that
+   * actually reached the write loop was `create`. The row has to use the action the attack used.
+   */
   function variants(rel) {
     const dir = path.posix.dirname(rel);
     const base = path.posix.basename(rel);
     return [
-      [`${dir}/./${base}`,                                     'a "." segment'],
-      [`${dir}//${base}`,                                      'a doubled separator'],
-      [`${dir}/../${path.posix.basename(dir)}/${base}`,         'a ".." that comes back'],
-      [`./${rel}`,                                             'a leading "./"'],
-      [`${rel.split('/').join('\\').replace(/\\([^\\]+)$/, '\\.\\$1')}`, 'backslashes and a "." segment'],
+      [`${dir}/./${base}`,                                     'a "." segment',                 'patch'],
+      [`${dir}//${base}`,                                      'a doubled separator',           'patch'],
+      [`${dir}/../${path.posix.basename(dir)}/${base}`,         'a ".." that comes back',        'patch'],
+      [`./${rel}`,                                             'a leading "./"',                'patch'],
+      [`${rel.split('/').join('\\').replace(/\\([^\\]+)$/, '\\.\\$1')}`, 'backslashes and a "." segment', 'patch'],
+      [`${rel}.`,                                              'a trailing dot',                'create'],
+      [`${rel} `,                                              'a trailing space',              'create'],
     ];
   }
 
@@ -626,12 +663,12 @@ console.log('\n  the path fence resolves structure — every spelling of a gover
   let variantRows = 0;
 
   for (const entry of policy.SELF_GOVERNING_PATHS) {
-    for (const [spelling, shape] of variants(entry.path)) {
+    for (const [spelling, shape, action] of variants(entry.path)) {
       variantRows += 1;
 
       // (i) the renderer create path
       const fromIpc = gate.inspectCreate(
-        { kind: 'self-modify', changes: [{ action: 'patch', path: spelling, content: PAYLOAD }] },
+        { kind: 'self-modify', changes: [{ action, path: spelling, content: PAYLOAD }] },
         { origin: 'ipc' });
       check(`IPC create: "${spelling}" (${shape}) is refused`,
         fromIpc?.refused === true && /govern the autonomy policy or the stop/.test(fromIpc.reason),
@@ -639,7 +676,7 @@ console.log('\n  the path fence resolves structure — every spelling of a gover
 
       // (ii) Rāma's own create path
       const fromRama = gate.inspectCreate(
-        { kind: gate.KIND.DIFF, changes: [{ action: 'patch', path: spelling, content: PAYLOAD }] },
+        { kind: gate.KIND.DIFF, changes: [{ action, path: spelling, content: PAYLOAD }] },
         { origin: 'rama' });
       check(`Rāma's create: "${spelling}" is refused for naming a governed path, not merely for the stop`,
         fromRama?.refused === true && /govern the autonomy policy or the stop/.test(fromRama.reason),
@@ -653,48 +690,63 @@ console.log('\n  the path fence resolves structure — every spelling of a gover
         inMeta?.refused === true, inMeta?.reason ?? 'it was allowed');
     }
   }
-  check('all four self-governing paths were covered, in five spellings each',
-    variantRows === policy.SELF_GOVERNING_PATHS.length * 5 && variantRows === 20, String(variantRows));
+  check('all four self-governing paths were covered, in seven spellings each',
+    variantRows === policy.SELF_GOVERNING_PATHS.length * 7 && variantRows === 28, String(variantRows));
 
   // (iv) the applier, where the bytes would actually land
   for (const entry of policy.SELF_GOVERNING_PATHS) {
-    for (const [spelling] of variants(entry.path)) {
+    for (const [spelling, shape, action] of variants(entry.path)) {
       const repo = governedRepoFixture();
       const target = path.join(repo, ...entry.path.split('/'));
       const before = fs.readFileSync(target, 'utf8');
+      const change = action === 'patch'
+        ? { action, path: spelling, content: PAYLOAD, baseSha256: sha256(fs.readFileSync(target)) }
+        : { action, path: spelling, content: PAYLOAD };
       const proposal = {
         id: pid(), kind: gate.KIND.DIFF, title: 'a governed path, spelled around the fence',
         meta: { schema: gate.SCHEMA },
-        changes: [{ action: 'patch', path: spelling, content: PAYLOAD, baseSha256: sha256(fs.readFileSync(target)) }],
+        changes: [change],
       };
       let message = null;
       try { await applier.applyWith(io(repo, userData), proposal, { user: MASTER }); }
       catch (err) { message = err.message; }
-      check(`applyWith: "${spelling}" is refused at step 3`,
+      check(`applyWith: "${spelling}" (${shape}) is refused at step 3`,
         message !== null && /govern the autonomy policy or the stop/.test(message),
         message ?? 'it was applied');
       check(`and ${entry.path} is byte-identical on disk afterwards`,
         fs.readFileSync(target, 'utf8') === before);
+      // The trailing-dot and trailing-space spellings are distinct files here, so the governed file
+      // surviving is not enough: the governed-ADJACENT file must not exist either.
+      if (action === 'create') {
+        check(`and no "${path.posix.basename(spelling)}" was left beside it`,
+          fs.existsSync(path.join(repo, ...spelling.split('/'))) === false);
+      }
     }
   }
 
   // (v) THE CONTROL. The same spellings, an ungoverned path — these must APPLY. Without this row a
   // green section above would be satisfied by a fence that refuses anything with a "." or a ".." in it,
   // which is a different and much blunter guarantee than the one being claimed.
-  for (const [spelling, shape] of variants('electron/lib/target.cjs')) {
+  for (const [spelling, shape, action] of variants('electron/lib/target.cjs')) {
     const repo = governedRepoFixture();
     const target = path.join(repo, 'electron', 'lib', 'target.cjs');
+    const change = action === 'patch'
+      ? { action, path: spelling, content: 'module.exports = 2;\n', baseSha256: sha256(fs.readFileSync(target)) }
+      : { action, path: spelling, content: 'module.exports = 2;\n' };
     const proposal = {
       id: pid(), kind: gate.KIND.DIFF, title: 'an ungoverned path, same spelling',
       meta: { schema: gate.SCHEMA },
-      changes: [{ action: 'patch', path: spelling, content: 'module.exports = 2;\n', baseSha256: sha256(fs.readFileSync(target)) }],
+      changes: [change],
     };
     let message = null;
     try { await applier.applyWith(io(repo, userData), proposal, { user: MASTER }); }
     catch (err) { message = err.message; }
     check(`control: an UNGOVERNED path written with ${shape} still applies`, message === null, message);
-    check('and the bytes really changed, so the fence resolves paths rather than rejecting odd ones',
-      fs.readFileSync(target, 'utf8') === 'module.exports = 2;\n');
+    const landed = action === 'patch'
+      ? path.join(repo, 'electron', 'lib', 'target.cjs')
+      : path.join(repo, ...spelling.split('/'));
+    check('and the bytes really landed, so the fence resolves paths rather than rejecting odd ones',
+      fs.readFileSync(landed, 'utf8') === 'module.exports = 2;\n');
   }
 
   const gateCode = strip(read('electron/lib/autonomyGate.cjs'));
@@ -740,6 +792,158 @@ console.log('\n  a real shared/autonomy-policy.json cannot refuse master\'s appr
     check('and the data file is absent again, exactly as it ships',
       fs.existsSync(policy.DATA_FILE) === false);
   }
+}
+
+// ─── 15. THE CLASS THAT NAMES THE ACT IS A CLASS THIS APPLIER CONSULTS ────────
+// The applier used to resolve `revert-own-apply` alone — the safety net — and never `apply-source`,
+// whose entire description is applying a source change. No behavioural difference today (both
+// MASTER_ACT, both PERMANENT, both pinned FLOOR === CEILING === L4), which is exactly why it needed a
+// row: a reader wiring behaviour onto apply-source later would have found the applier never read it.
+// Neither can be pushed below L4 by data, so the refusal is exercised through the INJECTED policy that
+// `io` already carries, one class at a time.
+console.log('\n  both master-driven classes are resolved, and either one refusing stops the apply');
+{
+  const userData = scratch('bothclasses');
+  stop.configure({ userDataRoot: userData });
+  const refusingPolicy = (refuse) => ({
+    requireMasterDriven: (classId, need) => (classId === refuse
+      ? { ok: false, blocked: true, classId, have: 'L3', need,
+        reason: `autonomy policy: "${classId}" is L3 (propose-only); ${need} (apply-after-approval) required for a master-driven act` }
+      : null),
+  });
+
+  for (const classId of ['apply-source', 'revert-own-apply']) {
+    const repo = repoFixture();
+    const target = path.join(repo, 'electron', 'lib', 'target.cjs');
+    const before = fs.readFileSync(target, 'utf8');
+    let message = null;
+    try {
+      await applier.applyWith(io(repo, userData, { policy: refusingPolicy(classId) }),
+        diffProposal(repo), { user: MASTER });
+    } catch (err) { message = err.message; }
+    check(`an apply is refused when "${classId}" resolves below L4, and the refusal names the class`,
+      message !== null && message.includes(classId), message ?? 'it was applied');
+    check(`and ${classId}'s refusal wrote nothing`, fs.readFileSync(target, 'utf8') === before);
+  }
+
+  const asked = [];
+  const repo = repoFixture();
+  await applier.applyWith(io(repo, userData, {
+    policy: { requireMasterDriven: (classId, need) => { asked.push(`${classId}:${need}`); return null; } },
+  }), diffProposal(repo), { user: MASTER });
+  check('both classes are asked for, at L4, with apply-source first',
+    asked.join(',') === 'apply-source:L4,revert-own-apply:L4', asked.join(','));
+  check('and with the REAL policy on a shipped install the apply still succeeds',
+    (await applier.applyWith(io(repoFixture(), userData), diffProposal(repoFixture()), { user: MASTER }))
+      .verification === 'not-run');
+}
+
+// ─── 16. AN UNWRITABLE DESTINATION IS AN ENVIRONMENT PROBLEM, NOT A FATAL HALT ─
+// Traced, then executed. When a write failed because the DESTINATION was unwritable rather than because
+// of anything about the change, revert() restored the snapshotted bytes to those same unwritable paths
+// and failed too — so `failures` was non-empty, `fatal.json` was written and `stop.engage()` revoked
+// master's allow-file. A read-only checkout, a chmod, or a packaged install where repoRoot resolves
+// inside app.asar turned a correctly-approved apply into "FATAL … and autonomy has been halted": the
+// fail-safe firing on a mundane environment problem, with a message blaming the revert.
+console.log('\n  an unwritable destination is refused cleanly, and autonomy stays un-halted');
+{
+  const userData = scratch('unwritable');
+  stop.configure({ userDataRoot: userData });
+  fs.writeFileSync(path.join(userData, stop.STATE_DIR, stop.ALLOW_FILE),
+    JSON.stringify({ allowed: true, by: 'master', at: 'now', note: 'allowed' }), 'utf8');
+  const W_OK = fs.constants.W_OK;
+
+  function fsDenying(denied) {
+    return Object.assign(Object.create(Object.getPrototypeOf(fs)), fs, {
+      accessSync: (p, mode) => {
+        if (mode === W_OK && denied.includes(String(p))) {
+          const err = new Error(`EACCES: permission denied, access '${p}'`);
+          err.code = 'EACCES';
+          throw err;
+        }
+        return fs.accessSync(p, mode);
+      },
+      writeFileSync: () => {
+        const err = new Error('EACCES: permission denied, open');
+        err.code = 'EACCES';
+        throw err;
+      },
+    });
+  }
+
+  // (i) an existing file that denies writes
+  const repo = repoFixture();
+  const target = path.join(repo, 'electron', 'lib', 'target.cjs');
+  let message = null;
+  try {
+    await applier.applyWith(io(repo, userData, { fs: fsDenying([target]) }), diffProposal(repo), { user: MASTER });
+  } catch (err) { message = err.message; }
+  check('the apply is refused by the probe, naming the file and the permission',
+    message !== null && /is not writable/.test(message) && /EACCES/.test(message)
+    && message.includes('electron/lib/target.cjs'), message ?? 'it was applied');
+  check('and it says plainly that this is an environment problem rather than a failed change',
+    /environment problem/.test(message || ''));
+  check('the bytes are untouched', fs.readFileSync(target, 'utf8') === 'module.exports = 1;\n');
+  check('AUTONOMY WAS NOT HALTED and master\'s allow-file survives',
+    stop.isHalted() === false && stop.isStopped() === false
+    && fs.existsSync(stop.stoppedRecordPath()) === false);
+  check('no snapshot directory was created, because the probe runs before the snapshot',
+    fs.existsSync(path.join(userData, stop.STATE_DIR, stop.SNAPSHOT_DIR)) === false);
+
+  // (ii) a CREATE under a directory that denies writes — probed through the nearest existing ancestor,
+  // because a create under a new directory has no parent to ask and ENOENT there is not a permission.
+  const repo2 = repoFixture();
+  const libDir = path.join(repo2, 'electron', 'lib');
+  let message2 = null;
+  try {
+    await applier.applyWith(io(repo2, userData, { fs: fsDenying([libDir]) }), diffProposal(repo2, {
+      changes: [{ action: 'create', path: 'electron/lib/deep/new.cjs', content: 'module.exports = 3;\n' }],
+    }), { user: MASTER });
+  } catch (err) { message2 = err.message; }
+  check('a create under an unwritable ancestor is refused the same way',
+    message2 !== null && /is not writable/.test(message2) && message2.includes('lib'), message2 ?? 'it was applied');
+  check('and nothing was created', fs.existsSync(path.join(libDir, 'deep')) === false);
+  check('autonomy is still not halted after the second refusal', stop.isHalted() === false);
+
+  // (iii) and the same thing with the REAL filesystem and a read-only file, so the probe is not only
+  // exercised against a fake. Windows reports the read-only ATTRIBUTE here (measured: EPERM).
+  const repo3 = repoFixture();
+  const ro = path.join(repo3, 'electron', 'lib', 'target.cjs');
+  const p3 = diffProposal(repo3);
+  fs.chmodSync(ro, 0o444);
+  let detected = true;
+  try { fs.accessSync(ro, W_OK); detected = false; } catch { detected = true; }
+  if (detected) {
+    let message3 = null;
+    try { await applier.applyWith(io(repo3, userData), p3, { user: MASTER }); }
+    catch (err) { message3 = err.message; }
+    check('a REAL read-only file is refused by the probe, with no fake filesystem involved',
+      message3 !== null && /is not writable/.test(message3), message3 ?? 'it was applied');
+    check('and the real read-only file still holds its original bytes',
+      fs.readFileSync(ro, 'utf8') === 'module.exports = 1;\n');
+    check('and no field on the entry claims the apply happened',
+      p3.meta.autonomy.appliedBy === undefined && p3.meta.autonomy.attemptedBy === 'master');
+  } else {
+    residual('accessSync(W_OK) does not report this machine\'s read-only files, so the real-filesystem '
+      + 'row was skipped; the injected-fs rows above still cover the probe.');
+  }
+  fs.chmodSync(ro, 0o644);
+
+  // (iv) the control: the probe must not refuse a writable destination, or it would refuse everything.
+  const repo4 = repoFixture();
+  const ok4 = await applier.applyWith(io(repo4, userData), diffProposal(repo4), { user: MASTER });
+  check('control: a writable destination still applies, so the probe is a probe and not a wall',
+    ok4.applied.length === 1
+    && fs.readFileSync(path.join(repo4, 'electron', 'lib', 'target.cjs'), 'utf8') === 'module.exports = 2;\n');
+  check('the probe runs BEFORE the snapshot in source, so the revert path is never entered for it',
+    strip(read('electron/lib/upgradeApplier.cjs')).indexOf('writabilityOf(fs, t)')
+    < strip(read('electron/lib/upgradeApplier.cjs')).indexOf('the snapshot of'));
+
+  residual('on this platform accessSync(W_OK) reports a directory as writable even when its ACL denies '
+    + 'writes — it reads the read-only ATTRIBUTE, not the ACL. So the probe catches a read-only file, a '
+    + 'missing ancestor and an app.asar root, and NOT an ACL-denied directory: for that case the write '
+    + 'loop\'s catch and the revert behind it are still what responds.');
+  stop.configure({ userDataRoot: userData });
 }
 
 }

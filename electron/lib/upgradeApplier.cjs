@@ -24,7 +24,10 @@
  *    (`preload.cjs` 680 → `proposals.cjs` 235) untouched, so a predicate built on it is supplied by the
  *    party the stop exists to stop, and a future autonomous applier would bypass it by OMITTING A
  *    FIELD. It is recorded into `meta.autonomy` as a datum for the audit, MERGED rather than assigned so
- *    `appliedBy` and `autonomousApply` survive beside it.
+ *    `autonomousApply` and anything already recorded survive beside it. What is recorded at ENTRY says
+ *    `attemptedBy`/`attemptedAt`; `appliedBy`/`appliedAt` are written on the success path only, because
+ *    an entry refused at the door is persisted FAILED by `proposals.cjs` and must not carry a field
+ *    claiming master applied it.
  *
  * 2. **The snapshot directory is DERIVED from the proposal id, and the persisted `dir` is never read.**
  *    `rollbackPoint` lives in `meta`, `restore()` rehydrates `meta` on an id check alone, and `<userData>`
@@ -32,8 +35,10 @@
  *    stop's state inside the one branch the fence permits to write. `meta...rollbackPoint.dir` is
  *    DISPLAY-ONLY, exactly as a persisted verification plan is.
  *
- * 3. **The level comes from `policy.requireMasterDriven`, which ignores the stop for the two MASTER_ACT
- *    classes and throws for everything else.** An unconditional `policy.require('revert-own-apply')`
+ * 3. **The levels come from `policy.requireMasterDriven`, which ignores the stop for the two MASTER_ACT
+ *    classes and throws for everything else.** BOTH are resolved — `apply-source`, the class whose
+ *    description is this act, and `revert-own-apply`, the safety net that must work before a byte is
+ *    written. An unconditional `policy.require('revert-own-apply')`
  *    resolved against the L0 the stop forces, and the shipped install has no allow-file — so it REFUSED
  *    A MASTER-APPROVED APPLY ON EVERY INSTALL. The stop halts Rāma starting work; it must never refuse
  *    master. `scripts/verifyUpgradeApplier.cjs` asserts that in the shipped state: no allow-file, no
@@ -128,6 +133,37 @@ function validatePath(fs, repoRoot, p) {
   return { ok: true, resolved, existed, rel: path.relative(root, resolved).split(path.sep).join('/') };
 }
 
+/**
+ * Can this target actually be written? An existing file is probed directly; a create is probed against
+ * its NEAREST EXISTING ANCESTOR, because a create under a new directory has no parent to ask yet and an
+ * ENOENT on a directory this apply is going to make is not a permission problem.
+ *
+ * Measured on this platform: `accessSync(W_OK)` on a read-only FILE throws EPERM, and on a directory it
+ * returns success even when the directory denies writes — Windows reports the read-only ATTRIBUTE, not
+ * the ACL. So this catches a read-only checkout, a chmod'd file and an `app.asar` root, and it does NOT
+ * catch an ACL-denied directory. That residual is printed by the suite rather than argued away: the
+ * write loop still has its `catch`, and the revert behind it, for everything the probe cannot see.
+ */
+function writabilityOf(fs, target) {
+  const W_OK = fs?.constants?.W_OK ?? 2;
+  if (target.existed) {
+    try { fs.accessSync(target.resolved, W_OK); return { ok: true }; }
+    catch (err) { return { ok: false, why: `${err.code || 'EACCES'} on the file itself` }; }
+  }
+  let dir = path.dirname(target.resolved);
+  for (;;) {
+    let exists = true;
+    try { fs.accessSync(dir); } catch { exists = false; }
+    if (exists) {
+      try { fs.accessSync(dir, W_OK); return { ok: true }; }
+      catch (err) { return { ok: false, why: `${err.code || 'EACCES'} on ${dir}` }; }
+    }
+    const up = path.dirname(dir);
+    if (up === dir) return { ok: false, why: `no existing ancestor directory of ${target.resolved} could be reached` };
+    dir = up;
+  }
+}
+
 // ─── The applier ──────────────────────────────────────────────────────────────
 
 /**
@@ -156,20 +192,37 @@ async function applyWith(io, proposal, opts = {}) {
   const masterDriven = !!(user && typeof user.tier === 'number' && capability.can(user, 'self-modify.apply'));
   if (!masterDriven) throw new Error('apply requires an authenticated tier-0 user (I6)');
 
-  const levelRefusal = policy.requireMasterDriven('revert-own-apply', 'L4');
-  if (levelRefusal) throw new Error(levelRefusal.reason);
+  // BOTH classes, and `apply-source` first, because it is the class whose entire description is
+  // applying a source change and this is the one component in the design that writes one. Gating on
+  // `revert-own-apply` — the safety net that has to work before any byte is written — is the other half
+  // and is kept rather than replaced. The two resolve identically today (both MASTER_ACT, both
+  // PERMANENT, both pinned FLOOR === CEILING === L4), so this is about the class that NAMES the act
+  // being the class consulted: a reader wiring behaviour onto `apply-source` later would otherwise find
+  // that the applier never read it.
+  for (const classId of ['apply-source', 'revert-own-apply']) {
+    const levelRefusal = policy.requireMasterDriven(classId, 'L4');
+    if (levelRefusal) throw new Error(levelRefusal.reason);
+  }
 
   const at = new Date(now()).toISOString();
   proposal.meta = proposal.meta || {};
-  // MERGED, never assigned: `appliedBy` and `autonomousApply` are what the audit trail and the
-  // forward-compatibility argument both rest on, and `flagFromOpts` keeps "what the caller claimed"
-  // and "what the system decided" as two separate auditable facts.
+  // MERGED, never assigned: `autonomousApply` is what the forward-compatibility argument rests on, and
+  // `flagFromOpts` keeps "what the caller claimed" and "what the system decided" as two separate
+  // auditable facts.
+  //
+  // ATTEMPTED, not APPLIED. This runs above the schema check, the loyalty guard, the governed-path
+  // fence and the per-change validations, and it mutates the ledger's own entry object — so when a
+  // validation then throws, `proposals.cjs`'s catch sets `status = FAILED` and persists THIS object.
+  // An earlier revision wrote `appliedBy: 'master'` here, which left an entry refused at the door
+  // carrying a field that said master applied it: the badge-label mismatch, in the audit trail of the
+  // one component that writes source. Recording the attempt has value, so it stays where it is and
+  // says what it is; `appliedBy` and `appliedAt` are set on the SUCCESS PATH ONLY, below.
   proposal.meta.autonomy = {
     ...(proposal.meta.autonomy || {}),
-    appliedBy: 'master',
+    attemptedBy: 'master',
     autonomousApply: false,
     flagFromOpts: opts?.autonomous === true,
-    recordedAt: at,
+    attemptedAt: at,
   };
 
   // ── the id, and the DERIVED snapshot directory ─────────────────────────────────────────────────
@@ -230,6 +283,23 @@ async function applyWith(io, proposal, opts = {}) {
     }
   }
 
+  // ── 7. is the DESTINATION even writable? Probed before the snapshot is taken ───────────────────
+  // A write that fails because the destination is unwritable sends `revert()` to restore the
+  // snapshotted bytes to those same unwritable paths, so the revert fails too — and a failed revert is
+  // FATAL: it writes `fatal.json` and `stop.engage()` revokes master's allow-file. A read-only
+  // checkout, a permissions change, or a packaged install where `repoRoot` resolves inside `app.asar`
+  // would therefore turn a correctly-approved apply into "FATAL … and autonomy has been halted",
+  // firing the fail-safe on a mundane environment problem and blaming the revert for it. So the
+  // environment is probed first and refused plainly, by path and by permission, and the revert path is
+  // never entered for a cause it cannot fix.
+  for (const t of targets) {
+    const probe = writabilityOf(fs, t);
+    if (!probe.ok) {
+      throw new Error(`refused: "${t.rel}" is not writable — ${probe.why}. Nothing was written and `
+        + 'autonomy was not halted: this is an environment problem, not a failed change.');
+    }
+  }
+
   // ── the snapshot, taken and VERIFIED before the first write ────────────────────────────────────
   const files = [];
   fs.mkdirSync(path.join(dir, 'files'), { recursive: true });
@@ -271,6 +341,11 @@ async function applyWith(io, proposal, opts = {}) {
   }
 
   evictSnapshots({ fs, root: path.join(userDataRoot, stop.STATE_DIR, stop.SNAPSHOT_DIR), keep: dir, now: now() });
+
+  // THE SUCCESS PATH, and the only place a field may claim the apply happened. Everything above this
+  // line can still throw, and `proposals.cjs` persists the entry object it was handed when it does.
+  proposal.meta.autonomy.appliedBy = 'master';
+  proposal.meta.autonomy.appliedAt = new Date(now()).toISOString();
 
   return {
     applied,
@@ -382,5 +457,5 @@ function evictSnapshots({ fs, root, keep = null, now = Date.now() }) {
 module.exports = {
   KIND, SCHEMA, PID, ALLOWED_ACTIONS, RECOGNISED_OPTS,
   SNAPSHOT_MAX_ENTRIES, SNAPSHOT_MAX_AGE_MS,
-  register, applyWith, revert, validatePath, evictSnapshots,
+  register, applyWith, revert, validatePath, writabilityOf, evictSnapshots,
 };

@@ -247,12 +247,33 @@ for (const d of stop.PRE_EXISTING) {
     const actual = lines.findIndex(l => l.includes(d.fn)) + 1;
     residual(`${d.module}'s citation for ${d.fn} says line ${d.citedLine}; it now reads line ${actual || 'unknown'}`);
   }
-  check(`${d.fn} is governed by isHalted(), not by the fail-safe predicate`, d.governedBy === 'isHalted');
+  check(`${d.fn} DECLARES isHalted() as the predicate it will consult — the field, not the wiring`,
+    d.governedByWhenBuilt === 'isHalted');
   check(`and this build does not tear it down, which is declared rather than assumed`,
     d.haltedByEngage === false && typeof d.why === 'string' && d.why.length > 20);
   const code = src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
   check(`${path.basename(d.module)} is untouched by the stop — no isStopped() reaches it`,
     !/isStopped\s*\(/.test(code));
+}
+// And the honest half of those four rows, asserted rather than left to be inferred from the field name:
+// isHalted() has NO production consumer. The four rows above record an intention, and the day one of
+// those dispatchers starts consulting it is the day this row has to be rewritten — which is the point.
+{
+  const dirs = [['electron', 'lib'], ['electron', 'ipc'], ['electron']];
+  const consumers = [];
+  for (const parts of dirs) {
+    let names = [];
+    try { names = fs.readdirSync(path.join(ROOT, ...parts)).filter(f => f.endsWith('.cjs')); } catch { names = []; }
+    for (const name of names) {
+      if (name === 'autonomyStop.cjs') continue;
+      const src = read(path.join(...parts, name)).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+      if (/isHalted\s*\(/.test(src)) consumers.push(path.join(...parts, name));
+    }
+  }
+  check('isHalted() has no production consumer yet, so governedByWhenBuilt names an intention and the '
+    + 'header must not claim a mechanism', consumers.length === 0, consumers.join(', '));
+  check('and the module header says exactly that, in words',
+    /NOTHING CALLS IT YET/.test(stopSrc) && /governedByWhenBuilt/.test(stopSrc));
 }
 
 // ─── 9. the behavioural proof for I11 ─────────────────────────────────────────
@@ -318,9 +339,32 @@ check('no ceiling is L5 — the top rung is declared and unreachable',
   policy.CLASSES.every(c => policy.CEILINGS[c] !== 'L5'));
 check('every class Rāma INITIATES has a floor no higher than L3',
   policy.RAMA_INITIATED.every(c => policy.rank(policy.FLOORS[c]) <= policy.rank('L3')));
-check('the four frozen constants really are frozen',
+check('the three frozen tables really are frozen',
   Object.isFrozen(policy.CLASSES) && Object.isFrozen(policy.FLOORS)
-  && Object.isFrozen(policy.CEILINGS) && Object.isFrozen(policy.PERMANENT));
+  && Object.isFrozen(policy.CEILINGS));
+// `Object.freeze(new Set([...]))` freezes PROPERTIES, not internal slots: with the sets exported
+// directly, `Object.isFrozen(policy.PERMANENT)` returned true while `policy.PERMANENT.delete(...)`
+// succeeded and dropped the size from 7 to 6 — after which a data file naming that class VALIDATED.
+// So the clause that read `Object.isFrozen` is replaced by what it was supposed to mean: no mutator
+// exists, mutating a copy changes nothing, and the membership rows below carry the actual guarantee.
+check('the two membership views expose no mutator at all, so a delete throws instead of succeeding',
+  typeof policy.PERMANENT.delete === 'undefined' && typeof policy.PERMANENT.add === 'undefined'
+  && typeof policy.PERMANENT.clear === 'undefined' && typeof policy.MASTER_ACT.delete === 'undefined'
+  && typeof policy.MASTER_ACT.add === 'undefined');
+{
+  const sizeBefore = policy.PERMANENT.size;
+  const copy = new Set([...policy.PERMANENT]);
+  copy.delete('revert-own-apply');
+  check('copying the view and mutating the copy leaves the exported view untouched',
+    copy.size === sizeBefore - 1 && policy.PERMANENT.size === sizeBefore
+    && policy.PERMANENT.has('revert-own-apply') === true);
+  check('and the loader still rejects a file naming that class, which is what the mutation used to buy',
+    policy.validate({ version: 1, levels: { 'revert-own-apply': 'L0' } }).ok === false);
+  let assignmentHeld = true;
+  try { policy.PERMANENT.has = () => false; } catch { assignmentHeld = false; }
+  check('the view itself is frozen, so its has() cannot be swapped for one that answers false',
+    policy.PERMANENT.has('master-record') === true, `assignment ${assignmentHeld ? 'was ignored' : 'threw'}`);
+}
 const status = policy.policyStatus();
 check('seven permanent, eight editable, and the arithmetic is printed',
   status.counts.permanent === 7 && status.counts.editable === 8
@@ -436,8 +480,10 @@ console.log('\n  require() names what it needed; requireMasterDriven() is a two-
     policy.requireMasterDriven('revert-own-apply', 'L4') === null);
   check('and permits apply-source, the other MASTER_ACT class',
     policy.requireMasterDriven('apply-source', 'L4') === null);
-  check('the MASTER_ACT subset is exactly two — a third member turns this RED',
-    policy.MASTER_ACT.size === 2 && policy.MASTER_ACT.has('apply-source') && policy.MASTER_ACT.has('revert-own-apply'),
+  check('the MASTER_ACT subset is exactly two — a third member turns this RED, and only a source edit '
+    + 'can add one now that the view has no add()',
+    policy.MASTER_ACT.size === 2 && policy.MASTER_ACT.has('apply-source') && policy.MASTER_ACT.has('revert-own-apply')
+    && typeof policy.MASTER_ACT.add === 'undefined',
     [...policy.MASTER_ACT].join(', '));
   for (const c of ['propose-source', 'observe', 'research-network', 'author-change', 'master-record']) {
     let t = false;
@@ -501,12 +547,32 @@ check('a data file lowering revert-own-apply to L0 is rejected WHOLE rather than
 check('and so is one that only lowers it alongside legitimate edits',
   policy.validate({ version: 1, levels: { 'research-network': 'L1', 'revert-own-apply': 'L0' } }).ok === false);
 {
-  const mdCode = read('electron/lib/autonomyPolicy.cjs').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
-  const start = mdCode.indexOf('function requireMasterDriven');
-  const next = mdCode.indexOf('\nfunction ', start + 1);
-  const body = mdCode.slice(start, next === -1 ? undefined : next);
-  check('requireMasterDriven refuses outright for a MASTER_ACT class that is not PERMANENT',
-    /PERMANENT\.has\(classId\)/.test(body) && /throw new Error/.test(body));
+  // EXECUTED, not matched. This row used to test two regexes against requireMasterDriven's own source
+  // text, which passes for any function that merely mentions the identifier — the one row in this area
+  // that asserted a shape instead of a behaviour, guarding the loud half of the fence. The sets are
+  // genuinely immutable now, so the divergence cannot be produced by deleting a member; the fence is a
+  // pure function over the two sets instead, and the suite hands it a pair that disagrees.
+  const divergent = { permanent: policy.frozenSetView(['apply-source']) };
+  const err = policy.masterDrivenFence('revert-own-apply', divergent);
+  check('the fence REFUSES a MASTER_ACT class that is not PERMANENT, with the reason in the message',
+    err instanceof Error
+    && /is a MASTER_ACT class but not a PERMANENT one/.test(err.message)
+    && /refuse master's own act/.test(err.message), err && err.message);
+  check('and it still refuses a class that is not MASTER_ACT at all, even with that pair',
+    /only for MASTER_ACT classes/.test(policy.masterDrivenFence('propose-source', divergent)?.message || ''));
+  check('with the real sets it permits both members and returns null',
+    policy.masterDrivenFence('apply-source') === null
+    && policy.masterDrivenFence('revert-own-apply') === null);
+  const polCode = read('electron/lib/autonomyPolicy.cjs').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+  check('and the production door passes NO override — the seam is the suite\'s, not a caller\'s',
+    /const fenced = masterDrivenFence\(classId\);/.test(polCode)
+    && (polCode.match(/masterDrivenFence\(/g) || []).length === 2);
+  const libDir = path.join(ROOT, 'electron', 'lib');
+  const overriders = fs.readdirSync(libDir).filter((f) => {
+    if (!f.endsWith('.cjs') || f === 'autonomyPolicy.cjs') return false;
+    return /masterDrivenFence/.test(read(path.join('electron', 'lib', f)).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, ''));
+  });
+  check('no other module calls the fence directly', overriders.length === 0, overriders.join(', '));
 }
 {
   // And the behavioural end of it, through the LIVE loader rather than a fixture: a real data file on

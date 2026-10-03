@@ -79,6 +79,30 @@ const UNREACHABLE_LEVEL = 'L5';
 function rank(level) { return ORDER.indexOf(level); }
 function min(a, b)   { return rank(a) <= rank(b) ? a : b; }
 
+/**
+ * A membership view over a set of ids, with NO mutator and the backing `Set` unreachable.
+ *
+ * `Object.freeze(new Set([...]))` freezes PROPERTIES, not internal slots, so a frozen `Set` is still
+ * mutable: measured against the live module, `policy.PERMANENT.delete('revert-own-apply')` succeeded and
+ * dropped the size from 7 to 6, after which `validate({version:1,levels:{'revert-own-apply':'L0'}})`
+ * returned `ok: true` — a class the data file is never read for became readable from it. Nothing was
+ * exploitable (`requireMasterDriven` fails closed for the pair, and every permanent class has
+ * `FLOORS[c] === CEILINGS[c]`), but `Object.isFrozen` was an assertion that overstated its guarantee.
+ *
+ * So the exported view carries `has`, `size` and an iterator and nothing else. `delete` and `add` are
+ * `undefined` rather than refused, which throws at the call site instead of silently succeeding, and a
+ * caller that copies the view (`new Set([...PERMANENT])`) mutates its own copy and nothing else.
+ */
+function frozenSetView(ids) {
+  const inner = new Set(ids);
+  return Object.freeze({
+    has: (id) => inner.has(id),
+    get size() { return inner.size; },
+    values: () => inner.values(),
+    [Symbol.iterator]: () => inner.values(),
+  });
+}
+
 // ─── The fifteen classes ──────────────────────────────────────────────────────
 const CLASSES = Object.freeze([
   'observe', 'research-local', 'research-network', 'propose-question',
@@ -139,7 +163,7 @@ const CEILINGS = Object.freeze({
  * `requireMasterDriven` THROWS for a `MASTER_ACT` class that is not permanent: removing one from this
  * set fails loudly at the first apply instead of quietly handing the decision to a data edit.
  */
-const PERMANENT = Object.freeze(new Set([
+const PERMANENT = frozenSetView([
   'apply-source',       // I6 + MASTER_ACT
   'revert-own-apply',   // MASTER_ACT — a data edit must not be able to refuse master's own apply
   'release-classify',   // I17 — master alone
@@ -147,7 +171,7 @@ const PERMANENT = Object.freeze(new Set([
   'loyalty-core',       // I15 / I16
   'master-record',      // spec Section 127
   'autonomy-policy',    // Rāma may not propose its own promotion
-]));
+]);
 
 /** DERIVED, never restated — a second list is how two lists come to disagree. */
 const EDITABLE = Object.freeze(CLASSES.filter(c => !PERMANENT.has(c)));
@@ -166,7 +190,7 @@ const RAMA_INITIATED = Object.freeze([
  * MASTER'S ACTS, not Rāma's autonomy. The ONLY classes that may ignore the stop, and the only ones
  * `requireMasterDriven()` accepts. A third member turns the suite RED.
  */
-const MASTER_ACT = Object.freeze(new Set(['apply-source', 'revert-own-apply']));
+const MASTER_ACT = frozenSetView(['apply-source', 'revert-own-apply']);
 
 /**
  * The paths no proposal of this design's kinds may name, in a change or in its metadata. Declared HERE,
@@ -347,18 +371,38 @@ function require_(classId, need, { action = null } = {}) {
  * cannot borrow the carve-out, because the only function that ignores the stop refuses to be called
  * with one.
  */
-function requireMasterDriven(classId, need) {
-  if (!MASTER_ACT.has(classId)) {
-    throw new Error(`requireMasterDriven is only for MASTER_ACT classes — "${classId}" is not one`);
+/**
+ * The fence itself, as a PURE function over the two sets, returning the `Error` to throw or `null`.
+ *
+ * Extracted so it can be EXERCISED rather than read. Its second clause — a `MASTER_ACT` class that is
+ * not `PERMANENT` — is unreachable through the real sets by construction, and the suite row that used
+ * to cover it matched two regexes over `requireMasterDriven`'s own source text, which passes for any
+ * function that merely mentions the identifier. Now the suite passes a divergent pair and asserts the
+ * real throw, over the real code, with the real message.
+ *
+ * The overrides are a SUITE seam and nothing else: `requireMasterDriven` calls this with no second
+ * argument, and the suite asserts that. They also grant no reach — `masterAct` still bounds which
+ * classes may reach the door at all, so an injected `permanent` can only re-permit a class that is
+ * already in the frozen two-member subset.
+ */
+function masterDrivenFence(classId, { masterAct = MASTER_ACT, permanent = PERMANENT } = {}) {
+  if (!masterAct.has(classId)) {
+    return new Error(`requireMasterDriven is only for MASTER_ACT classes — "${classId}" is not one`);
   }
   // The second half of the fence, and it fails LOUDLY on purpose. This is the one door that ignores the
   // stop, so if its class were also readable from the data file then a validator-accepted edit would be
   // the last thing standing between master's approved apply and a refusal. Rather than trust a comment
   // saying the two sets agree, the door refuses to open for a MASTER_ACT class that is not permanent.
-  if (!PERMANENT.has(classId)) {
-    throw new Error(`"${classId}" is a MASTER_ACT class but not a PERMANENT one, so the data file could `
+  if (!permanent.has(classId)) {
+    return new Error(`"${classId}" is a MASTER_ACT class but not a PERMANENT one, so the data file could `
       + 'refuse master\'s own act — refusing to resolve it at all until it is one or the other');
   }
+  return null;
+}
+
+function requireMasterDriven(classId, need) {
+  const fenced = masterDrivenFence(classId);
+  if (fenced) throw fenced;
   if (!need) throw new Error(`policy.requireMasterDriven("${classId}") needs an explicit level`);
   reload();
   return gate(effective(classId, { ignoreStop: true }), classId, need, 'a master-driven act');
@@ -403,6 +447,6 @@ module.exports = {
   LEVELS, ORDER, UNREACHABLE_LEVEL,
   CLASSES, FLOORS, CEILINGS, PERMANENT, EDITABLE, RAMA_INITIATED, MASTER_ACT, SELF_GOVERNING_PATHS,
   DATA_FILE,
-  rank, validate, load, loadFrom, reload, effective, effectiveFrom, policyStatus,
-  require: require_, requireMasterDriven,
+  rank, frozenSetView, validate, load, loadFrom, reload, effective, effectiveFrom, policyStatus,
+  require: require_, masterDrivenFence, requireMasterDriven,
 };

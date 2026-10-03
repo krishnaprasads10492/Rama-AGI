@@ -11,8 +11,14 @@
  * ── TWO PREDICATES, AND THE ASYMMETRY IS THE DECISION ─────────────────────────────────────────────
  *
  *   isStopped()  governs NEW autonomous action. FAIL-SAFE: absence of configuration means STOPPED.
- *   isHalted()   governs the PRE-EXISTING dispatchers. True only on an EXPLICIT engage (or the env
- *                variable). Absence means "exactly the build master already has".
+ *                It has a real consumer: `autonomyGate.fileProposal`, the one chokepoint in this slice.
+ *   isHalted()   is the predicate the PRE-EXISTING dispatchers WILL consult. **NOTHING CALLS IT YET** —
+ *                grepped across `electron/`, `src/` and `scripts/`, every reference is in this file or
+ *                in the two suites. It is true only on an EXPLICIT engage (or the env variable), and
+ *                absence means "exactly the build master already has". `PRE_EXISTING[]` records it as
+ *                `governedByWhenBuilt` for that reason: an intention, declared, not a mechanism in
+ *                place. Tearing those timers down is deferred for the reason spelled out below, and
+ *                `engage().teardown.performed === false` and `statusText()` both say so in words.
  *
  * For autonomy that does not exist yet the safe default is *off*, and absence must mean *off* —
  * nothing is lost because nothing was there. For work that ALREADY RUNS on master's machine the safe
@@ -184,8 +190,9 @@ const MASTER_DRIVEN_ENTRIES = Object.freeze([
 ]);
 
 /**
- * The four PRE-EXISTING dispatchers. They ship and they run today, so `isStopped()` does not govern
- * them — `isHalted()` does, and nothing in this slice tears them down. Measured citations, kept true
+ * The four PRE-EXISTING dispatchers. They ship and they run today, so `isStopped()` must never govern
+ * them — `isHalted()` is the predicate they will consult WHEN THE TEARDOWN IS BUILT, and nothing in
+ * this slice tears them down or calls that predicate. Measured citations, kept true
  * by the suite: the symbol must still exist in the file (RED if it does not); a drifted line number is
  * printed as a residual rather than failing, because an unrelated edit elsewhere in those files is not
  * a loyalty defect.
@@ -194,28 +201,28 @@ const PRE_EXISTING = Object.freeze([
   Object.freeze({
     module: 'electron/lib/refreshScheduler.cjs', fn: 'runNow', citedLine: 125,
     work: 'ollama-catalog, dependency-review and every other registered refresh task',
-    governedBy: 'isHalted', haltedByEngage: false,
+    governedByWhenBuilt: 'isHalted', haltedByEngage: false,
     why: 'one dispatcher covers every registered task; engage() does not call stop() in this slice '
        + 'because lift() cannot succeed until master adds system.suspend-autonomy',
   }),
   Object.freeze({
     module: 'electron/ipc/metaCognition.cjs', fn: 'auditTimer', citedLine: 332,
     work: 'the 10-minute metacognition audit',
-    governedBy: 'isHalted', haltedByEngage: false,
+    governedByWhenBuilt: 'isHalted', haltedByEngage: false,
     why: 'the interval is armed inside register() and there is no exported re-arm, so a halt with no '
        + 'working lift could not be undone without a restart',
   }),
   Object.freeze({
     module: 'electron/ipc/selfCare.cjs', fn: 'runHealthSweep', citedLine: 200,
     work: 'the 120-second health sweep, including checkInstanceFailover',
-    governedBy: 'isHalted', haltedByEngage: false,
+    governedByWhenBuilt: 'isHalted', haltedByEngage: false,
     why: 'armed at TWO sites (345 and 396); replacing one would leave a live timer that an '
        + 'interval-clearing assertion still passes — a green row over running work',
   }),
   Object.freeze({
     module: 'electron/ipc/marketIntel.cjs', fn: 'tickResolveOutcomes', citedLine: 731,
     work: 'outcome resolution and news sync (tickSyncNews at 748; timers at 784-785)',
-    governedBy: 'isHalted', haltedByEngage: false,
+    governedByWhenBuilt: 'isHalted', haltedByEngage: false,
     why: 'master\'s on-demand StockMind calls arrive through IPC handlers and must stay untouched',
   }),
 ]);

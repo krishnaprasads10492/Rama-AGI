@@ -1,218 +1,284 @@
-# The stop, the policy table, and the gate on `proposals:create`
+# The stop, the policy table and the create gate — build review (pass 2)
 
-Four new main-process modules build the fence before anything autonomous exists behind it: a fail-safe
-stop whose absent configuration means stopped, a fifteen-class policy table with six classes the data
-file is never read for, a validation seam on the ledger's `proposals:create` channel, and an applier
-with entry validation plus a verified byte snapshot. Two new suites carry 271 assertions and both pass.
-The three measured defects the orchestrator named are genuinely closed: nothing renderer-supplied
-decides whether an action is autonomous, the snapshot directory is derived from the proposal id and the
-persisted one is never read, and a master-approved apply succeeds on a shipped install with no
-allow-file — asserted in exactly that state rather than against a fixture. No protected file changed,
-the tripwire is ALL PASS, no `console.log`, no TODO, no new dependency, and the pre-existing dispatchers
-are untouched.
+Four new modules under `electron/lib/` give Rāma a fail-safe stop, a fifteen-class autonomy ladder
+whose permanent rungs are not readable from data, and two fences on the one renderer-reachable door
+that files proposals. `main.cjs` wraps the approval ledger's IPC recorder and registers an applier for
+one new kind; `package.json` appends two suites to the end of the verify chain. The scope was
+deliberately narrowed to three items and the deferred five-stage loop is named rather than implied, so
+its absence is not judged here. This is the second pass: the first returned 1 HIGH, 2 MEDIUM and 3 NIT,
+and all six are fixed where they lived — I re-derived each fix rather than taking the commit message's
+word for it.
 
-**Watch for:** the governed-path fence is defeated by a single `.` path segment (**confirmed** — a
-`self-upgrade` diff naming `electron/lib/./autonomyStop.cjs` was applied over the stop module in a
-fixture repo), so the narrowed FR-14 claim the build note states as true is also false; and a
-validator-accepted data edit (`revert-own-apply: L0`) makes the applier's entry gate refuse every
-master-approved apply (**confirmed**), reintroducing the defect class this slice exists to kill.
+Watch for: the build ledger in `RAMA_AGI_MASTER_SPEC.md` was never updated, so a cold session cannot
+find this work in Section 28 at all (**confirmed**, MEDIUM); `Object.freeze` over a `Set` is asserted as
+though it bounds membership, and it does not (**confirmed**, NIT); a trailing dot or space defeats the
+path fence, though Node treats the result as a different file so the stop's bytes stay intact
+(**confirmed**, NIT).
+
+Everything the brief asked be checked hardest came back clean. A master-approved apply succeeds on the
+shipped default with no allow-file and no policy file — I ran it myself against a scratch root, not a
+fixture. Nothing renderer-supplied decides whether an action is autonomous. The snapshot directory is
+derived from the proposal id and the persisted one is never read. The four pre-existing dispatchers are
+untouched. No permanent class can be raised by a data edit, by three independent mechanisms. No
+protected file changed, the tripwire is ALL PASS, and I re-ran the whole chain: 2949 passed, 0 failed.
 
 **Verdict**: NEEDS_CHANGES
 
 ## High-level view
 
-The deferrals are declared as data rather than implied: `DEFERRED_CHOKEPOINTS`, `FUTURE_ENTRIES` and
-`PRE_EXISTING[].haltedByEngage` are frozen lists the suite reads back, and the five unbuilt stage
-modules are asserted absent so `CHOKEPOINTS.length` cannot overclaim coverage.
+The stop's design turns on two predicates rather than one, and that asymmetry is the load-bearing
+decision. `isStopped()` is fail-safe — no allow-file, torn JSON, `"true"`, `1`, `{}` or a directory at
+that path all mean stopped — and governs new autonomous work. `isHalted()` is true only on an explicit
+`engage()` or `RAMA_AUTONOMY=stop`, and is the predicate nominally assigned to the four dispatchers that
+ship and run today. Governing those with the fail-safe predicate would have deleted five working
+behaviours on every install until master hand-created a file nobody had told him about, which I11 has no
+exception for. The slice gets this right by not touching those files at all.
 
-The stop's asymmetry — `isStopped()` fail-safe for new work, `isHalted()` explicit-engage only for the
-four dispatchers that already ship — is what keeps I11 intact, and it is proved behaviourally: a
-counting task registered with `refreshScheduler` is still dispatched on an install with no allow-file.
-Nothing in the diff touches `refreshScheduler`, `metaCognition`, `selfCare` or `marketIntel` at all, so
-`ollama-catalog`, `dependency-review`, the 10-minute audit, the 120-second sweep and the market ticks
-keep running. The cost, declared in words by `statusText()`, is that `engage()` tears nothing down and
-`lift()` cannot succeed on any machine.
+The policy table's answer to "what stops a data edit raising a permanent class" is that the loader never
+reads them: for a permanent class `shared/autonomy-policy.json` is not overridden, it is not consulted,
+and a file that so much as names one is rejected whole. Three mechanisms hold it, which is why the one
+mutable-`Set` weakness below is a nit and not a hole — the pinned ceilings alone make every permanent
+class unraisable even if the permanent set were emptied.
 
-Permanence is mechanical rather than documentary: `PERMANENT` is a frozen six-member set, `EDITABLE` is
-derived from it by filter rather than restated, the loader rejects a file that so much as names a
-permanent class, and `resolveWithoutStop` returns the frozen floor for those classes before it looks at
-the data. The suite pins the set against a literal list, so moving one into the editable set turns a row
-red.
+The applier's level gate was the first pass's second MEDIUM and the shape of the fix is the interesting
+part. `revert-own-apply` is now PERMANENT, so the data file cannot reach it, and `requireMasterDriven`
+throws outright for a `MASTER_ACT` class that is not permanent — so the two sets cannot drift apart
+quietly. The entry gate consults the revert class rather than `apply-source`, which reads oddly for a
+function whose job is applying; both are pinned at L4 so nothing differs today.
 
-The create gate derives `origin` as a literal written at each call site and throws on anything else,
-closing the `opts.autonomous` bypass at its root rather than sanitising it. What it does not close is
-the path fence itself: `autonomyGate.normalise()` lowercases and converts separators but never resolves,
-so `./`, `//` and `..` variants of the four self-governing paths pass unrecognised. The pre-existing
-`loyaltyGuard` handles the same input correctly, which makes the fix local and the gap new code's.
+Autonomy is derived from the call site, never read from a field. `origin` is a literal written inside
+the main process at both call sites and `inspectCreate` throws on anything else; `opts.autonomous`
+survives only as an audit datum recorded beside what the system decided. The residual honesty here is
+good: the user object the applier reads really does arrive with the IPC request, the applier says so,
+and binding it to the session is on the master list because `proposals.cjs` is protected.
 
-The applier's level comes from `requireMasterDriven` over a frozen two-class subset, which is what lets
-a permanently stopped install still apply what master approved. But that level is resolved through the
-data file, and `revert-own-apply` is editable down to L0 — so an edit the module documents as "turning
-the automatic revert off" instead refuses the whole apply, and does not disable the revert at all.
-
-Coverage is mostly behavioural. The source-shape rows sit where the behaviour is unreachable and each
-says why. The exception is `lift()`: it writes the one file that enables autonomy and its success path
-has no behavioural coverage at all, with no seam to give it one.
+What is missing is not code. The spec's Section 28 ledger ends at row 146 and the spec never mentions
+`autonomyStop` or the allow-file; the paste-ready section and ledger row sit in the build note instead.
+The immediately preceding commit in this same series put its section and row into the spec directly, and
+the spec is not a protected file.
 
 <details>
-<summary>Issues (6)</summary>
+<summary>Issues (8)</summary>
 
-1. **Governed-path fence defeated by a dot segment** (HIGH, confirmed) — `autonomyGate.normalise()`
-   never resolves the path, so `electron/lib/./autonomyStop.cjs`, `electron//lib/autonomyStop.cjs` and
-   `electron/lib/../lib/autonomyStop.cjs` are not recognised as the stop module and are applied.
-   Normalise by resolution (as `loyaltyGuard` already does) and add suite rows for `./`, `//` and `..`
-   variants of each of the four self-governing paths.
-2. **A permitted data edit refuses master's apply** (MEDIUM, confirmed) — `revert-own-apply` is
-   editable to L0 and the applier's entry gate resolves it through the data file, so master setting it
-   to L0 blocks every apply while leaving `revert()` fully enabled. Resolve MASTER_ACT classes at the
-   entry gate against the frozen floor, or make `revert()` the thing that consults the class, and add a
-   suite row with a present data file that lowers it.
-3. **`lift()` has no behavioural coverage and no seam for it** (MEDIUM, confirmed) — it hard-requires
-   `./capability.cjs` and can never succeed, so the allow-file write ordering, the note check and the
-   halt clearing are asserted only by regex over source text. Give it an injectable capability module
-   so the success path can be exercised before master adds `system.suspend-autonomy`.
-4. **The policy file is read once per process** (NIT, confirmed) — `reload()` has no production caller
-   and no IPC surface, so a hand edit needs a restart, contradicting the module's own "no build and no
-   restart is required". Drop the claim or call `reload()` where the policy is read.
-5. **"Forgeable in-process" understates the trust boundary** (NIT, confirmed) — `proposals:apply`
-   passes the renderer's `opts` through, so the `{tier: 0}` object the applier's `masterDriven` check
-   reads is forgeable from the renderer, not just in-process. Reword the comment to name the renderer
-   route and add it to the "for master" list.
-6. **A degraded gate is a silent fail-open fence** (NIT, likely) — if `autonomyGate.cjs` fails to load,
-   `main.cjs` hands the ledger the bare recorder and the path fence disappears, while the stop itself
-   stays fail-safe. Surface the degradation in `status()` so it is visible where autonomy is reported,
-   not only in `loadFailures`.
+1. **Build ledger never updated** — `RAMA_AGI_MASTER_SPEC.md`'s Section 28 ledger ends at row 146 and
+   the spec never mentions these modules; Section 132 and ledger row 152 exist only as paste-ready text
+   in `docs/research/self-upgrade-build.md` §6. Paste both into the spec and renumber the row to 147 to
+   follow 146.
+2. **`Object.freeze` over a `Set` asserted as immutability** — `PERMANENT` and `MASTER_ACT` are mutable
+   at runtime despite `Object.isFrozen` returning true, and one `.delete()` makes `validate()` accept a
+   data file naming that class. Export frozen arrays or a `has()` closure, and replace the
+   `Object.isFrozen(policy.PERMANENT)` row with the membership assertion that already exists below it.
+3. **A source-regex row where behaviour is now reachable** — `verifyAutonomyStop.cjs` line 508 asserts
+   `requireMasterDriven`'s non-permanent refusal by matching `/PERMANENT\.has\(classId\)/` over the
+   function's own text; because the set is mutable the real throw can be executed. Execute it.
+4. **Trailing dot and space defeat the path fence** — `namesGovernedPath('electron/lib/autonomyStop.cjs.')`
+   returns null and a `create` change spelled that way applies, planting a sibling beside the governed
+   file. Trim trailing dots and spaces per segment in `normalise`, and add the two spellings to the
+   variant generator in `verifyUpgradeApplier.cjs` §13.
+5. **`apply-source` is never consulted by the applier** — the entry gate resolves `revert-own-apply`
+   only, so the class that names "applying a source change" is not read by the component that applies
+   them. Require both at L4, or say in the header why the revert net is the thing gated.
+6. **`meta.autonomy` recorded before the entry validations** — a refused apply leaves
+   `appliedBy: 'master'` and `recordedAt` on an entry `proposals.apply` then marks FAILED. Move the merge
+   below the validations, or rename the field to `attemptedBy`.
+7. **`isHalted()` has no production consumers** — `PRE_EXISTING[].governedBy: 'isHalted'` and the suite
+   row that reads it describe an assignment with no mechanism. Reword to "would be governed by" and have
+   the suite row say it asserts the declaration.
+8. **An unwritable repo tree engages the stop** — a failed write triggers a revert that writes back to
+   the same unwritable paths, so it also fails, and `engage()` then revokes master's allow-file. Check
+   writability before the snapshot and refuse cleanly.
 
 </details>
 
 <details>
 <summary>Details</summary>
 
-### A single dot segment reaches the stop module
+### The shipped default, re-measured without a fixture
 
-`autonomyGate.normalise()` is the whole of the path fence's canonicalisation:
+This is the defect the design shipped twice, so I did not take the suite's word for it. With a scratch
+`userData` containing no allow-file, `shared/autonomy-policy.json` absent as it ships, and a tier-0
+user, `applyWith` returned without throwing and the bytes landed. Tracing why: `requireMasterDriven`
+reloads, `effective(classId, {ignoreStop: true})` skips the stop's first line, `resolveWithoutStop` sees
+`source === 'absent'` and returns `FLOORS['revert-own-apply']`, which is `L4`, and the gate needs `L4`.
+No branch in that chain reads the allow-file.
 
-```js
-function normalise(p) {
-  return String(p ?? '').replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
-}
-```
+The second door — a validated data file lowering the class — is shut by making both `MASTER_ACT`
+members permanent, and the suite exercises it through the live loader at `policy.DATA_FILE` rather than
+a fixture, writing and removing a real file under `try/finally`. I confirmed the file is absent again
+afterwards and `git status` is clean. The residual is that a hard kill mid-suite would leave a policy
+file in a shipped tree; the `finally` covers throws but not a signal.
 
-Separators and case are handled; path *structure* is not. `namesGovernedPath` then compares the result
-against four repo-relative tokens with `===` and `endsWith('/' + rel)`, so any form that is not already
-canonical misses:
+### The path fence, and the two spellings still outside it
 
-```
-"electron/lib/autonomyStop.cjs"          -> "electron/lib/autonomystop.cjs"
-"electron/lib/./autonomyStop.cjs"        -> null
-"electron//lib/autonomyStop.cjs"         -> null
-"electron/lib/../lib/autonomyStop.cjs"   -> null
-"shared/./autonomy-policy.json"          -> null
-```
+The first pass's HIGH was a comparison that swapped separators and lowercased but never resolved
+structure. `path.posix.normalize` fixes it, and §13 of the applier suite carries a control row that
+applies the same odd spellings to an *ungoverned* path — so a green section cannot mean "the fence
+rejects anything with a dot in it" when what is claimed is that it resolves them. Twenty variant rows
+across both origins, `meta` and `applyWith`; I reproduced the plain spelling being refused at all three
+gates.
 
-The stop's own state files survive this, because they are matched on basename and
-`.../rama/./autonomy.allow` still ends with `/autonomy.allow`. The four repo-relative paths do not, and
-`electron/lib/autonomyStop.cjs` is one of them.
-
-Both routes the build note claims are closed are open. Driving a `self-upgrade` entry with
-`meta.schema` set, one `patch` change naming `electron/lib/./autonomyStop.cjs` with a correct
-`baseSha256`, and a tier-0 user through `applyWith` against a fixture repo: the applier raised no
-refusal and the file on disk afterwards read `function isStopped(){return false;}`. The same string in
-`meta` passes `fileProposal`'s scan. On the renderer side the create fence returns no refusal either,
-and since `autonomyStop.cjs` is not in `loyaltyGuard.PROTECTED_FILES`, nothing downstream objects —
-`timeline.cjs`'s SELF_MODIFY applier writes `changes[].path` verbatim, which is already a printed
-residual.
-
-I6 is still intact: this needs a recorded master approval and a diff master reads. But the whole point
-of the fence is that the diff should never have been fileable, and the build note's §2 explicitly
-narrows FR-14 to "unreachable by **this design's applier** and by **the renderer create path**" — both
-halves of the narrowed claim are false as shipped.
-
-`loyaltyGuard` refuses `electron/lib/./loyaltyGuard.cjs` and `electron/lib/../lib/loyaltyGuard.cjs` on
-the same input, so the covenant itself is unaffected and the correct matching already exists in the tree
-to copy.
-
-### `revert-own-apply: L0` turns into "no applies at all"
-
-`revert-own-apply` is not permanent. Its floor and ceiling are both L4, which means the data file can
-only move it down — and the module presents that as a feature: *"A present file may RESTRICT an editable
-class below its floor — that is how master puts Rāma offline, or turns the automatic revert off"*, and
-again, *"setting `revert-own-apply` to L0 in the data file still genuinely disables the automatic
-revert."*
-
-Neither sentence holds. With `shared/autonomy-policy.json` present and `{"revert-own-apply": "L0"}`,
-the file validates clean (`source=file`, `rejected=false`) and the applier's entry gate refuses:
+Two spellings are still outside it, and they are the Windows ones:
 
 ```
-autonomy policy: "revert-own-apply" is L0 (forbidden); L4 (apply-after-approval) required
-for a master-driven act
+"electron/lib/autonomyStop.cjs."  -> fence: null   IPC create: ALLOWED   applyWith(create): APPLIED
+"electron/lib/autonomyStop.cjs "  -> fence: null   IPC create: ALLOWED   applyWith(create): APPLIED
+"electron/lib/autonomyStop.cjs"   -> fence: electron/lib/autonomystop.cjs   refused at both gates
 ```
 
-So the edit blocks every master-approved apply of this kind — the exact failure the first assertions of
-`verifyUpgradeApplier.cjs` were written to catch, reachable again through a documented, validator-
-accepted edit. And `revert()` reads neither the policy nor the stop by design, so the automatic revert
-the edit was supposed to disable keeps running. The suite's shipped-state rows all exercise the
-absent-file branch, and §4 of the build note concedes the live `load()` path has only ever taken that
-branch, so nothing covers this.
+`normalize` collapses `.`, `..` and repeated separators but does not trim a trailing dot or space from a
+segment, so the comparison misses them. What saves the stop's bytes is libuv, not the fence: Node opens
+these through the NT path form, so the write creates a genuinely distinct `autonomyStop.cjs.` and the
+real file is byte-identical afterwards — I checked the directory listing and the contents. A `patch` is
+refused earlier with "does not exist, so there is nothing to patch", so only `create` gets through, and
+what it plants is a sibling Node will never load. The reason it is still worth closing is that the
+fence's answer for a governed-adjacent name is "names nothing governed", and plenty of Windows tooling
+does collapse trailing dots and spaces.
 
-Compounding it mildly: `current()` caches the first load for the process lifetime and `reload()` has no
-production caller, so undoing the edit by deleting the file does not take effect until a restart.
+### Autonomy derived from the call site
 
-### Behaviour versus string existence, row by row
+`opts.autonomous` reaches no conditional, and the suite proves it with two applies over separate fixture
+repos — one carrying the flag, one not — asserted to produce the same outcome, rather than by grepping
+for the absence of an `if`. `origin` is a literal at both call sites and an undeclared or invented one
+throws rather than being guessed.
 
-The load-bearing rows drive real state. The fail-safe matrix writes seven malformed allow-files plus a
-directory at the allow path and checks `isStopped()` for each. The revert rows inject an `fs` whose
-`writeFileSync` fails for the second target once (transient — reverted) and then forever (fatal —
-`fatal.json` written, stop engaged, prior allow-file preserved inside the stopped-record). Section 9
-registers the real ledger through `guardLedgerIpc` and calls the captured `proposals:create` handler, so
-the I11 row and the kind fence are exercised rather than read.
+The honest half: `masterDriven` derives from `opts.user`, and that object is renderer-supplied.
+`ipcMain.handle('proposals:apply', (_e, id, opts) => apply(id, opts || {}))` at `proposals.cjs` 269 and
+`authorise(opts.user, ...)` at 219 — I read both lines, and the applier's step-0 comment describes them
+accurately, which it did not in the first pass. The hole is pre-existing, lives in a protected file, and
+is on the master list. What holds "Rāma does not start an apply" is the asserted absence of in-process
+callers of `proposals.apply`: the suite walks `electron/lib`, `electron/ipc` and `electron/`, finds
+exactly two call sites, asserts both sit inside an `ipcMain.handle` body, and goes red at a third.
 
-The source-shape rows are confined to unreachable behaviour: the record-then-unlink ordering in
-`engage()` is also proved behaviourally, the equivalent ordering inside `lift()` is not. `ignoreStop`
-having exactly one consumer is a regex over the module plus a scan of every other file in
-`electron/lib`, which is the right shape for a "nobody else may borrow this" claim.
+### The permanent set is mechanically unraisable, and the freeze assertion is not what it looks like
 
-The gap is `lift()`. Its empty-note refusal, the allow-file contents, the write ordering and the halt
-clearing are all regex over source text, because `lift()` reaches for `require('./capability.cjs')`
-directly with no injection point — unlike `upgradeApplier`'s `io` — so the suite cannot construct a
-passing case even artificially. When master adds `system.suspend-autonomy`, the first real execution of
-the function that enables autonomy is in production.
+Three independent mechanisms stop a data edit raising a permanent class: `validate()` rejects a file
+naming one, whole rather than per key; `resolveWithoutStop` returns the floor without consulting the
+file; and every one of the seven has `FLOORS[c] === CEILINGS[c]`, so `min(CEILINGS[c], declared)` cannot
+exceed the floor even if the first two were bypassed. The red-on-change row is a literal list of the
+seven ids compared against the set, and it does go red when one is moved out by a source edit.
 
-### The I11 half, and what `isHalted()` governs today
+The weakness is in the assertion beside it. `Object.freeze` on a `Set` freezes properties, not internal
+slots:
 
-`isHalted()` has no consumer other than `status()`/`statusText()`. The four `PRE_EXISTING` entries say
-`haltedByEngage: false` with a per-entry reason and `statusText()` prints "Still ARMED, because this
-build does not tear them down", so nothing misreports — but it means the stop currently halts exactly
-one thing, `fileProposal`, which has no caller in the shipped tree. The fence is built and untravelled,
-which is the stated intent.
+```
+isFrozen(PERMANENT) true size 7
+after delete       size 6   has('revert-own-apply') false
+validate({levels:{'revert-own-apply':'L0'}}).ok  ->  true
+requireMasterDriven('revert-own-apply','L4')     ->  throws "...is a MASTER_ACT class but not a PERMANENT one"
+MASTER_ACT.add('propose-source')                 ->  succeeds
+```
 
-`engage()`'s one production caller is the fatal-revert path in `upgradeApplier`. There is no tray entry
-and no IPC channel for `status()`, `statusText()` or `policyStatus()`, so master has no in-app view of
-any of this — within the scope cut, and listed as deferred.
+So `check('the four frozen constants really are frozen', ... Object.isFrozen(policy.PERMANENT))` asserts
+a guarantee it does not provide, and `check('the MASTER_ACT subset is exactly two — a third member turns
+this RED')` holds against a source edit but not against a runtime `.add()`. Nothing is exploitable: the
+loud `throw` catches the `MASTER_ACT` pair fail-closed, and the pinned ceilings catch the other five.
+It is the claim that is overstated, not the fence.
+
+The same mutability makes the one regex row in this area unnecessary. Line 508 asserts
+`requireMasterDriven`'s refusal by matching `/PERMANENT\.has\(classId\)/` against the function's own
+source; deleting a member and calling it produces the real throw, as above.
+
+### Snapshot directory, and the poisoned record
+
+`path.join(userDataRoot, stop.STATE_DIR, stop.SNAPSHOT_DIR, proposal.id)`, with `userDataRoot` closed
+over at wiring time and the id matched against `^[0-9a-f]{20}$` before any path is built. `rollbackPoint`
+appears nowhere in the module. The suite plants
+`meta.weighing.blastRadius.rollbackPoint.dir` pointing at the state directory itself, applies, and then
+asserts both that the snapshot went to the derived path and that the allow-file is byte-identical — a
+`Buffer.compare` against bytes read before the apply, which is the assertion that matters, since the
+earlier design's failure mode was the stop's own state landing inside the one branch the fence permits
+to write.
+
+### The pre-existing dispatchers
+
+None of `refreshScheduler.cjs`, `metaCognition.cjs`, `selfCare.cjs` or `marketIntel.cjs` is in the diff,
+and no `isStopped(` or `isHalted(` reaches any of them — I grepped the whole of `electron/` and the only
+hits outside the new modules are in the two suites. `refreshScheduler` gets a behavioural row: a scratch
+store, a counting probe task, `isStopped()` asserted true, and `runNow` asserted to have called the task
+and recorded its outcome twice. The other three rest on the file being unmodified, which is a sound
+proxy only because they genuinely are.
+
+What that exposes is that `isHalted()` has no production consumer anywhere. `PRE_EXISTING[].governedBy:
+'isHalted'` is a label, and the suite row `"runNow is governed by isHalted(), not by the fail-safe
+predicate"` passes by reading that hardcoded field — a green row over a claim with no mechanism, which is
+the `badgeLabel` defect's shape. It is disclosed three other ways and `statusText()` is careful to say
+"Still ARMED, because this build does not tear them down", so a reader is not misled for long. The module
+header's "`isHalted()` governs the PRE-EXISTING dispatchers" is the sentence to fix.
+
+### The audit record is written before the door
+
+Step 0 merges `meta.autonomy` — `appliedBy: 'master'`, `autonomousApply: false`, `flagFromOpts`,
+`recordedAt` — above the schema check, the loyalty guard, the governed-path fence and the six per-change
+validations. `proposals.apply` then runs `p.status = STATUS.FAILED; log('failed', p, ...)` on the same
+mutated object, so a proposal refused at the door carries a record of master having applied it. The
+status and reason sit beside it, so both facts are available; it is the field name `appliedBy` on a
+FAILED entry that reads wrong. Recording the attempt is worth keeping, so renaming is the cheaper fix
+than moving the merge.
+
+### Failure direction on an unwritable tree
+
+If a write throws, `revert(token, io)` restores from the snapshot in `userData` back to the same paths
+under `repoRoot`. When the cause of the original failure is the destination rather than the source — a
+read-only tree, a permissions change, a packaged install where `path.resolve(__dirname, '..', '..')`
+lands inside `app.asar` — the restore writes fail too, `failures` is non-empty, `fatal.json` is written
+and `stop.engage()` revokes master's allow-file and records a halt. A mundane permissions problem ends
+with autonomy halted and a FATAL message. Recoverable by hand, and master writes that file by hand
+anyway since `lift()` cannot succeed until the capability exists, but a pre-flight writability check
+would turn it into a clean refusal. Traced through the code; not executed against a read-only fixture.
+
+### The ledger, which is the one thing not in the diff
+
+`RAMA_AGI_MASTER_SPEC.md` is unchanged. Its Section 28 ledger ends at row 146 (Section 126, the already
+reviewed Phase 0 commit), rows 147–151 do not exist, and the spec contains no occurrence of
+`autonomyStop` or `autonomy.allow`. Section 132 and ledger row 152 are written out in full in
+`docs/research/self-upgrade-build.md` §6 under a "PASTE-READY" heading. The spec is not in
+`loyaltyGuard.PROTECTED_FILES`, and the preceding commit in this same series added its own section and
+ledger row to the spec directly, so the pattern in this project is that the build commit carries them.
+The resume protocol's stated purpose is that a cold session can resume from the document alone; right
+now that session would find four new modules governing Rāma's autonomy with no entry in the ledger and
+no next step recorded.
+
+### Suites and verification
+
+I ran everything. `node --check` clean on all five `.cjs` touched plus the two suites. The two new
+suites: 187 and 244, 0 failed. The whole chain via `npm run verify`: exit 0, 2949 passed, 0 failed
+summed across every suite, with both new ones at the end and nothing reordered. `verifyLoyaltyTripwire`
+is ALL PASS — the live core hashes to the approved manifest digest, so no protected file moved and
+`--approve` was not run; `shared/loyalty-tripwire.json` is not in the diff. `verifyInvariants` ALL PASS
+with its held-by-hand list unchanged.
+
+`node_modules` is absent from this worktree, so `npx vite build` genuinely cannot run. No `.jsx`
+changed, so there is nothing a renderer build would have covered.
+
+`console.log` appears only in the two suites (28 and 22 calls), matching the existing verify scripts;
+none in the four shipped modules. No TODO, FIXME, XXX or placeholder anywhere in the seven files.
+`package.json` adds two `verify:*` scripts and extends the chain — no dependency added, nothing
+unpinned. Only `main.cjs` and `package.json` were modified; everything else in the diff is new, and
+nothing outside `electron/lib/`, `scripts/` and `docs/research/` is touched.
+
+One check on the wiring, since the gate now sits between the ledger and `ipcMain`: `guardLedgerIpc`
+intercepts `proposals:create` and forwards every other channel, and the suite registers the real
+`proposals.cjs` through it against a fake recorder, asserts all nine channels arrive, and asserts a
+shipped `self-modify` create from a tier-1 user still succeeds while a tier-2 one is still refused by the
+ledger's own view gate. I also grepped `src/` for every governed path and the stop's state names: no
+shipped renderer flow names any of them, so the path fence is additive and cannot have removed a working
+behaviour.
 
 </details>
 
 <details>
-<summary>File map</summary>
+<summary>Files changed</summary>
 
-| File | What changed |
-|---|---|
-| `electron/lib/autonomyStop.cjs` | new — the two predicates, `engage`/`lift`, five frozen coverage lists, `status`/`statusText` |
-| `electron/lib/autonomyPolicy.cjs` | new — fifteen classes over frozen floors/ceilings/permanent, whole-file loader, `require`/`requireMasterDriven` |
-| `electron/lib/autonomyGate.cjs` | new — `guardLedgerIpc` seam, `fileProposal`, the kind and path fences |
-| `electron/lib/upgradeApplier.cjs` | new — entry validation, derived snapshot dir, verified snapshot, revert, retention |
-| `electron/main.cjs` | two edits — ledger registered through the gate wrapper, applier added after it |
-| `package.json` | two new verify scripts, both appended to the `verify` chain |
-| `scripts/verifyAutonomyStop.cjs` | new — 147 assertions, 1 residual |
-| `scripts/verifyUpgradeApplier.cjs` | new — 124 assertions, 3 residuals |
-| `docs/research/SELF_UPGRADE.md` | new — the full design, with the orchestrator's deferral section |
-| `docs/research/self-upgrade-build.md` | new — build note, design claims measured false, NOT VERIFIED list |
-| `docs/research/design-review.md`, `design-review.json` | new — the prior design-pass review artifacts |
+- `electron/lib/autonomyStop.cjs` — new; two predicates, `engage`/`lift`, the declared coverage lists and the status reporting
+- `electron/lib/autonomyPolicy.cjs` — new; fifteen classes over frozen floors, ceilings and a seven-member permanent set, with the whole-file validator and the two gate doors
+- `electron/lib/autonomyGate.cjs` — new; the path and kind fences, `inspectCreate`, `fileProposal`, and the ledger IPC wrapper
+- `electron/lib/upgradeApplier.cjs` — new; entry validation, the verified byte snapshot, the revert and snapshot retention
+- `electron/main.cjs` — wraps the ledger's recorder with the gate when it loaded, registers the applier after the ledger
+- `package.json` — two `verify:*` scripts, both appended to the end of the chain
+- `scripts/verifyAutonomyStop.cjs` — new; 187 assertions
+- `scripts/verifyUpgradeApplier.cjs` — new; 244 assertions
+- `docs/research/SELF_UPGRADE.md`, `docs/research/self-upgrade-build.md`, `docs/research/design-review.{md,json}` — the design, the build note with the paste-ready spec text, and the design review
 
-Diff reviewed: `git diff d949b18..HEAD` on `model/self-upgrade-loop` (Phase 0 excluded).
-Suites re-run in the worktree: `verifyAutonomyStop` 147/0, `verifyUpgradeApplier` 124/0,
-`verifyLoyaltyTripwire` 12/0 ALL PASS, `verifyInvariants` ALL PASS, `node --check` clean on all seven
-touched `.cjs`. `npx vite build` genuinely cannot run — `node_modules` is absent from the worktree and
-no `.jsx` changed.
+Full diff: `git diff d949b18..HEAD` in `.worktrees/self-upgrade`.
 
 </details>

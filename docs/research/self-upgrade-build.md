@@ -167,6 +167,107 @@ fence, asserts the warning, and restores it.
 
 ---
 
+## 1B. THE SECOND BUILD-REVIEW ROUND — EIGHT FINDINGS, AND THE ONE THAT WAS NOT ACTIONED
+
+`docs/research/build-review.json` returned **CHANGES_REQUESTED** a second time: 1 MEDIUM, 7 NIT. Again
+no module was re-implemented. `+76` assertions in `verifyUpgradeApplier.cjs` and `+10` in
+`verifyAutonomyStop.cjs`; three existing rows were rewritten in place and none was removed.
+
+**Finding 1 (MEDIUM) — nothing was in the spec's ledger.** ACTIONED, but NOT as prescribed, and the
+difference matters. The finding's fix was to paste both blocks from §6 and renumber the ledger row from
+152 to **147**, on the premise that the ledger's last row is 146. That premise is true of THIS
+WORKTREE and false of `dev`: the branch was cut at `c595342`, `dev` has since reached `42fa12f`, and
+`dev`'s SECTION 28 already contains rows **147, 149, 150, 151, 153 and 155** plus sections 129, 130,
+131, 133 and 135. Renumbering to 147 would have collided with a row that exists. **So the row went in
+as 152, inserted after row 146 as a single line, with nothing else in SECTION 28 touched — no
+renumbering, no reflow, and the I1–I17 invariant block untouched.** Block A (the Section 132 prose)
+is deliberately **still paste-ready and not in the spec**: the worktree's copy of the file ends five
+sections behind `dev`, so inserting a new section there writes into the exact region `dev` has grown,
+and a hand-resolved conflict in this file is the one thing worth avoiding. The ledger row says in its
+own first sentence that Section 132 is not in the document yet and where to find it, so a cold session
+is pointed, not misled.
+
+**Finding 2 (NIT) — `Object.freeze(new Set([...]))` freezes properties, not internal slots.** Both
+exported sets were mutable at runtime: measured, `policy.PERMANENT.delete('revert-own-apply')` succeeded
+and dropped the size from 7 to 6, after which
+`policy.validate({version:1,levels:{'revert-own-apply':'L0'}}).ok` returned **TRUE** — a class the data
+file is never read for became readable from it. Nothing was exploitable (`requireMasterDriven` fails
+closed for the pair, and every permanent class has `FLOORS[c] === CEILINGS[c]`), so this was an
+assertion overstating its guarantee rather than a fence leaking. **`PERMANENT` and `MASTER_ACT` are now
+`frozenSetView` objects: `has`, `size`, an iterator, and NO mutator, with the backing `Set` unreachable
+in a closure.** A `delete` is now a TypeError at the call site instead of a silent success, and a caller
+that copies the view mutates its own copy. The `Object.isFrozen(policy.PERMANENT)` clause was replaced
+by what it was meant to mean: no mutator exists, a mutated copy leaves the view untouched, and the
+loader still rejects the file that the mutation used to make valid.
+
+**Finding 3 (NIT) — the loud half of the `MASTER_ACT`/`PERMANENT` fence was asserted by regex.** The
+row matched `/PERMANENT\.has\(classId\)/` and `/throw new Error/` over `requireMasterDriven`'s own
+source text, which passes for any function that merely mentions the identifier — the one row in that
+area asserting a shape instead of a behaviour. The fence is now a pure exported function,
+`masterDrivenFence(classId, {masterAct, permanent})`, returning the `Error` to throw or `null`;
+`requireMasterDriven` calls it with **no** override and the suite asserts that, then hands it a
+divergent pair and asserts the real throw with the real message. The overrides grant no reach:
+`masterAct` still bounds which classes reach the door, so an injected `permanent` can only re-permit a
+class already in the frozen two-member subset.
+
+**Finding 4 (NIT) — `path.posix.normalize` does not strip a trailing dot or space.** So
+`namesGovernedPath('electron/lib/autonomyStop.cjs.')` and the trailing-space form both returned `null`,
+`inspectCreate` refused neither at either origin, and `applyWith` with action `create` APPLIED, leaving
+`autonomyStop.cjs.` and `autonomyStop.cjs ` in `electron/lib/` beside the real file. **Confirmed on
+this machine rather than assumed: `lstat` of the trailing-dot name is ENOENT and a write creates a
+second directory entry, so these are genuinely distinct files and the stop's own bytes survived** — it
+was the fence answering "names nothing governed" for a governed-ADJACENT name, on the one platform
+whose shell and many of whose APIs do collapse the two. `normalise` now trims trailing dots and spaces
+**per segment, before `normalize`, and skips `.` and `..`** — trimming those would have turned
+`electron/lib/../lib/x` into `electron/lib//lib/x`, breaking the `..` spelling the fence already
+caught. §13's generator now carries the ACTION each attack has to use, because a `patch` of a
+trailing-dot name is refused for the wrong reason ("there is nothing to patch"): **seven spellings ×
+four governed paths × three gates**, the two new ones additionally asserting that no
+governed-adjacent file was left beside the real one, and the ungoverned control extended to match.
+
+**Finding 5 (NIT) — the one component that writes source never consulted `apply-source`.** It resolved
+`revert-own-apply`, the safety net, and not the class whose entire description is applying a source
+change. No behavioural difference today — both `MASTER_ACT`, both `PERMANENT`, both pinned
+`FLOOR === CEILING === L4` — which is exactly why it needed a row rather than a comment: a reader
+wiring behaviour onto `apply-source` later would have found the applier never read it. **Both are
+required now, `apply-source` first, and the suite asserts the pair and the order through the injected
+policy `io` already carries, one class at a time refusing.**
+
+**Finding 6 (NIT) — a refused apply carried a field saying master applied it.** `meta.autonomy` is
+merged above every validation and it mutates the **ledger's own entry object**, so when a validation
+throws, `proposals.cjs` sets `status = FAILED` and persists that same object (244–248) — with
+`appliedBy: 'master'` on it. The badge-label mismatch, in the audit trail of the one component that
+writes source. Recording the attempt has value, so it stays where it is and **says what it is:
+`attemptedBy`/`attemptedAt` at entry, `appliedBy`/`appliedAt` on the success path only, below the write
+loop.** A row asserts a refused apply leaves no field claiming the apply happened, and a source row
+asserts the only `appliedBy` assignment sits after the writes.
+
+**Finding 7 (NIT) — `isHalted()` has no production consumer, and the header implied it did.** Grepped
+and confirmed: every reference is inside `autonomyStop.cjs` or the two suites. So `governedBy:
+'isHalted'` recorded an intention, not a mechanism, and four green rows read that hardcoded field two
+lines above a row asserting those same files contain no reference to the stop at all. The field is
+**`governedByWhenBuilt`** now, the header says **NOTHING CALLS IT YET** in those words, and the four
+rows say they assert the declaration. **A new row asserts the absence of any consumer**, so the day one
+of those dispatchers starts consulting the predicate, the row goes red and demands the header be
+corrected — which is the point.
+
+**Finding 8 (NIT) — a permissions problem became a FATAL halt.** When a write failed because the
+DESTINATION was unwritable rather than because of anything about the change, `revert()` restored the
+snapshotted bytes to those same unwritable paths and failed too — so `fatal.json` was written and
+`stop.engage()` revoked master's allow-file. A read-only checkout, a `chmod`, or a packaged install
+where `repoRoot` resolves inside `app.asar` turned a correctly-approved apply into *"FATAL … and
+autonomy has been halted"*, with the message blaming the revert. **Each target is now probed for
+writability before the snapshot is taken and refused plainly, by path and by permission, saying in words
+that this is an environment problem and not a failed change.** Four executed cases: an injected `fs`
+denying the file, one denying the create's nearest existing ancestor, a **real** read-only file with no
+fake filesystem involved, and a writable control proving the probe is a probe and not a wall — each
+asserting `stop.isHalted()` stays false, master's allow-file survives, and no snapshot directory is
+created. **The limit is printed as a residual rather than argued away: on this platform
+`accessSync(W_OK)` reports the read-only ATTRIBUTE and not the ACL, so an ACL-denied directory is still
+caught only by the write loop's `catch` and the revert behind it.**
+
+---
+
 ## 2. EVERY DESIGN CLAIM MEASURED **FALSE** AGAINST SOURCE
 
 | Claim in the design | Measured | What was built instead |
@@ -202,10 +303,14 @@ disturb the tripwire. Both asserted.
 |---|---|---|---|---|
 | **Before this slice** | 27 | 26 | **2518** | 0 |
 | **After the first pass** | 29 | 28 | **2789** | 0 |
-| **After the build review** | 29 | 28 | **2949** | 0 |
+| **After the first build review** | 29 | 28 | **2949** | 0 |
+| **After the second build review** | 29 | 28 | **3035** | 0 |
 
-The slice is `+431` in total: `+187` from `verifyAutonomyStop.cjs` and `+244` from
-`verifyUpgradeApplier.cjs`. The build-review round added `+160` of those (`+40` and `+120`) and
+The slice is `+517` in total: `+197` from `verifyAutonomyStop.cjs` and `+320` from
+`verifyUpgradeApplier.cjs`. The second review round added `+86` of those (`+10` and `+76`), rewrote
+three rows in place — the `Object.isFrozen(PERMANENT)` clause, the regex over `requireMasterDriven`'s
+source, and the four `governedBy` rows — and removed none. The first build-review round added `+160`
+(`+40` and `+120`) and
 **changed three existing assertions in place** — the permanent-set literal and the two counts that read
 six-and-nine now read seven-and-eight, and the `requireMasterDriven` source row is bounded by the next
 function declaration instead of by a character count, so growing that function's body can no longer
@@ -272,6 +377,29 @@ print across the two suites on every run and are counted out loud rather than hi
   measured under load.** The gates are rare by construction — a proposal filing, an apply — so the cost
   is assumed negligible rather than profiled.
 
+### Added by the second build review
+
+- **The trailing-dot and trailing-space measurement is WINDOWS-ONLY.** `lstat` of
+  `target.cjs.` returning ENOENT, and a write creating a second directory entry beside `target.cjs`,
+  were measured on this machine and nowhere else. On a POSIX host those are ordinary filename
+  characters, so the per-segment trim makes the fence **stricter** there than it strictly needs to be —
+  never looser — and nothing in this build depends on the difference. The variant rows would behave the
+  same on either platform; the *reason* the rows use action `create` rather than `patch` is the Windows
+  measurement.
+- **`accessSync(W_OK)` does not see an ACL.** Measured: on a read-only FILE it throws `EPERM`, and on a
+  directory whose ACL denies writes it returns success, because Windows reports the read-only
+  ATTRIBUTE. So the writability probe catches a read-only file, a missing ancestor and an `app.asar`
+  root, and **not** an ACL-denied directory. For that case the write loop's `catch` and the revert
+  behind it are still what responds — which means the FATAL-halt-on-a-permissions-problem path is
+  narrowed, not eliminated. Printed as a residual on every run.
+- **`frozenSetView` is not a containment boundary against in-process code.** It removes the mutators and
+  hides the backing `Set`, so a stray `delete` is a TypeError instead of a silent demotion. Anything
+  already running inside the main process could still replace the module's entry in `require.cache`;
+  what holds that line is the same thing that holds it everywhere else in this slice — the asserted
+  absence of callers — not the shape of an export.
+- **The probe adds one `accessSync` per target per apply.** Unmeasured cost. It is a stat-class call on
+  a handful of paths, so it is almost certainly irrelevant, but nobody has timed it.
+
 ---
 
 ## 5. FOR MASTER — the entries this build cannot add
@@ -331,7 +459,16 @@ Deleting it stops everything again, needs no running Rāma, and cannot be taken 
 > **Verify the target immediately before pasting; do not trust these numbers:**
 > `Select-String -Path RAMA_AGI_MASTER_SPEC.md -Pattern '^## SECTION 13[0-9]'` and
 > `Select-String -Path RAMA_AGI_MASTER_SPEC.md -Pattern '^\| 15[0-9] \|'`.
-> **`RAMA_AGI_MASTER_SPEC.md` was NOT modified by this build.**
+>
+> **STATE AFTER THE SECOND BUILD REVIEW:** **Block B (ledger row 152) HAS BEEN INSERTED** into
+> SECTION 28, as a single line after row 146, with nothing else in that section touched — the text
+> below is the record of what went in, not something still to paste. **Block A (Section 132) is STILL
+> PASTE-READY and is deliberately not in the spec:** this worktree's copy of
+> `RAMA_AGI_MASTER_SPEC.md` was cut at `c595342` and `dev` has since added sections 129, 130, 131, 133
+> and 135, so a new section inserted here writes into the region `dev` has grown. Paste it on `dev`,
+> after Section 131, and confirm 132 is still free first. The ledger row states in its own first
+> sentence that the section is not in the document yet and where it lives, so the pointer is honest
+> rather than dangling.
 
 ### Block A — the spec section
 
@@ -405,5 +542,5 @@ shipped applier.
 ### Block B — the ledger row
 
 ```markdown
-| 152 | The stop, the policy table, and the gate on `proposals:create` — built before there is anything autonomous | done | Section 132. Four new modules (`autonomyStop`, `autonomyPolicy`, `autonomyGate`, `upgradeApplier`), two suites, +431 assertions (2518 → 2949, 0 failed). Fail-safe stop with a second explicit-engage predicate so no shipping timer is halted (I11); **seven** permanent policy classes the data file is not read for, including both `MASTER_ACT` members so no data edit can refuse master's own apply; `requireMasterDriven` over that two-class subset so a stopped install still applies what master approved; `proposals:create` fenced at the IPC seam, with the path fence canonicalising by resolution so no spelling of a governed path gets past it. The build review returned 1 HIGH / 2 MEDIUM / 3 NIT and all six were fixed in place (+160 assertions), the HIGH being a path fence that compared unresolved strings. `node_modules` is absent from the worktree, so `vite build` was NOT run — no `.jsx` changed. NOT VERIFIED: the app has never booted with these modules, `app.getPath('userData')` never resolved, `lift()` has never succeeded against the real capability matrix (needs `system.suspend-autonomy`; its success path is executed with an injected one), `engage()` tears down nothing by design, and a torn read of a hand-edited policy file falls back to the floors. Next step: the five-stage loop, blocked on design-review findings 2 and 5 — see `docs/research/SELF_UPGRADE.md` § DEFERRED BY THE ORCHESTRATOR. |
+| 152 | The stop, the policy table, and the gate on `proposals:create` — built before there is anything autonomous | done | Section 132 — **the section's prose is NOT in this document yet; it is paste-ready in `docs/research/self-upgrade-build.md` §6 Block A**, held out of this file deliberately so this row is a one-line insertion that rebases cleanly onto `dev`. **THE LOCKED DECISION, master's option 1: I6 and I17 stay INTACT — Rāma proposes, master approves, and nothing in this slice applies a source change without a recorded approval. No autonomy rung was climbed.** The STOP is built BEFORE anything is autonomous, because a stop retrofitted onto a running loop is the one thing that must not be retrofitted. **BUILT: four modules — `electron/lib/autonomyStop.cjs` (the fail-safe switch), `autonomyPolicy.cjs` (fifteen classes over frozen floors/ceilings/permanence), `autonomyGate.cjs` (the create fence) and `upgradeApplier.cjs` (entry validation plus a byte snapshot) — and two suites, `verifyAutonomyStop.cjs` (197) and `verifyUpgradeApplier.cjs` (320), appended to the end of the `verify` chain and never reordered. 2518 → 3035 assertions, 0 failures.** **TWO PREDICATES, AND THE ASYMMETRY IS THE DECISION: `isStopped()` is fail-safe — no `<userData>/rama/autonomy.allow`, an unreadable file, invalid JSON, `"true"`, `1`, `{}`, `null` or a directory there all mean STOPPED — and it governs NEW autonomous action only. `isHalted()` is true only on an explicit `engage()` or `RAMA_AUTONOMY=stop` and is the predicate the four PRE-EXISTING dispatchers will consult when a teardown is built; NOTHING CALLS IT YET and the module says so. Governing those four with the fail-safe predicate would have deleted five shipping behaviours on every install until master hand-created a file nobody had told him about — `ollama-catalog`, `dependency-review`, the metacognition audit, selfCare's 120s sweep including `checkInstanceFailover`, and marketIntel's two ticks — a regression wearing a fail-safe argument, which I11 has no exception for. A counting fake proves a default install still dispatches.** **SEVEN PERMANENT POLICY CLASSES THE DATA FILE IS NOT READ FOR AT ALL** (`apply-source`, `revert-own-apply`, `release-classify`, `capability-grant`, `loyalty-core`, `master-record` — Section 127 — and `autonomy-policy`), with the editable eight DERIVED from them so two lists cannot disagree; `shared/autonomy-policy.json` ships ABSENT so the floors are the shipped levels, and a file that so much as names a permanent class is rejected WHOLE. **THE DEFECT TWO REVISIONS EACH THOUGHT THEY HAD FIXED: on a shipped install every class resolves to L0, so an unconditional `policy.require('revert-own-apply','L4')` at the applier's entry REFUSED A MASTER-APPROVED APPLY on every install — hidden because the row testing it used an allow-file fixture. The level now comes from `requireMasterDriven` over the frozen two-member `MASTER_ACT` subset, both members also PERMANENT so no data edit can refuse master either, and the first assertions in the suite run in the state a real install boots into: no allow-file, no policy file, master's apply SUCCEEDS.** **THE HOLE A LATER SESSION COULD NOT RECONSTRUCT, FOUND BY EXECUTING THE ATTACK RATHER THAN READING THE CODE: `autonomyGate.normalise` swapped separators and stripped a leading `./` but NEVER RESOLVED PATH STRUCTURE, so `electron/lib/./autonomyStop.cjs`, `electron//lib/autonomyStop.cjs`, `electron/lib/../lib/autonomyStop.cjs` and the backslash form all read as naming nothing governed — a `self-upgrade` proposal with a correct `baseSha256` passed the create gate at BOTH origins and the applier's step 3, and the stop module on disk afterwards read `function isStopped(){return false;}`. `autonomyStop.cjs` is not in `PROTECTED_FILES`, so nothing downstream objected. I6 still held — the apply needed master's recorded approval — but the diff should never have been fileable. FIXED BY RESOLVING BEFORE COMPARING (`path.posix.normalize`), plus per-segment trimming of a trailing dot or space, which `normalize` does not collapse and which on this platform left `autonomyStop.cjs.` and `autonomyStop.cjs ` readable as ungoverned. Seven spellings × four governed paths × every gate, with a control proving the fence RESOLVES paths rather than refusing odd-looking ones.** **OPEN GAP, STATED PLAINLY RATHER THAN ASSUMED COVERED: `shared/autonomy-policy.json`, `electron/lib/autonomyPolicy.cjs`, `electron/lib/autonomyStop.cjs` and `shared/loyalty-tripwire.json` are NOT in `loyaltyGuard.PROTECTED_FILES` (seven entries, tripwire-asserted), so they are not tamper-evident by that route — the create fence and the applier's entry validation are the only mechanical guards on them today. `loyaltyGuard.cjs` and `shared/capabilities.json` are protected and invariant-adjacent, so this build ASKS: add those four paths to `PROTECTED_FILES` and the tripwire manifest, and add `"system.suspend-autonomy": 0` and `"autonomy.view": 1` to the matrix. Until the capability exists, `lift()` cannot succeed for anyone including master, and the refusal names the file he writes by hand instead of rendering a dead button.** Two build-review rounds were fixed in place rather than re-implemented: round 1 (1 HIGH / 2 MEDIUM / 3 NIT, +160) and round 2 (1 MEDIUM / 7 NIT, +86) — the frozen `Set`s that were mutable because `Object.freeze` freezes properties and not internal slots, a fence asserted by regex and now executed, both master-driven classes resolved instead of only the revert net, `appliedBy` no longer written onto an entry refused at the door, and an unwritable destination refused as an environment problem instead of becoming a FATAL revert that revoked master's allow-file. **`node_modules` is absent from the worktree, so `vite build` was NOT run — no `.jsx` changed. NOT VERIFIED: the app has never booted with these modules loaded, `app.getPath('userData')` has never been resolved (every row injects a scratch root), `fileProposal` has no caller in the shipped tree, `engage()` tears down nothing by design, `lift()` has never succeeded against the real capability matrix, and a torn read of a hand-edited policy file falls back to the floors.** **NEXT STEP: the five-stage NOTICE/RESEARCH/WEIGH/PROPOSE/ANALYSE loop and `upgradeAuthor.cjs`, both DEFERRED and blocked on design-review findings 2 and 5 — see `docs/research/SELF_UPGRADE.md` § DEFERRED BY THE ORCHESTRATOR for the full deferred list with the finding id gating each item. Before any of it: paste Section 132 from the build note, and decide the two protected-file/capability additions above, because the loop files proposals and the fence on its own state is not complete without them.** |
 ```

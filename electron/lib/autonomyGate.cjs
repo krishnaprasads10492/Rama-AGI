@@ -91,11 +91,35 @@ const ORIGINS = Object.freeze(['ipc', 'rama']);
  * It is applied to the stringified `meta` blob too, which is not a path. That is safe and deliberate:
  * `normalize` only ever collapses `/`-delimited segments, so a path-like run hidden inside a JSON string
  * is canonicalised in place and the surrounding text is left as it is.
+ *
+ * ── AND THE TWO SPELLINGS `normalize` DOES NOT COLLAPSE ───────────────────────────────────────────
+ *
+ * It leaves a TRAILING DOT and a TRAILING SPACE on a segment alone, so `autonomyStop.cjs.` and
+ * `autonomyStop.cjs ` both read as naming nothing governed. Measured end to end: `inspectCreate`
+ * returned no refusal at either origin and `applyWith` with action `create` APPLIED, leaving
+ * `autonomyStop.cjs.` and `autonomyStop.cjs ` in `electron/lib/` beside the real file — whose bytes
+ * survived, because these are genuinely distinct files here (`lstat` of the trailing-dot name is
+ * ENOENT and a write creates a second directory entry, verified on this machine). So it was never a
+ * write to the governed file; it was the fence answering "names nothing governed" for a
+ * governed-ADJACENT name, on the one platform whose shell and many of whose APIs do collapse the two.
+ *
+ * `trimSegments` therefore runs BEFORE `normalize`, and it SKIPS `.` and `..` — trimming those would
+ * turn `electron/lib/../lib/x` into `electron/lib//lib/x`, which resolves to a different file and would
+ * have broken the `..` spelling the fence already catches. A segment that is nothing BUT dots or spaces
+ * is left as it was for the same reason: an empty segment is not a canonicalisation of anything.
  */
+function trimSegments(p) {
+  return p.split('/').map((seg) => {
+    if (seg === '' || seg === '.' || seg === '..') return seg;
+    const trimmed = seg.replace(/[. ]+$/, '');
+    return trimmed === '' ? seg : trimmed;
+  }).join('/');
+}
+
 function normalise(p) {
   const slashed = String(p ?? '').replace(/\\/g, '/');
   if (!slashed) return '';
-  return path.posix.normalize(slashed).replace(/^\.\//, '').toLowerCase();
+  return path.posix.normalize(trimSegments(slashed)).replace(/^\.\//, '').toLowerCase();
 }
 
 /**
@@ -268,6 +292,6 @@ function guardLedgerIpc(ipc) {
 
 module.exports = {
   KIND, OWNED_KINDS, SCHEMA, DIFF_CLASSES, ORIGINS, STOP_STATE_NAMES,
-  normalise, namesGovernedPath, governedPathsNamed, classFor,
+  trimSegments, normalise, namesGovernedPath, governedPathsNamed, classFor,
   inspectCreate, fileProposal, guardLedgerIpc,
 };
