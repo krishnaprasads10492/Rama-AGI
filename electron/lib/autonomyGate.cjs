@@ -123,6 +123,64 @@ function normalise(p) {
 }
 
 /**
+ * The THIRD spelling class this fence failed to canonicalise, and the first whose governed bytes did
+ * not survive: an **NTFS alternate-data-stream suffix**. On this platform `file::$DATA` is a SYNONYM for
+ * the primary data stream — not a neighbouring file, as the trailing dot and trailing space are.
+ *
+ * Measured end to end before this existed: `namesGovernedPath('electron/lib/autonomyStop.cjs::$DATA')`
+ * returned null, `path.resolve` kept the suffix so the confinement check passed, `lstat` reported a
+ * regular file, `readFileSync` through the spelling returned the REAL FILE'S 25255 bytes so the
+ * `baseSha256` base-drift check PASSED instead of catching it, and a master-approved `patch` APPLIED —
+ * leaving `autonomyStop.cjs` reading `function isStopped(){return false;}`. The same spelling replaced
+ * `shared/loyalty-tripwire.json`, the baseline the tamper-evidence compares against.
+ *
+ * Two spellings are stripped here, and the reason differs for each:
+ *
+ *   - `:<anything>` after the first character of a segment — the stream suffix. Truncating the segment
+ *     at the colon yields the primary stream's real name, which is the name that must be compared.
+ *   - a TRAILING CONTROL CHARACTER, `\t` being the reachable one. Unlike the stream suffix this does
+ *     NOT address the governed file here (a write through it is ENOENT on this platform, so nothing was
+ *     ever clobbered), but it is the same gap — the fence answering "names nothing governed" for a name
+ *     that is a trivial respelling of one — and a control character is never in a legitimate source path.
+ *
+ * A leading drive designator is preserved: `C:/…` is a drive, not a stream, and discarding it would make
+ * an absolute path to the stop's own allow-file stop looking absolute. A segment that is NOTHING BUT a
+ * stream suffix (`:evil` alone) is left exactly as it was, for the same reason `trimSegments` leaves a
+ * dots-only segment alone: an empty segment is not a canonicalisation of anything.
+ *
+ * ── WHY THIS IS SEPARATE FROM `normalise` AND NOT FOLDED INTO IT ───────────────────────────────────
+ *
+ * `normalise` is applied to the stringified `meta` blob, which is JSON — and JSON is full of colons.
+ * Measured: folding a colon strip into `trimSegments` turns `{"plan":"then patch electron/lib/x.cjs"}`
+ * into `{"plan"/lib/x.cjs"}`, because the colon it truncates at is the one after `"plan"`. That DELETES
+ * the `electron/` segment and the `meta` substring scan then misses a governed path it catches today.
+ * So the colon strip lives here, on the route that handles actual paths, and the `meta` route keeps
+ * `normalise` — where a suffix spelling is caught anyway, because `electron/lib/x.cjs::$data` CONTAINS
+ * `electron/lib/x.cjs` and that scan is a substring test.
+ */
+function stripSpellings(p) {
+  const slashed = String(p ?? '').replace(/\\/g, '/');
+  const drive = /^[A-Za-z]:\//.exec(slashed);
+  const head = drive ? slashed.slice(0, 2) : '';
+  const rest = drive ? slashed.slice(2) : slashed;
+  const cleaned = rest.split('/').map((seg) => {
+    if (seg === '' || seg === '.' || seg === '..') return seg;
+    const trimmed = seg.replace(/[\u0000-\u001f]+$/, '');
+    const cut = trimmed.indexOf(':');
+    const out = cut > 0 ? trimmed.slice(0, cut) : trimmed;
+    return out === '' ? seg : out;
+  }).join('/');
+  return head + cleaned;
+}
+
+/** `normalise`, plus the spellings that address a file without naming it. For PATHS, never for text. */
+function normalisePath(p) {
+  const stripped = stripSpellings(p);
+  if (!stripped) return '';
+  return normalise(stripped);
+}
+
+/**
  * The basenames of the stop's own state, which live OUTSIDE the repository root. `changes[].path` cannot
  * address them relatively — it can address them absolutely, which is the whole point of fencing on the
  * basename rather than on the root.
@@ -143,7 +201,7 @@ function selfGoverningRelPaths() {
  * @returns {string|null} the token it named, or null
  */
 function namesGovernedPath(text) {
-  const p = normalise(text);
+  const p = normalisePath(text);
   if (!p) return null;
   for (const rel of selfGoverningRelPaths()) {
     if (p === rel || p.endsWith(`/${rel}`)) return rel;
@@ -292,6 +350,6 @@ function guardLedgerIpc(ipc) {
 
 module.exports = {
   KIND, OWNED_KINDS, SCHEMA, DIFF_CLASSES, ORIGINS, STOP_STATE_NAMES,
-  trimSegments, normalise, namesGovernedPath, governedPathsNamed, classFor,
+  trimSegments, normalise, stripSpellings, normalisePath, namesGovernedPath, governedPathsNamed, classFor,
   inspectCreate, fileProposal, guardLedgerIpc,
 };

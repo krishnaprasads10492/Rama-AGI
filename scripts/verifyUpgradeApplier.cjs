@@ -632,6 +632,8 @@ console.log('\n  the path fence resolves structure — every spelling of a gover
     fs.writeFileSync(path.join(root, 'electron', 'lib', 'autonomyPolicy.cjs'), 'module.exports = {};\n', 'utf8');
     fs.writeFileSync(path.join(root, 'shared', 'autonomy-policy.json'), '{"version":1,"levels":{}}\n', 'utf8');
     fs.writeFileSync(path.join(root, 'shared', 'loyalty-tripwire.json'), '{}\n', 'utf8');
+    fs.writeFileSync(path.join(root, 'electron', 'lib', 'loyaltyGuard.cjs'),
+      'module.exports = { covenant: true };\n', 'utf8');
     return root;
   }
 
@@ -644,18 +646,45 @@ console.log('\n  the path fence resolves structure — every spelling of a gover
    * trailing-dot name is ENOENT, and a write creates a second directory entry beside the real file). So
    * a `patch` of them is refused for the wrong reason, "there is nothing to patch", and the shape that
    * actually reached the write loop was `create`. The row has to use the action the attack used.
+   *
+   * The fourth element is what the CONTROL row (v) expects for an UNGOVERNED path spelled this way:
+   * `null` means "it must still apply", and a regular expression means "it must be refused, and for THIS
+   * reason rather than for naming a governed path". The last three spellings are the second kind, and
+   * that distinction is the point rather than a weakening of the control:
+   *
+   *   - `::$DATA` is an NTFS alternate-data-stream suffix, and on this platform it is a SYNONYM for the
+   *     primary data stream — not a neighbouring file. Measured before the fix: the create fence read it
+   *     as naming nothing governed, `path.resolve` kept the suffix so confinement passed, `lstat` said
+   *     regular file, `readFileSync` through it returned the REAL FILE'S bytes so the `baseSha256`
+   *     base-drift check PASSED, and a master-approved `patch` APPLIED — `autonomyStop.cjs` afterwards
+   *     read `function isStopped(){return false;}`. The same spelling replaced
+   *     `shared/loyalty-tripwire.json` and carried a patch of `loyaltyGuard.cjs` past the covenant re-run.
+   *     This is the first of these spellings whose GOVERNED BYTES DID NOT SURVIVE, which is why the
+   *     byte-identity assertion below is the one that matters.
+   *   - `:stream` writes a hidden alternate stream and leaves the primary intact.
+   *   - a trailing `\t` is ENOENT on this platform, so nothing was ever clobbered — same gap, no impact
+   *     today, covered so it stays that way.
+   *
+   * A stream name and a control character are never legitimate source paths, so `upgradeApplier`
+   * refuses the spelling OUTRIGHT for every path, governed or not, and `autonomyGate` canonicalises it so
+   * the governed-path fence reports it too. Those are two different refusals and the control row holds
+   * both apart.
    */
   function variants(rel) {
     const dir = path.posix.dirname(rel);
     const base = path.posix.basename(rel);
+    const DOLLAR = '$';
     return [
-      [`${dir}/./${base}`,                                     'a "." segment',                 'patch'],
-      [`${dir}//${base}`,                                      'a doubled separator',           'patch'],
-      [`${dir}/../${path.posix.basename(dir)}/${base}`,         'a ".." that comes back',        'patch'],
-      [`./${rel}`,                                             'a leading "./"',                'patch'],
-      [`${rel.split('/').join('\\').replace(/\\([^\\]+)$/, '\\.\\$1')}`, 'backslashes and a "." segment', 'patch'],
-      [`${rel}.`,                                              'a trailing dot',                'create'],
-      [`${rel} `,                                              'a trailing space',              'create'],
+      [`${dir}/./${base}`,                                     'a "." segment',                 'patch', null],
+      [`${dir}//${base}`,                                      'a doubled separator',           'patch', null],
+      [`${dir}/../${path.posix.basename(dir)}/${base}`,         'a ".." that comes back',        'patch', null],
+      [`./${rel}`,                                             'a leading "./"',                'patch', null],
+      [`${rel.split('/').join('\\').replace(/\\([^\\]+)$/, '\\.\\$1')}`, 'backslashes and a "." segment', 'patch', null],
+      [`${rel}.`,                                              'a trailing dot',                'create', null],
+      [`${rel} `,                                              'a trailing space',              'create', null],
+      [`${rel}::${DOLLAR}DATA`,                                'an NTFS data-stream suffix',    'patch', /alternate data stream/],
+      [`${rel}:stream`,                                        'an alternate stream name',      'create', /alternate data stream/],
+      [`${rel}\t`,                                             'a trailing tab',                'create', /control character/],
     ];
   }
 
@@ -690,8 +719,8 @@ console.log('\n  the path fence resolves structure — every spelling of a gover
         inMeta?.refused === true, inMeta?.reason ?? 'it was allowed');
     }
   }
-  check('all four self-governing paths were covered, in seven spellings each',
-    variantRows === policy.SELF_GOVERNING_PATHS.length * 7 && variantRows === 28, String(variantRows));
+  check('all four self-governing paths were covered, in ten spellings each',
+    variantRows === policy.SELF_GOVERNING_PATHS.length * 10 && variantRows === 40, String(variantRows));
 
   // (iv) the applier, where the bytes would actually land
   for (const entry of policy.SELF_GOVERNING_PATHS) {
@@ -715,8 +744,11 @@ console.log('\n  the path fence resolves structure — every spelling of a gover
         message ?? 'it was applied');
       check(`and ${entry.path} is byte-identical on disk afterwards`,
         fs.readFileSync(target, 'utf8') === before);
-      // The trailing-dot and trailing-space spellings are distinct files here, so the governed file
-      // surviving is not enough: the governed-ADJACENT file must not exist either.
+      // The four `create` spellings — trailing dot, trailing space, `:stream` and a trailing tab — name
+      // something DISTINCT from the governed file here, so the governed file surviving is not enough: the
+      // governed-ADJACENT entry must not exist either. `::$DATA` is the opposite case and uses `patch`:
+      // it IS the governed file, so `existsSync` through it is true whatever happened and only the bytes
+      // can answer. Asserting the wrong one of those two would be a green row over a clobbered file.
       if (action === 'create') {
         check(`and no "${path.posix.basename(spelling)}" was left beside it`,
           fs.existsSync(path.join(repo, ...spelling.split('/'))) === false);
@@ -724,12 +756,15 @@ console.log('\n  the path fence resolves structure — every spelling of a gover
     }
   }
 
-  // (v) THE CONTROL. The same spellings, an ungoverned path — these must APPLY. Without this row a
-  // green section above would be satisfied by a fence that refuses anything with a "." or a ".." in it,
-  // which is a different and much blunter guarantee than the one being claimed.
-  for (const [spelling, shape, action] of variants('electron/lib/target.cjs')) {
+  // (v) THE CONTROL. The same spellings, an ungoverned path. The seven that merely RESPELL a path must
+  // APPLY — without that a green section above would be satisfied by a fence that refuses anything with
+  // a "." or a ".." in it, which is a blunter guarantee than the one being claimed. The three that name
+  // a STREAM or carry a CONTROL CHARACTER must be refused even here, and the row asserts the refusal is
+  // the SPELLING one rather than the governed-path one, so "refuses everything odd" still cannot pass.
+  for (const [spelling, shape, action, controlRefusal] of variants('electron/lib/target.cjs')) {
     const repo = governedRepoFixture();
     const target = path.join(repo, 'electron', 'lib', 'target.cjs');
+    const before = fs.readFileSync(target, 'utf8');
     const change = action === 'patch'
       ? { action, path: spelling, content: 'module.exports = 2;\n', baseSha256: sha256(fs.readFileSync(target)) }
       : { action, path: spelling, content: 'module.exports = 2;\n' };
@@ -741,6 +776,24 @@ console.log('\n  the path fence resolves structure — every spelling of a gover
     let message = null;
     try { await applier.applyWith(io(repo, userData), proposal, { user: MASTER }); }
     catch (err) { message = err.message; }
+
+    if (controlRefusal) {
+      check(`control: an UNGOVERNED path written with ${shape} is refused for the SPELLING, not for naming a governed path`,
+        message !== null && controlRefusal.test(message)
+        && !/govern the autonomy policy or the stop/.test(message),
+        message ?? 'it applied');
+      // The bytes for `::$DATA`, which IS the primary stream — `existsSync` through that spelling is
+      // true whether or not anything was written, because it is a synonym for a file that exists. The
+      // directory listing for the two that would have made a NEW entry.
+      check('and nothing was written through it — the file is byte-identical',
+        fs.readFileSync(target, 'utf8') === before);
+      if (action === 'create') {
+        check('and no entry was left beside it either',
+          fs.existsSync(path.join(repo, ...spelling.split('/'))) === false);
+      }
+      continue;
+    }
+
     check(`control: an UNGOVERNED path written with ${shape} still applies`, message === null, message);
     const landed = action === 'patch'
       ? path.join(repo, 'electron', 'lib', 'target.cjs')
@@ -749,12 +802,61 @@ console.log('\n  the path fence resolves structure — every spelling of a gover
       fs.readFileSync(landed, 'utf8') === 'module.exports = 2;\n');
   }
 
+  // (vi) THE COVENANT, through every one of the same spellings. `loyaltyGuard.normalise` swaps
+  // separators, strips a leading "./" and lower-cases — it does not RESOLVE structure and it does not
+  // strip a stream suffix, so step 2's re-run of the guard refused NOTHING for
+  // `loyaltyGuard.cjs::$DATA`, a spelling that reads and writes the real file's bytes. That blind spot is
+  // pre-existing and lives in a protected file; what this build owns is what it HANDS the guard, so it
+  // hands it the canonical name. These rows hold the step-2 claim — "the covenant re-run, rather than
+  // trusted from creation" — rather than letting the step-4 spelling refusal stand in for it.
+  for (const [spelling, shape, action] of variants('electron/lib/loyaltyGuard.cjs')) {
+    const repo = governedRepoFixture();
+    const target = path.join(repo, 'electron', 'lib', 'loyaltyGuard.cjs');
+    const before = fs.readFileSync(target, 'utf8');
+    const change = action === 'patch'
+      ? { action, path: spelling, content: 'module.exports = {};\n', baseSha256: sha256(fs.readFileSync(target)) }
+      : { action, path: spelling, content: 'module.exports = {};\n' };
+    const proposal = {
+      id: pid(), kind: gate.KIND.DIFF, title: 'a protected file, spelled around the covenant',
+      meta: { schema: gate.SCHEMA },
+      changes: [change],
+    };
+    let message = null;
+    try { await applier.applyWith(io(repo, userData), proposal, { user: MASTER }); }
+    catch (err) { message = err.message; }
+    check(`covenant: a PROTECTED file written with ${shape} is refused at step 2`,
+      message !== null && /loyalty covenant \(I15\)/.test(message), message ?? 'it was applied');
+    check(`and the refusal names the spelling master wrote, "${spelling}", rather than the canonical form`,
+      message !== null && message.includes(spelling));
+    check('and electron/lib/loyaltyGuard.cjs is byte-identical on disk afterwards',
+      fs.readFileSync(target, 'utf8') === before);
+    if (action === 'create') {
+      check(`and no "${path.posix.basename(spelling)}" was left beside the covenant file`,
+        fs.existsSync(path.join(repo, ...spelling.split('/'))) === false);
+    }
+  }
+
   const gateCode = strip(read('electron/lib/autonomyGate.cjs'));
   check('the comparison canonicalises by resolution before it compares',
     /path\.posix\.normalize/.test(gateCode));
   check('and an empty path still names nothing, rather than normalising to the repository root',
     gate.namesGovernedPath('') === null && gate.namesGovernedPath(null) === null
     && gate.namesGovernedPath('.') === null);
+  // The colon strip is on the PATH route only, never on the text route. Folding it into `normalise` —
+  // which is applied to the stringified `meta` blob — turns {"plan":"then patch electron/lib/x.cjs"}
+  // into {"plan"/lib/x.cjs"}, because the colon it truncates at is the one after "plan": the
+  // `electron/` segment is deleted and the meta scan then MISSES a path it catches today. So `meta`
+  // keeps `normalise`, where a suffix spelling is caught by the substring test anyway.
+  check('the meta scan still catches a governed path with no leading "./" to anchor it',
+    gate.inspectCreate({ kind: 'self-modify', changes: [],
+      meta: { plan: 'then patch electron/lib/autonomyStop.cjs' } }, { origin: 'ipc' })?.refused === true);
+  check('and stripping a stream suffix is confined to the path route',
+    gate.normalisePath('electron/lib/autonomyStop.cjs::$DATA') === 'electron/lib/autonomystop.cjs'
+    && gate.normalise('{"plan":"then patch electron/lib/autonomyStop.cjs"}')
+       .includes('electron/lib/autonomystop.cjs'));
+  check('a drive designator is a drive, not a stream, so an absolute path to the allow-file still names it',
+    gate.namesGovernedPath('C:\\Users\\k\\AppData\\Roaming\\Rama AGI\\rama\\autonomy.allow::$DATA')
+      === 'autonomy.allow');
 }
 
 // ─── 14. the data file cannot refuse master's apply either ────────────────────

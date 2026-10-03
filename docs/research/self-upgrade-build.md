@@ -20,9 +20,9 @@ Nothing was removed and no protected file was touched.**
 | `electron/lib/autonomyStop.cjs` | **THE STOP.** Two predicates — `isStopped()` (fail-safe: absence of configuration means stopped; governs new autonomous action) and `isHalted()` (true only on an explicit `engage()` or `RAMA_AUTONOMY=stop`; governs the four pre-existing dispatchers). `engage()`, `lift()`, `status()`, `statusText()`, and five frozen lists declaring exactly what each predicate governs. `fs`, `path`, `os` at module scope and nothing else. |
 | `electron/lib/autonomyPolicy.cjs` | **THE POLICY TABLE.** Fifteen classes over four frozen constants — `CLASSES`, `FLOORS`, `CEILINGS`, `PERMANENT` — with `EDITABLE` **derived**, plus `RAMA_INITIATED`, the two-member `MASTER_ACT`, and `SELF_GOVERNING_PATHS`. `shared/autonomy-policy.json` ships absent; the loader validates and rejects **whole**, never per key. `require(classId, need)` throws when `need` is absent; `requireMasterDriven` throws for any class outside `MASTER_ACT`. |
 | `electron/lib/autonomyGate.cjs` | **THE CREATE GATE.** `guardLedgerIpc(ipc)` wraps the recorder the ledger is handed so `proposals:create` is validated before it is reached; `fileProposal(ledger, def)` is the only path by which Rāma may file one of this design's kinds, and it consults the stop and then the policy. `origin` is a literal written at each call site, never read from the definition. |
-| `electron/lib/upgradeApplier.cjs` | **THE APPLIER'S ENTRY VALIDATION.** Registered for the new kind `self-upgrade` through `registerApplier`. Derives `masterDriven` from `opts.user`; resolves its level through `requireMasterDriven`; records `opts.autonomous` and never reads it; derives the snapshot directory from the proposal id; re-runs the loyalty guard; refuses a governed path, a path outside the root, a symlink, `action: 'delete'`, a mis-declared create, and a drifted base digest. Byte snapshot verified on read-back before the first write; revert on a failed write; a failed revert is fatal, marked, and engages the stop. |
-| `scripts/verifyAutonomyStop.cjs` | 187 assertions. The stop, the policy table, the permanence row, the I11 behavioural proof, `lift()`'s executed success path, the live data-file loader, and the degraded create fence. |
-| `scripts/verifyUpgradeApplier.cjs` | 244 assertions. The shipped-state apply, the create gate, the entry validations, every spelling of a governed path at every gate, the revert, retention, and who can reach `proposals.apply`. |
+| `electron/lib/upgradeApplier.cjs` | **THE APPLIER'S ENTRY VALIDATION.** Registered for the new kind `self-upgrade` through `registerApplier`. Derives `masterDriven` from `opts.user`; resolves its level through `requireMasterDriven`; records `opts.autonomous` and never reads it; derives the snapshot directory from the proposal id; re-runs the loyalty guard **against the canonicalised path**; refuses a governed path, an NTFS alternate-data-stream spelling or any control character, a path outside the root, a symlink, `action: 'delete'`, a mis-declared create, and a drifted base digest. Byte snapshot verified on read-back before the first write; revert on a failed write; a failed revert is fatal, marked, and engages the stop. |
+| `scripts/verifyAutonomyStop.cjs` | **197** assertions after three review rounds. The stop, the policy table, the permanence row, the I11 behavioural proof, `lift()`'s executed success path, the live data-file loader, and the degraded create fence. |
+| `scripts/verifyUpgradeApplier.cjs` | **433** assertions after three review rounds. The shipped-state apply, the create gate, the entry validations, **ten** spellings of a governed path at every gate plus a protected-file pass, the revert, retention, and who can reach `proposals.apply`. |
 
 `electron/main.cjs` changed in exactly two places: the ledger's `register()` now receives
 `autonomyGate.guardLedgerIpc(ipcRec)` (and the bare `ipcRec` if the gate failed to load, so a degraded
@@ -103,7 +103,7 @@ origin or at the applier's step 3. **Both halves of the narrowed FR-14 claim in 
 I6 still held — the apply needed a recorded master approval — but the diff should never have been
 fileable. Fixed by canonicalising through `path.posix.normalize` before comparing, with an empty input
 returned empty rather than as `normalize`'s `'.'` (which would have made a blank path name the
-repository root). **§13 of `verifyUpgradeApplier.cjs` now runs five spellings of each of the four
+repository root). **§13 of `verifyUpgradeApplier.cjs` ran, AS OF THIS ROUND, five spellings of each of the four
 `SELF_GOVERNING_PATHS` — generated from the path, so a fifth path is covered automatically — at
 `inspectCreate` for BOTH origins, in `meta`, and at `applyWith` with a correct `baseSha256` and the
 governed file present in the fixture, asserting the bytes are identical afterwards.** It ends with a
@@ -221,7 +221,8 @@ whose shell and many of whose APIs do collapse the two. `normalise` now trims tr
 **per segment, before `normalize`, and skips `.` and `..`** — trimming those would have turned
 `electron/lib/../lib/x` into `electron/lib//lib/x`, breaking the `..` spelling the fence already
 caught. §13's generator now carries the ACTION each attack has to use, because a `patch` of a
-trailing-dot name is refused for the wrong reason ("there is nothing to patch"): **seven spellings ×
+trailing-dot name is refused for the wrong reason ("there is nothing to patch"): **seven spellings as of
+this round, ten after round 3 ×
 four governed paths × three gates**, the two new ones additionally asserting that no
 governed-adjacent file was left beside the real one, and the ungoverned control extended to match.
 
@@ -268,6 +269,92 @@ caught only by the write loop's `catch` and the revert behind it.**
 
 ---
 
+## 1C. THE THIRD BUILD-REVIEW ROUND — ONE FINDING, AND THE FIRST SPELLING WHOSE GOVERNED BYTES DID NOT SURVIVE
+
+`docs/research/build-review.json` returned **CHANGES_REQUESTED** a third time: **1 HIGH, nothing else.**
+No module was re-implemented. `+113` assertions in `verifyUpgradeApplier.cjs`, none anywhere else; one
+existing row was rewritten in place (the `variants` count, seven → ten) and none was removed.
+
+**Finding 1 (HIGH) — an NTFS alternate-data-stream suffix is not a respelling, it is a SYNONYM.** This is
+the third spelling class this fence has failed to canonicalise in three rounds — round 1 was unresolved
+structure, round 2 was a trailing dot and space — and the first whose **governed bytes did not survive**.
+Round 2's was graded NIT precisely because they did: `autonomyStop.cjs.` is a genuinely different file
+here, so the attack created a second directory entry and left the real one alone. `::$DATA` is not that.
+On NTFS it names the primary data stream of the file itself.
+
+Reproduced on this machine against the real modules before the fix:
+
+- `gate.namesGovernedPath('electron/lib/autonomyStop.cjs::$DATA')` returned **`null`** — names nothing
+  governed. The same for `:evil`, for a trailing `\t`, and for every governed path.
+- `path.resolve` **kept the suffix**, so the confinement check passed; `lstatSync` reported a **regular
+  file**, so neither the symlink rule nor the not-a-file rule fired; and `readFileSync` through the
+  spelling returned the real file's **25255 bytes**, so the step-6 `baseSha256` base-drift check —
+  the one gate whose job is to notice the file is not the file the change was computed from — **PASSED
+  instead of catching it.**
+- A master-approved `patch` with `action: 'patch'` therefore **APPLIED**, leaving
+  `electron/lib/autonomyStop.cjs` containing `function isStopped(){return false;}`. The same spelling
+  replaced `shared/loyalty-tripwire.json` with `{"approved":"everything"}` — the baseline the tamper
+  evidence compares against — and carried a patch of `electron/lib/loyaltyGuard.cjs` through step 2's
+  covenant re-run with `guard.inspectChanges` returning `{ok: true, refused: []}`.
+
+So in-scope item 1, *"the STOP unreachable by any proposal"*, was **false for this design's own kind.**
+The bounds, because the severity should not be overstated: I6 held — the apply still needed master's
+recorded approval, and `proposals.apply` has no in-process caller; the create fence refuses the owned
+kinds at origin `ipc`, so a renderer cannot file one; and `fileProposal` has no caller at all. Nothing in
+the shipped tree constructs such a change. **It was reachable by a hand-built approval, not by Rāma.**
+
+**FIXED IN TWO PLACES, and the split is the decision.**
+
+1. **`upgradeApplier.spellingRefusal`, consulted first thing in `validatePath`, refuses the spelling
+   CLASS outright for every path — governed, protected or ordinary.** A `:` anywhere outside a leading
+   drive designator, or any control character, is refused by name. Neither is ever a legitimate source
+   path, so a plain refusal is the whole fix, and it is made **before the snapshot is taken and before a
+   byte is written** — so the revert path, whose own failure is fatal and revokes master's allow-file, is
+   never entered for it.
+2. **`autonomyGate.stripSpellings` / `normalisePath` canonicalise the same two spellings, so
+   `namesGovernedPath` REPORTS the path as governed** at both create origins and at the applier's step 3,
+   rather than leaving one refusal in one function as the only thing between a stream name and the stop's
+   own module. A segment is truncated at its first `:`; a leading `C:/` is preserved, because a drive is
+   not a stream and discarding it would stop an absolute path to the allow-file looking absolute; a
+   segment that is nothing but a stream suffix is left alone, for the same reason `trimSegments` leaves a
+   dots-only segment alone.
+
+**And a third change the finding did not ask for, because step 2 was presented as the covenant re-run
+rather than trusted and for this spelling it refused nothing.** `loyaltyGuard.normalise` swaps
+separators, strips a leading `./` and lower-cases — it does not resolve structure and it does not strip a
+stream suffix. That blind spot is **pre-existing and lives in a protected file this build must not
+touch.** What this build owns is what it HANDS the guard, so **the applier now canonicalises each
+change's path through `gate.normalisePath` before the re-run**, one change at a time so the refusal still
+names the spelling master wrote rather than the canonical form it compared. All ten spellings of
+`electron/lib/loyaltyGuard.cjs` are now refused **at step 2, by the covenant**, instead of falling
+through to step 4 and being refused for their punctuation.
+
+**Why the colon strip is NOT in `normalise`, which is the non-obvious half.** `normalise` is also applied
+to the stringified `meta` blob, and JSON is full of colons. Measured: folding the strip into
+`trimSegments` turns `{"plan":"then patch electron/lib/x.cjs"}` into `{"plan"/lib/x.cjs"}`, because the
+colon it truncates at is the one after `"plan"` — the `electron/` segment is **deleted** and the `meta`
+substring scan then MISSES a governed path it catches today. So the strip lives on the path route only.
+The `meta` route needs none: that scan is a substring test, and `electron/lib/x.cjs::$data` **contains**
+`electron/lib/x.cjs`. Two rows assert both halves of that, so a later session cannot "tidy" the two
+functions into one.
+
+**§13's generator is now ten spellings**, and it carries a fourth element: what the UNGOVERNED control
+row expects. The seven that merely respell a path must still **APPLY** — that control is what stops a
+green section meaning "the fence refuses anything odd-looking". The three new ones must be **refused even
+for an ungoverned path**, and the row asserts the refusal is the SPELLING one and *not* the
+governed-path one, so the distinction is held rather than blurred. Ten spellings × four governed paths ×
+three gates, plus the applier where the bytes would land, plus the ungoverned control, plus **a new
+protected-file pass over all ten spellings** holding the step-2 claim. The assertion that would have
+caught this in round 2 — and did not exist — is the one that now runs on every row: **the governed file's
+bytes are byte-identical on disk afterwards.**
+
+**One honest residual from the fix.** `existsSync` through `::$DATA` is TRUE whether or not anything was
+written, because it is a synonym for a file that exists. So the `::$DATA` rows assert **bytes**, and the
+`:stream` and trailing-tab rows — which would have created a NEW entry — assert the **directory
+listing**. Asserting the wrong one of those two would have been a green row over a clobbered file.
+
+---
+
 ## 2. EVERY DESIGN CLAIM MEASURED **FALSE** AGAINST SOURCE
 
 | Claim in the design | Measured | What was built instead |
@@ -288,6 +375,8 @@ caught only by the write loop's `catch` and the revert behind it.**
 | `autonomyPolicy.cjs`'s header: *"a present file … turns the automatic revert off"* and *"setting `revert-own-apply` to L0 in the data file still genuinely disables the automatic revert"* | **FALSE, twice.** `revert()` consults neither the policy nor the stop — a token is its authority — so the edit never touched the revert. What it DID do was make `requireMasterDriven` refuse a **master-approved apply**. A documented, validator-accepted edit that re-created the defect this slice exists to prevent. | `revert-own-apply` is PERMANENT, so the file is not read for it; a file naming it is rejected whole; `requireMasterDriven` throws for a `MASTER_ACT` class that is not permanent. Both sentences rewritten to say what is true. |
 | `autonomyPolicy.cjs`'s `reload()`: *"no build and no restart is required"* | **FALSE.** `reload()` had **no production caller anywhere in `electron/`** and there is no IPC channel for the policy, so `current()` cached the first load for the process lifetime. | Called at `require`, `requireMasterDriven` and `policyStatus`, and proven against a real file on disk. |
 | `upgradeApplier.cjs`'s step-0 comment: *"a `{tier: 0}` object is forgeable **in-process**"* | **UNDERSTATED.** `proposals:apply` is `ipcMain.handle('proposals:apply', (_e, id, opts) => apply(id, opts \|\| {}))` at **269**, and `apply()` authorises `opts.user` at **219** — the user object arrives with the IPC request. | The comment says renderer-supplied, and the fix is on the FOR MASTER list because `proposals.cjs` is protected. |
+| **This note's own §2 row 1 again, and the in-scope claim *"the STOP unreachable by any proposal"*** | **FALSE A SECOND TIME, for a different spelling class.** An NTFS alternate-data-stream suffix is a SYNONYM for the primary stream, not a neighbouring file: `namesGovernedPath('electron/lib/autonomyStop.cjs::$DATA')` returned `null`, `path.resolve` kept the suffix so confinement passed, `lstat` said regular file, `readFileSync` through it returned the real file's **25255 bytes** so the `baseSha256` base-drift check **PASSED**, and a master-approved `patch` APPLIED — the stop module afterwards read `function isStopped(){return false;}`. `shared/loyalty-tripwire.json` was replaced the same way. | Refused as a SPELLING CLASS in `upgradeApplier.spellingRefusal` (any `:` outside a leading drive designator, any control character) before anything resolves it, **and** canonicalised in `autonomyGate.stripSpellings` so the governed-path fence reports it at both origins and at step 3. `+113` assertions: ten spellings × four governed paths × three gates, the applier, an ungoverned control that distinguishes the two refusals, and a protected-file pass over all ten. |
+| **`upgradeApplier.cjs`'s step-2 header: *"the loyalty guard, RE-RUN rather than trusted from creation"*** | **FALSE for the stream spelling.** `loyaltyGuard.normalise` (**209–214**) swaps separators, strips a leading `./` and lower-cases; it neither resolves structure nor strips a stream suffix. `guard.inspectChanges` returned `{ok: true, refused: []}` for `electron/lib/loyaltyGuard.cjs::$DATA`, a spelling that reads and writes the real file's bytes. The blind spot is **pre-existing** and `loyaltyGuard.cjs` is protected. | The applier canonicalises each change's path through `gate.normalisePath` **before** handing it to the guard, one change at a time so the refusal still names the spelling master wrote. All ten spellings of a protected file are now refused **at step 2, by the covenant.** The guard itself was not touched; what changed is what it is given. |
 | The build review's own fix note: *"canonicalise by resolution … the way the pre-existing `loyaltyGuard` already does"* | **FALSE as to mechanism, true as to outcome.** `loyaltyGuard.normalise` (**209–214**) is byte-for-byte the same non-resolving function. What makes it refuse `electron/lib/./loyaltyGuard.cjs` is a *third* clause in `inspectChanges` at **229** — `p.endsWith(basename(prot)) && p.includes(dirname(prot))` — which is basename-plus-dirname matching, not resolution. | The prescribed fix was adopted anyway, because it is the better one: resolution is exact where basename matching is a heuristic that would also refuse an unrelated file of the same name in the same directory tree. Recorded because *"copy what loyaltyGuard does"* would have reproduced the hole. |
 
 **One thing the design claimed and source confirmed, worth recording because the whole slice rests on
@@ -305,9 +394,16 @@ disturb the tripwire. Both asserted.
 | **After the first pass** | 29 | 28 | **2789** | 0 |
 | **After the first build review** | 29 | 28 | **2949** | 0 |
 | **After the second build review** | 29 | 28 | **3035** | 0 |
+| **After the third build review** | 29 | 28 | **3148** | 0 |
 
-The slice is `+517` in total: `+197` from `verifyAutonomyStop.cjs` and `+320` from
-`verifyUpgradeApplier.cjs`. The second review round added `+86` of those (`+10` and `+76`), rewrote
+Both numbers in the last row were measured by summing every `N passed, M failed` line the chain prints,
+once with the three changed files stashed and once with them restored: **3035 → 3148, `+113`, 0 failures
+either way.**
+
+The slice is `+630` in total: `+197` from `verifyAutonomyStop.cjs` and `+433` from
+`verifyUpgradeApplier.cjs`. The third review round added `+113`, all of them in the applier suite, and
+rewrote one row in place — the `variants` coverage count, seven spellings → ten. The second review round
+added `+86` (`+10` and `+76`), rewrote
 three rows in place — the `Object.isFrozen(PERMANENT)` clause, the regex over `requireMasterDriven`'s
 source, and the four `governedBy` rows — and removed none. The first build-review round added `+160`
 (`+40` and `+120`) and
@@ -400,6 +496,34 @@ print across the two suites on every run and are counted out loud rather than hi
 - **The probe adds one `accessSync` per target per apply.** Unmeasured cost. It is a stat-class call on
   a handful of paths, so it is almost certainly irrelevant, but nobody has timed it.
 
+### Added by the third build review
+
+- **The stream-suffix measurement is WINDOWS-ONLY, and this time the platform difference cuts the other
+  way.** That `electron/lib/autonomyStop.cjs::$DATA` resolves, `lstat`s as a regular file, reads the real
+  file's 25255 bytes and **writes through to them** was measured on this machine. On a POSIX host `::$DATA`
+  is an ordinary filename and the attack is a create of a differently-named file. So the *refusal* is
+  correct everywhere and *stricter than strictly necessary* on POSIX — never looser — but **the severity
+  of what it prevents is a Windows fact, and this is the only platform it has been observed on.**
+- **`:` is now refused in EVERY change path, on every platform.** A colon outside a leading drive
+  designator is legal in a POSIX filename. No source file in this project has one, and nothing in the
+  shipped tree constructs such a path, so this removes no reachable capability (I11) — but it is a
+  behaviour change for a hypothetical future change set, stated here rather than discovered later. The
+  refusal names the path and says why.
+- **Three spellings were NOT exercised, because a true alternate stream was not written.** The rows assert
+  that `:stream` is refused and that no entry appears beside the file. They do **not** assert what would
+  have happened had the write proceeded — the round-3 measurement says a hidden stream is created and the
+  primary is left intact, and that measurement was taken by the reviewer, not reproduced here.
+- **The `meta` route still has no resolution, only substring matching.** That is deliberate and now
+  asserted, because folding the colon strip into `normalise` measurably breaks it. The consequence is that
+  `meta` is matched by containment: a governed path mentioned anywhere in a persisted `meta` blob is
+  caught, and a path *constructed* at apply time from pieces that are individually innocuous would not be.
+  No code in this slice constructs one; nothing mechanical prevents it.
+- **Step 2 now depends on `autonomyGate` loading.** The applier already required the gate for step 3, so
+  this adds no new failure mode — but it does mean the covenant re-run's canonicalisation shares a fate
+  with the governed-path fence. If `autonomyGate.cjs` fails to load, `upgradeApplier.cjs` throws at
+  `require` and registers no applier at all, which is the safe direction and is **not** the fail-open
+  behaviour the create fence's wiring site has.
+
 ---
 
 ## 5. FOR MASTER — the entries this build cannot add
@@ -460,10 +584,14 @@ Deleting it stops everything again, needs no running Rāma, and cannot be taken 
 > `Select-String -Path RAMA_AGI_MASTER_SPEC.md -Pattern '^## SECTION 13[0-9]'` and
 > `Select-String -Path RAMA_AGI_MASTER_SPEC.md -Pattern '^\| 15[0-9] \|'`.
 >
-> **STATE AFTER THE SECOND BUILD REVIEW:** **Block B (ledger row 152) HAS BEEN INSERTED** into
-> SECTION 28, as a single line after row 146, with nothing else in that section touched — the text
-> below is the record of what went in, not something still to paste. **Block A (Section 132) is STILL
-> PASTE-READY and is deliberately not in the spec:** this worktree's copy of
+> **STATE AFTER THE THIRD BUILD REVIEW:** **Block B (ledger row 152) HAS BEEN INSERTED** into
+> SECTION 28, as a single line after row 146, with nothing else in that section touched — by the second
+> round, at `518a759`. **THE LINE NOW IN THE SPEC IS THE ROUND-2 TEXT AND IS STALE: it says
+> `2518 → 3035` and *"Two build-review rounds"*. The third round was instructed not to modify
+> `RAMA_AGI_MASTER_SPEC.md`, so it did not, and it is RAISING the staleness here instead of quietly
+> editing it. Block B below is the CORRECTED line — `2518 → 3148`, three rounds — and applying it is a
+> one-line replacement of the existing row 152, nothing more.**
+> **Block A (Section 132) is STILL PASTE-READY and is deliberately not in the spec:** this worktree's copy of
 > `RAMA_AGI_MASTER_SPEC.md` was cut at `c595342` and `dev` has since added sections 129, 130, 131, 133
 > and 135, so a new section inserted here writes into the region `dev` has grown. Paste it on `dev`,
 > after Section 131, and confirm 132 is still free first. The ledger row states in its own first
@@ -519,8 +647,26 @@ and `requireMasterDriven` THROWS for a `MASTER_ACT` class that is not, so the tw
 apart quietly. The review also found the path fence comparing strings it had never resolved:
 `electron/lib/./autonomyStop.cjs` and `electron/lib/../lib/autonomyStop.cjs` named nothing governed, so
 a diff against the stop's own module was fileable at both origins and at the applier. Resolution now
-precedes comparison, and 100 assertions cover five spellings of each governed path at every gate — with
-a control proving the fence resolves paths rather than rejecting unusual-looking ones.
+precedes comparison, with a control proving the fence resolves paths rather than rejecting
+unusual-looking ones.
+
+**The path fence failed three times, on three different spellings, and the third one mattered most.**
+Round 1 was unresolved structure. Round 2 was a trailing dot and space, which `path.posix.normalize`
+leaves alone — graded a NIT because those are genuinely distinct files here, so the governed bytes
+survived. Round 3 was an **NTFS alternate data stream**, and that is not a respelling: `file::$DATA` is a
+SYNONYM for the primary stream. `path.resolve` keeps the suffix, `lstat` reports a regular file,
+`readFileSync` through it returns the real file's bytes — so the `baseSha256` base-drift check, the one
+gate whose job is to notice the file is not the file the change was computed from, **passed instead of
+catching it** — and a master-approved patch left `autonomyStop.cjs` reading
+`function isStopped(){return false;}`. The same spelling replaced `shared/loyalty-tripwire.json` and
+carried a patch of `loyaltyGuard.cjs` past the covenant re-run. **A stream suffix and a control character
+are now refused as a SPELLING CLASS in the applier before anything resolves them, and canonicalised in
+the gate so the fence reports them; and the applier hands the loyalty guard the canonical path, because
+the guard is protected and its own comparison does not resolve either.** Ten spellings × four governed
+paths × every gate, plus a protected-file pass, and every row asserts the governed file is
+**byte-identical afterwards** — the assertion whose absence let round 2 grade this class a NIT. **The
+lesson, recorded because it is the reusable part: a path fence must be proven by EXECUTING the attack and
+reading the bytes back, not by reading the comparison.**
 
 **Nothing autonomous was unlocked.** `author-change` and `propose-source` sit at L1, L5 is declared and
 unreachable, `fileProposal` has no caller, and the five stage functions are asserted ABSENT so the
@@ -542,5 +688,5 @@ shipped applier.
 ### Block B — the ledger row
 
 ```markdown
-| 152 | The stop, the policy table, and the gate on `proposals:create` — built before there is anything autonomous | done | Section 132 — **the section's prose is NOT in this document yet; it is paste-ready in `docs/research/self-upgrade-build.md` §6 Block A**, held out of this file deliberately so this row is a one-line insertion that rebases cleanly onto `dev`. **THE LOCKED DECISION, master's option 1: I6 and I17 stay INTACT — Rāma proposes, master approves, and nothing in this slice applies a source change without a recorded approval. No autonomy rung was climbed.** The STOP is built BEFORE anything is autonomous, because a stop retrofitted onto a running loop is the one thing that must not be retrofitted. **BUILT: four modules — `electron/lib/autonomyStop.cjs` (the fail-safe switch), `autonomyPolicy.cjs` (fifteen classes over frozen floors/ceilings/permanence), `autonomyGate.cjs` (the create fence) and `upgradeApplier.cjs` (entry validation plus a byte snapshot) — and two suites, `verifyAutonomyStop.cjs` (197) and `verifyUpgradeApplier.cjs` (320), appended to the end of the `verify` chain and never reordered. 2518 → 3035 assertions, 0 failures.** **TWO PREDICATES, AND THE ASYMMETRY IS THE DECISION: `isStopped()` is fail-safe — no `<userData>/rama/autonomy.allow`, an unreadable file, invalid JSON, `"true"`, `1`, `{}`, `null` or a directory there all mean STOPPED — and it governs NEW autonomous action only. `isHalted()` is true only on an explicit `engage()` or `RAMA_AUTONOMY=stop` and is the predicate the four PRE-EXISTING dispatchers will consult when a teardown is built; NOTHING CALLS IT YET and the module says so. Governing those four with the fail-safe predicate would have deleted five shipping behaviours on every install until master hand-created a file nobody had told him about — `ollama-catalog`, `dependency-review`, the metacognition audit, selfCare's 120s sweep including `checkInstanceFailover`, and marketIntel's two ticks — a regression wearing a fail-safe argument, which I11 has no exception for. A counting fake proves a default install still dispatches.** **SEVEN PERMANENT POLICY CLASSES THE DATA FILE IS NOT READ FOR AT ALL** (`apply-source`, `revert-own-apply`, `release-classify`, `capability-grant`, `loyalty-core`, `master-record` — Section 127 — and `autonomy-policy`), with the editable eight DERIVED from them so two lists cannot disagree; `shared/autonomy-policy.json` ships ABSENT so the floors are the shipped levels, and a file that so much as names a permanent class is rejected WHOLE. **THE DEFECT TWO REVISIONS EACH THOUGHT THEY HAD FIXED: on a shipped install every class resolves to L0, so an unconditional `policy.require('revert-own-apply','L4')` at the applier's entry REFUSED A MASTER-APPROVED APPLY on every install — hidden because the row testing it used an allow-file fixture. The level now comes from `requireMasterDriven` over the frozen two-member `MASTER_ACT` subset, both members also PERMANENT so no data edit can refuse master either, and the first assertions in the suite run in the state a real install boots into: no allow-file, no policy file, master's apply SUCCEEDS.** **THE HOLE A LATER SESSION COULD NOT RECONSTRUCT, FOUND BY EXECUTING THE ATTACK RATHER THAN READING THE CODE: `autonomyGate.normalise` swapped separators and stripped a leading `./` but NEVER RESOLVED PATH STRUCTURE, so `electron/lib/./autonomyStop.cjs`, `electron//lib/autonomyStop.cjs`, `electron/lib/../lib/autonomyStop.cjs` and the backslash form all read as naming nothing governed — a `self-upgrade` proposal with a correct `baseSha256` passed the create gate at BOTH origins and the applier's step 3, and the stop module on disk afterwards read `function isStopped(){return false;}`. `autonomyStop.cjs` is not in `PROTECTED_FILES`, so nothing downstream objected. I6 still held — the apply needed master's recorded approval — but the diff should never have been fileable. FIXED BY RESOLVING BEFORE COMPARING (`path.posix.normalize`), plus per-segment trimming of a trailing dot or space, which `normalize` does not collapse and which on this platform left `autonomyStop.cjs.` and `autonomyStop.cjs ` readable as ungoverned. Seven spellings × four governed paths × every gate, with a control proving the fence RESOLVES paths rather than refusing odd-looking ones.** **OPEN GAP, STATED PLAINLY RATHER THAN ASSUMED COVERED: `shared/autonomy-policy.json`, `electron/lib/autonomyPolicy.cjs`, `electron/lib/autonomyStop.cjs` and `shared/loyalty-tripwire.json` are NOT in `loyaltyGuard.PROTECTED_FILES` (seven entries, tripwire-asserted), so they are not tamper-evident by that route — the create fence and the applier's entry validation are the only mechanical guards on them today. `loyaltyGuard.cjs` and `shared/capabilities.json` are protected and invariant-adjacent, so this build ASKS: add those four paths to `PROTECTED_FILES` and the tripwire manifest, and add `"system.suspend-autonomy": 0` and `"autonomy.view": 1` to the matrix. Until the capability exists, `lift()` cannot succeed for anyone including master, and the refusal names the file he writes by hand instead of rendering a dead button.** Two build-review rounds were fixed in place rather than re-implemented: round 1 (1 HIGH / 2 MEDIUM / 3 NIT, +160) and round 2 (1 MEDIUM / 7 NIT, +86) — the frozen `Set`s that were mutable because `Object.freeze` freezes properties and not internal slots, a fence asserted by regex and now executed, both master-driven classes resolved instead of only the revert net, `appliedBy` no longer written onto an entry refused at the door, and an unwritable destination refused as an environment problem instead of becoming a FATAL revert that revoked master's allow-file. **`node_modules` is absent from the worktree, so `vite build` was NOT run — no `.jsx` changed. NOT VERIFIED: the app has never booted with these modules loaded, `app.getPath('userData')` has never been resolved (every row injects a scratch root), `fileProposal` has no caller in the shipped tree, `engage()` tears down nothing by design, `lift()` has never succeeded against the real capability matrix, and a torn read of a hand-edited policy file falls back to the floors.** **NEXT STEP: the five-stage NOTICE/RESEARCH/WEIGH/PROPOSE/ANALYSE loop and `upgradeAuthor.cjs`, both DEFERRED and blocked on design-review findings 2 and 5 — see `docs/research/SELF_UPGRADE.md` § DEFERRED BY THE ORCHESTRATOR for the full deferred list with the finding id gating each item. Before any of it: paste Section 132 from the build note, and decide the two protected-file/capability additions above, because the loop files proposals and the fence on its own state is not complete without them.** |
+| 152 | The stop, the policy table, and the gate on `proposals:create` — built before there is anything autonomous | done | Section 132 — **the section's prose is NOT in this document yet; it is paste-ready in `docs/research/self-upgrade-build.md` §6 Block A**, held out of this file deliberately so this row is a one-line insertion that rebases cleanly onto `dev`. **THE LOCKED DECISION, master's option 1: I6 and I17 stay INTACT — Rāma proposes, master approves, and nothing in this slice applies a source change without a recorded approval. No autonomy rung was climbed.** The STOP is built BEFORE anything is autonomous, because a stop retrofitted onto a running loop is the one thing that must not be retrofitted. **BUILT: four modules — `electron/lib/autonomyStop.cjs` (the fail-safe switch), `autonomyPolicy.cjs` (fifteen classes over frozen floors/ceilings/permanence), `autonomyGate.cjs` (the create fence) and `upgradeApplier.cjs` (entry validation plus a byte snapshot) — and two suites, `verifyAutonomyStop.cjs` (197) and `verifyUpgradeApplier.cjs` (433), appended to the end of the `verify` chain and never reordered. 2518 → 3148 assertions, 0 failures.** **TWO PREDICATES, AND THE ASYMMETRY IS THE DECISION: `isStopped()` is fail-safe — no `<userData>/rama/autonomy.allow`, an unreadable file, invalid JSON, `"true"`, `1`, `{}`, `null` or a directory there all mean STOPPED — and it governs NEW autonomous action only. `isHalted()` is true only on an explicit `engage()` or `RAMA_AUTONOMY=stop` and is the predicate the four PRE-EXISTING dispatchers will consult when a teardown is built; NOTHING CALLS IT YET and the module says so. Governing those four with the fail-safe predicate would have deleted five shipping behaviours on every install until master hand-created a file nobody had told him about — `ollama-catalog`, `dependency-review`, the metacognition audit, selfCare's 120s sweep including `checkInstanceFailover`, and marketIntel's two ticks — a regression wearing a fail-safe argument, which I11 has no exception for. A counting fake proves a default install still dispatches.** **SEVEN PERMANENT POLICY CLASSES THE DATA FILE IS NOT READ FOR AT ALL** (`apply-source`, `revert-own-apply`, `release-classify`, `capability-grant`, `loyalty-core`, `master-record` — Section 127 — and `autonomy-policy`), with the editable eight DERIVED from them so two lists cannot disagree; `shared/autonomy-policy.json` ships ABSENT so the floors are the shipped levels, and a file that so much as names a permanent class is rejected WHOLE. **THE DEFECT TWO REVISIONS EACH THOUGHT THEY HAD FIXED: on a shipped install every class resolves to L0, so an unconditional `policy.require('revert-own-apply','L4')` at the applier's entry REFUSED A MASTER-APPROVED APPLY on every install — hidden because the row testing it used an allow-file fixture. The level now comes from `requireMasterDriven` over the frozen two-member `MASTER_ACT` subset, both members also PERMANENT so no data edit can refuse master either, and the first assertions in the suite run in the state a real install boots into: no allow-file, no policy file, master's apply SUCCEEDS.** **THE HOLE A LATER SESSION COULD NOT RECONSTRUCT, FOUND BY EXECUTING THE ATTACK RATHER THAN READING THE CODE: `autonomyGate.normalise` swapped separators and stripped a leading `./` but NEVER RESOLVED PATH STRUCTURE, so `electron/lib/./autonomyStop.cjs`, `electron//lib/autonomyStop.cjs`, `electron/lib/../lib/autonomyStop.cjs` and the backslash form all read as naming nothing governed — a `self-upgrade` proposal with a correct `baseSha256` passed the create gate at BOTH origins and the applier's step 3, and the stop module on disk afterwards read `function isStopped(){return false;}`. `autonomyStop.cjs` is not in `PROTECTED_FILES`, so nothing downstream objected. I6 still held — the apply needed master's recorded approval — but the diff should never have been fileable. FIXED BY RESOLVING BEFORE COMPARING (`path.posix.normalize`), plus per-segment trimming of a trailing dot or space, which `normalize` does not collapse and which on this platform left `autonomyStop.cjs.` and `autonomyStop.cjs ` readable as ungoverned. Ten spellings × four governed paths × every gate, with a control proving the fence RESOLVES paths rather than refusing odd-looking ones.** **THE SAME FENCE FAILED A THIRD TIME, ON THE ONE SPELLING THAT IS NOT A RESPELLING: an NTFS alternate data stream. `file::$DATA` is a SYNONYM for the primary stream, so `path.resolve` kept the suffix, `lstat` said regular file, `readFileSync` through it returned the real file's 25255 bytes — and the `baseSha256` base-drift check, whose entire job is to notice the file is not the file the change was computed from, PASSED instead of catching it. A master-approved patch left `autonomyStop.cjs` reading `function isStopped(){return false;}`; the same spelling replaced `shared/loyalty-tripwire.json` and carried a patch of `loyaltyGuard.cjs` past step 2's covenant re-run with `inspectChanges` returning `{ok:true,refused:[]}`. Round 2 graded the trailing-dot class a NIT because the governed bytes SURVIVED; this is the first class where they did not. FIXED IN TWO PLACES AND A THIRD NOBODY ASKED FOR: `upgradeApplier.spellingRefusal` refuses a `:` outside a leading drive designator and any control character for EVERY path before anything resolves it, so the revert path — whose own failure is fatal and revokes master's allow-file — is never entered for it; `autonomyGate.stripSpellings`/`normalisePath` canonicalise the same two so `namesGovernedPath` reports them at both origins and at step 3; and the applier now hands `loyaltyGuard.inspectChanges` the CANONICAL path, because that guard's own comparison does not resolve structure or strip a stream suffix either and it is a protected file this build cannot fix. The colon strip is deliberately NOT in `normalise`: `normalise` is applied to the stringified `meta` blob and JSON is full of colons — measured, folding it in turns `{"plan":"then patch electron/lib/x.cjs"}` into `{"plan"/lib/x.cjs"}` and the meta scan MISSES a path it catches today. Every variant row now asserts the governed file is BYTE-IDENTICAL afterwards, which is the assertion whose absence let round 2 grade this class a NIT.** **OPEN GAP, STATED PLAINLY RATHER THAN ASSUMED COVERED: `shared/autonomy-policy.json`, `electron/lib/autonomyPolicy.cjs`, `electron/lib/autonomyStop.cjs` and `shared/loyalty-tripwire.json` are NOT in `loyaltyGuard.PROTECTED_FILES` (seven entries, tripwire-asserted), so they are not tamper-evident by that route — the create fence and the applier's entry validation are the only mechanical guards on them today. `loyaltyGuard.cjs` and `shared/capabilities.json` are protected and invariant-adjacent, so this build ASKS: add those four paths to `PROTECTED_FILES` and the tripwire manifest, and add `"system.suspend-autonomy": 0` and `"autonomy.view": 1` to the matrix. Until the capability exists, `lift()` cannot succeed for anyone including master, and the refusal names the file he writes by hand instead of rendering a dead button.** Three build-review rounds were fixed in place rather than re-implemented: round 1 (1 HIGH / 2 MEDIUM / 3 NIT, +160), round 2 (1 MEDIUM / 7 NIT, +86) and round 3 (1 HIGH, +113) — the frozen `Set`s that were mutable because `Object.freeze` freezes properties and not internal slots, a fence asserted by regex and now executed, both master-driven classes resolved instead of only the revert net, `appliedBy` no longer written onto an entry refused at the door, and an unwritable destination refused as an environment problem instead of becoming a FATAL revert that revoked master's allow-file. **`node_modules` is absent from the worktree, so `vite build` was NOT run — no `.jsx` changed. NOT VERIFIED: the app has never booted with these modules loaded, `app.getPath('userData')` has never been resolved (every row injects a scratch root), `fileProposal` has no caller in the shipped tree, `engage()` tears down nothing by design, `lift()` has never succeeded against the real capability matrix, and a torn read of a hand-edited policy file falls back to the floors.** **NEXT STEP: the five-stage NOTICE/RESEARCH/WEIGH/PROPOSE/ANALYSE loop and `upgradeAuthor.cjs`, both DEFERRED and blocked on design-review findings 2 and 5 — see `docs/research/SELF_UPGRADE.md` § DEFERRED BY THE ORCHESTRATOR for the full deferred list with the finding id gating each item. Before any of it: paste Section 132 from the build note, and decide the two protected-file/capability additions above, because the loop files proposals and the fence on its own state is not complete without them.** |
 ```

@@ -103,12 +103,48 @@ function register(ledger, io = {}) {
 // ─── Path validation ──────────────────────────────────────────────────────────
 
 /**
+ * Refuse a path SPELLING outright, before anything resolves it — because resolution is exactly what
+ * fails to see these two.
+ *
+ * 1. An **NTFS alternate-data-stream suffix**. `file::$DATA` is a synonym for the primary data stream on
+ *    this platform, so `path.resolve` keeps the suffix, the confinement check passes, `lstat` reports a
+ *    regular file, and `readFileSync` through the spelling returns the REAL FILE'S BYTES — which means
+ *    the `baseSha256` base-drift check at step 6 PASSES rather than catching it. Measured: a
+ *    master-approved `patch` of `electron/lib/autonomyStop.cjs::$DATA` applied, and the stop module on
+ *    disk afterwards read `function isStopped(){return false;}`. The same spelling carried
+ *    `shared/loyalty-tripwire.json` and a patch of `loyaltyGuard.cjs` past the covenant re-run at step 2.
+ * 2. A **control character** anywhere in the path. `\t` is the reachable one; a write through it is
+ *    ENOENT here, so nothing was ever clobbered, but it is the same class and it is never legitimate.
+ *
+ * Neither spelling is ever a real source file, so a plain refusal naming the path is the whole fix, and
+ * it is made HERE — before the snapshot is taken and before a byte is written — so the revert path, whose
+ * own failure is fatal and revokes master's allow-file, is never entered for it. `autonomyGate`
+ * canonicalises the same two spellings so the governed-path fence at step 3 REPORTS them, rather than
+ * leaving this one refusal as the only thing standing between a stream name and the stop's own module.
+ *
+ * A leading drive designator is a drive, not a stream: `C:/x` passes, `C:/x:y` does not.
+ */
+function spellingRefusal(p) {
+  if (/[\u0000-\u001f]/.test(p)) {
+    return `"${p}" contains a control character, which no source path does`;
+  }
+  const afterDrive = /^[A-Za-z]:[\\/]/.test(p) ? p.slice(2) : p;
+  if (afterDrive.includes(':')) {
+    return `"${p}" names an NTFS alternate data stream (a ":" outside a drive designator), which is a `
+         + 'synonym for the file itself and is never a source path';
+  }
+  return null;
+}
+
+/**
  * Resolve, then compare — and `lstat`, because a symlink whose resolved path is inside the root still
  * writes outside it. Refuses a target that is a symlink, and a target whose existing parent directory
  * resolves outside the repository root.
  */
 function validatePath(fs, repoRoot, p) {
   if (!p || typeof p !== 'string') return { ok: false, why: 'a change needs a string path' };
+  const spelling = spellingRefusal(p);
+  if (spelling) return { ok: false, why: spelling };
   const resolved = path.resolve(repoRoot, p);
   const root = path.resolve(repoRoot);
   if (resolved !== root && !resolved.startsWith(root + path.sep)) {
@@ -238,9 +274,22 @@ async function applyWith(io, proposal, opts = {}) {
   if (changes.length === 0) throw new Error('a diff-bearing entry needs at least one change');
 
   // ── 2. the loyalty guard, RE-RUN rather than trusted from creation ─────────────────────────────
-  const inspected = guard.inspectChanges(changes);
-  if (inspected.refused.length > 0) {
-    throw new Error(`refused: these files constitute the loyalty covenant (I15): ${inspected.refused.join(', ')}`);
+  // CANONICALISED FIRST. `loyaltyGuard.normalise` swaps separators, strips a leading `./` and lower-cases
+  // — it does not resolve structure and it does not strip a stream suffix, so `loyaltyGuard.cjs::$DATA`
+  // reached this re-run and it refused NOTHING, for a spelling that reads and writes the real file's
+  // bytes. That blind spot is PRE-EXISTING and lives in a protected file this build must not touch; what
+  // this build owns is what it HANDS the guard, so it hands it the canonical name. The original
+  // `change.path` is what the refusal reports back, because that is the string master needs to see.
+  // One change at a time, so the refusal can name the spelling MASTER WROTE rather than the canonical
+  // form this re-run compared — the guard echoes back the path it was given, and a message that silently
+  // renamed the path master is looking at would be the harder bug to read.
+  const covenantRefused = [];
+  for (const change of changes) {
+    const probe = guard.inspectChanges([{ ...change, path: gate.normalisePath(change?.path) }]);
+    if (probe.refused.length > 0) covenantRefused.push(String(change?.path));
+  }
+  if (covenantRefused.length > 0) {
+    throw new Error(`refused: these files constitute the loyalty covenant (I15): ${covenantRefused.join(', ')}`);
   }
 
   // ── 3. nothing may name the policy's own authority, or the stop's own state ────────────────────
@@ -457,5 +506,5 @@ function evictSnapshots({ fs, root, keep = null, now = Date.now() }) {
 module.exports = {
   KIND, SCHEMA, PID, ALLOWED_ACTIONS, RECOGNISED_OPTS,
   SNAPSHOT_MAX_ENTRIES, SNAPSHOT_MAX_AGE_MS,
-  register, applyWith, revert, validatePath, writabilityOf, evictSnapshots,
+  register, applyWith, revert, spellingRefusal, validatePath, writabilityOf, evictSnapshots,
 };
