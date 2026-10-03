@@ -444,12 +444,25 @@ check('27. upColor and downColor of the projected candles are the same expressio
   /upColor: `\$\{bandColor\}1f`, downColor: `\$\{bandColor\}1f`/.test(projBlock));
 check('27. and of the projected bars too',
   /upColor: `\$\{bandColor\}aa`, downColor: `\$\{bandColor\}aa`/.test(projBlock));
+// Hue and thinness are the only two things separating a projected bar from a traded one in this
+// chart type, so both are pinned rather than one.
+check('27. the projected bars stay thin, so a real bar outranks them',
+  /thinBars: true/.test(projBlock));
 check('27. the candle body is near-hollow with a visible border, so a real candle outranks it',
   /borderVisible: true/.test(projBlock) && /borderUpColor: `\$\{bandColor\}cc`/.test(projBlock));
 check('28. the projected series is excluded from the price axis and the price line',
   /lastValueVisible: false, priceLineVisible: false/.test(projBlock));
-check('28. and the first projected bar carries a marker saying so',
-  /createSeriesMarkers\(projSeries,/.test(chart) && /projected/.test(projBlock));
+// Sliced to the marker call itself: the word "projected" also appears in a comment in the block
+// above, so reading projBlock would leave the visible label unasserted.
+const markFrom = projBlock.indexOf('createSeriesMarkers(projSeries,');
+const markBlock = markFrom >= 0 ? projBlock.slice(markFrom) : '';
+check('28. and the first projected bar carries a marker whose LABEL says so',
+  /createSeriesMarkers\(projSeries,/.test(chart) && /text: 'projected/.test(markBlock),
+  String(markBlock.length));
+check('28. that marker sits above the bar, and there is exactly one of them',
+  /position: 'aboveBar'/.test(markBlock)
+  && (markBlock.match(/time:/g) || []).length === 1,
+  String((markBlock.match(/time:/g) || []).length));
 check('29. attachPrimitive still appears EXACTLY twice — no third series primitive',
   (chart.match(/attachPrimitive\(/g) || []).length === 2,
   String((chart.match(/attachPrimitive\(/g) || []).length));
