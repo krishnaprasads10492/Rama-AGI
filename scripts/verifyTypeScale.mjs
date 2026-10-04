@@ -69,7 +69,10 @@ const camel = (cssName) => cssName
   .replace(/^--(fs|lh)-/, '')
   .replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
-const css = read('src/index.css');
+// Comments stripped first, and not as a tidiness measure: index.css explains the specificity trap
+// by QUOTING the selector it requires, so an includes() over the raw file would be satisfied by the
+// prose while the rule itself was wrong.
+const css = read('src/index.css').replace(/\/\*[\s\S]*?\*\//g, '');
 
 // Numeric truth lives in index.css, so both token blocks are parsed out of it rather than restated.
 const cssFs = new Map();
