@@ -10,6 +10,7 @@ import {
 // Pages come from the single registry — see src/config/registry.js
 import { visiblePages, searchPages } from '@config/registry.js';
 import { useUserStore } from '@store/userStore.js';
+import { FS, LH } from '@config/type.js';
 
 // ─── Voice mic button ─────────────────────────────────────────────────────────
 /**
@@ -76,7 +77,7 @@ function VoiceMicBtn({ capability, recording, micMuted, mode, onToggleMute, onPr
         display:      'flex',
         alignItems:   'center',
         justifyContent: 'center',
-        fontSize:     '14px',
+        fontSize:     FS.chromeLg,
         flexShrink:   0,
         transition:   'all 0.15s',
         opacity:      canVoice ? 1 : 0.45,
@@ -104,7 +105,7 @@ function SpeechMuteBtn({ muted, onToggle }) {
         background: muted ? 'rgba(255,170,0,0.12)' : 'transparent',
         color: muted ? 'var(--amber)' : 'var(--muted)',
         cursor: 'pointer', display: 'flex', alignItems: 'center',
-        justifyContent: 'center', fontSize: '12px', flexShrink: 0,
+        justifyContent: 'center', fontSize: FS.dense, flexShrink: 0,
         transition: 'all 0.15s',
       }}
     >
@@ -137,7 +138,7 @@ function MicModeMenu({ open, capability, mode, onPick, onClose }) {
         boxShadow: '0 8px 28px rgba(0,0,0,0.55)', overflow: 'hidden',
       }}>
         <div style={{
-          padding: '7px 12px', fontSize: '9px', letterSpacing: '0.1em',
+          padding: '7px 12px', fontSize: FS.chrome, lineHeight: LH.chrome, letterSpacing: '0.1em',
           color: 'var(--muted)', borderBottom: '1px solid var(--border)',
         }}>
           MICROPHONE MODE
@@ -151,7 +152,7 @@ function MicModeMenu({ open, capability, mode, onPick, onClose }) {
               onClick={() => enabled && onPick(m)}
               title={enabled ? '' : why[m]}
               style={{
-                padding: '8px 12px', fontSize: '11px',
+                padding: '8px 12px', fontSize: FS.chrome, lineHeight: LH.chrome,
                 cursor: enabled ? 'pointer' : 'not-allowed',
                 opacity: enabled ? 1 : 0.4,
                 color: active ? 'var(--accent)' : 'var(--text-dim)',
@@ -161,7 +162,7 @@ function MicModeMenu({ open, capability, mode, onPick, onClose }) {
             >
               <span style={{ width: '10px' }}>{active ? '●' : ''}</span>
               <span style={{ flex: 1 }}>{MIC_MODE_LABELS[m]}</span>
-              {!enabled && <span style={{ fontSize: '8px', color: 'var(--muted)' }}>unavailable</span>}
+              {!enabled && <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>unavailable</span>}
             </div>
           );
         })}
@@ -188,7 +189,8 @@ function VoiceLevelChip({ capability, onRescan }) {
         ? `Voice level ${level}/4 — to climb: ${capability.nextStep}. Click to re-check.`
         : `Voice level ${level}/4 — highest available. Click to re-check.`}
       style={{
-        fontSize: '9px', letterSpacing: '0.08em', cursor: 'pointer',
+        fontSize: FS.chrome, letterSpacing: '0.08em', cursor: 'pointer',
+        lineHeight: LH.chrome,
         padding: '2px 7px', borderRadius: '2px', flexShrink: 0,
         color: colour, border: `1px solid ${colour}55`, background: `${colour}12`,
       }}
@@ -225,7 +227,8 @@ function PageTab({ page, active, onClick }) {
         color:        active ? page.color : hover ? 'var(--text)' : 'var(--text-dim)',
         cursor:       'pointer',
         fontFamily:   'var(--font)',
-        fontSize:     '10px',
+        fontSize:     FS.chrome,
+        lineHeight: LH.chrome,
         letterSpacing:'0.06em',
         transition:   'all 0.15s',
         flexShrink:   0,
@@ -234,7 +237,7 @@ function PageTab({ page, active, onClick }) {
       }}
     >
       <span style={{
-        fontSize:   '15px',
+        fontSize:   FS.body,
         textShadow: active ? `0 0 8px ${page.color}` : 'none',
         filter:     active ? `drop-shadow(0 0 4px ${page.color})` : 'none',
         transition: 'all 0.15s',
@@ -281,10 +284,10 @@ function SearchResults({ query, pages, onSelect }) {
           onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,255,255,0.05)'}
           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
         >
-          <span style={{ color: p.color, fontSize: '16px', minWidth: '20px', textAlign: 'center' }}>{p.icon}</span>
+          <span style={{ color: p.color, fontSize: FS.read, minWidth: '20px', textAlign: 'center' }}>{p.icon}</span>
           <div>
-            <div style={{ fontWeight: 700, fontSize: '12px', color: 'var(--text)' }}>{p.label}</div>
-            <div style={{ fontSize: '10px', color: 'var(--muted)' }}>{p.desc}</div>
+            <div style={{ fontWeight: 700, fontSize: FS.dense, color: 'var(--text)' }}>{p.label}</div>
+            <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>{p.desc}</div>
           </div>
         </div>
       ))}
@@ -313,7 +316,7 @@ function VoiceHUD({ transcript, wakeActive, recording, error }) {
       borderRadius:'var(--radius-lg)',
       padding:    '8px 20px',
       color:      colour,
-      fontSize:   '12px',
+      fontSize:   FS.dense,
       maxWidth:   '70vw',
       zIndex:     9000,
       backdropFilter: 'blur(8px)',
@@ -348,20 +351,20 @@ function SelfModifyModal({ mod, onApprove, onDeny }) {
             ⚡ RĀMA SELF-MODIFICATION REQUEST
           </span>
           {mod.requiresRestart && (
-            <span className="badge badge-red" style={{ fontSize: '9px' }}>REQUIRES RESTART</span>
+            <span className="badge badge-red" style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>REQUIRES RESTART</span>
           )}
         </div>
-        <div style={{ color: 'var(--text)', fontSize: '13px' }}>{mod.description}</div>
+        <div style={{ color: 'var(--text)', fontSize: FS.chrome }}>{mod.description}</div>
         <div style={{ overflowY: 'auto', flex: 1 }}>
           {mod.files.map((f, i) => (
             <div key={i} style={{ marginBottom: '12px' }}>
-              <div style={{ fontSize: '11px', color: 'var(--accent)', marginBottom: '4px', fontWeight: 700 }}>
+              <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--accent)', marginBottom: '4px', fontWeight: 700 }}>
                 {f.action.toUpperCase()}: {f.path}
               </div>
               {f.content && (
                 <pre style={{
                   background: 'var(--surface)', border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius)', padding: '10px', fontSize: '11px',
+                  borderRadius: 'var(--radius)', padding: '10px', fontSize: FS.chrome, lineHeight: LH.chrome,
                   color: 'var(--text-dim)', overflow: 'auto', maxHeight: '200px',
                   whiteSpace: 'pre-wrap', wordBreak: 'break-all',
                 }}>
@@ -638,7 +641,7 @@ export default function CommandPalette({ extraPages = [] }) {
           padding:    '10px 16px',
           borderBottom: '1px solid var(--border)',
         }}>
-          <span style={{ color: 'var(--muted)', fontSize: '13px', flexShrink: 0 }}>⌕</span>
+          <span style={{ color: 'var(--muted)', fontSize: FS.chrome, flexShrink: 0 }}>⌕</span>
           <input
             ref={inputRef}
             value={paletteQuery}
@@ -662,7 +665,7 @@ export default function CommandPalette({ extraPages = [] }) {
               outline:    'none',
               color:      'var(--text)',
               fontFamily: 'var(--font)',
-              fontSize:   '13px',
+              fontSize:   FS.chrome,
             }}
           />
           <VoiceLevelChip capability={voiceCap} onRescan={rescanVoice} />
@@ -685,7 +688,7 @@ export default function CommandPalette({ extraPages = [] }) {
             onClose={() => setModeMenuOpen(false)}
           />
           <button className="btn btn-sm" onClick={closePalette}
-            style={{ fontSize: '11px', padding: '3px 8px' }}>
+            style={{ fontSize: FS.chrome, lineHeight: LH.chrome, padding: '3px 8px' }}>
             ESC
           </button>
 
@@ -745,7 +748,8 @@ export default function CommandPalette({ extraPages = [] }) {
           transition:     'height 0.2s, background 0.3s',
           flexShrink:     0,
           boxShadow:      paletteOpen ? '0 0 8px rgba(0,200,255,0.4)' : 'none',
-          fontSize:       '9px',
+          fontSize:       FS.chrome,
+          lineHeight: LH.chrome,
           letterSpacing:  '0.14em',
           color:          'var(--muted)',
           userSelect:     'none',

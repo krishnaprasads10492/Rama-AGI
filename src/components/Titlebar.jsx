@@ -6,6 +6,7 @@ import { authenticateMaster } from '@services/consciousness.js';
 import { authApi, clearSession } from '@services/authClient.js';
 import { getTierBadge, TIERS } from '@services/accessControl.js';
 import RamaOrb from './RamaOrb.jsx';
+import { FS, LH } from '@config/type.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -60,7 +61,7 @@ function Clock() {
     return () => clearInterval(id);
   }, []);
   return (
-    <span style={{ color: 'var(--text-dim)', fontSize: '11px', letterSpacing: '0.05em' }}>
+    <span style={{ color: 'var(--text-dim)', fontSize: FS.chrome, lineHeight: LH.chrome, letterSpacing: '0.05em' }}>
       {time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
     </span>
   );
@@ -73,7 +74,7 @@ function MetricPill({ label, value, warn = 70, danger = 90, title }) {
     : value >= danger ? 'var(--red)' : value >= warn ? 'var(--gold)' : 'var(--accent)';
   return (
     <div className="metric-pill no-drag" style={{ borderColor: color + '44' }} title={title}>
-      <span style={{ color: 'var(--muted)', fontSize: '10px' }}>{label}</span>
+      <span style={{ color: 'var(--muted)', fontSize: FS.chrome, lineHeight: LH.chrome }}>{label}</span>
       <span style={{ color, fontWeight: 700, minWidth: '28px', textAlign: 'right' }}>
         {unread ? '--' : `${value}%`}
       </span>
@@ -115,8 +116,8 @@ function AuthModal({ onClose }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <RamaOrb size={32} />
           <div>
-            <div className="title-glow" style={{ fontSize: '14px' }}>IDENTITY VERIFICATION</div>
-            <div style={{ fontSize: '10px', color: 'var(--muted)' }}>
+            <div className="title-glow" style={{ fontSize: FS.chromeLg }}>IDENTITY VERIFICATION</div>
+            <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
               Authenticate as master to reveal full AGI identity
             </div>
           </div>
@@ -124,7 +125,7 @@ function AuthModal({ onClose }) {
         <input className="input" type="password" placeholder="Master password"
           value={password} onChange={e => { setPassword(e.target.value); setError(''); }}
           onKeyDown={e => e.key === 'Enter' && tryAuth()} autoFocus />
-        {error && <div style={{ color: 'var(--red)', fontSize: '11px' }}>{error}</div>}
+        {error && <div style={{ color: 'var(--red)', fontSize: FS.chrome, lineHeight: LH.chrome }}>{error}</div>}
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
           <button className="btn btn-sm" onClick={onClose}>Cancel</button>
           <button className="btn btn-sm btn-primary" onClick={tryAuth}>Authenticate</button>
@@ -144,7 +145,7 @@ function TitleBtn({ onClick, label, title, hoverColor, isClose }) {
         width: '46px', height: 'var(--titlebar-h)', border: 'none',
         background: hover ? (isClose ? 'rgba(255,64,96,0.15)' : 'rgba(0,200,255,0.06)') : 'transparent',
         color: hover ? hoverColor : 'var(--text-dim)',
-        cursor: 'pointer', fontSize: '13px', display: 'flex',
+        cursor: 'pointer', fontSize: FS.chrome, display: 'flex',
         alignItems: 'center', justifyContent: 'center',
         transition: 'all 0.15s', WebkitAppRegion: 'no-drag',
       }}>
@@ -202,7 +203,7 @@ export default function Titlebar() {
           <div onClick={() => !masterAuthenticated && setShowAuth(true)}
             style={{ cursor: masterAuthenticated ? 'default' : 'pointer' }}>
             <span style={{
-              fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 700,
+              fontFamily: 'var(--font-display)', fontSize: FS.chrome, fontWeight: 700,
               letterSpacing: '0.14em', textTransform: 'uppercase',
               background: masterAuthenticated
                 ? 'linear-gradient(135deg, #4dd9ff 0%, #00c8ff 50%, #d4a940 100%)'
@@ -215,7 +216,7 @@ export default function Titlebar() {
               {masterAuthenticated ? 'RĀMA AGI' : 'ASSISTANT'}
             </span>
             {masterAuthenticated && (
-              <span style={{ fontSize: '9px', color: 'rgba(212,169,64,0.6)',
+              <span style={{ fontSize: FS.dense /* dense, not chrome: the headroom left in the 38px titlebar box */, lineHeight: LH.tight, color: 'rgba(212,169,64,0.6)',
                 letterSpacing: '0.08em', fontFamily: 'var(--font)', display: 'block' }}>
                 SUPER AGI · MASTER AUTHENTICATED
               </span>
@@ -228,7 +229,8 @@ export default function Titlebar() {
             border: `1px solid ${paletteOpen ? 'rgba(0,200,255,0.35)' : 'var(--border)'}`,
             borderRadius: '3px',
             color: paletteOpen ? 'var(--accent)' : 'var(--muted)',
-            fontSize: '9px', cursor: 'pointer', letterSpacing: '0.06em',
+            fontSize: FS.chrome, cursor: 'pointer', letterSpacing: '0.06em',
+            lineHeight: LH.chrome,
             WebkitAppRegion: 'no-drag', transition: 'all 0.15s',
           }}>Ctrl+K</div>
 
@@ -237,10 +239,10 @@ export default function Titlebar() {
               padding: '2px 8px', background: `${tierBadge.color}10`,
               border: `1px solid ${tierBadge.color}28`, borderRadius: '3px',
               WebkitAppRegion: 'no-drag' }}>
-              <span style={{ fontSize: '9px', color: tierBadge.color, fontWeight: 700 }}>
+              <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: tierBadge.color, fontWeight: 700 }}>
                 {currentUser.tier === TIERS.MASTER ? '◈' : '◎'}
               </span>
-              <span style={{ fontSize: '10px', color: tierBadge.color, fontFamily: 'var(--font-display)' }}>
+              <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: tierBadge.color, fontFamily: 'var(--font-display)' }}>
                 {currentUser.name}
               </span>
             </div>
@@ -269,7 +271,7 @@ export default function Titlebar() {
           {currentUser && currentUser.tier !== TIERS.GUEST && (
             <button onClick={handleLogout} title="Sign out" style={{
               padding: '0 10px', height: '100%', border: 'none', background: 'transparent',
-              color: 'var(--muted)', cursor: 'pointer', fontSize: '11px',
+              color: 'var(--muted)', cursor: 'pointer', fontSize: FS.chrome, lineHeight: LH.chrome,
               fontFamily: 'var(--font)', transition: 'color 0.15s', WebkitAppRegion: 'no-drag',
             }}
               onMouseEnter={e => e.currentTarget.style.color = 'var(--gold)'}

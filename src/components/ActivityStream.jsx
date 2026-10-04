@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { FS, LH } from '@config/type.js';
 
 /**
  * ActivityStream — Live feed of everything Rāma is doing.
@@ -56,7 +57,7 @@ export default function ActivityStream({ visible, onToggle }) {
         background:   'var(--surface)',
         color:        entries.length > 0 ? 'var(--accent)' : 'var(--muted)',
         cursor:       'pointer',
-        fontSize:     '14px',
+        fontSize:     FS.chromeLg,
         display:      'flex',
         alignItems:   'center',
         justifyContent: 'center',
@@ -105,18 +106,18 @@ export default function ActivityStream({ visible, onToggle }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--accent)',
             boxShadow: 'var(--glow-cyan)', animation: 'pulse-ring 1.5s ease infinite' }} />
-          <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.1em' }}>
+          <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.1em' }}>
             ACTIVITY STREAM
           </span>
         </div>
         <button onClick={onToggle} style={{ background: 'none', border: 'none', color: 'var(--muted)',
-          cursor: 'pointer', fontSize: '12px', fontFamily: 'var(--font)' }}>✕</button>
+          cursor: 'pointer', fontSize: FS.dense, fontFamily: 'var(--font)' }}>✕</button>
       </div>
 
       {/* Entries */}
       <div ref={listRef} style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }}>
         {entries.length === 0 ? (
-          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--muted)', fontSize: '11px' }}>
+          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--muted)', fontSize: FS.chrome, lineHeight: LH.chrome }}>
             Rāma is idle. Activity appears here in real time.
           </div>
         ) : entries.map(entry => {
@@ -132,15 +133,15 @@ export default function ActivityStream({ visible, onToggle }) {
               onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,255,255,0.03)'}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
             >
-              <span style={{ color: style.color, fontSize: '11px', flexShrink: 0, marginTop: '1px' }}>
+              <span style={{ color: style.color, fontSize: FS.chrome, lineHeight: LH.chrome, flexShrink: 0, marginTop: '1px' }}>
                 {style.icon}
               </span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '11px', color: style.color === 'var(--text-dim)' ? 'var(--text-dim)' : 'var(--text)',
+                <div style={{ fontSize: FS.chrome, color: style.color === 'var(--text-dim)' ? 'var(--text-dim)' : 'var(--text)',
                   lineHeight: '1.5', wordBreak: 'break-word' }}>
                   {entry.message}
                 </div>
-                <div style={{ fontSize: '9px', color: 'var(--muted)', marginTop: '1px' }}>
+                <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '1px' }}>
                   {new Date(entry.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                   {entry.meta?.model && ` · ${entry.meta.model}`}
                 </div>
