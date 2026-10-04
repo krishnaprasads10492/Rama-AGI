@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useUserStore } from '@store/userStore.js';
 import { SKILLS } from '@services/cognition.js';
 import { resolveVoiceCapability } from '@services/voiceEngine.js';
+import { FS } from '@config/type.js';
 
 /**
  * SelfPanel — what Rāma is, what it can do, and what it cannot (spec Section 88).
@@ -32,17 +33,17 @@ function Fact({ label, fact }) {
       display: 'flex', justifyContent: 'space-between', gap: 12,
       padding: '8px 0', borderBottom: '1px solid var(--border)',
     }}>
-      <span style={{ fontSize: 12, color: 'var(--muted)', flexShrink: 0 }}>{label}</span>
+      <span style={{ fontSize: FS.dense, color: 'var(--muted)', flexShrink: 0 }}>{label}</span>
       <span style={{ textAlign: 'right', minWidth: 0 }}>
         <span style={{
-          fontSize: 12,
+          fontSize: FS.dense,
           color: measured ? 'var(--text)' : 'var(--muted)',
           fontStyle: measured ? 'normal' : 'italic',
         }}>
           {shown}
         </span>
         {/* The source is what makes the claim auditable, so it is always visible. */}
-        <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', marginTop: 2 }}>
+        <span style={{ display: 'block', fontSize: FS.chip, color: 'var(--muted)', marginTop: 2 }}>
           {measured ? fact.source : (fact.why || fact.source)}
         </span>
       </span>
@@ -99,7 +100,7 @@ export default function SelfPanel() {
   if (error) {
     return (
       <div className="hud-card" style={{ padding: '16px 20px', maxWidth: 620 }}>
-        <div style={{ fontSize: 12, color: 'var(--amber)' }}>{error}</div>
+        <div style={{ fontSize: FS.dense, color: 'var(--amber)' }}>{error}</div>
       </div>
     );
   }
@@ -107,7 +108,7 @@ export default function SelfPanel() {
   if (!model) {
     return (
       <div className="hud-card" style={{ padding: '16px 20px', maxWidth: 620 }}>
-        <div style={{ fontSize: 12, color: 'var(--muted)' }}>Measuring…</div>
+        <div style={{ fontSize: FS.dense, color: 'var(--muted)' }}>Measuring…</div>
       </div>
     );
   }
@@ -123,11 +124,11 @@ export default function SelfPanel() {
           <div className="section-label">WHAT I AM</div>
           <button className="btn btn-sm" disabled={busy}
             onClick={load}
-            style={{ marginLeft: 'auto', fontSize: 11.5 }}>
+            style={{ marginLeft: 'auto', fontSize: FS.chip }}>
             {busy ? 'Measuring…' : '↺ Re-measure'}
           </button>
         </div>
-        <div style={{ fontSize: 13, lineHeight: 1.65, color: 'var(--text)' }}>
+        <div style={{ fontSize: FS.chrome, lineHeight: 1.65, color: 'var(--text)' }}>
           {summary.text}
         </div>
       </div>
@@ -139,7 +140,7 @@ export default function SelfPanel() {
         </div>
 
         {limits.length === 0 ? (
-          <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
+          <div style={{ fontSize: FS.dense, color: 'var(--muted)', lineHeight: 1.6 }}>
             Nothing I check for is currently missing. This is not a claim of completeness — it means
             every condition this panel knows how to test came back satisfied.
           </div>
@@ -149,18 +150,18 @@ export default function SelfPanel() {
               <div key={i} style={{
                 paddingLeft: 12, borderLeft: '2px solid var(--amber)',
               }}>
-                <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>
+                <div style={{ fontSize: FS.denseLg, fontWeight: 600, color: 'var(--text)' }}>
                   {l.what}
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 3, lineHeight: 1.6 }}>
+                <div style={{ fontSize: FS.dense, color: 'var(--text-dim)', marginTop: 3, lineHeight: 1.6 }}>
                   {l.why}
                 </div>
                 {l.fixable && (
-                  <div style={{ fontSize: 12, color: 'var(--accent)', marginTop: 4, lineHeight: 1.6 }}>
+                  <div style={{ fontSize: FS.dense, color: 'var(--accent)', marginTop: 4, lineHeight: 1.6 }}>
                     → {l.fixable}
                   </div>
                 )}
-                <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 3 }}>
+                <div style={{ fontSize: FS.chip, color: 'var(--muted)', marginTop: 3 }}>
                   measured from {l.source}
                 </div>
               </div>
@@ -177,7 +178,7 @@ export default function SelfPanel() {
         <Fact label="Loyalty"  fact={identity.loyalty} />
         <Fact label="Genome"   fact={identity.genome} />
         <Fact label="Packaged" fact={identity.packaged} />
-        <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 10, lineHeight: 1.6 }}>
+        <div style={{ fontSize: FS.chip, color: 'var(--muted)', marginTop: 10, lineHeight: 1.6 }}>
           {attestation.loyalty}
         </div>
       </Group>
@@ -199,7 +200,7 @@ export default function SelfPanel() {
           done nothing", which is a worse falsehood than saying the record is not yours to see. */}
       <Group title="WHAT I HAVE DONE">
         {experience.restricted ? (
-          <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
+          <div style={{ fontSize: FS.dense, color: 'var(--muted)', lineHeight: 1.6 }}>
             Withheld on this account — {experience.recorded?.why || 'requires "mind.view"'}. The
             activity record is master-only, so it is omitted rather than shown as zero.
           </div>
@@ -210,7 +211,7 @@ export default function SelfPanel() {
             <Fact label="Escalated to a model"    fact={experience.escalatedToAModel} />
             <Fact label="Reflex rate"             fact={experience.reflexRate} />
             <Fact label="Failures"                fact={experience.failures} />
-            <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 10, lineHeight: 1.6 }}>
+            <div style={{ fontSize: FS.chip, color: 'var(--muted)', marginTop: 10, lineHeight: 1.6 }}>
               Reflex rate is the share of turns answered without any model. It is the one number
               that would show Rāma getting cheaper and more capable over time — and it cannot rise
               until the tier-3 loop above is closed.
@@ -222,10 +223,10 @@ export default function SelfPanel() {
       {/* ── The rule this panel is bound by ──────────────────────────────── */}
       <div className="hud-card" style={{ padding: '14px 20px' }}>
         <div className="section-label" style={{ marginBottom: 8 }}>HOW TO READ THIS</div>
-        <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.65 }}>
+        <div style={{ fontSize: FS.dense, color: 'var(--text-dim)', lineHeight: 1.65 }}>
           {attestation.rule}
         </div>
-        <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6 }}>
+        <div style={{ fontSize: FS.chip, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6 }}>
           Measured {new Date(attestation.generatedAt).toLocaleString()} from{' '}
           {attestation.sources.length} source{attestation.sources.length === 1 ? '' : 's'}
           {attestation.sources.length > 0 && `: ${attestation.sources.join(', ')}`}.
