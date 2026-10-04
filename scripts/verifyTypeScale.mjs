@@ -241,6 +241,14 @@ check('and it is what sets --palette-w for wide',
   const branchAt = app.search(/const popout\s*=\s*readPopoutParams\(\)/);
   check('App.jsx still has the pop-out early return', branchAt > -1);
   check('and the band owner sits above it', hookAt > -1 && hookAt < branchAt, `hook ${hookAt}, branch ${branchAt}`);
+
+  // RED WHEN: the titlebar shed is deleted and `compact` keeps a mechanism with no consumer — the
+  // band would then only ever be read for `wide`, and nothing would notice a narrow window.
+  // Read off stripped code, so a comment mentioning 'compact' cannot satisfy it (the trap 71bdc8c
+  // caught in the wide-rule assertion).
+  const titlebar = stripComments(read('src/components/Titlebar.jsx'));
+  check('Titlebar.jsx reads the band', /useLayoutBand\(\s*\)/.test(titlebar));
+  check("and consumes the 'compact' band", /'compact'/.test(titlebar));
 }
 
 // ── 11. The fs-exempt: parser, self-tested because it has no users yet ────────

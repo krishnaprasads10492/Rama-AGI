@@ -345,7 +345,9 @@ function SelfModifyModal({ mod, onApprove, onDeny }) {
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 800,
     }}>
-      <div className="hud-card" style={{ width: '600px', maxHeight: '70vh', display: 'flex', flexDirection: 'column', padding: '24px', gap: '16px' }}>
+      {/* --palette-w is 600px, and 760px under :root[data-band="wide"] — the palette IS the
+          navigation in a shell with no sidebar, so surplus width goes here. */}
+      <div className="hud-card" style={{ width: 'var(--palette-w)', maxWidth: '92vw', maxHeight: '70vh', display: 'flex', flexDirection: 'column', padding: '24px', gap: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ color: 'var(--amber)', fontWeight: 700, letterSpacing: '0.08em' }}>
             ⚡ RĀMA SELF-MODIFICATION REQUEST

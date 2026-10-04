@@ -7,6 +7,7 @@ import { authApi, clearSession } from '@services/authClient.js';
 import { getTierBadge, TIERS } from '@services/accessControl.js';
 import RamaOrb from './RamaOrb.jsx';
 import { FS, LH } from '@config/type.js';
+import { useLayoutBand } from '@hooks/useLayoutBand.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -160,6 +161,11 @@ export default function Titlebar() {
   const [maximized, setMaximized] = useState(false);
   const [showAuth,  setShowAuth]  = useState(false);
 
+  // READ-ONLY: no `own` argument. App.jsx is the sole owner of the data-band attribute, because
+  // writes are idempotent but cleanups are not — see useLayoutBand.js (spec 136.12 [F4]).
+  const band = useLayoutBand();
+  const compact = band === 'compact';
+
   const { togglePalette, paletteOpen, voiceActive, masterAuthenticated } = useUIStore();
   const { isThinking } = useRamaStore();
   const { currentUser, clearSession: clearUserSession, sessionToken } = useUserStore();
@@ -215,24 +221,32 @@ export default function Titlebar() {
             }}>
               {masterAuthenticated ? 'RĀMA AGI' : 'ASSISTANT'}
             </span>
-            {masterAuthenticated && (
-              <span style={{ fontSize: FS.dense /* dense, not chrome: the headroom left in the 38px titlebar box */, lineHeight: LH.tight, color: 'rgba(212,169,64,0.6)',
+            {/* Shed in `compact`: the identity zone goes from 261px to the 61px the title keeps. */}
+            {masterAuthenticated && !compact && (
+              // dense (12px), not chrome (13px): a WCAG 1.4.12 1.5x line-height override on two
+              // 13px lines needs 39.0px and overflows the 38px box, while dense needs 37.5px.
+              <span style={{ fontSize: FS.dense, lineHeight: LH.tight, color: 'rgba(212,169,64,0.6)',
                 letterSpacing: '0.08em', fontFamily: 'var(--font)', display: 'block' }}>
                 SUPER AGI · MASTER AUTHENTICATED
               </span>
             )}
           </div>
 
-          <div onClick={togglePalette} style={{
-            padding: '2px 7px',
-            background: paletteOpen ? 'rgba(0,200,255,0.08)' : 'transparent',
-            border: `1px solid ${paletteOpen ? 'rgba(0,200,255,0.35)' : 'var(--border)'}`,
-            borderRadius: '3px',
-            color: paletteOpen ? 'var(--accent)' : 'var(--muted)',
-            fontSize: FS.chrome, cursor: 'pointer', letterSpacing: '0.06em',
-            lineHeight: LH.chrome,
-            WebkitAppRegion: 'no-drag', transition: 'all 0.15s',
-          }}>Ctrl+K</div>
+          {/* Also shed in `compact` (-67px plus its 8px gap), and NOTHING is lost with it (I11):
+              this chip only ADVERTISES the shortcut. Ctrl+K is a window keydown listener in
+              CommandPalette.jsx, and the orb above still toggles the palette on click. */}
+          {!compact && (
+            <div onClick={togglePalette} style={{
+              padding: '2px 7px',
+              background: paletteOpen ? 'rgba(0,200,255,0.08)' : 'transparent',
+              border: `1px solid ${paletteOpen ? 'rgba(0,200,255,0.35)' : 'var(--border)'}`,
+              borderRadius: '3px',
+              color: paletteOpen ? 'var(--accent)' : 'var(--muted)',
+              fontSize: FS.chrome, cursor: 'pointer', letterSpacing: '0.06em',
+              lineHeight: LH.chrome,
+              WebkitAppRegion: 'no-drag', transition: 'all 0.15s',
+            }}>Ctrl+K</div>
+          )}
 
           {currentUser && tierBadge && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '5px',
