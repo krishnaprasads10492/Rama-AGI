@@ -15991,3 +15991,59 @@ pop-out (420 DIP) it fires always. The fix is a one-constant change to **either*
 layout was never measured, and raising the band edge re-bands windows that are fine today. **Neither
 was changed, and `electron/main.cjs` was not touched.** The mechanism is proven by the suite and by
 the pop-out; what is unproven is only the main window at exactly zoom 1.0.
+
+### 136.15 Decision — how the render check proves it in a real renderer, and what it cannot reach
+
+`scripts/renderCheckTypeScale.mjs` (FEAT-004, plan item 14) starts the Vite dev server, drives ONE
+page through three viewport widths and reads the DOM. It is wired as `npm run verify:render` and is
+deliberately **NOT** in the `verify` chain: the chain must stay runnable with no dev server and no
+browser, so it is still **35** entries.
+
+**It launches an installed browser channel, not a downloaded binary.** `playwright 1.48.2` is
+already pinned in `dependencies` and no dependency is added, but `%LOCALAPPDATA%\ms-playwright`
+does not exist, so `chromium.launch()` with no channel cannot work. The script launches
+`channel: 'msedge'` and falls back to `'chrome'`; both executables are present on this machine. If
+neither launches it says so and exits non-zero rather than reporting a pass it never observed.
+
+**NO `window.rama` stub, which is a deliberate departure from plan item 14.2.** The plan called for
+stubbing the bridge members the first paint needs. That cannot work here: `Unlock.jsx:5` computes
+`isElectron = typeof window !== 'undefined' && !!window.rama`, so a stub of ANY shape — however
+partial — turns the passcode gate ON and makes every route unreachable behind a form the script has
+no passcode for. With the bridge absent instead, `Unlock` takes its own browser path and calls
+`onUnlocked({ devMode: true })`, `instanceApi.info()` answers `browserOnly: true` so `Setup` is
+skipped, and `loadSession()` restores the session that `page.addInitScript` seeded into
+`sessionStorage` under `authClient.js:50`'s `SESSION_KEY` (`rama_session`). Seeding the session is
+the whole mechanism; the absent bridge is a feature of it, not a gap in it.
+
+**Computed size is compared two ways, not one.** The plan asked for `getComputedStyle(el).fontSize
+>= FLOORS[role]`. That inequality alone cannot catch the failure the exercise exists to catch: a
+broken `var(--fs-chrome)` makes the site inherit `body`'s 15px, and 15 >= 13 **passes**. So each
+role anchor is asserted against BOTH its floor AND the role token's own computed value, read off
+`:root` with `getComputedStyle(document.documentElement).getPropertyValue('--fs-<role>')`. The two
+together fail on a break in either direction. The 12 role tokens are pairwise distinct, so equality
+to one of them is unambiguous.
+
+**The subtitle is asserted PRESENT before it is asserted ABSENT.** `Titlebar.jsx` renders the
+`SUPER AGI · MASTER AUTHENTICATED` subtitle only when `masterAuthenticated` is true, and that flag
+lives in `uiStore` with no persistence — so a bare absence check at 860 would pass on a subtitle
+that never rendered at any width. The script authenticates through the titlebar's own `AuthModal`,
+which in browser mode accepts any password by design (its `tryAuth` `!isElectron` branch), observes
+the subtitle at 1280, and only then resizes. The `Ctrl+K` chip needs no such setup — it is gated on
+the band alone — but is checked present-then-absent for the same reason.
+
+**One page, resized 1280 -> 1700 -> 860**, so the live run exercises the two JUMP cases `bandFor` is
+unit-tested on (`regular -> wide`, then `wide -> compact` across both edges at once) rather than
+three cold loads that would each only test a first resolve.
+
+**The palette's 760px is asserted as the computed custom property, not as an element width, and the
+reason is recorded rather than papered over.** `--palette-w`'s only consumer is
+`CommandPalette.jsx`'s self-modify card, which mounts on `pendingModification` — set by nothing but
+`uiStore.setPendingMod`, which no UI path calls (that modal is raised by Rāma, not by a click). So
+the card is **UNREACHABLE** in this run, and what the script asserts is that `:root` computes
+`--palette-w` to `760px` at 1700 and `600px` at 1280 and 860 — the `data-band` attribute, the
+cascade and the `:root` specificity all exercised live, which is the part that can rot. The card is
+named in the reachability table as unreachable, not implied as covered.
+
+Screenshots at 860 / 1280 / 1700 are written to
+`.agents/tasks/Rama_AGI-feat-legibility-responsive-2026-07-01/render/`, **outside the worktree**, so
+they can never be swept into a commit.
