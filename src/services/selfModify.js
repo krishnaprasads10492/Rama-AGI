@@ -199,6 +199,17 @@ export async function listSourceFiles(basePath = 'src') {
 }
 
 // ─── Default page template ────────────────────────────────────────────────────
+/**
+ * The emitted page writes the type scale as `var(--fs-chrome)`, never as `FS.chrome`
+ * (spec Section 136).
+ *
+ * This is a TEMPLATE STRING that emits a source file. A generated page lives wherever it is
+ * written, so an import of src/config/type.js may not resolve from there — and the whole point of
+ * scaffolding is that the page works without a later hand fix. The CSS variable needs no import,
+ * resolves from :root, and carries the same number, so a page Rāma creates obeys the same floor as
+ * one written by hand. The sizes above 11px in this template stay as authored and are part of the
+ * residual the type-scale suite budgets.
+ */
 function generateDefaultPage(componentName, displayName, icon, color, description) {
   return `import React, { useState } from 'react';
 
@@ -221,7 +232,8 @@ export default function ${componentName}() {
         </span>
         <span className="badge" style={{
           background: '${color}22', color: '${color}',
-          border: '1px solid ${color}44', fontSize: '9px',
+          border: '1px solid ${color}44', fontSize: 'var(--fs-chrome)',
+          lineHeight: 'var(--lh-chrome)',
           padding: '2px 8px', borderRadius: '2px',
         }}>CUSTOM PAGE</span>
       </div>
@@ -235,7 +247,7 @@ export default function ${componentName}() {
         </div>
         <div style={{ color: 'var(--text-dim)', fontSize: '12px', textAlign: 'center', lineHeight: '1.8', maxWidth: '400px' }}>
           ${description}<br />
-          <span style={{ color: 'var(--muted)', fontSize: '11px' }}>
+          <span style={{ color: 'var(--muted)', fontSize: 'var(--fs-chrome)', lineHeight: 'var(--lh-chrome)' }}>
             This page was created by Rāma AGI. Rāma can update it with more functionality on request.
           </span>
         </div>

@@ -18,9 +18,10 @@
  * (spec 136.12 [F7]). console.log is correct here — verifyInvariants.cjs's walkShipped
  * deliberately skips scripts/.
  *
- * Nothing is migrated at the point this suite first ships, so every assertion below passes on the
- * primitives alone. The census assertions (zero literals <= 11px, the 140 residual budget, the
- * chart's CHART_FS) arrive with the migration that makes them true.
+ * Assertions 1-11 pin the primitives and passed before anything was migrated. Assertions 12-14 are
+ * the census — zero numeric literals at or below 11px, the 140 residual budget, and the chart's
+ * CHART_FS — and they first pass on the commit that hand-edits the last five sites, because that is
+ * the commit on which they first become true.
  *
  * Run: node scripts/verifyTypeScale.mjs   (or npm run verify:type-scale)
  */
@@ -273,6 +274,94 @@ check('a marker with an empty reason is rejected', hasExemption(WITHOUT_REASON, 
 check('a reason on the preceding line is accepted',
   hasExemption('// fs-exempt: fixed 15x15px help glyph\nfontSize: 11,', 1) === true);
 check('no marker at all is rejected', hasExemption('fontSize: 10,', 0) === false);
+
+// ── 12-13. The census, after the migration ───────────────────────────────────
+console.log('\n--- the census: the sub-12px floor holds and the residual is inside budget ---');
+
+/**
+ * The residual budget. 812 numeric fontSize literals were measured in src; 672 were migrated to
+ * role tokens and 140 were deliberately left, every one of them 12px or above.
+ *
+ * THIS CONSTANT MAY ONLY EVER BE LOWERED. Raising it to make a suite green would let a literal be
+ * authored next to a token, which is the exact drift this file exists to catch.
+ */
+const RESIDUAL_BUDGET = 140;
+
+/**
+ * The allow-list, and it is EMPTY — which is the correct state, not an oversight.
+ *
+ * A file named here may keep a numeric fontSize at or below 11px, and only at a site that also
+ * carries an `fs-exempt:` marker with a reason. After the Section 136 migration nothing needs it:
+ * the two sub-12px glyphs (ScreenMap's 18x18px badge digit, InfoTip's 15x15px `?`) take FS.micro,
+ * which is not a numeric literal at all. It ships empty because the NEXT fixed-geometry glyph will
+ * need it and because hasExemption above is self-tested, so the mechanism cannot rot while unused.
+ * DO NOT delete this as dead code.
+ */
+const FS_EXEMPT_FILES = new Set();
+
+const LITERAL = /fontSize:\s*['"]?(\d+(?:\.\d+)?)(?:px)?/g;
+const residual = new Map();
+const tooSmall = [];
+let residualTotal = 0;
+let lhLiterals = 0;
+let lhTokens = 0;
+
+for (const file of walk(SRC)) {
+  const relPath = path.relative(ROOT, file).split(path.sep).join('/');
+  const text = fs.readFileSync(file, 'utf8');
+  const lines = text.split(/\r?\n/);
+  let n = 0;
+  lines.forEach((line, i) => {
+    for (const m of line.matchAll(LITERAL)) {
+      n += 1;
+      const px = parseFloat(m[1]);
+      if (px > 11) continue;
+      if (FS_EXEMPT_FILES.has(relPath) && hasExemption(text, i)) continue;
+      tooSmall.push(`${relPath}:${i + 1} = ${px}px`);
+    }
+  });
+  if (n > 0) { residual.set(relPath, n); residualTotal += n; }
+  // Line heights are counted off the CODE, so type.js's own worked example in a doc comment is not
+  // mistaken for a consumer.
+  const code = stripComments(text);
+  lhLiterals += (code.match(/lineHeight:\s*['"]?[\d.]+(?:px)?['"]?/g) || []).length;
+  lhTokens += (code.match(/lineHeight:\s*LH\.[a-zA-Z]+/g) || []).length;
+}
+
+// A12. RED WHEN: a new sub-12px literal lands anywhere in src — including inside a template string
+// that emits a generated page, which is why this reads raw text rather than parsing — or when an
+// exemption loses its reason. The floor is the whole point of the migration; nothing else pins it.
+check('no numeric fontSize at or below 11px anywhere in src',
+  tooSmall.length === 0, tooSmall.slice(0, 8).join('; '));
+
+// A13. RED WHEN: a literal is authored instead of a token, or a migrated file is reverted. FLOORS
+// and CHART_FS are not `fontSize:` sites, so they sit outside this count by construction rather
+// than by exemption.
+console.log(`        residual ${residualTotal} literals across ${residual.size} files, budget ${RESIDUAL_BUDGET}`);
+for (const [f, n] of [...residual.entries()].sort()) console.log(`          ${f.padEnd(44)} ${n}`);
+// Both numbers are whole-of-src totals, not per-site attributions: the first is every LH.* the
+// migration inserted; the second is every inline lineHeight still authored as a number, which is
+// the overrides the migration deliberately left alone PLUS the sites it never touched.
+console.log(`        line heights: ${lhTokens} LH.* tokens inserted, ${lhLiterals} inline literals left untouched`);
+check(`residual numeric fontSize count is within budget (${residualTotal} <= ${RESIDUAL_BUDGET})`,
+  residualTotal <= RESIDUAL_BUDGET, `${residualTotal} > ${RESIDUAL_BUDGET}`);
+
+// ── 14. The chart's one sanctioned number ────────────────────────────────────
+console.log('\n--- the chart reads CHART_FS and holds no number of its own ---');
+
+// RED WHEN: the chart size forks from the scale, or someone re-types `fontSize: 12` into the
+// createChart option.
+//
+// Asserted over the WHOLE file, with NO `layout:` anchor. An anchored
+// /layout:\s*\{[^}]*fontSize:\s*CHART_FS\b/s cannot work here: `[^}]` cannot cross the brace that
+// closes `background: { color: 'transparent' }`, and that brace sits BETWEEN `layout: {` and
+// `fontSize`. So the anchored must-match half fails on correct code, and its must-not-match half
+// is vacuous even before the migration. Verified against the real file text (spec 136.12 [F1]).
+{
+  const chart = read('src/pages/StockMind/PriceChart.jsx');
+  check('PriceChart.jsx passes CHART_FS to createChart', /fontSize:\s*CHART_FS\b/.test(chart));
+  check('and PriceChart.jsx holds no numeric fontSize anywhere', !/fontSize:\s*['"]?\d/.test(chart));
+}
 
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILURES'} — ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);
