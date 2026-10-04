@@ -29,6 +29,7 @@ import Unlock  from '@pages/Unlock/Unlock.jsx';
 
 // Every page/route/tier comes from ONE registry — src/config/registry.js
 import { routablePages, visiblePages, lazyFor, registryIssues, pageByRoute } from '@config/registry.js';
+import { useLayoutBand } from '@hooks/useLayoutBand.js';
 
 const Chat = lazyFor('chat');
 
@@ -219,8 +220,16 @@ function PopoutRoot() {
 }
 
 export default function App() {
-  // Deliberately the first statement: hooks below must not run in a pop-out window, and this branch
-  // is constant for the lifetime of the window, so the hook-order rule is not at risk.
+  // The ONE owner of <html data-band>. Above the pop-out branch deliberately: PopoutRoot is reached
+  // before any hook below it runs, so a band hook placed under the branch would never mount in a
+  // pop-out and data-band would be absent there. Above it, hook order is never conditional and a
+  // pop-out resolves its own band from its own window — correct, since a pop-out is a chart on a
+  // second monitor. Do not move this below the branch.
+  useLayoutBand({ own: true });
+
+  // Deliberately before everything except the band hook: the hooks below must not run in a pop-out
+  // window, and this branch is constant for the lifetime of the window, so the hook-order rule is
+  // not at risk. The band hook is the one exception and sits above it for the reason stated there.
   const popout = readPopoutParams();
   if (popout) return <PopoutRoot />;
 
