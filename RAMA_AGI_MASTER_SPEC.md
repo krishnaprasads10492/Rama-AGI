@@ -1814,6 +1814,7 @@ authenticated **Master session**, not merely an open store.
 | 153 | Rāma converses with master, and master's name stays on this machine | done | Section 133. Master: *"yes, just like jarvis in iron man movie, RAMA should be able to converse the optimal way."* **BUILT.** **A FORM OF ADDRESS IS A ROLE, NOT AN IDENTIFIER** — JARVIS says "sir", not "Tony Stark" — so the cloud-safe persona costs NOTHING in character: full persona fidelity, zero identifier. **THE LEAK WAS NEVER IN MASTER'S WORDS, IT WAS IN THE SYSTEM PROMPT** that `Chat.jsx` prepends to every turn, which for an authenticated master carries `Your master is Krishna Prasad. You are absolutely loyal to him.` before he types anything. **COMPOSED, NEVER REDACTED:** a redactor is a list of patterns and the first pattern nobody thought of is a leak that looks like a pass, so the persona is a frozen array of eight whole sentences in the new `electron/lib/conversationRole.cjs`, asserted structurally to contain no `.replace(`, nothing matching `redact|scrub|sanitis`, and no reference to `nucleusSealer` or `loyaltyCore` at all. **BOTH HALVES ASSERTED, because a prompt that leaked nothing by saying nothing would pass a one-sided test** — negative: no `Krishna`, no `Prasad`, no case variant, no `@`, no 24+ character opaque token, conditionally not whatever `loyaltyCore.displayIdentity()` returns; positive: still names Rāma, still addresses "master", still states the loyalty, still discloses the AI when sincerely asked. The conditional row is a DECLARED RESIDUAL, not a quiet pass, because the core is sealed in the suite's process. `nucleusSealer.cjs` is PROTECTED so the variant lives beside it; `identity.cloudSafePersona` is SPECIFIED FOR MASTER with a recommendation to leave it in source, since eight sentences of behavioural instruction are engineering rather than identity and a diff is reviewable where a sealed blob is not. **ONE CHOKEPOINT, AND THE ONE PLACE IT CANNOT BE `egressBoundary`:** `assembleTurn` is the only builder of a conversation payload; the CLOUD body is built by `egressBoundary.assemble` and nothing else, but the LOCAL body cannot be — **the boundary refuses `private` UNCONDITIONALLY AND BY DESIGN, the revealed prompt IS private, and forcing it through would mean calling it `public`, a lie told to the one component whose job is classification.** So the local body is derived in the same function from the same classified elements and **the module PROVES its own honesty rather than asserting it in prose**: every local result carries `wouldRefuseOnCloud`, computed by really running those elements through the boundary and recording the refusal WITH THE BOUNDARY'S OWN REASON STRING, compared literally; plus two anti-drift rows, identical key sets between the two bodies and no cloud key beyond `messages,model,stream`. **MASTER'S TYPED WORDS DEFAULT TO `public` AND IT IS A DECISION:** he chose to converse through a cloud model, so refusing his text by default would refuse the feature; the IDENTIFIER is what is withheld, and the cloud variant never contains one. The defence is MEASURED OVER THE SERIALISED BYTES — the revealed template handed to the assembler on the same call, the assembled cloud body carrying none of its identifiers, AND master's own words still crossing, so the feature was not disabled to pass the test. **ON ANY UNCERTAINTY, LOCAL OR REFUSE, NEVER CLOUD:** unknown destination refuses, a sensitive turn aimed at cloud refuses AT the chokepoint even though selection already routed it local, and a row whose `private` flag is neither true nor false resolves LOCAL — a loud model-not-found beats a prompt that cannot be recalled. **THREE DEFECTS ACROSS TWO REVIEWS, ALL FIXED AND NONE OF THEM TO COME BACK; THE FIRST TWO ARE THE SAME SHAPE — STRICT EQUALITY POINTED AT THE UNSAFE SIDE — AND THE THIRD IS THE ONLY ONE THAT COST A CAPABILITY RATHER THAN RISKING A DISCLOSURE.** (1) `levelOf` returned `'public'` for ANY `classification` outside the lattice, so a retained turn marked `'secret'`, `'confidential'` or `'PRIVATE'` had the concern STRIPPED and crossed to a cloud payload, and `egressBoundary` — which carries `REASON.unclassified` for precisely that element shape — was handed an already-clean `'public'` and never saw the original. **ABSENT AND UNRECOGNISED ARE DIFFERENT FACTS:** absent (or `undefined`) stays `'public'`, the deliberate decision that keeps the feature usable; anything else outside the lattice, INCLUDING `null` AND `''` WHICH THE BOUNDARY ALSO REFUSES, now REFUSES — on the LOCAL destination too, because a classification the module cannot read is a caller it cannot read and the local body would otherwise rank a level absent from `RANK` — carrying the boundary's own `unclassified` string rather than a second wording. (2) All three sensitivity decisions tested `sensitive === true`, so `'true'`, `1` or `'yes'` arriving over `models:converse` produced a NON-sensitive turn on every one of them: cloud destination allowed, text classified `public`, `requirePrivate` false. It was the ONE input to `assembleTurn` that was not validated while `destination`, `model`, `text` and every retained turn were each refused when malformed. `assembleTurn` now REFUSES a non-boolean `sensitive`; `selectModel` cannot refuse because it has to return a model, so there an unrecognised value resolves to SENSITIVE — which costs a cloud turn and never costs a disclosure. **AND THE SUITE ROW COVERING THE FIRST DEFECT ASSERTED THE OPPOSITE OF ITS OWN LABEL:** it read "is refused" over an assertion of `.ok === true`, it was GREEN so nothing flagged it, and a later session reading labels to learn what is guaranteed would have concluded the opposite of the truth — a green row that documents a leak as if it were the fix is worse than no row. Label and assertion now describe the same behaviour, over seven bogus classification values and five non-boolean flags, plus a row pinning `convo.REASON.unclassified` to the boundary's own string and a row proving an ABSENT classification still crosses, so the fix cannot be mistaken for "refuse everything". (3) **THE MESSAGE CEILING WAS REACHABLE IN ORDINARY USE, AND REFUSING THERE REMOVED A CAPABILITY (I11):** `Chat.jsx` sent the WHOLE session as retained turns and the session store never trims, so at 199 user/assistant messages `assembleTurn` refused `tooManyTurns` on every further turn in that session — permanently, where `models:chat` would still have answered — and the refusal carried no remedy because `remedy` was attached only to the SELECTION refusal. **THE CEILING IS NOT RELAXED AND `assembleTurn` STILL DOES NOT TRIM**, because the one honest payload constructor must not quietly drop history; **THE BOUND BELONGS TO THE CALLER, WHICH IS WHERE THE DECISION LIVES** — `RETAINED_TURNS = 24` in `Chat.jsx`, twelve exchanges, `.slice(-RETAINED_TURNS)`, with the arithmetic asserted (`cap + 2 < MAX_MESSAGES`, `cap * 4 < MAX_MESSAGES`) so neither number can drift into the other — and `models:converse` now attaches `assemblyRemedy(reason)` to EVERY assembly refusal: the ceiling names a new session, every other reason says the payload was refused before it was sent and nothing left this machine, because a refusal master cannot act on is only half-honest. Asserted through the handler, not only at the unit: the refusal, one turn below it still assembling, zero `/api/chat` calls on a refused turn, and the bounded turn still answered end to end. **A CHOKEPOINT THAT CORRECTLY REFUSES AN UNBOUNDED INPUT NEEDS A BOUNDED CALLER** — that is the shape worth remembering. **`ROLES.conversation` IS THE TENTH ROLE AND `sensitive` IS FALSE ON IT ON PURPOSE, said in the note so a later session does not "fix" it:** one conversation carries both "what is the rupee doing" and "should I sell my position", a table flag can only be right for one, and set true it refuses cloud on EVERY turn; the gate is PER-TURN ON THE PAYLOAD and a sensitive turn routes local via `requirePrivate` — the same gate from the call site instead of the table. **AND THAT GATE HAS NO PRODUCER YET, RECORDED RATHER THAN HIDDEN:** the mechanism is asserted from `assembleTurn` and `selectModel` inward, but no caller sets `sensitive` — `modelRouter` defaults it false and `Chat.jsx` passes neither it nor any `classification` — so TODAY EVERY TURN IS `public` AND CROSSES TO A CLOUD MODEL, a holdings question included; the recommendation RAISED FOR MASTER is a per-turn "keep this one local" control beside the VOICE toggle as its own tranche, since a keyword classifier mis-routes quietly and a model-based one would have to read the turn before the turn is gated. **NO `minCtxK`, the field most likely to be helpfully added later:** keyed cloud rows report `ctxK: null` by construction and `evaluate()` EXCLUDES an unknown window, so a floor would refuse every cloud model and invert the behaviour — asserted both ways, the same row `fit:'none'` for `long-context` and `declared` for `conversation`. No `needCaps` because Ollama reports no "chat" cap. `minParamsB: 7` is `tool-calling`'s published threshold and is low enough that the local `lfm2.5:8b-a1b-q4_K_M` clears it, so conversation works with NO credential. **THE BRIEF'S CLOUD-FIRST MECHANISM WAS WRONG IN A WAY THAT SILENTLY DOES NOTHING: INVERTING PRIVATE-BEFORE-COST CHANGES NOTHING**, because a local pull's `costTier: 0` beats a cloud row's `1` so cost AGREES with privacy — **the privacy comparator ITSELF had to be inverted**, for `preferRemote` roles only, which `conversation` alone sets; cost still breaks ties among cloud rows and `narration` refuses cloud at the fitness gate far above it. Asserted with REAL selections, both directions, order-independent, plus the rows that make it safe: `narration`, `extraction` and `tool-calling` all still prefer local and `conversation` is the only role with the flag. **AND CLOUD ROWS HAD TO REACH THE ROLE ENGINE AT ALL** — Section 131's open NEXT: `conversationCandidates()` widens the list FOR THIS ROLE ONLY and is INERT with no key stored AND with the vault merely locked, both asserted. **MEASURED CORRECTION: the registry holds FOURTEEN keyed cloud rows, not one, so cheapest-sufficient picks `ministral-3:8b` and not `gemma4:31b`** — the table's own rule, and cheaper per turn; preferring the largest within budget would be a new role flag and a behaviour change, so it is RAISED rather than taken. **A REFUSAL STAYS A REFUSAL:** `models:chat` walks `FALLBACK_CHAIN` so a refusal there becomes a silent downgrade and master cannot tell "I asked the big model" from "I quietly got the small one"; `models:converse` returns `fit:'none'` AS a refusal with role, reason, per-model exclusions and a remedy, measured at ZERO `/api/chat` calls and naming no substitute, and `Chat.jsx` renders `[Refused]` without falling through. **A CAPABILITY DENIAL IS DELIBERATELY NOT SHAPED LIKE A REFUSAL** — `models.use` is tier 3 against `chat.send`'s 5, so tiers 4–5 get a denial with no `refused` flag and fall through to `models:chat`, keeping the chat they had (I11). `claimGate` is NOT run here, because it refuses the `unattributed` class and conversation is unattributed prose, so enforcing it would withhold every reply. **IMMEDIACY: `chatStream` IS A SECOND FUNCTION, NOT A FLAG** — `verifyOllamaCloud.cjs` PINS the envelope's `stream` to false, so a flag would make a pinned shape argument-dependent; `chat()` is byte-identical and still buffered, asserted beside the streaming rows, and `chatStream` keeps the identical gate order with a mandatory `releaseSlot` in a `finally` because a leaked slot on `maxConcurrent: 1` is a permanent outage. Both destinations use the ONE client's `postStreamingJsonLines`, the local body arriving already built so nothing is composed at the transport, and preload mirrors `ollamaPull` INCLUDING the `finally` that removes the token listener — without it master hears the same tokens N times. Asserted: one event per delta in order, `stream: true` in the body, NO `Authorization` on the loopback call, the daemon-free API name with no `-cloud` suffix on the wire, and **THE CREDENTIAL LEAK SWEEP REPEATED ON THE STREAMING PATH** with the dummy only in the header, nowhere in any return or console line, and NO SUBSTRING OF LENGTH ≥ 6 elsewhere. **VOICE DEFAULTS OFF, for accuracy rather than caution:** it is the one preference whose "on" state makes noise in a room the app cannot see. `uiStore.ramaSpeaks` is independent of the older `speechMuted`, which still wins, and `voiceEngine.js` gains a REGISTRY over the ONE engine `CommandPalette` constructs rather than a second TTS call site — the engine's `speak()` is what honours the mute AND sets the hands-free cool-down that stops Rāma transcribing its own voice back as a command, both of which a direct `speechSynthesis` call would skip; `Chat.jsx` references `speechSynthesis` nowhere, asserted. The brief's `voiceEngine.speak()` was a CLASS METHOD whose only instance lives in `CommandPalette`, so the Chat page had nothing to call until the registry existed. **VOICE ON THAT PRODUCED NO SOUND NOW SAYS SO:** `speak()` returns false with no mounted engine or with speech muted and that return was discarded, so the toggle could read VOICE ON while master heard nothing and could not tell a silent machine from a silent Rāma — the reply carries `voiceSilent` and the bubble names both causes; the toggle is deliberately NOT disabled when no engine is mounted, because an engine can mount at any moment and a greyed control explains less than a reply that says what happened. **EVERY DELTA NOW CARRIES ITS TURN ID** — the channel was scoped to the sending window, which is not the same as scoped to a turn, so two turns in flight in one window would interleave into one bubble; unreachable through the UI today because `isThinking` blocks a second send, so the caller correlates instead of trusting arrival order and a non-string non-number id is normalised to `null` rather than echoed back. **AND THE NEW MODULE NAMES MASTER NOWHERE, NOT EVEN IN A COMMENT:** the header described the leak by quoting the revealed template verbatim, which never reached a payload but did put the identifier into new source in a project that feeds its own source into upgrade proposals — it names `NUCLEUS_TEMPLATE.identity` and describes the shape instead, asserted over the whole file with comments included and paired with a row that the explanation still survives. **SPEECH-TO-TEXT STAYS OUT:** Ollama serves no STT model, printed by the suite as a residual rather than left as an absence. Also not built: the context DB and cross-turn memory (Sections 127/130, recording stays dark), and proactive speech. **NOT VERIFIED: NO LIVE AUTHENTICATED CALL TO ollama.com WAS MADE — not one;** every request is an injected stub and the only credential seen is the literal dummy, so the streaming line shape, the Bearer requirement, the thirteen inferred `apiModel` spellings, free-tier access and zero-credit behaviour are inherited assumptions. **NOTHING WAS SEEN ON A SCREEN:** `node_modules` is absent from the worktree so `vite build` CANNOT run there and no claim is made that it passes, the app was never launched, and the streaming bubble, the model/fit/why line, the VOICE toggle and the spoken reply were NOT OBSERVED. Whether the prose reads like JARVIS is a judgement no assertion makes — the persona was never sent to a model. Files: `electron/lib/conversationRole.cjs`, `scripts/verifyConversation.cjs` (new, 179 assertions), `electron/lib/modelRoles.cjs`, `electron/lib/ollamaCloud.cjs`, `electron/ipc/modelRouter.cjs`, `electron/preload.cjs`, `src/services/voiceEngine.js`, `src/store/uiStore.js`, `src/components/CommandPalette.jsx`, `src/pages/Chat/Chat.jsx`, `package.json`, `docs/research/CONVERSATION.md`. Suites 27 → 28, assertions 2,825 → 3,004, 0 failures. **NEXT:** observe one real turn end to end from the main workspace after a build — the bubble, the toggle, the amber voice-silent line and the model line are the four things no assertion covers; decide the per-turn sensitivity control, without which every turn crosses as `public`; reconcile the inferred `apiModel` values against a live keyed `GET /api/tags`; decide `identity.cloudSafePersona`; decide cheapest-sufficient versus largest-within-budget for conversation; decide `chat.send`'s tier; feed `ollama-cloud/*` into the role engine for the OTHER roles, still open. |
 | 154 | The projection drawn as bars in the selected candle type, and whether the market is trading | done | Section 134. Master: *"projection in stockmind: make it displayed in types of candle selected… not a simple direction, but projection of path of market… this is what gives edge to stockmind"* and *"No indication of live market in stockmind."* **THE LOAD-BEARING DECISION: a projected bar has NO OHLC.** Those four numbers are what a bar that actually traded left behind; the engine returns a DISTRIBUTION (`mid`, `sigmaPct`, ±1σ/±2σ). So the body is the interquartile range (`mid·exp(±IQR_Z·s)`, `IQR_Z` = Φ⁻¹(0.75) = 0.6744897501960817) and the wicks are the engine's own ±2σ, with the centre left on the cone line because a candle holds four values and a distribution needs five. **`open` is ALWAYS the lower value, so a projected bar can never render as a down bar** — master asked for a path rather than a direction, and a bar that cannot be red is the structural guarantee of that. Engine-supplied `q25`/`q75` are PREFERRED (`source: 'engine'`) over derived (`source: 'derived'`), both branches exercised; a body not strictly inside its own wicks is dropped, asserted numerically because a future engine's quartiles are not this module's to trust. **Per chart type: candles → hollow single-hued quantile candles; bars → thin single-hued; line/area/baseline → nothing extra, the cone already is a centre path with a range; heikin → REFUSED, because an HA open and close are averages of real bars and each HA bar depends on the previous HA close, so a projected one would be an average of a guess compounded forward.** Horizon presets are BAR COUNTS (5/10/20/40) because a bar count is what the engine clamps, each labelled in minutes, hours or trading sessions; `MAX_BARS_AHEAD = 40` is duplicated from `ai_backend/engine/projection.py` and **pinned by a drift test that parses the Python**, the precedent `verifyTimeframes.mjs` set against `providers.py`. The badge prints a CLASS and never a confidence — `reflex:projection`, plus `modal` when the centre is tilted; no percentage appears anywhere in what `projectionState` returns. **WHERE THE ASK IS NOT MET, stated rather than glossed: master asked for "past data of all kinds" and the cone's width is entirely realised sigma over a stated lookback, with the centre moving only when an entitled model supplies a probability. `news`, `macro` and `derivatives` each read "absent — not an input to this projection", NOT "neutral", because neutral would claim they were read and found to say nothing. Three of six input classes are permanently absent until that changes, and the inputs ledger exists so the gap is visible on screen instead of inferred from a confident-looking drawing.** **LIVE MARKET STATE IS DERIVED AND NEVER CLAIMED: nothing observes the market — the only websocket in `electron/` is Vite's HMR origin in `main.cjs`'s CSP — so the reading composes the published session, the newest stored bar's age and fetch state, each with provenance. FIVE answers not one (`weekend`, `before-open`, `pre-open`, `open`, `closed-for-the-day`, plus `unknown`), because "closed" covering four of them is the flattening that hides a fault. THE HOLIDAY BLIND SPOT IS A FIELD, NOT A FOOTNOTE: Rāma holds no NSE/BSE holiday calendar, so a holiday falls inside scheduled hours and WILL read as a session — every state carries `holidayAware: false` and says so, because a guessed calendar is a confident wrong answer where this is a stated limit. Staleness is claimed ONLY while the session is open, or every weekend would raise a false alarm. Nothing read is not nothing happened: zero bars reads "no bars to age" never "up to date", an unrecorded fetch reads "not recorded this session" never "never fetched", and a fetch in flight says nothing about freshness — the same defect class as Section 129's false "No bars stored". Both chart time types age differently (S117): epoch numbers in minutes, `'YYYY-MM-DD'` in trading sessions and never zone-shifted (S118), with a zero session age split into "dated today" versus "from the most recent session". No second time vocabulary (`formatStamp`/`zoneLabel` from `chartTime.js`, spans and `SESSION_MINUTES` from `timeframes.js`) — a drifting copy is how S117's two defects happened.** **WHAT THE REVIEW CAUGHT, which matters more than the features: the visible `projected →` label could be EMPTIED with `verifyChartProjection.mjs` still green at 125/0, because assertion 28's `/projected/` matched an in-block COMMENT rather than the marker text; `thinBars: true` was unasserted for the bars type. An assertion that matches its own documentation tests nothing and reads green while doing it — Section 126's comment-stripping lesson in mirror image. Fixed, 125 → 127.** **VERIFIED: `npm run verify` exit 0, 3,267 assertions across 31 entries, 0 failures — the total equalling `dev`'s prior 3,006 plus the two new suites EXACTLY, which is what proves the merge's union of the `verify` chain dropped nothing (a union that loses a suite still exits 0); chart-time 197, sessions 109, invariants and tripwire ALL PASS; `npm run build` exit 0 from the main workspace. Both modules pure and screenless, `now` injectable so no suite freezes the clock.** **NOT VERIFIED, AND THIS IS THE POINT: no projected bar has ever been rendered and no real cone has ever been produced, because the Python engine has still never completed a run on master's machine (needs CPython 3.12; this box has 3.14 with no numpy/pandas). Every assertion runs against fixtures, so the arithmetic is tested and the FEATURE is not — legibility of the hollow body, distinguishability from a traded bar, and whether the cone's centre sits where the body implies are all unknown. The holiday blind spot has never met an actual holiday. The IDE chunk warning still fires.** **NEXT: install CPython 3.12 and produce ONE real cone end to end — that single step converts this row from tested arithmetic into a verified feature, and it is the same blocker gating every strategy backtest in row 155. Then see it on a screen; add a `requestedBars` field to the engine reply so the pre-clamp request stops being inferred from `horizon.measuredBars`; decide whether news, macro or derivatives ever become inputs.** |
 | 155 | How a strategy earns a place on the list — profit gates, accuracy ranks | in-progress | Section 135. **DECIDED, NOT BUILT.** Master asked for the strategy work automated end to end — *"create+update+self-check(backtest)+align them to market to see which explains the current trend for various time frames, tell for which time frames by how much %age it is nearer/accurate"* — named, stored with a basic and an updated column and a modified date, drawing on *"various books available online for trading&investing"*. Asked whether that yields scored candidates or one recommendation he ruled: ***"scored candidates with their sample sizes and cost-adjusted edge, ranked and named — but filtered for optimal accuracy and profit. accuracy takes most precedence but without profit what's the point."*** **THE RULE THOSE TWO SENTENCES ACTUALLY DESCRIBE: PROFIT IS A GATE, ACCURACY IS THE RANKING INSIDE IT.** They conflict only if both are rankings to weight. (1) Cost-adjusted expectancy is a REQUIREMENT — positive after master's real rupee charges or the strategy is EXCLUDED WITH ITS REASON, never ranked lower; `strategy_eval` already refuses anything whose edge is smaller than its measured costs. (2) Accuracy orders the survivors, highest hit rate first — his stated precedence exactly. **This is `modelRoles`' requirement-not-preference pattern (Section 112): a failed requirement excludes with a stated reason, because down-ranking lets an unfit candidate win whenever nothing better exists.** **AND IT IS NOT SECTION 113'S REFUSED FILTER — that one ranked BY accuracy and would have put the money-loser first: 40 wins of 1% against 10 losses of 5% is 80% ACCURATE and −0.20% EXPECTANCY. Gated on profit it never reaches the ranking at all.** Master gets accuracy-first ordering over a list that cannot contain a loser. **TWO MEANINGS OF "ACCURACY", BOTH REPORTED: hit rate, the fraction of signals that paid, which DRIVES THE RANKING; and explanatory fit per timeframe — his earlier ask, how well the strategy tracks the regime currently in force, which is not a win rate. A strategy can carry a strong historical hit rate and poor current fit, and THAT GAP IS PRECISELY WHAT HE NEEDS BEFORE TRADING IT.** Fit may be promoted to the ordering on his instruction. **TWO GATES HE DID NOT ASK FOR, without which the ranking is worthless. MINIMUM SAMPLE: 100% accuracy over three trades is noise, so below a floor a strategy reports `insufficient` rather than a flattering number — `macro.py`'s existing discipline of `MIN_OBSERVATIONS 30`, `MIN_PER_BUCKET 10`, `T_THRESHOLD 2.0`. MULTIPLE COMPARISONS — THE DOMINANT STATISTICAL RISK, AND THE AUTOMATION ITSELF CREATES IT: generate five hundred strategies, score them all, present the best five, and the result is almost certainly overfit noise, because THE BEST OF FIVE HUNDRED RANDOM STRATEGIES LOOKS EXCELLENT BY CONSTRUCTION. `macro.py` already carries this concern for twelve hand-written links; automated generation multiplies it by two orders of magnitude, moving it from a footnote to the central design constraint. THE ANSWER IS OUT-OF-SAMPLE VALIDATION AND IT IS NOT OPTIONAL: generate and tune on one period, score on a period the generator never saw, report BOTH numbers — if in-sample reads 71% and out-of-sample reads 48%, THAT GAP IS THE FINDING and must be shown rather than averaged away. A candidate with no out-of-sample score is not rankable.** **BOOKS ARE HYPOTHESES, NOT EVIDENCE — Section 113 already settled this: reading Wyckoff does not make Wyckoff true on NIFTY, which is why all nine `strategy_library.py` templates are marked `published` and five recorded strategies were REFUSED for missing capability rather than published with a caveat. So an ingested strategy enters as a CANDIDATE CARRYING ITS SOURCE and earns its place only by passing the profit gate and the out-of-sample validation on master's own instruments. The book's claim and the measurement are stored as SEPARATE FIELDS and never merged — which is also what makes master's requested basic/updated/date-modified shape the right one: the basic row is what the source claimed, the updated row is what measurement found, and the date says how stale the measurement is.** **NOT VERIFIED: nothing is built — no generator, no scorer, no storage. The engine cannot be exercised on this machine, so no backtest has ever produced a verdict from real bars and every number here is arithmetic about METHOD rather than a measured result. Section 123.7's lot-size contradiction still stands — `dispatcher.LOT_SIZES` says NIFTY is 25 while `strategy_spec.py` says 75 — and it changes whether a trade is reportable as placeable, so it must be resolved before any sizing figure reaches master.** **NEXT, in order: Python 3.12 so the engine runs at all; the Section 130 context store; then the generator behind the out-of-sample gate. NO RANKED LIST IS SHOWN TO MASTER BEFORE OUT-OF-SAMPLE VALIDATION EXISTS, because a ranking without it is the most confident-looking wrong answer this project could produce.** |
+| 156 | Legible letters, and layouts that survive a resized window | in-progress | Section 136. **DESIGNED (round 3 of 3, final — round 1 drew 5 HIGH/17 MEDIUM/5 NIT, round 2 drew 4 HIGH/7 MEDIUM/6 NIT with 11 blocking, round 3 drew 3 HIGH/5 MEDIUM/7 NIT with 8 blocking; **all 15 of round 3 resolved in 136.12 before any code was written, none waived**), PRIMITIVES BUILT — FEAT-001 landed the token block, `layoutBands.js`, `type.js`, `useLayoutBand.js`, its single `own: true` mount in `App.jsx` and `scripts/verifyTypeScale.mjs` wired into the chain at **35** entries, with nothing migrated yet so every module still renders exactly as today (I11); MIGRATION NOT RUN.** Master: *"increase legibility of letters in the App; do some basic research and also start to work on multiple screen sizes for all modules."* Re-measured a third time at `6d55bd7` and reproducing to the unit (the round-2 review also reproduced the census independently): **813** numeric `fontSize` literals across 40 of 81 `src` files (pattern `fontSize:\s*['"]?(\d+(?:\.\d+)?)(?:px)?`), of which **399 sit at ≤11px across 28 files** (9px→52, 10px→185, 11px→160, 8px→2); only **37** sizing sites in **5** files (4.6%) use the `--text-*` scale that already exists, so the 15px base is fine and 86% of literals bypass it; **one `@media` in all of `src`** (`index.css:637`, reduced-motion) and **2 `matchMedia` sites** (`PanelBoard.jsx:51–52`, also reduced-motion), so there is **no width-responsive behaviour in the product**. A first count of 422/34 files was wrong and is corrected: `(8\|9\|10\|11)` matches the `11` inside `'11.5px'`; the `(?!\.)` guard reconciles exactly to 399/28. **The brief's premise about StockMind is refuted and no chart label is enlarged:** the whole directory holds **2** literals ≤11px (`ScreenMap.jsx:456`, `InfoTip.jsx:55`, single glyphs in fixed boxes), `PriceChart.jsx` (**2,573** lines, not the brief's 2,100) holds **zero** — its axis text is one library option, `:679` `layout: { fontSize: 12 }` — so StockMind is pixel-neutral — **font size and line box both unchanged** — at **218 of 219** sites, the one exception being its single 13.5px site growing to 14px (`HelpPanel.jsx:59` is 11.5px, not the 12.5px an earlier table said; `ScreenMap.jsx:455` is an 18×18px circle, not 20px). Four decisions: **(1)** **12 role steps** with floors as a contract separate from current values — micro 11, chip 11.5, dense 12, dense-lg 12.5, chrome 13, chrome-lg 14, body 15, read 16, h3 17, h2 20, h1 24, display 32, plus 8 `--lh-*` tokens; the 8/9/10/11px cohorts land on chrome (397 of 399), the two glyphs stay at 11px by taking `fontSize: FS.micro`, so that token has exactly two consumers and the residual budget stays 140 (the `fs-exempt:` allow-list therefore ships with **zero users** and a comment saying so, so a later session does not delete it as dead code); **a `lineHeight` is added only at the 402 in-scope sites whose font size actually changes**, so the 271 pixel-neutral sites keep the inherited 1.6 from `index.css:104` and render identically down to the line box (round 2's broader rule would have moved a 12px line box from 19.2px to 16.2px at 142 StockMind sites alone); mapping is by authored value and **every row is a growth or a no-op so nothing shrinks anywhere**, and all six legacy `--text-*`/`--font-size` aliases are **pixel-neutral** (12/13/15/17/20) because the scale now has a 12px step. **(2)** breakpoints are **window** widths from this app's own constants — `compact < 900` derived from the titlebar's post-migration hard minimum of ≈885px (round 1's `REF_HEIGHT` justification was a height constant used as a width and is deleted), `regular 900–1599`, and `wide ≥ 1600` labelled honestly as **a provisional policy threshold borrowed from `REF_WIDTH`, not a measured layout break, because no layout fails above 1599**; hysteresis is directional (hold `compact` to 924, leave at 925; hold `wide` to 1576, leave at 1575) and the sticky branches **hold only and then re-resolve on the plain thresholds**, so a jump lands correctly — `bandFor(500,'wide')==='compact'`, `bandFor(1700,'compact')==='wide'`, both of which round 2's returning version got wrong while its assertion passed because it never drove those cases; `bandFor(width, prev)` is exported **pure and total** so the suite drives every edge, jump and non-finite input with no DOM; `useLayoutBand()` is mounted **once, as the first statement of `App()` above the pop-out early return at `App.jsx:225`**, and that one call site owns writing `data-band` and removing it on unmount, so a pop-out window resolves its own band (round 2 scheduled the hook only in `Titlebar.jsx`, which never mounts in a pop-out); band consumers shipped are `compact` shedding the titlebar subtitle and `Ctrl+K` chip (≈885px→**≈610px** demand, since the `RĀMA AGI` title survives the shed — round 2's 549px wrongly removed it) and `wide` widening the palette via `--palette-w` 600→760, with a counted band residual of **0 of 21 page modules**. **(3)** token layer is **both** — `index.css` holds one number per role, `src/config/type.js` exports `var()` **strings** behind an always-on warn-once `Proxy` (no `import.meta` is introduced; `src` has none), `FLOORS` is the floor so the assertion is a real inequality, and `CHART_FS = 12` is the single sanctioned number because lightweight-charts takes a JS number that no `var()` can reach; `selfModify.js`'s two template literals and `ErrorBoundary.jsx` emit `var()` strings with **no `type.js` import**. **(4)** this run migrates **673 of 813 (82.8%)** — all 399 ≤11px, all 304 in StockMind/Chat/Settings/RamaMind, all 39 in Titlebar/CommandPalette/ActivityStream — leaving an **exact residual of 140 across 23 files** (GitSync 25, Intelligence 15, IDE 10, Models 8, System 7, Agents 7, Evolution 7, Users 6, Home 6, Resources 6, PanelBoard 5, Login 4, Introspect 4, selfModify 4, Unlock 4, Knowledge 4, Terminal 3, ErrorBoundary 3, Genome 3, Setup 3, App 3, CodeEditor 2, DiffReview 1), all at 12px or above, printed per-file by the suite and pinned as a budget that may only fall. **Zoom composition: `effective = token value × zoom`, and round 1's zoom-policy changes are WITHDRAWN IN FULL** — no `electron/` file is edited, `AUTO_MAX` stays **1.4**, no `typeGen`, no re-fit clamp, **Section 47 and row 64 are untouched** — because the review showed the arithmetic did not reproduce (1920×1080 fits **1.20**, not 1.05, and 1.25 never bound there) and the re-fit floor would have raised zoom on a genuinely smaller docked panel. Net: a 10px label gains **+30% effective at every zoom** (12.0→15.6px at 1.20, 14.0→18.2px at 1.40, 10.0→13.0px at 1.00, 20.0→26.0px at a 2.0 slider), prose moves nowhere, and **nothing on screen gets smaller than today**. **Round 2's derived `--titlebar-h` is WITHDRAWN and the height stays `38px`**, with its pinning assertion and its `cognition.js:77` reword: both premises were false — `Titlebar.jsx:193` authors `padding: '0 0 0 10px'` so vertical padding is **zero**, and `setZoomFactor` is a **uniform** multiplier so the box and its text scale together and the fit is **zoom-invariant** — and measured, the two text lines come to 30.0px today, **31.8px** after migration and **37.5px** under a WCAG 1.4.12 1.5× override, all inside the 38px box, so the `calc()` would have cost 3.8px of vertical space on every page for nothing; the subtitle keeps its `dense` override but the recorded reason is now that 1.4.12 headroom (chrome 13px would give 39.0px and overflow), and `src/services/cognition.js` is **not touched**. What high zoom actually pressures is CSS-px viewport **width** (1920 physical → **1371 CSS px** at 1.4), which is the band's axis, not the titlebar's. **8** unguarded modals — not round 2's 7, which missed `System.jsx:175` (560px in a `position: fixed; inset: 0` overlay) — adopt the two-property `width` + `maxWidth: '92vw'` guard that `Users`/`Login`/`Setup` already use, from a reproducible inventory (`width:\s*'(3[5-9]\d\|[4-9]\d\d)px'` cross-checked against `maxWidth`: 18 hits = 8 unguarded + 4 guarded + 3 decorative `pointerEvents: 'none'` glow divs excluded with the reason + 3 that are themselves `maxWidth`); 4 fixed grids become `auto-fit`; and the 397 promotions carry an **overflow acceptance rule** — `(?:min)?(?:Width\|Height):\s*'\d+px'` run per migrated file, every match in the promoted site's object or its parent either converted to `min-content`/`ch`/`em` or recorded as inspected (measured scope: 107 such declarations in `src`, 18 in the 10–29px range across 14 files). Full WCAG conformance is **not** claimed — it needs manual assistive-technology testing and expert review; WCAG sets no minimum font size at all, and what 1.4.4/1.4.12 actually yield here is the 8 modals and 4 grids, plus the titlebar fit as a *measurement* rather than a defect. Enforced by new `scripts/verifyTypeScale.mjs` (**11** assertions — round 2's twelfth pinned the withdrawn `calc()` — **each published with the mechanism that evaluates it and the condition that would turn it red**, after round 2's band assertion passed on a function that answered the wrong band: a residual budget that may only fall, a whole-value `/^var\(--(fs\|lh)-[a-z0-9-]+\)$/` shape match replacing a "no digits" rule that could never pass `var(--fs-h1)`, `fs-exempt:` markers instead of brittle `file:line` keys, the `readZoom` pin for `0ba1b44`, `appearanceState`'s bounds asserted **unchanged**, `bandFor` driven over both edges, both jump cases and a 36-case idempotence sweep, and one band rule per band plus the `useLayoutBand()` call proven to sit above `App.jsx`'s pop-out return). Execution is a **one-off codemod, not 673 hand edits**: `scripts/migrateTypeLiterals.cjs` applies the value→role table with a six-entry exception list keyed by file plus matched source text, brace-scans the enclosing object to decide the `lineHeight`, inserts the `type.js` import, skips and names anything it cannot resolve, exits non-zero unless the post-run count is exactly `140 + 5` = **145** (the 5 being the hand-edited sites it skips — gating at 140 would fail its own correct output, finding `[F2]`), and **is deleted in the commit that lands its output**; `selfModify.js`'s 2 template-string sites and `ErrorBoundary.jsx`'s 3 are excluded and hand-edited; primitives commit first, then one commit per surface with `verify:type-scale` on each. Design: `.agents/tasks/Rama_AGI-feat-legibility-responsive-2026-07-01/design.md`. **Next step: FEAT-002 — write `scripts/migrateTypeLiterals.cjs` (value→role table, six-entry exception list keyed by file plus matched source text, `@config/type.js` alias import, insert-only `lineHeight` rule, fatal gate at `140 + 5` = 145), dry-run it, then run it and land the migration one surface at a time with `npm run verify:type-scale` on each. Then, still open from the design: confirm the two band edges by resizing the real window — `compact` 900 is derived from the titlebar's own minimum demand but unobserved, and `wide` 1600 is a provisional policy threshold with no layout break behind it, so it is the likelier to move — then build the primitives before touching any page (token block + six pixel-neutral aliases, `src/config/type.js`, `useLayoutBand.js` with `bandFor` pure and mounted once in `App.jsx` above the pop-out branch, `verifyTypeScale.mjs` with its 11 assertions; `--titlebar-h` stays 38px), then write and run `scripts/migrateTypeLiterals.cjs`, confirm the post-run literal count is exactly 145 (140 residual + 5 hand-edited), and delete the script in the commit that lands its output.** Corrected from round 1: `node_modules` **is** present in both the primary checkout and the worktree (491 packages, `vite`, `electron`), so `npm run build` is runnable and should be run; the steering note saying otherwise is stale. Raised for master, not changed: `index.css:38` declares `--amber: --gold;`, invalid CSS rescued by the redeclaration at line **42**; `appearanceState.cjs`'s `AUTO_MAX` comment claims high zoom clips the fixed-height titlebar, which the uniform-multiplier arithmetic refutes, so it is **no longer cited as evidence anywhere** while `AUTO_MAX` and the comment are both left alone (correcting it touches `electron/` and Section 47); `cognition.js:77` repeats that same claim to master's face and is left as-is to be fixed in the same decision; and with the `calc()` assertion dropped, **nothing now asserts the titlebar's text fits its 38px box** — the 6.2px of slack and 0.5px of 1.4.12 margin are measurements, not a gate, and the natural guard is a one-line sum assertion if master wants it. Deferred to its own future row: lowering `AUTO_MAX` needs a measurement from a ≥2560-wide panel, a residual of zero, and an amendment to Section 47 cross-referencing row 64 in the same commit. |
 | 132 | Role-based routing — what Rāma needs a model FOR | done | Section 112. Builds row 131's next step and row 130's item 5. **WHAT IT REPLACES:** `TASK_ROUTING`'s eight hand-written buckets plus a seven-id `FALLBACK_CHAIN` ending at `primaryModel`, so any task not matching a bucket fell to the first available entry — **the mechanism by which a 397B cloud model parses a date**, and by which a model that cannot do tool calling does tool calling, because a chain has no concept of *unfit*. **Nine roles declared with a label, a reason master can read, and hard requirements:** `extraction`, `tool-calling`, `code`, `reasoning`, `long-context`, `multilingual`, `embedding`, `vision`, `narration`. **TWO KINDS OF EVIDENCE, NEVER CONFLATED — `measured`** (the daemon and its fetched library: what is installed, its size, its parameter count, whether weights are on this disk) **and `published`** (leaderboards: function-calling collapses below ~7B, reasoning wants 14B+). Published evidence is about the FAMILY, not this machine, and every requirement records which kind it is so **a leaderboard can never be presented as a local measurement** — the same discipline as `{value, source, measured}` and `ctxVerified`. **DECISION: a role is a REQUIREMENT, not a preference** — a failed requirement EXCLUDES with a reason rather than ranking lower, because down-ranking lets an unfit model win whenever nothing better is present. **DECISION: no silent substitution and no silent absence** — `fit` is `declared` / `substitute` / `none`; a substitute is allowed (capability is never removed) but **labelled with what is unverified**; `none` reports the absence and how many candidates failed rather than handing the work onward. **DECISION: an unverified claim is a substitute, never a declared fit** — Ollama truncates to `num_ctx` whatever the family supports, so a 128K window is a claim; `multilingual` is a substitute BY CONSTRUCTION because Rāma has no local test, stated rather than implied. **DECISION: sensitivity is a gate, not a ranking** — `narration` names master's real holdings, so a non-private model is **refused outright**; a prompt that has left this machine cannot be recalled. Asserted: a 397B cloud model does not win narration by being large, and appears in `excluded` so the choice is auditable; any caller may raise `requirePrivate`. **Embedding and chat are a hard split both directions**, with mirror-image reasons. **DECISION: cheapest sufficient, not best available** — fit → privacy → cost → `fast` → capability, and for a role with a floor **the smallest model clearing it wins**; an unknown cost sorts LAST, because unknown must never look like free. Retired models are never candidates, with the replacement named. **THE DEFECT FOUND BY RUNNING IT: `Number(null)` is `0`** — a model with no parameter count was excluded as *"0B is below the 7B floor"* and a model with no reported size **silently CLEARED the disk budget**; unknown was read as zero and **zero passes or fails a threshold confidently.** Fixed with one `num()` returning `null` for absent, applied to parameters, context, size and cost. **Worth hunting for wherever else a threshold meets an optional field.** **THE RESEARCH HALF:** `researchPlan()` names, per unfilled or substituted role, what would fill it with the requirement in words — **from the FETCHED catalogue only**, because a list produced from memory is the Section 94 fabrication; with none loaded it reports `blocked` naming `models:refresh-catalog`, since *nothing to recommend* and *never looked* read alike and mean opposites. **WIRING — role selection is tried FIRST and the old path is the fallback, not the reverse:** `TASK_ROUTING` and `FALLBACK_CHAIN` are untouched so nothing that routes today changes, but a declared role is decided on fitness and only an unfilled role falls through — capability kept, silent default ended. `models:route` returns `role`/`roleFit`/`roleWhy`/`roleExcluded`; new reads `models:roles` and `models:role-research` gated on `models.use`, because being told a role is unfilled should not need elevated rights. **No capability decision — fitness is not authorisation**; no Electron, nothing persisted, no network. **VERIFIED: `npm run verify` 21 suites; `verifyModelRoles` 87 assertions; audit clean at 139 bridge calls / 72 files / 355 channels; `vite build` succeeds.** **NOT VERIFIED: no Ollama daemon was running, so every model record in the suite is a FIXTURE — the table has never been drawn against a real install.** **NEXT: the renderer surface.** `models:roles` and `models:role-research` have no UI, so master cannot see the table or the gaps, which is the point of building it — it belongs on the MODELS screen beside the existing suggestions list. |
 
 ### Resume checklist for a cold session
@@ -15212,3 +15213,669 @@ In order: Python 3.12 so the engine can run at all; the context store from Secti
 generator behind 135.4's out-of-sample gate. **No ranked list is shown to master before out-of-sample
 validation exists**, because a ranking without it is the most confident-looking wrong answer this
 project could produce.
+
+---
+
+## SECTION 136 — Letters master can read, and windows that can be resized
+
+Master, verbatim: *"increase legibility of letters in the App; do some basic research and also
+start to work on multiple screen sizes for all modules."* Text is too small to read comfortably
+and the app does not adapt to different screen sizes. Written before implementation, per
+Section 28. Full design, with the research citations and the per-finding review response:
+`.agents/tasks/Rama_AGI-feat-legibility-responsive-2026-07-01/design.md`.
+
+This section is the **third and final design round**. Round 1 drew `CHANGES_REQUESTED` (5 HIGH,
+17 MEDIUM, 5 NIT) and round 2 drew another (4 HIGH, 7 MEDIUM, 6 NIT; 11 blocking). Where the
+rounds differ, what follows is what holds. Four round-2 corrections changed what gets built, and
+three of them **removed** work rather than adding it:
+
+- **`--titlebar-h` stays `38px`.** Round 2's `calc()` (41.8px) is withdrawn, with its pinning
+  assertion and its `cognition.js:77` reword. Both premises were false — `Titlebar.jsx:193` authors
+  `padding: '0 0 0 10px'`, so vertical padding is **zero**, and `setZoomFactor` is a **uniform**
+  multiplier, so the box and the text inside it scale together and the fit is **zoom-invariant**.
+  Measured, the content is **31.8px inside 38px** after migration (136.6). There was no defect, and
+  the change would have cost 3.8px of vertical space on every page.
+- **A `lineHeight` is added only where the `fontSize` actually changes.** `index.css:104` sets
+  `line-height: 1.6` on `html, body, #root`, so adding a role line height to a *pixel-neutral* site
+  would have moved its line box (a 12px site from 19.2px to 16.2px) across the densest surface in
+  the app. **"Pixel-neutral" now means font size and line box both unchanged.**
+- **`ScreenMap.jsx:456` and `InfoTip.jsx:55` take `FS.micro`**, not a retained numeric literal, so
+  `--fs-micro` has exactly two consumers and the residual budget stays **140**.
+- **`bandFor`'s hysteresis branches hold only and then re-resolve.** As written in round 2 they
+  returned, so `bandFor(500, 'wide')` answered `'regular'` — the overlapping titlebar the band
+  exists to prevent — on any jump a monitor change or un-maximise produces.
+
+### 136.1 What was measured, and the pattern that reproduces it
+
+Re-measured a third time at `6d55bd7` in `.worktrees/legibility`; every figure below reproduces to
+the unit across all three rounds, and the round-2 design review reproduced the census
+independently as well. Pattern recorded so the count can be reproduced and disputed:
+`fontSize:\s*['"]?(\d+(?:\.\d+)?)(?:px)?` over `src/**/*.{jsx,js}`.
+
+| Measure | Count |
+|---|---|
+| `src` `.jsx` + `.js` files | 81 (43 + 38) |
+| `src` `.css` files | 1 |
+| Numeric `fontSize` literals | **813 across 40 files** |
+| Literals at ≤11px | **399 across 28 files** (9px→52, 10px→185, 11px→160, 8px→2) |
+| Sizing sites using the existing `--text-*` scale | **37, across 5 files (4.6%)** |
+| `@media` queries in `src` | **1** — `index.css:637`, `prefers-reduced-motion` |
+| `matchMedia` sites in `src` | **2** — both `PanelBoard.jsx:51–52`, also reduced-motion |
+| Width-responsive behaviour | **none** |
+| Base line height | **`line-height: 1.6` on `html, body, #root`** (`index.css:104`), inherited by every site with no inline value |
+| `auto-fit`/`auto-fill` grid sites | 13 |
+| Fixed `width`/`height`/`min*` px declarations | **107 lines**, of which **18** are in the 10–29px range across 14 files |
+| In-scope sites that change size vs. pixel-neutral | **402 / 271** (673 in scope; 673 + 140 residual = 813) |
+
+**The 15px base is not the problem.** `index.css` already declares `--font-size: 15px` and a
+`--text-xs`…`--text-xl` ramp; only 37 of 813 sizing sites read it, the `.text-*` utility classes
+have zero `className` uses, and 702 literals (86%) sit *below* the base. The defect is 399
+literals that bypass the scale and land at 8–11px.
+
+**A first count was wrong and the correction is recorded rather than quietly replaced.** The
+per-file pass used `(8|9|10|11)`, which matches the `11` inside `'11.5px'`, giving 422 across 34
+files. Subtracting the 23 genuine 11.5px sites (PanelBoard 4, SelfPanel 6, PriceChart 4,
+StockMind 3, Models 2, Settings 2, HelpPanel 1, StrategyBuilder 1) reconciles exactly to 399
+across 28 files. The `(?!\.)` in `fontSize:\s*['"]?(?:8|9|10|11)(?!\.)(?:px)?` is load-bearing.
+
+**One environment claim from round 1 is wrong and is corrected here:** `node_modules` is present
+in **both** the primary checkout and the worktree — 491 entries each, including `vite` and
+`electron`. The project steering note that says otherwise is stale. The honest consequence is the
+reverse of what round 1 wrote: `npm run build` **is** runnable and the implementation step should
+run it.
+
+### 136.2 The research, and the claim that will not be made
+
+WCAG **1.4.4 Resize Text** (AA; W3C *Understanding WCAG 2.2*, `Understanding/resize-text.html`)
+requires text to survive 200% enlargement with no loss of content or functionality. WCAG
+**1.4.12 Text Spacing** (AA; `Understanding/text-spacing.html`) requires no loss when the user sets
+line height 1.5×, paragraph spacing 2×, letter spacing 0.12em, word spacing 0.16em. Both are
+obligations on the *container*, not on the authored size — and **WCAG contains no
+minimum-font-size success criterion at all.** A pixel floor is a product decision, not a
+conformance requirement, and is treated as one here.
+
+Desktop convention runs smaller than web convention, because viewing distance is shorter and there
+is no touch target: *Fluent 2 → Design language → Typography* gives WinUI Caption 12px / Body 14px
+/ Subtitle 20px, *Apple HIG → Typography → macOS system font sizes* gives regular control text
+13pt with 11pt "small" and 9pt "mini" as explicitly de-emphasised variants, and *Material 3 →
+Styles → Typography → type scale tokens* gives body-small 12sp / body-medium 14sp. The familiar "16px minimum" is a web and mobile rule — the browser default, plus
+iOS Safari zooming sub-16px inputs — and importing it into a dense desktop instrument panel would
+be the wrong model. The UI face is JetBrains Mono, drawn with a tall x-height for legibility at
+code sizes, which holds at 12px; monospace is nonetheless slower for prose than for digits, which
+argues for a higher floor on prose than on tabular data.
+
+These were cited from standard identifiers and established vendor guidance. **Neither design round
+had web access**, so they were not re-fetched; a session with network should spot-check any figure
+something hinges on. Saying so is better than implying a literature sweep.
+
+**The claim this work will not make: WCAG conformance.** That requires manual testing with
+assistive technologies and expert accessibility review, neither of which a counting script
+performs. What is claimable is narrower and checkable: named role floors hold, zero literals below
+the floor outside two reasoned exemptions, an exact counted residual, and a titlebar height that
+is a function of its own content.
+
+1.4.4 and 1.4.12 do yield one sharp, checkable obligation: **a container holding text must tolerate
+the text growing.** In this app that lands on **8 fixed-width modals** and **4 fixed-column grids**
+(136.8), which is where the fix goes. Round 2 read it as condemning `--titlebar-h: 38px` as well;
+measured, it does not — the titlebar's two text lines come to 30.0px today, **31.8px** after
+migration, and **37.5px** under a 1.4.12 1.5× line-height override, all inside the 38px box
+(136.6). So the box stays as it is, and the claim is a measurement rather than an inference.
+
+### 136.3 Decision — role floors, not a global minimum
+
+Not all small text is a defect. A global minimum would destroy density where density is the
+product. Twelve steps, every value already present in the codebase; floors are a **contract** and
+the CSS value may sit at or above its floor.
+
+| Role | Token | Value | Line height | Why |
+|---|---|---|---|---|
+| Micro-glyph | `--fs-micro` | 11px | `--lh-flat` 1 | A single glyph used as an icon inside fixed geometry — an **18×18px** badge circle (`ScreenMap.jsx:455`), a **15×15px** `?` box (`InfoTip.jsx:53`). Not text to read; enlarging it breaks the box. **Exactly two consumers, both named via `fontSize: FS.micro`; never a default.** |
+| Chart chip | `--fs-chip` | 11.5px | `--lh-chart` 1.2 | The existing 11.5px cohort (23 sites). Pixel-neutral. |
+| Dense data | `--fs-dense` | 12px | `--lh-tight` 1.35 | The largest cohort (201 sites); WinUI Caption; the exact value `--text-xs` holds. |
+| Dense primary | `--fs-dense-lg` | 12.5px | `--lh-tight` 1.35 | Table content rather than table chrome (102 sites). |
+| UI chrome | `--fs-chrome` | 13px | `--lh-chrome` 1.5 | Labels, buttons, tabs, worded badges; macOS control text is 13pt. **The 8/9/10/11px cohorts land here — 397 of 399.** |
+| Chrome emphasis | `--fs-chrome-lg` | 14px | `--lh-chrome` 1.5 | The existing 14px cohort; WinUI Body. |
+| Body prose | `--fs-body` | 15px | `--lh-body` 1.6 | Today's base, so nothing regresses. |
+| Reading surface | `--fs-read` | 16px | `--lh-read` 1.7 | Chat bubble body and composer, the one surface read at length. |
+| Headings | `--fs-h3` / `h2` / `h1` | 17 / 20 / 24px | `--lh-head` 1.3 | `--text-lg`/`--text-xl` values retained. |
+| Display | `--fs-display` | 32px | `--lh-display` 1.15 | The existing 32px cohort. |
+
+Line heights, the complete set the suite is bidirectional over: `--lh-flat: 1`, `--lh-chart: 1.2`,
+`--lh-head: 1.3`, `--lh-tight: 1.35`, `--lh-chrome: 1.5`, `--lh-body: 1.6`, `--lh-read: 1.7`,
+`--lh-display: 1.15`. `--lh-read` is exactly what `Chat.jsx:87` already authors, and `--lh-body`
+is exactly the inherited base at `index.css:104`.
+
+**A line height is applied only where the font size changes** — 402 of the 673 in-scope sites, of
+which ~347 gain one and 55 keep an inline value they already had, counted as overrides. The 271
+pixel-neutral sites are left alone and keep the inherited 1.6, so they render identically down to
+the line box, which is what I11 requires of an additive upgrade. Round 2's broader rule would have
+moved every unstyled 12px site's line box from 19.2px to 16.2px; measured, **142 of StockMind's
+197 sites at 12/12.5px have no inline `lineHeight`**, so that was a wide and invisible change.
+
+**Mapping is by authored value, and every row is a growth or a no-op — nothing shrinks anywhere.**
+8/9/10/11→chrome 13 (except the two allow-listed glyphs, which stay 11); 11.5→chip, 12→dense,
+12.5→dense-lg, 13→chrome, 14→chrome-lg, 15→body, 16→read, 17→h3, 20→h2, 24→h1, 32→display, all
+pixel-neutral; 13.5→14 (+0.5, 2 sites), 18→20 (+2, 14 sites), 22→24 (+2, 6 sites), 30→32 (+2, 1
+site). The 48px site (`selfModify.js:232`) keeps its literal and stays in the residual. A site may
+take a non-default role only with a one-line reason comment, which the suite counts.
+
+The six legacy aliases are **pixel-neutral**, so all 37 existing call sites and the `.text-*`
+classes need no edit (additive, I11): `--text-xs: var(--fs-dense)` 12→12,
+`--text-sm: var(--fs-chrome)` 13→13, `--text-base: var(--fs-body)` 15→15,
+`--text-lg: var(--fs-h3)` 17→17, `--text-xl: var(--fs-h2)` 20→20,
+`--font-size: var(--fs-body)` 15→15. This is the payoff of having a 12px step: round 1 had none,
+and would have moved the 30 `--text-xs` sites by 0.5px. `index.css:77`'s comment calling 12px "the
+smallest permitted" is rewritten in the same edit, so the stylesheet stops arguing with itself.
+
+`index.css:112-116` already records a **rejected** blanket minimum-size CSS rule: any selector
+broad enough to catch inherited text collides with the utility classes on equal specificity and
+silently resizes headings. **That reasoning is correct and is not re-litigated.** The floor is set
+at the authoring site by tokens.
+
+### 136.4 The premise about StockMind was wrong, and no chart label is being enlarged
+
+The task brief expected the 9/10px literals in `src/pages/StockMind/` to be deliberate chart
+density needing careful treatment. Measurement refutes it. **The entire directory holds 2 literals
+at ≤11px**: `ScreenMap.jsx:456` and `InfoTip.jsx:55`, both single-glyph affordances in fixed boxes
+(an **18×18px** circle, a 15×15px `?`), both of which take `FS.micro` and do not move.
+`PriceChart.jsx`, at **2,573 lines** the densest surface in the
+app, holds **zero** — its smallest inline value is 11.5px, and its axis and legend text is not an
+inline literal at all but one lightweight-charts option, `PriceChart.jsx:679`
+`layout: { fontSize: 12 }`, already above the floor this design sets for chart text. There are no
+`fillText`/`ctx.font` sites anywhere in `src`. (The brief's "~2,100 lines" is the wrong number;
+2,573 is measured, twice.)
+
+So, stated with the reason rather than enlarged to satisfy a rule: **the densest surface is already
+the cleanest and its labels stay exactly where they are.** StockMind's migration is token
+substitution at **218 of its 219 sites with neither font size nor line box moving**; the single
+exception is its one 13.5px site, which grows to 14px. (`HelpPanel.jsx:59` is **11.5px**, not the
+12.5px an earlier per-file table said; the directory's smallest value outside the two glyphs is
+11.5px in four files.)
+
+The dense small text is in ordinary pages: `Resources.jsx` 46, `Evolution.jsx` 42, `IDE.jsx` 32,
+`Intelligence.jsx` 27, `Genome.jsx` 27, `Introspect.jsx` 25, `System.jsx` 24, `Models.jsx` 23,
+`Users.jsx` 23, `RamaMind.jsx` 20, `Setup.jsx` 14, `Settings.jsx` 14, `Agents.jsx` 13,
+`Login.jsx` 12, `CommandPalette.jsx` 11, `Titlebar.jsx` 9, `Chat.jsx` 8, `Unlock.jsx` 6,
+`ActivityStream.jsx` 5, then 1–3 each in `ErrorBoundary`, `Terminal`, `App`, `Knowledge`, `Home`,
+`GitSync`, `selfModify`, `ScreenMap`, `InfoTip`. The archetype is `Resources.jsx:133`: a 10px
+`TYPE` form label over an 11px `<select>`. A control read once and acted on. An accident, not
+density.
+
+### 136.5 Decision — breakpoints are window widths; one edge is derived, the other is provisional and labelled
+
+This is a windowed, resizable Electron app on at least two machines. Phone-first breakpoint tables
+are the wrong model: there is no 375px phone, there is a window master drags. The signal is
+**window width in CSS px**, which is what the layout sees after the zoom is applied.
+
+The shell is simpler than expected and that matters: `AppShell.jsx` is `100vw`/`100vh` with
+`overflow: hidden` and **applies no padding of its own**, there is **no sidebar**, and primary
+navigation is the command palette (`Ctrl+K`). Navigation therefore does not break at narrow widths
+— the whole risk is in-page. Page padding is **not** uniform (`12px 16px`, `14`, `16`, `4px 0`,
+`6px 8px`, `18px`…), so there is no page-padding constant to key a band rule off, and none is
+proposed.
+
+The one surface whose minimum width is a hard sum of non-wrapping content is the titlebar — and
+the type migration *raises* that sum, because its nine ≤11px literals are what keep it narrow.
+Computed from the authored content with JetBrains Mono's 0.6em advance plus the authored
+letter-spacing: **≈787px today, ≈885px after migration** (identity subtitle 196→261, `Ctrl+K` chip
+53→67, metric pills 120→128, clock 73→84, window controls 171 unchanged).
+
+| Band | Window width | Where the edge comes from |
+|---|---|---|
+| `compact` | **< 900** | **Derived.** The titlebar's post-migration hard minimum, ≈885px, rounded up to 900. Below it the three `space-between` zones overlap, because nothing wraps. |
+| `regular` | **900 – 1599** | Everything between the two edges; the authored range. |
+| `wide` | **≥ 1600** | **A provisional policy threshold borrowed from `REF_WIDTH` (`appearanceState.cjs:52`), not a measured layout break, because no layout fails above 1599.** It is the width the pixel values were authored against, so it is a width constant used as a width threshold — the right *category*, which is not the same as a derivation. Deriving it instead from the palette's own longest result row was considered and rejected: that lands near 826px, which makes `wide` the default band and destroys the distinction. |
+
+Round 1 justified the lower bound with `REF_HEIGHT = 900`, a height constant used as a width
+threshold; **that justification is deleted** and the 900 that survives is the titlebar sum. The
+`wide` edge moved from 1400 ("2 × the 700px content cap") to 1600, because those five
+`maxWidth: 700` sites already run ≈97 monospace characters per line and so cannot justify an edge.
+**Confirming or replacing 1600 is on row 156's measurement step alongside `compact`.**
+
+**Status of the edges, honestly:** they are derived arithmetic, not dragged windows. The app can be
+built and run, but a rendered window cannot be observed or dragged from an agent session, so each
+layout's own minimum demand was computed instead. Both edges are single named constants in one
+file, so confirming them later is a one-line change. **Confirming them by resizing the real window
+is row 156's next step.**
+
+Delivery is `src/hooks/useLayoutBand.js`, reusing the observer pattern already at
+`PanelBoard.jsx:254–257` (`ResizeObserver` with a `window.addEventListener('resize')` fallback;
+`ResizeObserver` is already on `auditRenderer.cjs`'s globals allow-list). It exports a **pure and
+total** `bandFor(width, prev)` so the band logic is testable without a DOM, debounces to one update
+per animation frame, and applies hysteresis **in a stated direction**: enter `compact` below 900,
+hold it up to and including **924**, leave at 925; enter `wide` at ≥1600, hold it down to and
+including **1576**, leave at 1575. With no `ResizeObserver` it uses the resize listener; with no
+`window` it returns `'regular'`, which is today's behaviour exactly.
+
+**The sticky branches hold only; they never resolve a band.** Outside the hold ranges the function
+always falls through to the plain width thresholds, so a jump — monitor change, un-maximise, or a
+resize the rAF debounce coalesced — lands in the right band: `bandFor(500, 'wide') === 'compact'`
+and `bandFor(1700, 'compact') === 'wide'`. Round 2's version returned from the sticky branches and
+got both of those wrong, and its assertion passed anyway because it never drove `prev='wide'`
+below 900 nor `prev='compact'` at or above 1600. Hence the rule now applied to the whole suite:
+**every assertion states the condition that would turn it red.**
+
+**`data-band` has exactly one owner.** `useLayoutBand()` is called once, as the **first statement
+of `App()` in `src/App.jsx`, above the pop-out early return at `:225`**; that call site writes
+`data-band` on `document.documentElement` and **removes it on unmount**, and later callers read
+only. Being above the branch is the point: `App.jsx:222–225` deliberately resolves the pop-out
+params before any hook runs, so a hook placed below it never mounts in a pop-out window and
+`[data-band="wide"]` would never apply there. Placed above, it runs unconditionally in both
+windows, hook order is never at risk, and a pop-out resolves its own band from its own window —
+correct, since a pop-out is a chart on a second monitor.
+
+**What consumes the band this run, and what does not.** `compact`: `Titlebar.jsx` sheds the
+`SUPER AGI · MASTER AUTHENTICATED` subtitle and the `Ctrl+K` chip, which takes its demand from
+≈885px to **≈610px** — `885 − 200 − 75`, where the 200 is the identity zone collapsing from 261px
+to the **61px the `RĀMA AGI` title still occupies** and the 75 is the chip plus its gap. (Round 2
+wrote ≈549px, which wrongly removed the surviving title; the conclusion that it fits any window
+Electron will realistically give is unchanged.) The shortcut still works and the orb still toggles
+the palette, so no capability is lost. `wide`: the palette modal widens via `--palette-w: 600px` with
+`[data-band="wide"] { --palette-w: 760px }` — the palette *is* the navigation in a shell with no
+sidebar, so that is the highest-value use of surplus width. **Counted band residual: 0 of the 21
+page modules consume the band after this run.** The mechanism is available to all of them; no
+per-page rule is claimed. That is the honest state of "all modules" after a first run.
+
+### 136.6 Decision — how the type scale composes with the zoom: by multiplication, with nothing subtracted
+
+The zoom is `webContents.setZoomFactor` over `appearance:*` IPC, persisted by
+`electron/lib/appearanceState.cjs`: effective px = authored px × zoom; first run auto-fits with
+`round(min(min(w/1600, h/900), 1.4) × 20) / 20` from DIP work-area size, floored at 1.0; a re-fit
+happens only when the display geometry changed; once master moves the slider `source` becomes
+`'master'` and the module never overrides it again. `Settings.jsx:79` reads the reply field `zoom`,
+which is the `0ba1b44` fix.
+
+**The composition rule: `effective px = role token value × zoom factor`.** The zoom keeps its exact
+semantics and the type scale is purely authored-size.
+
+**Round 1's zoom-policy changes are withdrawn in full, on the review's evidence.** It proposed
+`AUTO_MAX` 1.4 → 1.25, a re-fit floor of `previous / 1.266`, a new `typeGen` field and a Settings
+notice. The arithmetic behind it did not reproduce — a 1920×1080 work area fits to **1.20**, not
+the claimed 1.05, and 1.25 would never have bound there at all; the change only affected displays
+above ~2000×1125 DIP, where it *reduced* effective text size against an ask to increase
+legibility. The re-fit floor also applied precisely when master docks to a **different, often
+smaller** panel: 2560×1440 → 1366×768 fits 1.0 but would have been floored at 1.106 on the
+smallest screen, raising zoom on the display with the least room for it.
+
+**So no `electron/` file is edited in this run.** `AUTO_MAX` stays 1.4, `AUTO_MIN` stays 1.0, there
+is no `typeGen`, no re-fit clamp, no new IPC channel, no Settings notice, and **Section 47 keeps
+its recorded 1.0–1.4 range and reasoning untouched** (ledger row 64 needs no amendment, because
+nothing it describes changed).
+
+With the real arithmetic, a 10px label becomes 13px authored and therefore gains **+30% effective
+at every zoom**: 12.0→15.6px at auto 1.20 (1920×1080), 11.5→14.95px at 1.15 (1920×1032 with a
+taskbar), 14.0→18.2px at 1.40 (2560×1440, clamped from 1.6), 10.0→13.0px at 1.00 (1366×768), and
+20.0→26.0px at a master slider of 2.0. **Body prose moves nowhere**, and no text on screen gets
+smaller than today on any display at any zoom — not as an arithmetic bound this time, but because
+the zoom is untouched and every mapping row is a growth or a no-op. A master with a zoom already
+set gets legible defaults *on top of* it and is not double-scaled, because nothing is scaled twice:
+the authored number changed once.
+
+**What high zoom actually pressures is width, not height.** At 1.4 the whole surface is at 1.4 —
+prose is already 21px — so 13px chrome inside a 21px-prose UI is proportionate. And because
+`setZoomFactor` is a **uniform** CSS-px multiplier, a fixed-height box and the text inside it scale
+by the *same* factor: at zoom `z` the titlebar is `38z` and its content `31.8z`, so **the fit is
+zoom-invariant** and zoom cannot make that box clip its own text. What zoom does do is reduce the
+CSS-px viewport **width** — a 1920-physical-px panel presents **1371 CSS px** at 1.4 and 960 at
+2.0 — which is a horizontal constraint, and exactly what the `compact` band and the modal width
+guards address. **The band and the zoom cover different axes of the same user action, which is why
+both exist and neither is derived from the other.**
+
+**`--titlebar-h` therefore stays `38px`, and round 2's `calc()` is withdrawn.** With zero authored
+vertical padding (`Titlebar.jsx:193` is `padding: '0 0 0 10px'`, left only) the two stacked lines
+measure:
+
+| | title line | subtitle line | content | box | spare |
+|---|---|---|---|---|---|
+| today | 13 × 1.2 inline (`:213`) = 15.6 | 9 × **1.6 inherited** = 14.4 | **30.0px** | 38px | 8.0px |
+| after migration | 13 × 1.2 = 15.6 | 12 × 1.35 (`LH.tight`) = 16.2 | **31.8px** | 38px | **6.2px** |
+| under a 1.4.12 1.5× override | 13 × 1.5 = 19.5 | 12 × 1.5 = 18.0 | **37.5px** | 38px | **0.5px** |
+
+The migration adds 1.8px of content to a box with 8px of slack and the user-stylesheet worst case
+still fits, so there is nothing to fix and the `calc()` would have cost 3.8px of vertical space on
+every page. The subtitle at `:218` still takes the **named `dense` override** (12px, not chrome's
+13px) and gains `LH.tight`, but **the recorded reason is now 1.4.12 headroom, not clipping**: at
+chrome 13px the override case is 13×1.5 + 13×1.5 = 39.0px, which exceeds the box, while `dense`
+gives 37.5px and fits. Still +3px from 9px, so the no-shrink rule holds. The identity title keeps
+its inline 1.2 as `LH.chart`. Two consequences follow: `cognition.js:77` is **not** reworded (the
+clipping story that motivated it did not survive — see 136.10), and **nothing asserts the fit**,
+which is named as a known gap in 136.10 rather than left implied.
+
+**Eight** unguarded fixed-width modals adopt the **two-property guard `width: 'Npx', maxWidth:
+'92vw'`** that `Users.jsx:93`/`:357`, `Login.jsx:246` and `Setup.jsx:177` already use (round 1's
+`width: min(Npx, 92vw)` form appears nowhere in `src`): `CommandPalette.jsx:345` 600, `:261` 400,
+`Agents.jsx:163` 520, `Models.jsx:130` 520, `:202` 480, `Titlebar.jsx:114` 380,
+`Unlock.jsx:104` 400, and **`System.jsx:175` 560** — a `hud-card` inside a `position: fixed;
+inset: 0` backdrop (`:170–174`), which round 2 missed. The inventory is reproducible:
+`width:\s*'(3[5-9]\d|[4-9]\d\d)px'` over `src/**/*.jsx` cross-checked against `maxWidth` returns 18
+hits = 8 unguarded containers + 4 already guarded + **3 decorative `pointerEvents: 'none'` glow
+divs deliberately excluded** (`Login.jsx:240`, `Setup.jsx:171`, `Unlock.jsx:99` — absolutely
+positioned radial gradients that hold no content) + 3 that are themselves `maxWidth` declarations
+the case-insensitive pattern picked up (`ErrorBoundary.jsx:74`, `:82`, `:107`, already fluid).
+
+Four fixed-column grids become fluid with `minmax()` floors drawn from the vocabulary the 13
+existing `auto-fit` sites already use: `Agents.jsx:171` `repeat(4,1fr)` → `minmax(150px,1fr)`,
+`Users.jsx:170` → `minmax(180px,1fr)`, `StockMind.jsx:624`/`:675` → `minmax(260px,1fr)`.
+
+**Deferred, recorded so it is inherited rather than rediscovered:** if a later session wants
+`AUTO_MAX` lowered, it needs a measurement from a ≥2560-wide panel showing 1.25 suffices, it must
+wait until the literal residual reaches zero, and it must amend Section 47 and cross-reference
+ledger row 64 in the same commit. It gets its own ledger row when taken up.
+
+### 136.7 Decision — tokens in CSS and a JS name map, because the styling is inline
+
+Both layers, split so exactly one number exists per role. `src/index.css` is the single source of
+numeric truth: the `--fs-*`/`--lh-*` block in `:root`, with the six legacy aliases above.
+`src/config/type.js` is a name map, not a second scale: `FS` and `LH` export `var()` **strings**,
+never numbers, for direct use in inline style objects — `style={{ fontSize: FS.chrome, lineHeight:
+LH.chrome }}`. `src/config/` is already the home for single-source-of-truth modules
+(`registry.js`, I7), so this follows the convention instead of adding one.
+
+Why both, plainly: pure CSS cannot reach 813 inline style objects without rewriting every one into
+classes, a far larger and riskier change than master asked for. A JS-only numeric scale would
+duplicate the numbers and drift from `index.css` and from the `.text-*` classes. Emitting `var()`
+strings from JS means the number lives once, in CSS, and the JS layer carries only names.
+
+Three mechanism decisions the review found unbuildable as first written, now settled:
+
+- **The role map sits behind an always-on `Proxy`, not an `import.meta.env.DEV` gate.** `src` has
+  **zero** `import.meta` uses and zero `new Proxy` uses today, so there is no dev convention to
+  follow and introducing the renderer's first `import.meta` for this is the worse trade; `Proxy` is
+  already on `auditRenderer.cjs`'s globals allow-list. An unknown role **returns `undefined` and
+  warns once per key name** (deduped by a module-level `Set`, so a render loop cannot spam) and
+  never throws. React drops an `undefined` style value, so the site inherits its parent size:
+  degraded, not broken. `Object.freeze` installs no read hook, which is why round 1's
+  warn-on-unknown-key could not have worked.
+- **`FLOORS` is the floor, not a copy of the value.** `FLOORS.chrome = 13` is the minimum the role
+  may ever be set to; `--fs-chrome: 13px` is what it is set to today and may later be raised
+  without touching the suite. The assertion is an inequality, `cssValue >= FLOORS[role]`, which can
+  actually fail — round 1's equality guarded nothing. `type.js`'s own comment says so, so a later
+  session does not "fix" the duplication by deleting it.
+- **`CHART_FS = 12` is the one sanctioned number, and there is no `--fs-chart` in CSS.** The chart's
+  annotation text has exactly one consumer, `PriceChart.jsx:679`, and lightweight-charts takes a JS
+  **number**, so a `var()` string cannot reach it and a `getComputedStyle` read at chart
+  construction would be an invented mechanism. The chart role therefore lives in JS, is imported at
+  that one site, and is asserted equal to `FLOORS.chart`.
+
+Two surfaces cannot import `type.js` and are handled explicitly: `src/services/selfModify.js:224`
+(9px) and `:238` (11px) sit inside template strings that **emit JSX** for scaffolded pages, so the
+template emits the CSS variable string literally (`fontSize: 'var(--fs-chrome)'`) — no import
+needed, and generated pages then obey the floor too. `src/components/ErrorBoundary.jsx` (3 sub-12px
+literals) is the fallback render surface and migrates the same way, so the surface that renders
+when a module fails gains no new module dependency.
+
+**A token system no suite can check will drift back to literals**, so enforcement is
+`scripts/verifyTypeScale.mjs` — zero dependencies, the established `verifyXxx.cjs` house style,
+wired as `verify:type-scale` and appended to the chained `verify`. **Eleven assertions, each
+published with the mechanism that evaluates it and the condition that would turn it red**, because
+round 2's band assertion passed on a function that answered the wrong band: (1) bidirectional
+`--fs-*` parity and (2) `--lh-*` parity, using one published kebab→camel key map; (3) every
+`FS`/`LH` value matches `/^var\(--(fs|lh)-[a-z0-9-]+\)$/` — a whole-value shape match, since round
+2's "no digits" rule could never pass `var(--fs-h1)`; (4) every CSS value at or above its floor, an
+inequality that can fail; (5) `CHART_FS === FLOORS.chart` and `PriceChart.jsx`'s `layout` option
+carries `CHART_FS` and no digit; (6) **zero numeric literals ≤11px** including inside template
+strings, outside an allow-list keyed by file plus an **`fs-exempt:` marker comment with a non-empty
+reason** (round 1 keyed it by `file:line`, which breaks on any unrelated insertion above) — the
+allow-list has **zero users after this run**, since both glyph sites take `FS.micro`, and ships with
+a comment saying so, so a later session does not delete it as dead code; (7) a **residual budget**
+that fails if the literal count rises and may only be lowered; (8) `Settings.jsx` still reads the
+`zoom` field, pinning `0ba1b44`, which matters because this work edits that file; (9)
+`appearanceState.cjs`'s bounds **unchanged** by this run (`AUTO_MIN 1.0`, `AUTO_MAX 1.4`,
+`ZOOM 0.6–2.0`, `REF 1600×900`); (10) `bandFor` correct, sticky and total — both edges, the
+hysteresis direction, **the two jump cases `bandFor(500,'wide')==='compact'` and
+`bandFor(1700,'compact')==='wide'`**, the non-finite inputs, and a 36-case idempotence sweep; (11)
+one band rule per band exists **and `src/App.jsx` calls `useLayoutBand()` before its pop-out early
+return**, so the responsive half cannot ship as a hook nobody calls or silently stop working in
+pop-outs. Round 2's twelfth assertion pinned the `--titlebar-h` `calc()` and is **dropped with
+it**.
+
+### 136.8 Decision — the migration scope for this run, and the exact residual
+
+**813 literals will not be migrated. Attempting all of them is how this breaks something.**
+
+In scope: **(a)** every literal at **≤11px — all 399 across 28 files**, the defect master reported,
+enumerated per file in 136.4; **(b)** every remaining literal in the four surfaces master uses most
+— StockMind 219, Chat 16, Settings 39, RamaMind 30 (**304**, of which 44 are already in (a));
+**(c)** the three shell components being edited anyway for the band work — `Titlebar.jsx` 12,
+`CommandPalette.jsx` 20, `ActivityStream.jsx` 7 — in full, because touching them twice costs more;
+**(d)** the primitives and geometry fixes: the token block and six aliases, `src/config/type.js`,
+`src/hooks/useLayoutBand.js` plus its single mount in `App.jsx`, the **eight** modal guards, the
+four grid conversions, `--palette-w`, and the suite. `--titlebar-h` stays 38px and
+`src/services/cognition.js` is not touched.
+
+Line-height rule: **a `lineHeight` is added only at a site whose `fontSize` changes, and only if
+that site's style object has none already** — 402 sites, ~347 gaining one and 55 keeping an
+override. The 271 pixel-neutral sites are untouched and keep the inherited 1.6, which is what makes
+"pixel-neutral" mean *font size and line box both unchanged*. Chat's `:87` (1.7) and `:509` (1.6)
+sit on two of the moved sites and are kept; `:87` already equals `LH.read`. The titlebar subtitle is
+the one moved site inside a fixed-height box and is handled explicitly in 136.6.
+
+**Execution is a one-off codemod, not 673 hand edits** — the single largest risk in the plan, and
+the mapping is deterministic. `scripts/migrateTypeLiterals.cjs` applies the value→role table with a
+**six-entry hard-coded exception list** (`ScreenMap.jsx:456` and `InfoTip.jsx:55` → `micro`,
+`Chat.jsx:86` and `:508` → `read`, `Titlebar.jsx:218` → `dense`, `PriceChart.jsx:679` → the
+`CHART_FS` import), keyed by file plus matched source text rather than line number alone; rewrites
+`fontSize: <n>` → `fontSize: FS.<role>`; brace-scans the enclosing object literal to decide the
+`lineHeight`; inserts the `type.js` import **through the `@config` alias** every other `src`
+consumer uses, not a computed relative depth; skips and names any file it cannot resolve rather than
+guessing; and **exits non-zero unless the post-run literal count is exactly `140 + 5` = 145**, the
+five being the hand-edited sites the codemod deliberately skips (`selfModify.js` 2,
+`ErrorBoundary.jsx` 3), so a bad run is reverted with `git checkout -- src` before anything is
+committed. Gating the codemod at 140 would fail on its own correct output (136.12 `[F2]`).
+**It is deleted in the commit that lands its output** — a migration is not a capability.
+`selfModify.js` (2 template-string sites) and `ErrorBoundary.jsx` (3 sites) are excluded and
+hand-edited, because rewriting inside a template string is where an automated brace scan is unsafe.
+Commit order: primitives first, then one commit per surface with `verify:type-scale` on each, so a
+failing surface is one revert rather than a bisect.
+
+**Overflow acceptance rule for the 397 promotions**, because growing a label +2…+5px next to
+geometry that does not move is how a migration breaks a layout quietly: for each migrated file the
+implementer runs `(?:min)?(?:Width|Height):\s*'\d+px'` over it and, for every match in the promoted
+site's style object or its parent, either converts the value to `min-content`/`ch`/`em` or records
+it as inspected, with the list going in the commit message. Measured scope: **107** such
+declarations in `src`, **18** of them in the 10–29px range across 14 files — including
+`Titlebar.jsx:77`'s `minWidth: '28px'` beside `:76`'s promoted 10px label, `ScreenMap.jsx:455`'s
+18×18px circle and `InfoTip.jsx:53`'s 15×15px box, the last two of which keep `FS.micro` precisely
+so they do not move.
+
+Per-surface, measured: StockMind 219 literals = **218 pixel-neutral / 1 move**; Chat 16 = 5 / 11;
+**Settings 39 = 24 / 15** (distribution `9×1 10×4 11×9 11.5×8 12×13 12.5×1 13×1 18×1 20×1`, so
+round 2's "23 / 16 minus overlaps" was both wrong and not a rule a reader could apply);
+RamaMind 30 = 10 / 20.
+
+Named deltas on master's primary conversation surface, because round 1 proposed them silently:
+**`Chat.jsx:86` (bubble body) and `:508` (composer) go 13px → 16px, +23%**, keeping their existing
+line heights; round 1's 17px (+31%) was more than the measurement supports. The sites that are
+**not** `read` are named too, so the role does not leak: `:95`, `:107`, `:120` are metadata and
+take `chrome`.
+
+**Out of scope, as an exact counted residual: 140 literals across 23 files** — GitSync 25,
+Intelligence 15, IDE 10, Models 8, System 7, Agents 7, Evolution 7, Users 6, Home 6, Resources 6,
+PanelBoard 5, Login 4, Introspect 4, selfModify 4, Unlock 4, Knowledge 4, Terminal 3,
+ErrorBoundary 3, Genome 3, Setup 3, App 3, CodeEditor 2, DiffReview 1. **Migrated this run: 673 of
+813 (82.8%).** Every residual literal is at 12px or above — at or over the `dense` floor — which is
+why leaving them is a deferral, not a defect; those same 23 files still get their ≤11px literals
+migrated under (a). `verifyTypeScale.mjs` prints this table on every run and pins **140** as the
+budget constant, which may only ever fall, so the number lives in the repository rather than in a
+session's memory and a cold continuation resumes from the table alone. **A partial migration stated
+honestly is the goal; a claim of completeness is not.**
+
+Master's separate ask about concising comments and making Rāma's self-repair legible is a different
+item and is not in this scope.
+
+### 136.9 What cannot be verified, and what is not claimed
+
+The eleven suite assertions are file parses and pure-function drives and do run. `npm run build`
+and `npm run verify` **are** runnable (136.1) and the implementation step should run both; no build
+result is claimed by any design round, because none changed renderer source. Band firing at the
+right widths, modal overflow at 900px, the four converted grids reflowing, `[data-band="wide"]`
+actually widening the palette, a pop-out resolving its own band, and whether any of the 397
+promoted labels overflows a neighbour are integration concerns needing a running renderer. Whether master finds the result comfortable, and anything about assistive-technology
+behaviour, is manual and is the honest limit of this work. **WCAG conformance is not claimed.**
+
+### 136.10 Raised for master, not changed
+
+**`appearanceState.cjs`'s `AUTO_MAX` comment appears to be wrong, and is no longer cited as
+evidence anywhere in this section.** It says an automatic guess should stay well short of the upper
+bound *"where the fixed-height titlebar starts to clip."* The first half of that comment is sound;
+the clipping clause describes a mechanism that cannot work, because `setZoomFactor` is uniform and
+the titlebar fit is zoom-invariant (136.6). Two design rounds inherited the sentence as a
+measurement. **`AUTO_MAX` stays 1.4 and the comment is left alone** — the clamp may well be right
+for the real reason, which is that high zoom shrinks CSS-px viewport *width*. Correcting it touches
+`electron/` and Section 47, so it is master's call. **`src/services/cognition.js:77` repeats the
+same claim to master's face** (*"I will not go further — the titlebar starts to clip"*; the real
+bound is `ZOOM_MAX = 2.0`) and is likewise left exactly as it is, to be fixed in the same decision
+rather than piecemeal. Flagged because Rāma should not keep an explanation master can check and
+find false.
+
+**Nothing asserts that the titlebar's text fits its 38px box.** With round 2's `calc()` assertion
+dropped, the 6.2px of slack and the 0.5px of 1.4.12 margin are measurements in a document, not a
+gate: if a later session raises `--fs-chrome` above 13px, raises `--lh-tight` above 1.35, or adds a
+third line to the identity zone, the content exceeds 38px and nothing catches it. The natural guard
+is a one-line assertion computing the two-line sum from the tokens and comparing it with 38 —
+recorded here so it is a decision available to master rather than a surprise later.
+
+`index.css:38` declares `--amber: --gold;`. A custom property cannot reference another by bare
+name, so that line is invalid CSS; **line 42** redeclares `--amber: #d4a940;`, which is what takes
+effect. The result is correct by accident. A one-line fix, out of this scope, left untouched for
+master's call rather than folded in silently. Separately, the steering note claiming `node_modules`
+is absent is stale (136.1) and should be corrected so later sessions stop inheriting a false
+constraint.
+
+### 136.11 Next
+
+Confirm the two band edges by resizing the real window: `compact` 900 is derived from the
+titlebar's own minimum demand but has not been observed, and `wide` 1600 is a **provisional policy
+threshold** with no layout break behind it, so it is the one more likely to move. Then build the
+primitives before touching any page: the `--fs-*`/`--lh-*` block with the six pixel-neutral
+aliases, `src/config/type.js` (`FS`, `LH`, `FLOORS`, `CHART_FS`), `src/hooks/useLayoutBand.js` with
+`bandFor` exported pure and mounted once in `App.jsx` above the pop-out branch, and
+`scripts/verifyTypeScale.mjs` with its eleven assertions. `--titlebar-h` stays 38px. Then write
+`scripts/migrateTypeLiterals.cjs`, run it, confirm the post-run literal count is exactly **145**
+(`140` residual + the 5 hand-edited sites it skips), and delete the script in the commit that lands
+its output. **The round-3 review's fifteen findings and how each is built are in 136.12**, which is
+the operative record where it differs from anything above it.
+
+### 136.12 The round-3 review's fifteen findings, resolved before any code was written
+
+The round-3 design review returned `CHANGES_REQUESTED` with **3 HIGH, 5 MEDIUM, 7 NIT (8
+blocking)**. The design loop was ended at 3 of 3 deliberately, because every blocking finding came
+with an exact prescribed fix. **All fifteen are resolved here and none is waived**; where this
+subsection differs from 136.1–136.11 above, this subsection is what is built. Written before the
+implementation, per Section 28.
+
+**`[F3]` — `compact` is unreachable in the main window at zoom 1.0, and that is recorded rather
+than fixed.** `electron/main.cjs:1265-1266` pins the main window at `minWidth: 900` /
+`minHeight: 600` **DIP**; the pop-out at `:1610-1611` is `420` / `260`. `bandFor` reads **CSS px**,
+which is DIP ÷ zoom, and the rule is `width < 900`:
+
+| Window | DIP floor | CSS px at zoom 1.0 | at 1.2 | at 1.4 | Band at the floor |
+|---|---|---|---|---|---|
+| main | 900 | **900** | 750 | 643 | `regular` at 1.0; `compact` at ≥1.05 |
+| pop-out | 420 | 420 | 350 | 300 | **always `compact`** |
+
+So at zoom 1.0 the titlebar shed — `compact`'s only consumer — can never fire in the main window.
+**Changing `minWidth` is master's decision, not this run's: it is raised, and `electron/main.cjs`
+is not altered.** Exercising `compact` for real therefore means zoom ≥ 1.05 and a drag to the DIP
+floor, or opening a pop-out; that procedure is part of the render check, not an assumption.
+
+**`[F7]` — the suite is `scripts/verifyTypeScale.mjs`, and `bandFor` lives in a React-free
+module.** Five assertions import the ESM exports of `src/config/type.js` and
+`src/config/layoutBands.js`. No `.cjs` suite in `scripts/` imports from `src`, and every suite that
+does is `.mjs` (`verifyGlossary.mjs`, `verifyChartTime.mjs`, `verifyIndicators.mjs`,
+`verifyTimeframes.mjs`, `verifyChartProjection.mjs`). So the constants and `bandFor` sit in
+**`src/config/layoutBands.js`**, which imports nothing, and `src/hooks/useLayoutBand.js` re-exports
+them so a consumer still has one import. Earlier mentions of a `.cjs` suite in this section are
+corrected in place.
+
+**`[F2]` — the codemod gates at `140 + 5` = 145, not 140.** `HAND_EDITED_REMAINING = 5` names its
+reason: `selfModify.js` (2 template-string sites) and `ErrorBoundary.jsx` (3) are excluded from the
+codemod and hand-edited afterwards. Gating at exactly 140 would fail the codemod's own correct
+output and revert 673 right edits. **The suite's 140 budget first passes on the commit that lands
+the hand edits.**
+
+**`[F1]` — the chart assertion drops its `layout:` anchor.** The design's
+`/layout:\s*\{[^}]*fontSize:\s*CHART_FS\b/s` cannot work: `[^}]` cannot cross the brace closing
+`background: { color: 'transparent' }` at `PriceChart.jsx:677`, which precedes `fontSize` at
+`:679`, so its must-match half fails on correct code and its must-not-match half is vacuous even
+today. The assertion is instead whole-file:
+`/fontSize:\s*CHART_FS\b/.test(src) && !/fontSize:\s*['"]?\d/.test(src)`.
+
+**`[F4]` — the hook's published signature is `useLayoutBand({ own = false } = {})`, with
+owner-counted cleanup.** It returns `'compact' | 'regular' | 'wide'`. **Only an `own: true` caller
+writes `data-band`**; read-only callers never write. The attribute is removed on unmount **only
+when `own` and a module-level owner count reaches 0** — `Titlebar.jsx` calls the same hook, and
+while writes are idempotent **cleanups are not**, so a Titlebar unmount would otherwise strip
+`data-band` from `<html>` while `App` is still mounted and the `wide` palette rule would silently
+stop applying. The initial band is computed **synchronously** from
+`document.documentElement.clientWidth`, the attribute is written in `useLayoutEffect` so it lands
+before paint, resize is coalesced through **one `requestAnimationFrame`** cancelled on cleanup, and
+`typeof window === 'undefined'` returns `'regular'` and writes nothing.
+
+**`[F5]` — the band rule is `:root[data-band="wide"]`, for specificity that does not depend on
+source order.** A bare `[data-band="wide"]` scores `(0,1,0)` and **ties with `:root`**, so rule
+order would silently decide whether the override applies at all. `:root[data-band="wide"]` scores
+`(0,2,0)` and wins regardless of order. This is the same rule-order trap `index.css:112-116`
+already records against a blanket minimum-size rule.
+
+**`[F6]` — imports go through the project's aliases.** `@config/type.js`, `@config/layoutBands.js`,
+`@hooks/useLayoutBand.js`, each with the explicit extension, matching how every existing `src`
+consumer imports (`@config/registry.js` in `App.jsx`, `CommandPalette.jsx`, `cognition.js`,
+`voiceEngine.js`, `userStore.js`). The alias table is `vite.config.js:11-27`. The codemod inserts
+`import { FS, LH } from '@config/type.js';` — **never a computed relative depth** — and imports
+only the bindings a file actually uses, so no file carries an unused `LH`.
+
+**`[F8]` — the `lineHeight` rule, stated once: existing inline `lineHeight` literals are never
+rewritten in this run.** The codemod only **inserts**, and only when it changed a `fontSize` **and**
+the enclosing object literal has no `lineHeight` key. So the 271 pixel-neutral sites gain nothing
+and keep the inherited `line-height: 1.6` from `index.css:104`, and of the 402 moved sites the ~55
+that already carry an inline value keep it and are counted as overrides: `Titlebar.jsx:213` keeps
+its authored `'1.2'`, `Chat.jsx:87` keeps `'1.7'`, `:509` keeps `'1.6'`, `InfoTip.jsx:53` keeps its
+`'13px'`. **`LH.chart` therefore ships with no consumer from this rule**, which is said rather than
+claimed otherwise.
+
+**`[F9]` — `--lh-flat` ships with zero consumers and must not be deleted as dead code.** The two
+micro-glyph sites take `FS.micro` but keep their own geometry, so nothing authors `LH.flat` this
+run. It is the line height the next fixed-geometry glyph needs, so it ships with a comment in
+`index.css` saying exactly that, rather than being pruned by a later session as unused.
+
+**`[F10]` — the constant is `BAND_REGULAR_MIN = 900`, named for the band it starts.** The rule is
+`width < 900`, so **900 itself is `regular`** — carried as an inline comment in
+`src/config/layoutBands.js` so no later reader "fixes" a non-existent off-by-one. `BAND_WIDE_MIN =
+1600`, `BAND_HYSTERESIS = 24`. `compact < 900` is **derived** from the post-migration titlebar
+demand of ≈885px rounded up; `wide ≥ 1600` is a **provisional policy threshold borrowed from
+`REF_WIDTH`**, not a measured layout break, and the file says so.
+
+**`[F11]` — the `fs-exempt:` parser self-tests against two inline fixtures.** The allow-list
+correctly has **zero entries** after this run, so without a self-test its branches never execute —
+the exact vacuity this suite exists to prevent. The assertion drives one valid marker carrying a
+non-empty reason (must accept) and one with an empty reason (must reject).
+
+**`[F12]` — one titlebar advance-width row is worked end to end**, so the ≈787px → ≈885px figures
+in 136.5 are reproducible rather than asserted. The subtitle at `Titlebar.jsx:218` is
+`SUPER AGI · MASTER AUTHENTICATED` = **32 characters**, `fontFamily: var(--font)` (JetBrains Mono,
+advance `0.6em`), `letterSpacing: '0.08em'`:
+
+| | font size | advance 0.6em | letter-spacing 0.08em | per char | × 32 chars |
+|---|---|---|---|---|---|
+| today | 9px | 5.40px | 0.72px | 6.12px | **195.8 ≈ 196px** |
+| after migration (`dense`) | 12px | 7.20px | 0.96px | 8.16px | **261.1 ≈ 261px** |
+
+That is the +65px in the identity zone, and the same arithmetic produces every other row of the
+titlebar sum. The advance ratio is the nominal monospace figure, not a measured glyph table, which
+is why the totals are written as ≈.
+
+**`[F13]` — the move breakdown is published to the row, including the single `9 → dense` site.**
+`8→13 ×2`, `9→13 ×51`, **`9→12 ×1`** (the named `Titlebar.jsx:218` `dense` override),
+`10→13 ×185`, `11→13 ×158`, `13→16 ×2`, `13.5→14 ×1`, `18→20 ×2` = **402**. The 9px cohort is 52,
+which splits 51 + 1; the 11px cohort is 160, of which 158 move and **2 stay at 11px** as the
+`FS.micro` glyphs. Every row is a growth or a no-op.
+
+**`[F14]` — line ranges quoted anywhere in this section are indicative; the codemod keys on matched
+source text.** Its six-entry exception list is keyed by **file plus the matched source text**, never
+by line number alone, so an insertion above a site cannot silently redirect it, and a stale key
+that does not match exactly once is a **hard stop** rather than a silent default.
+
+**`[F15]` — the project steering note's `I1–I14` is stale; the spec's table runs `I1–I17` and the
+spec is authoritative.** Recorded here so a cold session reading the steering note does not conclude
+that `I15–I17` are inventions. The invariant block itself is not touched by this work.
