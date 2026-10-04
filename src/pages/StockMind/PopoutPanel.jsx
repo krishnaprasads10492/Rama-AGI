@@ -4,6 +4,7 @@ import BookPanel from './BookPanel.jsx';
 import WhyPanel from './WhyPanel.jsx';
 import { saveSession } from '@services/authClient.js';
 import { limitForDates } from './timeframes.js';
+import { FS } from '@config/type.js';
 
 /**
  * PopoutPanel — one StockMind surface alone in its own OS window (Sections 97, 109).
@@ -32,7 +33,7 @@ function Frame({ title, children, onRefresh, onDock, busy }) {
         flexShrink: 0, WebkitAppRegion: 'drag',
       }}>
         <span aria-hidden="true" className="hud-panel-glyph">◈</span>
-        <span style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text)' }}>
+        <span style={{ fontSize: FS.denseLg, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text)' }}>
           {title}
         </span>
         <span style={{ flex: 1 }} />
@@ -143,7 +144,7 @@ export default function PopoutPanel({ params }) {
   if (!inElectron) {
     return (
       <Frame title={title}>
-        <span style={{ fontSize: 12, color: 'var(--amber)' }}>This window needs the desktop app.</span>
+        <span style={{ fontSize: FS.dense, color: 'var(--amber)' }}>This window needs the desktop app.</span>
       </Frame>
     );
   }
@@ -151,8 +152,8 @@ export default function PopoutPanel({ params }) {
   if (authError) {
     return (
       <Frame title={title} onDock={dock}>
-        <div style={{ fontSize: 12.5, color: 'var(--amber)', lineHeight: 1.7 }}>{authError}</div>
-        <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7, marginTop: 8 }}>
+        <div style={{ fontSize: FS.denseLg, color: 'var(--amber)', lineHeight: 1.7 }}>{authError}</div>
+        <div style={{ fontSize: FS.dense, color: 'var(--text-dim)', lineHeight: 1.7, marginTop: 8 }}>
           A pop-out adopts the main window&rsquo;s session through a one-time ticket that expires in
           30 seconds and cannot be reused. Close this window and pop the panel out again.
         </div>
@@ -161,7 +162,7 @@ export default function PopoutPanel({ params }) {
   }
 
   if (!user) {
-    return <Frame title={title}><span style={{ fontSize: 12, color: 'var(--muted)' }}>
+    return <Frame title={title}><span style={{ fontSize: FS.dense, color: 'var(--muted)' }}>
       Adopting the workspace session…
     </span></Frame>;
   }
@@ -174,7 +175,7 @@ export default function PopoutPanel({ params }) {
             for the case the overlay cannot cover: a refresh that fails while the PREVIOUS fetch's
             candles are still drawn, where there is no empty state to put the message in. */}
         {error && bars.length > 0 && (
-          <div style={{ fontSize: 12, color: 'var(--red)', marginBottom: 8 }}>{error}</div>
+          <div style={{ fontSize: FS.dense, color: 'var(--red)', marginBottom: 8 }}>{error}</div>
         )}
         <PriceChart bars={bars} symbol={symbol} interval={interval} rangeId={range}
                     chartId={`popout-${panel}`} busy={busy} onFetch={loadBars} height={420}
@@ -209,7 +210,7 @@ export default function PopoutPanel({ params }) {
 
   return (
     <Frame title={title} onDock={dock}>
-      <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+      <span style={{ fontSize: FS.dense, color: 'var(--muted)' }}>
         &ldquo;{panel}&rdquo; has no standalone view — signals need the selection state of the main
         window, so it is only available there.
       </span>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { SCREEN_DATA } from './screenMapData.js';
+import { FS } from '@config/type.js';
 
 /**
  * ScreenMap — annotated layout maps of each StockMind screen (spec Section 104).
@@ -439,7 +440,7 @@ export default function ScreenMap({ id, onTerm }) {
   if (!map || !Drawing) return null;
   return (
     <div>
-      <div style={{ fontSize: '12.5px', color: 'var(--text-dim, var(--muted))', lineHeight: 1.7,
+      <div style={{ fontSize: FS.denseLg, color: 'var(--text-dim, var(--muted))', lineHeight: 1.7,
         marginBottom: '10px', maxWidth: '78ch' }}>
         {map.intro}
       </div>
@@ -453,10 +454,10 @@ export default function ScreenMap({ id, onTerm }) {
           <li key={title} style={{ display: 'flex', gap: '9px', alignItems: 'flex-start' }}>
             <span aria-hidden="true" style={{
               flexShrink: 0, width: '18px', height: '18px', borderRadius: '50%',
-              background: 'var(--accent)', color: '#06080c', fontSize: '11px', fontWeight: 700,
+              background: 'var(--accent)', color: '#06080c', fontSize: FS.micro /* micro, not chrome: one digit inside a fixed 18x18px circle */, fontWeight: 700,
               display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '1px',
             }}>{i + 1}</span>
-            <span style={{ fontSize: '12.5px', lineHeight: 1.7 }}>
+            <span style={{ fontSize: FS.denseLg, lineHeight: 1.7 }}>
               <strong style={{ color: 'var(--text)' }}>{title}</strong>
               <span style={{ color: 'var(--text-dim, var(--muted))' }}> — {body}</span>
               {termId && onTerm && (

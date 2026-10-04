@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { FS } from '@config/type.js';
 
 /**
  * WhyPanel — the justification bullets and the pitfalls (Section 76), plus the risk ruler
@@ -57,7 +58,7 @@ export default function WhyPanel({ currentUser, symbol, exchange, thesis }) {
   useEffect(() => { load(); }, [load]);
 
   if (!hasBridge) {
-    return <div style={{ color: 'var(--muted)', fontSize: '12px' }}>
+    return <div style={{ color: 'var(--muted)', fontSize: FS.dense }}>
       Unavailable — run inside the Rāma desktop app.
     </div>;
   }
@@ -74,13 +75,13 @@ export default function WhyPanel({ currentUser, symbol, exchange, thesis }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
         <div className="section-label">WHY — {symbol}</div>
         <div style={{ flex: 1 }} />
-        <select className="input" style={{ width: 'auto', fontSize: '12px' }}
+        <select className="input" style={{ width: 'auto', fontSize: FS.dense }}
                 value={horizon} onChange={(e) => setHorizon(e.target.value)}>
           <option value="intraday">intraday</option>
           <option value="swing">swing</option>
           <option value="positional">positional</option>
         </select>
-        <label style={{ fontSize: '12px', color: 'var(--muted)', display: 'flex',
+        <label style={{ fontSize: FS.dense, color: 'var(--muted)', display: 'flex',
           gap: '4px', alignItems: 'center' }}>
           <input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} />
           delivery + events (fetches)
@@ -93,7 +94,7 @@ export default function WhyPanel({ currentUser, symbol, exchange, thesis }) {
       {/* The caveat is part of the payload, not something the UI may drop. */}
       {brief?.caveat && (
         <div style={{
-          padding: '10px 12px', borderRadius: 'var(--radius)', fontSize: '12.5px',
+          padding: '10px 12px', borderRadius: 'var(--radius)', fontSize: FS.denseLg,
           lineHeight: 1.7,
           background: brief.entitledHorizons?.length
             ? 'rgba(80,200,120,0.06)' : 'rgba(255,170,0,0.06)',
@@ -111,7 +112,7 @@ export default function WhyPanel({ currentUser, symbol, exchange, thesis }) {
           <div className="section-label" style={{ marginBottom: '8px' }}>
             YOUR LEVELS AGAINST THIS INSTRUMENT'S OWN VOLATILITY
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12.5px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: FS.denseLg }}>
             {ruler.stop && (
               <div style={{
                 borderLeft: `3px solid ${ruler.stop.insideNoise ? 'var(--red)' : 'var(--green)'}`,
@@ -141,7 +142,7 @@ export default function WhyPanel({ currentUser, symbol, exchange, thesis }) {
               </div>
             )}
             {ruler.rewardRisk !== null && ruler.rewardRisk !== undefined && (
-              <div style={{ color: 'var(--muted)', fontSize: '12.5px' }}>
+              <div style={{ color: 'var(--muted)', fontSize: FS.denseLg }}>
                 Reward-to-risk {ruler.rewardRisk}:1 against your own levels · one-bar σ
                 {' '}{ruler.sigmaOneBar} · horizon σ {ruler.sigmaHorizon}
               </div>
@@ -150,7 +151,7 @@ export default function WhyPanel({ currentUser, symbol, exchange, thesis }) {
         </div>
       )}
       {ruler?.ok === false && (
-        <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
+        <div style={{ fontSize: FS.denseLg, color: 'var(--muted)' }}>
           Risk ruler unavailable: {ruler.reason}
         </div>
       )}
@@ -167,10 +168,10 @@ export default function WhyPanel({ currentUser, symbol, exchange, thesis }) {
                 borderLeft: `3px solid ${SEV_COLOR[w.severity] || 'var(--border)'}`,
                 paddingLeft: '10px',
               }}>
-                <div style={{ fontSize: '12.5px', color: 'var(--text)', fontWeight: 600 }}>
+                <div style={{ fontSize: FS.denseLg, color: 'var(--text)', fontWeight: 600 }}>
                   {w.headline}
                 </div>
-                <div style={{ fontSize: '12.5px', color: 'var(--text-dim)', lineHeight: 1.6 }}>
+                <div style={{ fontSize: FS.denseLg, color: 'var(--text-dim)', lineHeight: 1.6 }}>
                   {w.detail}
                 </div>
               </div>
@@ -183,7 +184,7 @@ export default function WhyPanel({ currentUser, symbol, exchange, thesis }) {
       <div className="hud-card" style={{ padding: '12px 14px' }}>
         <div className="section-label" style={{ marginBottom: '8px' }}>JUSTIFICATION</div>
         {bullets.length === 0 && (
-          <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
+          <div style={{ fontSize: FS.denseLg, color: 'var(--muted)' }}>
             {brief?.error || (busy ? 'Reading…' : 'Nothing to explain yet.')}
           </div>
         )}
@@ -193,7 +194,7 @@ export default function WhyPanel({ currentUser, symbol, exchange, thesis }) {
           return (
             <div key={basis} style={{ marginBottom: '10px' }}>
               <div style={{
-                fontSize: '12.5px', letterSpacing: '0.08em', color: BASIS_COLOR[basis],
+                fontSize: FS.denseLg, letterSpacing: '0.08em', color: BASIS_COLOR[basis],
                 marginBottom: '4px', fontWeight: 700,
               }}>
                 {BASIS_LABEL[basis]}
@@ -202,7 +203,7 @@ export default function WhyPanel({ currentUser, symbol, exchange, thesis }) {
                 flexDirection: 'column', gap: '3px' }}>
                 {group.map((b, i) => (
                   <li key={i} style={{
-                    fontSize: '12.5px', lineHeight: 1.65,
+                    fontSize: FS.denseLg, lineHeight: 1.65,
                     color: basis === 'convention' ? 'var(--muted)'
                       : basis === 'gate' ? 'var(--amber)' : 'var(--text-dim)',
                     fontStyle: basis === 'convention' ? 'italic' : 'normal',
@@ -218,7 +219,7 @@ export default function WhyPanel({ currentUser, symbol, exchange, thesis }) {
 
       {/* Silence must never read as safety. */}
       {unchecked.length > 0 && (
-        <div style={{ fontSize: '12px', color: 'var(--muted)', lineHeight: 1.7 }}>
+        <div style={{ fontSize: FS.dense, color: 'var(--muted)', lineHeight: 1.7 }}>
           <strong style={{ color: 'var(--text-dim)' }}>Not checked</strong> — these are not a
           clean bill of health, they simply could not be looked at:
           <ul style={{ margin: '4px 0 0', paddingLeft: '16px' }}>

@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import ScreenMap, { SCREEN_IDS, screenMap } from './ScreenMap.jsx';
 import { GROUPS, TERMS, searchTerms, term, termsInGroup } from './glossary.js';
+import { FS } from '@config/type.js';
 
 /**
  * HelpPanel — the info screen master asked for (spec Section 104).
@@ -44,7 +45,7 @@ function H({ children }) {
 
 function P({ children, wide }) {
   return (
-    <p style={{ fontSize: '12.5px', lineHeight: 1.75, color: 'var(--text-dim, var(--muted))',
+    <p style={{ fontSize: FS.denseLg, lineHeight: 1.75, color: 'var(--text-dim, var(--muted))',
       maxWidth: wide ? 'none' : '80ch', margin: '0 0 10px' }}>
       {children}
     </p>
@@ -56,10 +57,10 @@ function Step({ n, title, children }) {
     <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
       <span aria-hidden="true" style={{
         flexShrink: 0, width: '20px', height: '20px', borderRadius: '50%',
-        background: 'var(--accent)', color: '#06080c', fontSize: '11.5px', fontWeight: 700,
+        background: 'var(--accent)', color: '#06080c', fontSize: FS.chip, fontWeight: 700,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>{n}</span>
-      <div style={{ fontSize: '12.5px', lineHeight: 1.75 }}>
+      <div style={{ fontSize: FS.denseLg, lineHeight: 1.75 }}>
         <strong style={{ color: 'var(--text)' }}>{title}</strong>
         <div style={{ color: 'var(--text-dim, var(--muted))' }}>{children}</div>
       </div>
@@ -94,7 +95,7 @@ export default function HelpPanel() {
           <button key={s.id} type="button" role="tab" aria-selected={section === s.id}
                   onClick={() => setSection(s.id)}
                   style={{
-                    padding: '5px 12px', fontSize: '12.5px', cursor: 'pointer', borderRadius: '4px',
+                    padding: '5px 12px', fontSize: FS.denseLg, cursor: 'pointer', borderRadius: '4px',
                     border: `1px solid ${section === s.id ? 'var(--accent)' : 'var(--border)'}`,
                     background: section === s.id
                       ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
@@ -161,7 +162,7 @@ export default function HelpPanel() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))',
               gap: '14px' }}>
               <div>
-                <div style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text)',
+                <div style={{ fontSize: FS.denseLg, fontWeight: 700, color: 'var(--text)',
                   marginBottom: '4px' }}>A signal</div>
                 <P>
                   One reading of one instrument, right now. Produced on request, never in the
@@ -170,7 +171,7 @@ export default function HelpPanel() {
                 </P>
               </div>
               <div>
-                <div style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text)',
+                <div style={{ fontSize: FS.denseLg, fontWeight: 700, color: 'var(--text)',
                   marginBottom: '4px' }}>A strategy</div>
                 <P>
                   A rule you could have followed for years. Tested over stored history, with the last
@@ -199,7 +200,7 @@ export default function HelpPanel() {
               <button key={id} type="button" onClick={() => setScreen(id)}
                       aria-pressed={screen === id}
                       style={{
-                        padding: '4px 11px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px',
+                        padding: '4px 11px', fontSize: FS.dense, cursor: 'pointer', borderRadius: '4px',
                         border: `1px solid ${screen === id ? 'var(--accent)' : 'var(--border)'}`,
                         background: screen === id
                           ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
@@ -231,7 +232,7 @@ export default function HelpPanel() {
             <div style={{ border: '1px solid var(--accent)', borderRadius: 'var(--radius)',
               padding: '10px 12px', marginBottom: '12px',
               background: 'color-mix(in srgb, var(--accent) 8%, transparent)' }}>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>
+              <div style={{ fontSize: FS.chrome, fontWeight: 700, color: 'var(--text)' }}>
                 {term(focusTerm).term}
               </div>
               <P>{term(focusTerm).long}</P>
@@ -251,9 +252,9 @@ export default function HelpPanel() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {hits.map((t) => (
                   <div key={t.id}>
-                    <div style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text)' }}>
+                    <div style={{ fontSize: FS.denseLg, fontWeight: 700, color: 'var(--text)' }}>
                       {t.term}
-                      <span style={{ fontWeight: 400, color: 'var(--muted)', fontSize: '12px' }}>
+                      <span style={{ fontWeight: 400, color: 'var(--muted)', fontSize: FS.dense }}>
                         {' '}· {GROUPS.find((g) => g.id === t.group)?.label || t.group}
                       </span>
                     </div>
@@ -268,7 +269,7 @@ export default function HelpPanel() {
               if (items.length === 0) return null;
               return (
                 <details key={g.id} open={g.id === 'concepts'} style={{ marginBottom: '8px' }}>
-                  <summary style={{ cursor: 'pointer', fontSize: '12.5px', fontWeight: 700,
+                  <summary style={{ cursor: 'pointer', fontSize: FS.denseLg, fontWeight: 700,
                     color: 'var(--text)', padding: '4px 0' }}>
                     {g.label}
                     <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {items.length}</span>
@@ -277,12 +278,12 @@ export default function HelpPanel() {
                     padding: '6px 0 6px 12px', borderLeft: '1px solid var(--border)' }}>
                     {items.map((t) => (
                       <div key={t.id}>
-                        <div style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text)' }}>
+                        <div style={{ fontSize: FS.denseLg, fontWeight: 700, color: 'var(--text)' }}>
                           {t.term}
                         </div>
                         <P>{t.long}</P>
                         {(t.seeAlso || []).length > 0 && (
-                          <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                          <div style={{ fontSize: FS.dense, color: 'var(--muted)' }}>
                             see also:{' '}
                             {t.seeAlso.map((sid, i) => (
                               <React.Fragment key={sid}>
@@ -316,7 +317,7 @@ export default function HelpPanel() {
               place because you will meet them one at a time across the product, and it is easier to
               trust a limit you can see the whole of.
             </P>
-            <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12.5px', lineHeight: 1.85,
+            <ul style={{ margin: 0, paddingLeft: '18px', fontSize: FS.denseLg, lineHeight: 1.85,
               color: 'var(--text-dim, var(--muted))' }}>
               <li>
                 <strong style={{ color: 'var(--text)' }}>It never places, changes or cancels a
@@ -369,14 +370,14 @@ export default function HelpPanel() {
                   + 'beyond it are not offered rather than offered and failing.'],
               ].map(([title, termId, body]) => (
                 <div key={title}>
-                  <div style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--amber)' }}>
+                  <div style={{ fontSize: FS.denseLg, fontWeight: 700, color: 'var(--amber)' }}>
                     {title}
                   </div>
                   <P>{body}</P>
                   <button type="button" onClick={() => goToTerm(termId)}
                           style={{ background: 'none', border: 'none', padding: 0,
                             color: 'var(--accent)', cursor: 'pointer', font: 'inherit',
-                            fontSize: '12px' }}>
+                            fontSize: FS.dense }}>
                     glossary: {term(termId)?.term} →
                   </button>
                 </div>
@@ -390,7 +391,7 @@ export default function HelpPanel() {
               Worth knowing even if you never open the STRATEGY tab, because they are why a result from
               this tool will usually look worse than one from a tool that does not do them.
             </P>
-            <ol style={{ margin: 0, paddingLeft: '18px', fontSize: '12.5px', lineHeight: 1.85,
+            <ol style={{ margin: 0, paddingLeft: '18px', fontSize: FS.denseLg, lineHeight: 1.85,
               color: 'var(--text-dim, var(--muted))' }}>
               <li>
                 <strong style={{ color: 'var(--text)' }}>Costs are always applied.</strong> Commission,

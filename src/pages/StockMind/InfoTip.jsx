@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { term } from './glossary.js';
+import { FS } from '@config/type.js';
 
 /**
  * InfoTip — the `?` beside a label, reading from the glossary (spec Section 104).
@@ -52,7 +53,7 @@ export default function InfoTip({ id, side = 'right' }) {
         style={{
           width: '15px', height: '15px', lineHeight: '13px', padding: 0, marginLeft: '4px',
           borderRadius: '50%', border: '1px solid var(--border)', background: 'transparent',
-          color: 'var(--muted)', fontSize: '11px', cursor: 'pointer', flexShrink: 0,
+          color: 'var(--muted)', fontSize: FS.micro /* micro, not chrome: the ? glyph inside a fixed 15x15px box */, cursor: 'pointer', flexShrink: 0,
         }}
       >?</button>
       {open && (
@@ -64,7 +65,7 @@ export default function InfoTip({ id, side = 'right' }) {
             width: '290px', padding: '8px 10px', textAlign: 'left',
             background: 'var(--panel, #131722)', border: '1px solid var(--border)',
             borderRadius: 'var(--radius, 6px)', boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-            fontSize: '12.5px', lineHeight: 1.6, color: 'var(--text-dim, var(--muted))',
+            fontSize: FS.denseLg, lineHeight: 1.6, color: 'var(--text-dim, var(--muted))',
             fontWeight: 400, letterSpacing: 0, textTransform: 'none',
           }}
         >
@@ -73,7 +74,7 @@ export default function InfoTip({ id, side = 'right' }) {
           </strong>
           {t.long}
           <span style={{ display: 'block', marginTop: '6px', color: 'var(--muted)',
-            fontSize: '12px' }}>
+            fontSize: FS.dense }}>
             Full glossary in the HELP tab.
           </span>
         </span>

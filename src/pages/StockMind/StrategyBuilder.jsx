@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import InfoTip from './InfoTip.jsx';
+import { FS } from '@config/type.js';
 
 /**
  * StrategyBuilder — pick the parts, see what the search costs, judge the result, take the Python.
@@ -41,9 +42,9 @@ const pnlColor = (v) => (typeof v !== 'number' || !Number.isFinite(v) ? 'var(--m
 function Field({ label, hint, children }) {
   return (
     <div>
-      <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '3px' }}>{label}</div>
+      <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginBottom: '3px' }}>{label}</div>
       {children}
-      {hint && <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>{hint}</div>}
+      {hint && <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginTop: '2px' }}>{hint}</div>}
     </div>
   );
 }
@@ -182,7 +183,7 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
   };
 
   if (!inBridge) {
-    return <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
+    return <div style={{ fontSize: FS.denseLg, color: 'var(--muted)' }}>
       The strategy builder needs the Rāma desktop app.
     </div>;
   }
@@ -207,12 +208,12 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
           <input className="input" value={name} onChange={(e) => setName(e.target.value)}
                  aria-label="Strategy name" style={{ width: '200px' }} />
           <span style={{ flex: 1 }} />
-          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+          <span style={{ fontSize: FS.dense, color: 'var(--muted)' }}>
             {symbol} · {interval} · {exchange}
           </span>
         </div>
 
-        {catError && <div style={{ fontSize: '12.5px', color: 'var(--red)' }}>{catError}</div>}
+        {catError && <div style={{ fontSize: FS.denseLg, color: 'var(--red)' }}>{catError}</div>}
 
         {/* Groups are collapsed by default. Sixteen blocks laid flat is the density problem all over
             again; grouped by what each is evidence OF is how a trader already thinks about them. */}
@@ -222,7 +223,7 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
                     onClick={() => setOpenGroup(openGroup === g.group ? null : g.group)}
                     aria-pressed={openGroup === g.group}
                     style={{
-                      padding: '3px 10px', fontSize: '12px', cursor: 'pointer', borderRadius: '4px',
+                      padding: '3px 10px', fontSize: FS.dense, cursor: 'pointer', borderRadius: '4px',
                       border: `1px solid ${openGroup === g.group ? 'var(--accent)' : 'var(--border)'}`,
                       background: openGroup === g.group
                         ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
@@ -243,7 +244,7 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
             paddingBottom: '8px' }}>
             {g.blocks.map((b) => (
               <div key={b.id} style={{ display: 'flex', alignItems: 'baseline', gap: '8px',
-                fontSize: '12.5px', lineHeight: 1.6 }}>
+                fontSize: FS.denseLg, lineHeight: 1.6 }}>
                 <button type="button" className="btn btn-sm" onClick={() => addBlock(b)}>+ add</button>
                 <strong style={{ color: 'var(--text)', minWidth: '180px' }}>{b.label}</strong>
                 {!b.backtestable && (
@@ -257,7 +258,7 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
             {/* The reason is printed, not merely hoverable: it is the difference between a limitation
                 master understands and one that looks like a bug. */}
             {g.blocks.filter((b) => !b.backtestable).map((b) => (
-              <div key={`${b.id}-why`} style={{ fontSize: '12px', color: 'var(--amber)',
+              <div key={`${b.id}-why`} style={{ fontSize: FS.dense, color: 'var(--amber)',
                 borderLeft: '2px solid var(--amber)', paddingLeft: '8px', lineHeight: 1.6 }}>
                 <strong>{b.label}:</strong> {b.whyNotBacktestable}
               </div>
@@ -292,7 +293,7 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
         </div>
 
         {picked.length === 0 ? (
-          <div style={{ fontSize: '12.5px', color: 'var(--muted)', lineHeight: 1.7 }}>
+          <div style={{ fontSize: FS.denseLg, color: 'var(--muted)', lineHeight: 1.7 }}>
             Nothing picked yet. Add one block for a simple strategy, or several and combine them —
             a trend-structure block plus a momentum block plus a session filter is a different
             question from any one of them alone, which is the point of building it this way.
@@ -307,7 +308,7 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
                   borderRadius: 'var(--radius)', padding: '9px 11px' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px',
                     marginBottom: '6px', flexWrap: 'wrap' }}>
-                    <strong style={{ fontSize: '12.5px', color: 'var(--text)' }}>{b.label}</strong>
+                    <strong style={{ fontSize: FS.denseLg, color: 'var(--text)' }}>{b.label}</strong>
                     {!b.backtestable && (
                       <span className="badge badge-amber">NOT BACKTESTABLE</span>
                     )}
@@ -342,7 +343,7 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
                             search is something master typed rather than something a range control
                             did for him — and the trial count below moves as he types. */}
                         {(pspec.type === 'int' || pspec.type === 'float') && (
-                          <input className="input" style={{ marginTop: '3px', fontSize: '12px' }}
+                          <input className="input" style={{ marginTop: '3px', fontSize: FS.dense }}
                                  placeholder="sweep: 10,20,30"
                                  aria-label={`Sweep values for ${pname}`}
                                  value={(p.sweep?.[pname] || []).join(',')}
@@ -384,7 +385,7 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
         </div>
         {/* There is deliberately NO target-ROI field. See Section 103: a search that runs until
             something clears a target will always find something in the noise. */}
-        <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px', lineHeight: 1.6 }}>
+        <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginTop: '8px', lineHeight: 1.6 }}>
           There is no target-return field, on purpose. A search that keeps going until something meets
           a target will always find something — in noise as readily as in an edge. Return is reported
           here, never requested.
@@ -396,11 +397,11 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
         flexDirection: 'column', gap: '8px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', flexWrap: 'wrap' }}>
           <div className="section-label">BEFORE YOU RUN IT</div>
-          <span style={{ fontSize: '13px', color: trials > 1 ? 'var(--amber)' : 'var(--text)',
+          <span style={{ fontSize: FS.chrome, color: trials > 1 ? 'var(--amber)' : 'var(--text)',
             fontWeight: 700, display: 'inline-flex', alignItems: 'center' }}>
             {trials.toLocaleString()} variant{trials === 1 ? '' : 's'}<InfoTip id="trials" />
           </span>
-          <span style={{ fontSize: '12px', color: 'var(--muted)', maxWidth: '58ch',
+          <span style={{ fontSize: FS.dense, color: 'var(--muted)', maxWidth: '58ch',
             lineHeight: 1.6 }}>
             {trials === 1
               ? 'One configuration, specified in advance — the strongest form of evidence this tool can produce.'
@@ -411,17 +412,17 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
         </div>
 
         {errors.length > 0 && (
-          <div style={{ fontSize: '12.5px', color: 'var(--red)', lineHeight: 1.7 }}>
+          <div style={{ fontSize: FS.denseLg, color: 'var(--red)', lineHeight: 1.7 }}>
             {errors.map((e, i) => <div key={i}>✕ {e}</div>)}
           </div>
         )}
         {warnings.length > 0 && (
-          <div style={{ fontSize: '12.5px', color: 'var(--amber)', lineHeight: 1.7 }}>
+          <div style={{ fontSize: FS.denseLg, color: 'var(--amber)', lineHeight: 1.7 }}>
             {warnings.map((w, i) => <div key={i}>⚠ {w}</div>)}
           </div>
         )}
         {blocked.length > 0 && (
-          <div style={{ fontSize: '12.5px', color: 'var(--amber)', lineHeight: 1.7 }}>
+          <div style={{ fontSize: FS.denseLg, color: 'var(--amber)', lineHeight: 1.7 }}>
             This cannot be backtested as configured:
             {blocked.map((b) => <div key={b.id}>· <strong>{b.label}</strong> — {b.why}</div>)}
             <div style={{ color: 'var(--muted)' }}>
@@ -445,7 +446,7 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
             {codeBusy ? 'Generating…' : '🐍 Generate Python'}
           </button>
           {!canRequest && (
-            <span style={{ fontSize: '12.5px', color: 'var(--amber)' }}>
+            <span style={{ fontSize: FS.denseLg, color: 'var(--amber)' }}>
               Backtesting needs Operator tier or higher.
             </span>
           )}
@@ -456,7 +457,7 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
       {result && result.ok === false && (
         <div className="hud-card" style={{ padding: '14px', borderColor: 'var(--amber)' }}>
           <div className="section-label" style={{ marginBottom: '6px' }}>NOT RUN</div>
-          <div style={{ fontSize: '12.5px', color: 'var(--amber)', lineHeight: 1.7 }}>
+          <div style={{ fontSize: FS.denseLg, color: 'var(--amber)', lineHeight: 1.7 }}>
             {result.reason}
           </div>
         </div>
@@ -475,29 +476,29 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
               {String(verdict.confidence || '').toUpperCase()}<InfoTip id="confidence" />
             </span>
             <span style={{ flex: 1 }} />
-            <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+            <span style={{ fontSize: FS.dense, color: 'var(--muted)' }}>
               {result.trials} variant{result.trials === 1 ? '' : 's'} searched ·{' '}
               {verdict.trades} holdout trades
             </span>
           </div>
 
-          <div style={{ fontSize: '13px', color: 'var(--text)', lineHeight: 1.7,
+          <div style={{ fontSize: FS.chrome, color: 'var(--text)', lineHeight: 1.7,
             maxWidth: '76ch' }}>
             {verdict.meaning}
           </div>
 
           {(verdict.risks || []).length > 0 && (
-            <ul style={{ margin: '8px 0 0', paddingLeft: '18px', fontSize: '12.5px',
+            <ul style={{ margin: '8px 0 0', paddingLeft: '18px', fontSize: FS.denseLg,
               color: 'var(--amber)', lineHeight: 1.7 }}>
               {verdict.risks.map((r, i) => <li key={i}>{r}</li>)}
             </ul>
           )}
           {(verdict.would_change || []).length > 0 && (
             <>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px' }}>
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginTop: '8px' }}>
                 WHAT WOULD CHANGE THIS
               </div>
-              <ul style={{ margin: '2px 0 0', paddingLeft: '18px', fontSize: '12.5px',
+              <ul style={{ margin: '2px 0 0', paddingLeft: '18px', fontSize: FS.denseLg,
                 color: 'var(--text-dim)', lineHeight: 1.7 }}>
                 {verdict.would_change.map((r, i) => <li key={i}>{r}</li>)}
               </ul>
@@ -507,11 +508,11 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
           {/* The numbers stay available underneath. They are not the headline — a table of statistics
               is not a judgement, which is what `meaning` is for (Section 95). */}
           <details style={{ marginTop: '10px' }}>
-            <summary style={{ cursor: 'pointer', fontSize: '12px', color: 'var(--muted)' }}>
+            <summary style={{ cursor: 'pointer', fontSize: FS.dense, color: 'var(--muted)' }}>
               the numbers
             </summary>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))',
-              gap: '10px', marginTop: '8px', fontSize: '12.5px' }}>
+              gap: '10px', marginTop: '8px', fontSize: FS.denseLg }}>
               <Field label="NET SHARPE"><span>{dec(verdict.net_sharpe)}</span></Field>
               <Field label="NOISE BENCHMARK" hint={`from ${result.trials} tries`}>
                 <span>{dec(verdict.benchmark_sharpe)}</span>
@@ -538,7 +539,7 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
                 <span>{dec(verdict.gross_sharpe)}</span>
               </Field>
             </div>
-            <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px',
+            <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginTop: '8px',
               lineHeight: 1.6 }}>
               {result.note}
             </div>
@@ -552,7 +553,7 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap',
             marginBottom: '8px' }}>
             <div className="section-label">ON THE HOLDOUT, IN MONEY</div>
-            <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+            <span style={{ fontSize: FS.dense, color: 'var(--muted)' }}>
               {result.window?.holdoutBars} bars the search never saw
             </span>
           </div>
@@ -580,7 +581,7 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
               </span>
             </Field>
           </div>
-          <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px', lineHeight: 1.6 }}>
+          <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginTop: '8px', lineHeight: 1.6 }}>
             {result.money.note}
           </div>
         </div>
@@ -597,19 +598,19 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
             </div>
             {code.ok ? (
               <>
-                <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                <span style={{ fontSize: FS.dense, color: 'var(--muted)' }}>
                   {code.filename} · {code.lines} lines · spec {code.specHash}
                 </span>
                 <span style={{ flex: 1 }} />
                 <button type="button" className="btn btn-sm" onClick={copyCode}>copy</button>
               </>
             ) : (
-              <span style={{ fontSize: '12.5px', color: 'var(--red)' }}>{code.reason}</span>
+              <span style={{ fontSize: FS.denseLg, color: 'var(--red)' }}>{code.reason}</span>
             )}
           </div>
           {code.ok && (
             <>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', lineHeight: 1.7,
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', lineHeight: 1.7,
                 marginBottom: '8px' }}>
                 The block logic in this file is copied from the engine functions that ran the backtest,
                 so the file and the verdict cannot disagree. It prints signals and sizes;{' '}
@@ -619,7 +620,7 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
               <pre style={{
                 margin: 0, padding: '10px 12px', maxHeight: '420px', overflow: 'auto',
                 background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)',
-                borderRadius: 'var(--radius)', fontSize: '11.5px', color: 'var(--text-dim)',
+                borderRadius: 'var(--radius)', fontSize: FS.chip, color: 'var(--text-dim)',
                 lineHeight: 1.5,
               }}>{code.code}</pre>
             </>
