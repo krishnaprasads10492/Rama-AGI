@@ -139,6 +139,38 @@ check('no CSS value is below its role floor', underFloor.length === 0, underFloo
 // lightweight-charts' layout.fontSize takes a JS number no var() string can reach.
 eq('CHART_FS equals FLOORS.chart', CHART_FS, FLOORS.chart);
 
+// ── 5b. The legacy aliases still resolve to the px they held before this task ─
+// Spec 136.17. I11's load-bearing seam: these six aliases were retargeted onto the new tokens, and
+// 43 sites in modules this run did NOT migrate still read them (--text-xs 31, --text-sm 8, the rest
+// once each), while html/body/#root takes its font-size from --font-size. Nothing else here can
+// catch a drift: the floors above are INEQUALITIES, so --fs-chrome: 14px passes 14 >= 13 while
+// silently growing all 8 --text-sm sites, and the census below counts literals, which these sites
+// do not have. The pinned numbers are HISTORY — what each alias measured at 6d55bd7 — and so they
+// are the definition of "renders exactly as today".
+console.log('\n--- the legacy aliases are still pixel-neutral for unmigrated modules ---');
+
+const LEGACY_PX = { '--font-size': 15, '--text-xs': 12, '--text-sm': 13, '--text-base': 15, '--text-lg': 17, '--text-xl': 20 };
+
+// Resolution, not spelling: the alias must point at a token this file DECLARES, and that token's
+// parsed px is what gets compared. So retargeting the alias and moving the token it names both go
+// red. A bare `--text-sm: 13px` is pixel-neutral but abandons the single source of truth, and fails
+// saying so rather than passing quietly.
+const aliasDrift = [];
+for (const [alias, wantPx] of Object.entries(LEGACY_PX)) {
+  const m = css.match(new RegExp(`${alias}\\s*:\\s*([^;]+);`));
+  if (!m) { aliasDrift.push(`${alias} is not declared at all`); continue; }
+  const value = m[1].trim();
+  const via = value.match(/^var\((--fs-[a-z0-9-]+)\)$/);
+  if (!via) { aliasDrift.push(`${alias} is "${value}", not a var(--fs-*) reference`); continue; }
+  const role = camel(via[1]);
+  if (!cssFs.has(role)) { aliasDrift.push(`${alias} -> ${via[1]}, which is not declared`); continue; }
+  const gotPx = cssFs.get(role);
+  if (gotPx !== wantPx) aliasDrift.push(`${alias} -> ${via[1]} = ${gotPx}px, was ${wantPx}px`);
+}
+check('all six legacy aliases resolve through a token to their pre-task px',
+  aliasDrift.length === 0, aliasDrift.join('; '));
+eq('and all six are still accounted for', Object.keys(LEGACY_PX).length, 6);
+
 // ── 6-7. The appearance zoom is untouched, so nothing double-scales ───────────
 console.log('\n--- the zoom still composes by multiplication, unchanged ---');
 
