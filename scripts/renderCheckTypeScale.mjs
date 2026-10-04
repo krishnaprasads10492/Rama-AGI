@@ -41,7 +41,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { spawn } from 'child_process';
+import { spawn, execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 import { chromium } from 'playwright';
@@ -129,11 +129,13 @@ async function startDevServer() {
 
 function stopDevServer(proc) {
   if (!proc || proc.exitCode !== null) return;
-  /* npm.cmd is a shell wrapper, so killing it leaves vite running and holding the port. Kill the
-     whole tree. taskkill is best-effort; proc.kill is the fallback. */
+  /* npm.cmd is a shell wrapper, so killing it leaves vite running and still holding the port. The
+     whole tree has to go, and SYNCHRONOUSLY: an async taskkill was measured to lose the race with
+     this process exiting, which left a dev server listening on 5173 after the run. proc.kill alone
+     reaches only the shell. */
   try {
-    spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-  } catch { /* fall through */ }
+    execFileSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+  } catch { /* already gone, or not Windows — proc.kill below is the fallback */ }
   try { proc.kill(); } catch { /* already gone */ }
 }
 
