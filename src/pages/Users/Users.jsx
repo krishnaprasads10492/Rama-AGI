@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useUserStore }  from '@store/userStore.js';
 import { usersApi, keyApi } from '@services/authClient.js';
 import { TIERS, TIER_LABELS, TIER_COLORS, getTierBadge, canManage } from '@services/accessControl.js';
+import { FS, LH } from '@config/type.js';
 
 // ─── Tier badge ───────────────────────────────────────────────────────────────
 function TierBadge({ tier }) {
@@ -10,7 +11,8 @@ function TierBadge({ tier }) {
     <span style={{
       padding:      '2px 8px',
       borderRadius: '2px',
-      fontSize:     '10px',
+      fontSize:     FS.chrome,
+      lineHeight: LH.chrome,
       fontWeight:   700,
       letterSpacing:'0.06em',
       textTransform:'uppercase',
@@ -102,7 +104,7 @@ function UserModal({ editUser, onSave, onClose }) {
         {/* Key handover — the only moment this key exists in readable form */}
         {issuedKey ? (
           <>
-            <div style={{ fontSize: '11px', color: 'var(--text-dim)', lineHeight: '1.7' }}>
+            <div style={{ fontSize: FS.chrome, color: 'var(--text-dim)', lineHeight: '1.7' }}>
               Give <strong>{issuedKey.user?.username}</strong> both their password and
               the key below. They need both to sign in.
             </div>
@@ -120,7 +122,7 @@ function UserModal({ editUser, onSave, onClose }) {
                 Copy key
               </button>
               {issuedKey.expiresAt && (
-                <span style={{ fontSize: '9px', color: 'var(--muted)' }}>
+                <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
                   Expires {new Date(issuedKey.expiresAt).toLocaleDateString()}
                 </span>
               )}
@@ -148,7 +150,7 @@ function UserModal({ editUser, onSave, onClose }) {
             )}
 
             {isEdit && (
-              <div style={{ fontSize: '11px', color: 'var(--text-dim)' }}>
+              <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)' }}>
                 Editing <strong>{editUser.username}</strong>
               </div>
             )}
@@ -160,7 +162,7 @@ function UserModal({ editUser, onSave, onClose }) {
               <input className="input" type="password" value={password} placeholder="••••••••••••"
                 autoComplete="new-password"
                 onChange={e => { setPassword(e.target.value); setError(''); }} />
-              <div style={{ fontSize: '9px', color: 'var(--muted)', marginTop: '4px' }}>
+              <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '4px' }}>
                 10+ characters with upper, lower, number and symbol
               </div>
             </div>
@@ -173,7 +175,7 @@ function UserModal({ editUser, onSave, onClose }) {
                     padding: '8px 6px', border: `1px solid ${tier === value ? TIER_COLORS[value] : 'var(--border)'}`,
                     borderRadius: 'var(--radius)', background: tier === value ? `${TIER_COLORS[value]}15` : 'transparent',
                     color: tier === value ? TIER_COLORS[value] : 'var(--muted)',
-                    cursor: 'pointer', fontFamily: 'var(--font)', fontSize: '11px', textAlign: 'center',
+                    cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome, textAlign: 'center',
                   }}>
                     {TIER_LABELS[value]}
                   </button>
@@ -182,7 +184,7 @@ function UserModal({ editUser, onSave, onClose }) {
               <TierDescriptions tier={tier} />
             </div>
 
-            {error && <div style={{ color: 'var(--red)', fontSize: '11px' }}>{error}</div>}
+            {error && <div style={{ color: 'var(--red)', fontSize: FS.chrome, lineHeight: LH.chrome }}>{error}</div>}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
               <button className="btn btn-sm" onClick={onClose}>Cancel</button>
@@ -206,7 +208,7 @@ function TierDescriptions({ tier }) {
     [TIERS.GUEST]:      'Single-session chat only. No persistence. Masked AGI.',
   };
   return (
-    <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '6px', fontStyle: 'italic' }}>
+    <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', marginTop: '6px', fontStyle: 'italic' }}>
       {descs[tier] || ''}
     </div>
   );
@@ -222,55 +224,56 @@ function UserRow({ user, currentUser, onEdit, onSuspend, onDelete, onIssueKey })
     <tr style={{ borderBottom: '1px solid var(--border)' }}>
       <td style={{ padding: '10px 14px' }}>
         <div style={{ fontWeight: 600, fontSize: '12px', color: 'var(--text)' }}>{user.name}</div>
-        <div style={{ fontSize: '10px', color: 'var(--muted)' }}>{user.username}</div>
+        <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>{user.username}</div>
       </td>
       <td style={{ padding: '10px 14px' }}><TierBadge tier={user.tier} /></td>
       <td style={{ padding: '10px 14px' }}>
         <span style={{
-          fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em',
+          fontSize: FS.chrome, fontWeight: 700, letterSpacing: '0.06em',
+          lineHeight: LH.chrome,
           color: suspended ? 'var(--red)' : 'var(--green)',
         }}>
           {suspended ? 'SUSPENDED' : 'ACTIVE'}
         </span>
         {user.isMaster && (
-          <span style={{ fontSize: '10px', color: 'var(--violet)', marginLeft: '8px' }}>MASTER</span>
+          <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--violet)', marginLeft: '8px' }}>MASTER</span>
         )}
         {/* A password without a key cannot sign in — say so rather than let them find out */}
         {!user.hasKey && (
-          <span style={{ fontSize: '9px', color: 'var(--amber)', marginLeft: '8px' }} title="No access key issued">
+          <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--amber)', marginLeft: '8px' }} title="No access key issued">
             NO KEY
           </span>
         )}
         {user.hasKey && user.keyExpiresAt && user.keyExpiresAt < Date.now() && (
-          <span style={{ fontSize: '9px', color: 'var(--amber)', marginLeft: '8px' }}>KEY EXPIRED</span>
+          <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--amber)', marginLeft: '8px' }}>KEY EXPIRED</span>
         )}
       </td>
-      <td style={{ padding: '10px 14px', fontSize: '10px', color: 'var(--muted)' }}>
+      <td style={{ padding: '10px 14px', fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
         {user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never'}
       </td>
       <td style={{ padding: '10px 14px' }}>
         {canAct && !user.isMaster && (
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            <button className="btn btn-sm" onClick={() => onEdit(user)} style={{ fontSize: '10px' }}>Edit</button>
-            <button className="btn btn-sm" onClick={() => onIssueKey(user)} style={{ fontSize: '10px' }}
+            <button className="btn btn-sm" onClick={() => onEdit(user)} style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>Edit</button>
+            <button className="btn btn-sm" onClick={() => onIssueKey(user)} style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}
               title="Issue a fresh access key for this account">
               Issue key
             </button>
             <button className="btn btn-sm" onClick={() => onSuspend(user)}
-              style={{ fontSize: '10px', color: suspended ? 'var(--green)' : 'var(--amber)',
+              style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: suspended ? 'var(--green)' : 'var(--amber)',
                 borderColor: suspended ? 'var(--green)' : 'var(--amber)' }}>
               {suspended ? 'Unsuspend' : 'Suspend'}
             </button>
             {currentUser.tier === TIERS.MASTER && (
               confirm === user.id ? (
                 <>
-                  <button className="btn btn-sm btn-danger" style={{ fontSize: '10px' }}
+                  <button className="btn btn-sm btn-danger" style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}
                     onClick={() => { onDelete(user); setConfirm(null); }}>Confirm</button>
-                  <button className="btn btn-sm" style={{ fontSize: '10px' }}
+                  <button className="btn btn-sm" style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}
                     onClick={() => setConfirm(null)}>Cancel</button>
                 </>
               ) : (
-                <button className="btn btn-sm btn-danger" style={{ fontSize: '10px' }}
+                <button className="btn btn-sm btn-danger" style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}
                   onClick={() => setConfirm(user.id)}>Delete</button>
               )
             )}
@@ -367,7 +370,7 @@ export default function Users() {
             }}>
               {issuedKey.key}
             </div>
-            <div style={{ fontSize: '10px', color: 'var(--amber)', lineHeight: '1.7' }}>
+            <div style={{ fontSize: FS.chrome, color: 'var(--amber)', lineHeight: '1.7' }}>
               Shown once. Their previous key stopped working the moment this was
               issued. Only an HMAC is stored, so it cannot be looked up later.
             </div>
@@ -405,7 +408,7 @@ export default function Users() {
             <TierBadge tier={parseInt(tier)} />
           </div>
         ))}
-        <span style={{ fontSize: '10px', color: 'var(--muted)', marginLeft: 'auto' }}>
+        <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginLeft: 'auto' }}>
           Lower tier = higher privilege
         </span>
       </div>
@@ -425,7 +428,7 @@ export default function Users() {
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
                 {['User', 'Tier', 'Status', 'Last Login', 'Actions'].map(h => (
-                  <th key={h} style={{ padding: '10px 14px', fontSize: '10px', color: 'var(--muted)',
+                  <th key={h} style={{ padding: '10px 14px', fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)',
                     letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700, textAlign: 'left' }}>{h}</th>
                 ))}
               </tr>

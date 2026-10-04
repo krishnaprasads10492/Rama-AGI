@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { gitClient, fsClient } from '@services/ipcClient.js';
 import { useUserStore } from '@store/userStore.js';
+import { FS, LH } from '@config/type.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -38,7 +39,7 @@ function ReleasePanel({ repoPath }) {
     <div className="hud-card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div className="section-label">RELEASE CHANNEL</div>
 
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 11 }}>
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: FS.chrome, lineHeight: LH.chrome }}>
         <div><span style={{ color: 'var(--muted)' }}>Current version: </span>
           <span style={{ color: 'var(--text)', fontWeight: 700 }}>{state?.version || '—'}</span></div>
         <div><span style={{ color: 'var(--muted)' }}>Last tag: </span>
@@ -256,7 +257,7 @@ function LocalUpdatePanel({ repoPath }) {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 11 }}>
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: FS.chrome, lineHeight: LH.chrome }}>
         <div><span style={{ color: 'var(--muted)' }}>Branch: </span>
           <span style={{ color: 'var(--text)' }}>{state?.branch || '—'}</span></div>
         <div><span style={{ color: 'var(--muted)' }}>Behind: </span>

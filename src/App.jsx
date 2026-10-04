@@ -30,6 +30,7 @@ import Unlock  from '@pages/Unlock/Unlock.jsx';
 // Every page/route/tier comes from ONE registry — src/config/registry.js
 import { routablePages, visiblePages, lazyFor, registryIssues, pageByRoute } from '@config/registry.js';
 import { useLayoutBand } from '@hooks/useLayoutBand.js';
+import { FS, LH } from '@config/type.js';
 
 const Chat = lazyFor('chat');
 
@@ -50,7 +51,7 @@ const PageLoader = () => (
       borderRadius:   '50%',
       animation: 'spin 0.7s linear infinite',
     }} />
-    <span style={{ color: 'var(--muted)', fontSize: '11px', letterSpacing: '0.1em' }}>
+    <span style={{ color: 'var(--muted)', fontSize: FS.chrome, lineHeight: LH.chrome, letterSpacing: '0.1em' }}>
       LOADING MODULE...
     </span>
     <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
@@ -67,7 +68,7 @@ const Forbidden = ({ page }) => (
     <div style={{ color: 'var(--text)', fontSize: '14px', fontWeight: 700 }}>
       Access restricted
     </div>
-    <div style={{ color: 'var(--muted)', fontSize: '11px', maxWidth: '320px' }}>
+    <div style={{ color: 'var(--muted)', fontSize: FS.chrome, lineHeight: LH.chrome, maxWidth: '320px' }}>
       {page?.label ?? 'This module'} requires a higher access tier.
       Rāma will not expose it to the current session.
     </div>

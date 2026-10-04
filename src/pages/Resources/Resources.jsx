@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { emitActivity } from '@components/ActivityStream.jsx';
+import { FS, LH } from '@config/type.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -42,8 +43,8 @@ function ArcGauge({ value, max = 100, color, label, sub, size = 90 }) {
           </span>
         </div>
       </div>
-      <span style={{ fontSize: 10, color: 'var(--text-dim)', letterSpacing: '0.08em' }}>{label}</span>
-      {sub && <span style={{ fontSize: 9, color: 'var(--muted)' }}>{sub}</span>}
+      <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', letterSpacing: '0.08em' }}>{label}</span>
+      {sub && <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>{sub}</span>}
     </div>
   );
 }
@@ -55,8 +56,8 @@ function ApiLimitBar({ provider, data }) {
   return (
     <div style={{ marginBottom: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-        <span style={{ fontSize: 11, color: 'var(--text)', fontWeight: 600 }}>{provider}</span>
-        <span style={{ fontSize: 11, color }}>
+        <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text)', fontWeight: 600 }}>{provider}</span>
+        <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color }}>
           {data.used}/{data.cap} req/min ({pct}%)
         </span>
       </div>
@@ -88,23 +89,23 @@ function TaskRow({ task, onCancel }) {
         animation: task.status === 'running' ? 'pulse-ring 1.2s ease infinite' : 'none',
         flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {task.type}{task.description ? ` — ${task.description}` : ''}
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
-          <span style={{ fontSize: 9, color: priorityColor, fontWeight: 700, textTransform: 'uppercase' }}>
+          <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: priorityColor, fontWeight: 700, textTransform: 'uppercase' }}>
             {PRIORITY_LABELS[task.priority ?? 2]}
           </span>
           {task.aiProvider && (
-            <span style={{ fontSize: 9, color: 'var(--muted)' }}>{task.aiProvider}</span>
+            <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>{task.aiProvider}</span>
           )}
           {elapsed !== null && (
-            <span style={{ fontSize: 9, color: 'var(--muted)' }}>{elapsed}s</span>
+            <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>{elapsed}s</span>
           )}
         </div>
       </div>
       {task.status === 'queued' && onCancel && (
-        <button className="btn btn-sm" style={{ fontSize: 9, padding: '2px 6px' }}
+        <button className="btn btn-sm" style={{ fontSize: FS.chrome, lineHeight: LH.chrome, padding: '2px 6px' }}
           onClick={() => onCancel(task.id)}>✕</button>
       )}
     </div>
@@ -129,19 +130,19 @@ function SubmitTaskPanel({ onSubmit }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', gap: 8 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>TYPE</div>
+            <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginBottom: 4 }}>TYPE</div>
             <select value={type} onChange={e => setType(e.target.value)}
               style={{ width: '100%', background: 'var(--elevated)', border: '1px solid var(--border)',
-                color: 'var(--text)', fontFamily: 'var(--font)', fontSize: 11, padding: '6px 8px',
+                color: 'var(--text)', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome, padding: '6px 8px',
                 borderRadius: 'var(--radius)', outline: 'none' }}>
               {TASK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>PRIORITY</div>
+            <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginBottom: 4 }}>PRIORITY</div>
             <select value={priority} onChange={e => setPriority(parseInt(e.target.value))}
               style={{ width: '100%', background: 'var(--elevated)', border: '1px solid var(--border)',
-                color: PRIORITY_COLORS[priority], fontFamily: 'var(--font)', fontSize: 11,
+                color: PRIORITY_COLORS[priority], fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome,
                 padding: '6px 8px', borderRadius: 'var(--radius)', outline: 'none' }}>
               {PRIORITY_LABELS.map((l, i) => <option key={i} value={i}>{l}</option>)}
             </select>
@@ -149,10 +150,10 @@ function SubmitTaskPanel({ onSubmit }) {
         </div>
 
         <input className="input" value={description} onChange={e => setDescription(e.target.value)}
-          placeholder="Task description..." style={{ fontSize: 11 }} />
+          placeholder="Task description..." style={{ fontSize: FS.chrome, lineHeight: LH.chrome }} />
 
         <input className="input" value={provider} onChange={e => setProvider(e.target.value)}
-          placeholder="AI provider (optional: openai, anthropic, groq, ollama...)" style={{ fontSize: 11 }} />
+          placeholder="AI provider (optional: openai, anthropic, groq, ollama...)" style={{ fontSize: FS.chrome, lineHeight: LH.chrome }} />
 
         <button className="btn btn-primary btn-sm" style={{ alignSelf: 'flex-end' }}
           onClick={() => { onSubmit({ type, description, priority, aiProvider: provider || undefined }); setDescription(''); }}>
@@ -183,13 +184,13 @@ function ResourceRow({ resource, onResearch, researching }) {
       borderBottom: '1px solid var(--border)' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600 }}>{resource.name}</div>
-        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{resource.notes}</div>
+        <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: 2 }}>{resource.notes}</div>
       </div>
       <div style={{ padding: '2px 8px', background: `${st.color}18`, border: `1px solid ${st.color}44`,
-        borderRadius: 2, fontSize: 9, fontWeight: 700, color: st.color, letterSpacing: '0.05em', flexShrink: 0 }}>
+        borderRadius: 2, fontSize: FS.chrome, lineHeight: LH.chrome, fontWeight: 700, color: st.color, letterSpacing: '0.05em', flexShrink: 0 }}>
         {st.label}
       </div>
-      <button className="btn btn-sm" style={{ fontSize: 10, flexShrink: 0 }}
+      <button className="btn btn-sm" style={{ fontSize: FS.chrome, lineHeight: LH.chrome, flexShrink: 0 }}
         disabled={researching}
         onClick={() => onResearch(resource)}>
         {researching ? '…' : '🔎 Research'}
@@ -206,7 +207,7 @@ function ResourceReportPanel({ report }) {
         <div style={{ fontSize: 12, color: 'var(--red)', fontWeight: 700, marginBottom: 6 }}>
           Could not read docs: {report.reason}
         </div>
-        {report.hint && <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{report.hint}</div>}
+        {report.hint && <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)' }}>{report.hint}</div>}
       </div>
     );
   }
@@ -215,30 +216,30 @@ function ResourceReportPanel({ report }) {
     <div className="hud-card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div className="section-label">RESEARCH REPORT — {report.url}</div>
       {s.pricesFound?.length > 0 && (
-        <div><span style={{ fontSize: 10, color: 'var(--muted)' }}>PRICES FOUND: </span>
-          <span style={{ fontSize: 11, color: 'var(--text)' }}>{s.pricesFound.join(', ')}</span></div>
+        <div><span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>PRICES FOUND: </span>
+          <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text)' }}>{s.pricesFound.join(', ')}</span></div>
       )}
       {s.rateLimitsFound?.length > 0 && (
-        <div><span style={{ fontSize: 10, color: 'var(--muted)' }}>RATE LIMITS: </span>
-          <span style={{ fontSize: 11, color: 'var(--text)' }}>{s.rateLimitsFound.join(', ')}</span></div>
+        <div><span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>RATE LIMITS: </span>
+          <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text)' }}>{s.rateLimitsFound.join(', ')}</span></div>
       )}
       {s.freeTierMentions?.length > 0 && (
         <div>
-          <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>FREE TIER MENTIONS</div>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginBottom: 3 }}>FREE TIER MENTIONS</div>
           {s.freeTierMentions.map((m, i) => (
-            <div key={i} style={{ fontSize: 10, color: 'var(--text-dim)', padding: '3px 0' }}>… {m} …</div>
+            <div key={i} style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', padding: '3px 0' }}>… {m} …</div>
           ))}
         </div>
       )}
       {s.apiKeyMentions?.length > 0 && (
         <div>
-          <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>CREDENTIAL / AUTH MENTIONS</div>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginBottom: 3 }}>CREDENTIAL / AUTH MENTIONS</div>
           {s.apiKeyMentions.map((m, i) => (
-            <div key={i} style={{ fontSize: 10, color: 'var(--text-dim)', padding: '3px 0' }}>… {m} …</div>
+            <div key={i} style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', padding: '3px 0' }}>… {m} …</div>
           ))}
         </div>
       )}
-      <div style={{ fontSize: 10, color: 'var(--muted)', fontStyle: 'italic' }}>{report.disclaimer}</div>
+      <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', fontStyle: 'italic' }}>{report.disclaimer}</div>
     </div>
   );
 }
@@ -278,13 +279,13 @@ function ResearchTab() {
         <div className="section-label" style={{ marginBottom: 10 }}>RESEARCH AN ARBITRARY URL</div>
         <div style={{ display: 'flex', gap: 8 }}>
           <input className="input" value={customUrl} onChange={e => setCustomUrl(e.target.value)}
-            placeholder="https://provider.com/pricing" style={{ flex: 1, fontSize: 11 }} />
+            placeholder="https://provider.com/pricing" style={{ flex: 1, fontSize: FS.chrome, lineHeight: LH.chrome }} />
           <button className="btn btn-primary btn-sm" disabled={!customUrl || researching}
             onClick={() => runResearch(null)}>
             {researching === 'custom' ? '…' : 'Read Docs'}
           </button>
         </div>
-        <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.6 }}>
+        <div style={{ fontSize: FS.chrome, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.6 }}>
           Rāma fetches the page live and extracts pricing, rate limits, and credential
           requirements — it never answers this from training data alone.
         </div>
@@ -293,7 +294,7 @@ function ResearchTab() {
       {catalog && Object.entries(catalog.axes || {}).map(([axisId, axis]) => (
         <div key={axisId} className="hud-card" style={{ overflow: 'hidden' }}>
           <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)',
-            fontSize: 10, color: 'var(--muted)', fontWeight: 700, letterSpacing: '0.1em' }}>
+            fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', fontWeight: 700, letterSpacing: '0.1em' }}>
             {axis.label?.toUpperCase()}
           </div>
           {(axis.resources || []).map(r => (
@@ -305,7 +306,7 @@ function ResearchTab() {
 
       <ResourceReportPanel report={report} />
 
-      <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.7, padding: '10px 14px',
+      <div style={{ fontSize: FS.chrome, color: 'var(--text-dim)', lineHeight: 1.7, padding: '10px 14px',
         background: 'var(--elevated)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
         <span style={{ color: 'var(--accent)', fontWeight: 700 }}>How enabling works:</span>{' '}
         Research never writes anything. Turning a finding into a real integration goes through
@@ -407,13 +408,13 @@ export default function Resources() {
           <div style={{ fontWeight: 700, color: pst.color, letterSpacing: '0.1em' }}>
             RESOURCE ORCHESTRATOR
           </div>
-          <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
             Dynamic multi-resource scheduling · {s?.workers?.current ?? 0}/{s?.workers?.max ?? 0} workers active
           </div>
         </div>
         <div style={{ flex: 1 }} />
         <div style={{ padding: '3px 12px', background: `${pst.color}18`, border: `1px solid ${pst.color}44`,
-          borderRadius: 2, fontSize: 11, fontWeight: 700, color: pst.color, letterSpacing: '0.1em' }}>
+          borderRadius: 2, fontSize: FS.chrome, lineHeight: LH.chrome, fontWeight: 700, color: pst.color, letterSpacing: '0.1em' }}>
           {pst.label}
         </div>
         <button className="btn btn-sm" onClick={load}>↺</button>
@@ -426,7 +427,7 @@ export default function Resources() {
             padding: '9px 14px', border: 'none', background: 'transparent',
             color: tab === t ? 'var(--accent)' : 'var(--muted)',
             borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
-            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: '11px', textTransform: 'uppercase',
+            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome, textTransform: 'uppercase',
           }}>{t}</button>
         ))}
       </div>
@@ -461,14 +462,14 @@ export default function Resources() {
                     border: `1px solid ${count > 0 ? PRIORITY_COLORS[i] + '44' : 'var(--border)'}`,
                     borderRadius: 'var(--radius)' }}>
                     <div style={{ fontSize: 20, fontWeight: 700, color: PRIORITY_COLORS[i] }}>{count}</div>
-                    <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 3 }}>{label}</div>
+                    <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: 3 }}>{label}</div>
                   </div>
                 ))}
               </div>
             </div>
 
             {/* Adaptive worker note */}
-            <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.7, padding: '10px 14px',
+            <div style={{ fontSize: FS.chrome, color: 'var(--text-dim)', lineHeight: 1.7, padding: '10px 14px',
               background: 'var(--elevated)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
               <span style={{ color: 'var(--accent)', fontWeight: 700 }}>Adaptive workers:</span>{' '}
               {/* `os.cpus()` used to be called here. `os` is a Node builtin and does not exist in
@@ -494,7 +495,7 @@ export default function Resources() {
             {s.running?.length > 0 && (
               <div className="hud-card" style={{ overflow: 'hidden' }}>
                 <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)',
-                  fontSize: 10, color: 'var(--muted)', fontWeight: 700, letterSpacing: '0.1em' }}>
+                  fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', fontWeight: 700, letterSpacing: '0.1em' }}>
                   RUNNING ({s.running.length})
                 </div>
                 {s.running.map(t => <TaskRow key={t.id} task={t} />)}
@@ -505,7 +506,7 @@ export default function Resources() {
             {s.queue?.history?.length > 0 && (
               <div className="hud-card" style={{ overflow: 'hidden' }}>
                 <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)',
-                  fontSize: 10, color: 'var(--muted)', fontWeight: 700, letterSpacing: '0.1em' }}>
+                  fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', fontWeight: 700, letterSpacing: '0.1em' }}>
                   RECENT
                 </div>
                 {s.queue.history.map((t, i) => <TaskRow key={i} task={t} />)}
@@ -523,7 +524,7 @@ export default function Resources() {
                 <ApiLimitBar key={provider} provider={provider} data={data} />
               ))}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.7, padding: '10px 14px',
+            <div style={{ fontSize: FS.chrome, color: 'var(--text-dim)', lineHeight: 1.7, padding: '10px 14px',
               background: 'var(--elevated)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
               <span style={{ color: 'var(--accent)', fontWeight: 700 }}>Cost optimization:</span>{' '}
               Rāma uses only 80% of each provider's limit as a safety buffer. When a provider
@@ -540,7 +541,7 @@ export default function Resources() {
         {tab === 'events' && (
           <div className="hud-card" style={{ overflow: 'hidden' }}>
             <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)',
-              fontSize: 10, color: 'var(--muted)', fontWeight: 700, letterSpacing: '0.1em' }}>
+              fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', fontWeight: 700, letterSpacing: '0.1em' }}>
               ORCHESTRATOR EVENTS (live)
             </div>
             {events.length === 0 ? (
@@ -550,13 +551,13 @@ export default function Resources() {
             ) : events.map((e, i) => (
               <div key={i} style={{ padding: '5px 14px', borderBottom: '1px solid var(--border)',
                 display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 9, color: 'var(--muted)', flexShrink: 0, minWidth: 80 }}>
+                <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', flexShrink: 0, minWidth: 80 }}>
                   {new Date(e.ts).toLocaleTimeString()}
                 </span>
-                <span style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }}>
+                <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--accent)', flexShrink: 0 }}>
                   {e.channel.replace('orchestrator:', '')}
                 </span>
-                <span style={{ fontSize: 10, color: 'var(--text-dim)', overflow: 'hidden',
+                <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', overflow: 'hidden',
                   textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {JSON.stringify(e.data).slice(0, 80)}
                 </span>
@@ -595,8 +596,8 @@ function ConfigurePanel({ thresholds, workers, onSave }) {
       ].map(f => (
         <div key={f.label} style={{ marginBottom: 14 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-            <span style={{ fontSize: 11, color: 'var(--text)' }}>{f.label}</span>
-            <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 700 }}>{f.value}</span>
+            <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text)' }}>{f.label}</span>
+            <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--accent)', fontWeight: 700 }}>{f.value}</span>
           </div>
           <input type="range" min={f.min} max={f.max} value={f.value}
             onChange={e => f.set(parseInt(e.target.value))}

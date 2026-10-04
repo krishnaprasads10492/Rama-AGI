@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import RamaOrb from '@components/RamaOrb.jsx';
+import { FS, LH } from '@config/type.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -81,7 +82,7 @@ export default function Unlock({ onUnlocked }) {
       <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: 'var(--bg)', flexDirection: 'column', gap: '16px' }}>
         <RamaOrb size={40} active />
-        <span style={{ color: 'var(--muted)', fontSize: '11px', letterSpacing: '0.1em' }}>
+        <span style={{ color: 'var(--muted)', fontSize: FS.chrome, lineHeight: LH.chrome, letterSpacing: '0.1em' }}>
           INITIALIZING...
         </span>
       </div>
@@ -112,11 +113,11 @@ export default function Unlock({ onUnlocked }) {
             <div className="title-glow" style={{ fontSize: '22px' }}>
               RĀMA AGI
             </div>
-            <div style={{ fontSize: '11px', color: 'rgba(212,169,64,0.7)', marginTop: '4px',
+            <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'rgba(212,169,64,0.7)', marginTop: '4px',
               letterSpacing: '0.2em', fontFamily: 'var(--font-display)', textTransform: 'uppercase' }}>
               SUPER AGI
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '8px', letterSpacing: '0.05em' }}>
+            <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', marginTop: '8px', letterSpacing: '0.05em' }}>
               {isFirstRun
                 ? 'First launch — set your master passcode'
                 : 'Enter master passcode to unlock'}
@@ -130,7 +131,8 @@ export default function Unlock({ onUnlocked }) {
             background:   'rgba(0,200,255,0.05)',
             border:       '1px solid rgba(0,200,255,0.15)',
             borderRadius: 'var(--radius)',
-            fontSize:     '10px', color: 'rgba(0,200,255,0.7)',
+            fontSize:     FS.chrome, color: 'rgba(0,200,255,0.7)',
+            lineHeight: LH.chrome,
             letterSpacing:'0.06em',
           }}>
             <span style={{ color: 'var(--gold)', fontSize: '12px' }}>⬢</span>
@@ -187,7 +189,7 @@ export default function Unlock({ onUnlocked }) {
           )}
 
           {error && (
-            <div style={{ color: 'var(--red)', fontSize: '11px', padding: '8px 10px',
+            <div style={{ color: 'var(--red)', fontSize: FS.chrome, lineHeight: LH.chrome, padding: '8px 10px',
               background: 'rgba(255,0,60,0.08)', border: '1px solid rgba(255,0,60,0.25)',
               borderRadius: 'var(--radius)' }}>
               {error}
@@ -212,7 +214,7 @@ export default function Unlock({ onUnlocked }) {
         </div>
 
         {/* Security note */}
-        <div style={{ fontSize: '10px', color: 'var(--muted)', textAlign: 'center', lineHeight: '1.7' }}>
+        <div style={{ fontSize: FS.chrome, color: 'var(--muted)', textAlign: 'center', lineHeight: '1.7' }}>
           {isFirstRun
             ? 'This passcode encrypts ALL data. Store it securely.\nThere is no recovery without it.'
             : 'All data is encrypted at rest.\nThis passcode is never stored anywhere.'}

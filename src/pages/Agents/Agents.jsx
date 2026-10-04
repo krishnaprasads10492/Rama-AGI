@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAgentStore } from '@store/agentStore.js';
 import { useUserStore } from '@store/userStore.js';
+import { FS, LH } from '@config/type.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -51,7 +52,7 @@ function ApprovalBanner({ items, onResolve }) {
   return (
     <div style={{ background: 'rgba(255,170,0,0.1)', border: '1px solid rgba(255,170,0,0.4)',
       borderRadius: 'var(--radius)', padding: '12px 16px', marginBottom: '16px' }}>
-      <div style={{ color: 'var(--amber)', fontWeight: 700, fontSize: '11px', marginBottom: '8px' }}>
+      <div style={{ color: 'var(--amber)', fontWeight: 700, fontSize: FS.chrome, lineHeight: LH.chrome, marginBottom: '8px' }}>
         ⚠ AGENT ACTION REQUIRES YOUR APPROVAL ({items.length})
       </div>
       {items.map(item => (
@@ -86,11 +87,12 @@ function AgentCard({ agent, onKill }) {
               background: `${STATUS_COLOR[agent.status]}22`,
               color: STATUS_COLOR[agent.status],
               border: `1px solid ${STATUS_COLOR[agent.status]}44`,
-              fontSize: '9px',
+              fontSize: FS.chrome,
+              lineHeight: LH.chrome,
             }}>{agent.status.toUpperCase()}</span>
-            <span style={{ fontSize: '10px', color: 'var(--muted)', marginLeft: 'auto' }}>{elapsed}s</span>
+            <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginLeft: 'auto' }}>{elapsed}s</span>
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {agent.task}
           </div>
         </div>
@@ -114,13 +116,13 @@ function AgentCard({ agent, onKill }) {
             </div>
           )}
           {agent.error && (
-            <div style={{ color: 'var(--red)', fontSize: '11px', marginBottom: '8px' }}>✕ {agent.error}</div>
+            <div style={{ color: 'var(--red)', fontSize: FS.chrome, lineHeight: LH.chrome, marginBottom: '8px' }}>✕ {agent.error}</div>
           )}
           {agent.steps?.length > 0 && (
             <div>
               <div className="section-label" style={{ marginBottom: '6px' }}>STEPS</div>
               {agent.steps.map((s, i) => (
-                <div key={i} style={{ fontSize: '10px', color: 'var(--muted)', padding: '2px 0',
+                <div key={i} style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', padding: '2px 0',
                   borderLeft: '2px solid var(--border)', paddingLeft: '8px', marginBottom: '2px' }}>
                   <span style={{ color: 'var(--accent)' }}>{s.label}</span>
                   {' — '}
@@ -174,7 +176,7 @@ function SpawnModal({ onClose, onSpawn }) {
                 padding: '8px 6px', border: `1px solid ${type === at.type ? at.color : 'var(--border)'}`,
                 borderRadius: 'var(--radius)', background: type === at.type ? `${at.color}11` : 'transparent',
                 color: type === at.type ? at.color : 'var(--muted)', cursor: 'pointer',
-                fontFamily: 'var(--font)', fontSize: '11px', textAlign: 'center',
+                fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome, textAlign: 'center',
               }}>
                 <div>{at.icon}</div>
                 <div style={{ marginTop: '3px' }}>{at.label}</div>
@@ -207,7 +209,7 @@ function SpawnModal({ onClose, onSpawn }) {
                 { v: 'readability',  label: 'Readability' },
               ].map(o => (
                 <button key={o.v} onClick={() => setRefine(o.v)} style={{
-                  flex: 1, padding: '6px', fontSize: '11px', cursor: 'pointer',
+                  flex: 1, padding: '6px', fontSize: FS.chrome, lineHeight: LH.chrome, cursor: 'pointer',
                   border: `1px solid ${refine === o.v ? 'var(--accent)' : 'var(--border)'}`,
                   borderRadius: 'var(--radius)',
                   background: refine === o.v ? 'rgba(0,200,255,0.08)' : 'transparent',
@@ -218,7 +220,7 @@ function SpawnModal({ onClose, onSpawn }) {
                 </button>
               ))}
             </div>
-            <div style={{ fontSize: '9px', color: 'var(--muted)', marginTop: '4px' }}>
+            <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '4px' }}>
               The agent scores its own draft and revises up to 3 times against the
               weaknesses found. No fabricated "engagement" score — credibility reuses
               Rāma's source-vetting table, readability is a plain sentence/jargon heuristic.
@@ -286,7 +288,7 @@ export default function Agents() {
         <span style={{ fontWeight: 700, color: 'var(--violet)', letterSpacing: '0.1em' }}>AGENT CONTROL</span>
         <span className="badge badge-violet">{active} ACTIVE</span>
         {resources && (
-          <span style={{ fontSize: '10px', color: 'var(--muted)' }}>
+          <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
             {active}/{resources.maxAgents} agents · {resources.ramFreeMB}MB free RAM
           </span>
         )}
@@ -304,7 +306,7 @@ export default function Agents() {
             padding: '8px 16px', border: 'none', background: 'transparent',
             color: filter === f ? 'var(--violet)' : 'var(--muted)',
             borderBottom: filter === f ? '2px solid var(--violet)' : '2px solid transparent',
-            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: '11px', textTransform: 'uppercase',
+            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome, textTransform: 'uppercase',
           }}>{f} ({agentList.filter(a => f === 'all' || a.status === f).length})</button>
         ))}
       </div>
@@ -316,7 +318,7 @@ export default function Agents() {
         {/* Resource governor */}
         {resources && (
           <div className="hud-card" style={{ padding: '12px 16px', marginBottom: '16px', display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
-            <div style={{ fontSize: '10px', color: 'var(--muted)', letterSpacing: '0.1em', flex: '0 0 100%' }}>
+            <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', letterSpacing: '0.1em', flex: '0 0 100%' }}>
               RESOURCE GOVERNOR
             </div>
             {[
@@ -327,7 +329,7 @@ export default function Agents() {
               ['Timeout',       `${resources.governor.AGENT_TIMEOUT_MS / 1000}s`],
             ].map(([k, v]) => (
               <div key={k} style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '10px', color: 'var(--muted)' }}>{k}</div>
+                <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>{k}</div>
                 <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--accent)' }}>{v}</div>
               </div>
             ))}

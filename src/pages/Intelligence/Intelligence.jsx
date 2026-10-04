@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { FS, LH } from '@config/type.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -47,7 +48,7 @@ function ClaimClassMark({ claimClass }) {
       alignItems: 'center', gap: 4, padding: '10px 6px', background: 'var(--surface)',
       border: `1px solid ${c.color}`, borderRadius: 'var(--radius)' }}>
       <span style={{ fontSize: 20, color: c.color, lineHeight: 1 }} aria-hidden="true">{c.mark}</span>
-      <span style={{ fontSize: 10, fontWeight: 700, color: c.color, letterSpacing: '0.06em',
+      <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, fontWeight: 700, color: c.color, letterSpacing: '0.06em',
         textAlign: 'center' }}>{c.label}</span>
     </div>
   );
@@ -61,11 +62,11 @@ function SourceBadge({ source }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px',
       background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-      fontSize: 11 }}>
+      fontSize: FS.chrome, lineHeight: LH.chrome }}>
       <div style={{ width: 6, height: 6, borderRadius: '50%', background: credColor, flexShrink: 0 }} />
       <span style={{ color: 'var(--text)', fontWeight: 600 }}>{source.domain}</span>
-      <span style={{ color: credColor, fontSize: 10, marginLeft: 'auto' }}>{source.credibility}%</span>
-      <span style={{ color: 'var(--muted)', fontSize: 10 }}>{source.bias}</span>
+      <span style={{ color: credColor, fontSize: FS.chrome, lineHeight: LH.chrome, marginLeft: 'auto' }}>{source.credibility}%</span>
+      <span style={{ color: 'var(--muted)', fontSize: FS.chrome, lineHeight: LH.chrome }}>{source.bias}</span>
     </div>
   );
 }
@@ -81,15 +82,15 @@ function PipelineStep({ step, data, isActive }) {
         {isActive ? '⬡' : (icons[step] || '·')}
       </span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: colors[step] || 'var(--muted)',
+        <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, fontWeight: 700, color: colors[step] || 'var(--muted)',
           textTransform: 'uppercase', letterSpacing: '0.06em' }}>{step}</span>
         {data?.message && (
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>{data.message}</div>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', marginTop: 2 }}>{data.message}</div>
         )}
         {data?.subQueries && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
             {data.subQueries.map((q, i) => (
-              <span key={i} style={{ fontSize: 10, color: 'var(--accent)', background: 'rgba(0,255,255,0.06)',
+              <span key={i} style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--accent)', background: 'rgba(0,255,255,0.06)',
                 border: '1px solid rgba(0,255,255,0.2)', borderRadius: 2, padding: '1px 6px' }}>{q}</span>
             ))}
           </div>
@@ -186,7 +187,7 @@ export default function Intelligence() {
           <div style={{ fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.1em' }}>
             UNIVERSAL INTELLIGENCE ENGINE
           </div>
-          <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
             Multi-source gathering · Human-emulated fetch · Every finding attributed or withheld
           </div>
         </div>
@@ -201,7 +202,7 @@ export default function Intelligence() {
             padding: '9px 18px', border: 'none', background: 'transparent',
             color: tab === t ? 'var(--accent)' : 'var(--muted)',
             borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
-            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: '11px', textTransform: 'uppercase',
+            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome, textTransform: 'uppercase',
           }}>{t}</button>
         ))}
       </div>
@@ -229,7 +230,7 @@ export default function Intelligence() {
                     border: `1px solid ${category === c.id ? c.color : 'var(--border)'}`,
                     borderRadius: 'var(--radius)', background: category === c.id ? `${c.color}18` : 'transparent',
                     color: category === c.id ? c.color : 'var(--muted)',
-                    cursor: 'pointer', fontFamily: 'var(--font)', fontSize: 11,
+                    cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome,
                   }}>
                     <span>{c.icon}</span><span>{c.label}</span>
                   </button>
@@ -247,7 +248,7 @@ export default function Intelligence() {
                     cursor: 'pointer', fontFamily: 'var(--font)', textAlign: 'center',
                   }}>
                     <div style={{ fontWeight: 700, fontSize: 12 }}>{d.label}</div>
-                    <div style={{ fontSize: 10, marginTop: 2 }}>{d.desc}</div>
+                    <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, marginTop: 2 }}>{d.desc}</div>
                   </button>
                 ))}
               </div>
@@ -259,7 +260,7 @@ export default function Intelligence() {
               </button>
             </div>
 
-            <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.7, padding: '0 4px' }}>
+            <div style={{ fontSize: FS.chrome, color: 'var(--muted)', lineHeight: 1.7, padding: '0 4px' }}>
               ⚠ Intelligence analysis is for informational purposes only. Sources are gathered
               from public outlets and vetted for credibility. No guarantees of accuracy.
               Always verify independently before making decisions.
@@ -281,7 +282,7 @@ export default function Intelligence() {
               )}
               {running && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0',
-                  color: 'var(--accent)', fontSize: 11 }}>
+                  color: 'var(--accent)', fontSize: FS.chrome, lineHeight: LH.chrome }}>
                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)',
                     animation: 'pulse-ring 1s ease infinite', boxShadow: 'var(--glow-cyan)' }} />
                   Processing...
@@ -312,14 +313,14 @@ export default function Intelligence() {
                   <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 6, lineHeight: 1.4 }}>
                     {result.query}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--accent)', marginBottom: 4 }}>
+                  <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--accent)', marginBottom: 4 }}>
                     {result.recommendation}
                   </div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)', lineHeight: 1.6 }}>
+                  <div style={{ fontSize: FS.chrome, color: 'var(--muted)', lineHeight: 1.6 }}>
                     {(CLAIM_CLASSES[result.claimClass] || CLAIM_CLASSES.unattributed).meaning}
                   </div>
                   {result.claimNotice && (
-                    <div style={{ fontSize: 10, color: 'var(--amber)', marginTop: 4, lineHeight: 1.6 }}>
+                    <div style={{ fontSize: FS.chrome, color: 'var(--amber)', marginTop: 4, lineHeight: 1.6 }}>
                       {result.claimNotice}
                     </div>
                   )}
@@ -335,7 +336,7 @@ export default function Intelligence() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16 }}>
                     {result.withheld.map((w, i) => (
                       <div key={i} style={{ padding: '7px 10px', background: 'var(--surface)',
-                        border: '1px solid rgba(212,169,64,0.35)', borderRadius: 'var(--radius)', fontSize: 11 }}>
+                        border: '1px solid rgba(212,169,64,0.35)', borderRadius: 'var(--radius)', fontSize: FS.chrome, lineHeight: LH.chrome }}>
                         <span style={{ color: 'var(--amber)', fontWeight: 600 }}>{w.reason}</span>
                         {w.detail && <span style={{ color: 'var(--text-dim)' }}> · {w.detail}</span>}
                       </div>
@@ -348,12 +349,12 @@ export default function Intelligence() {
                 <div style={{ textAlign: 'center', padding: '6px 14px', background: 'var(--surface)',
                   border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--accent)' }}>{result.sourceCount}</div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>Sources</div>
+                  <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>Sources</div>
                 </div>
                 <div style={{ textAlign: 'center', padding: '6px 14px', background: 'var(--surface)',
                   border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--green)' }}>{result.agreements?.length || 0}</div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>Agreements</div>
+                  <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>Agreements</div>
                 </div>
                 <div style={{ textAlign: 'center', padding: '6px 14px', background: 'var(--surface)',
                   border: `1px solid ${result.contradictions?.length > 0 ? 'rgba(255,0,60,0.3)' : 'var(--border)'}`,
@@ -361,14 +362,14 @@ export default function Intelligence() {
                   <div style={{ fontSize: 18, fontWeight: 700, color: result.contradictions?.length > 0 ? 'var(--red)' : 'var(--muted)' }}>
                     {result.contradictions?.length || 0}
                   </div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>Contradictions</div>
+                  <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>Contradictions</div>
                 </div>
               </div>
 
               {/* A zero in the box above reads as "they agree". It means "the sentiment heuristic
                   found no divergence", which is a weaker and different claim — so it is said. */}
               {result.contradictionNote && (
-                <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 16, lineHeight: 1.6 }}>
+                <div style={{ fontSize: FS.chrome, color: 'var(--muted)', marginBottom: 16, lineHeight: 1.6 }}>
                   {result.contradictionNote}
                 </div>
               )}
@@ -391,11 +392,11 @@ export default function Intelligence() {
                           <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{f.source}</span>
                           {/* The class on the finding itself: the batch verdict says nothing about
                               which line was refused. */}
-                          <span style={{ fontSize: 10, fontWeight: 700,
+                          <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, fontWeight: 700,
                             color: (CLAIM_CLASSES[f.class] || CLAIM_CLASSES.unattributed).color }}>
                             {(CLAIM_CLASSES[f.class] || CLAIM_CLASSES.unattributed).label}
                           </span>
-                          <span style={{ color: 'var(--muted)', fontSize: 10, marginLeft: 'auto' }}>
+                          <span style={{ color: 'var(--muted)', fontSize: FS.chrome, lineHeight: LH.chrome, marginLeft: 'auto' }}>
                             {Math.round(f.credibility * 100)}% domain reputation
                           </span>
                         </div>
@@ -412,7 +413,7 @@ export default function Intelligence() {
                   <div className="section-label" style={{ marginBottom: 8, color: 'var(--red)' }}>⚠ CONTRADICTIONS DETECTED</div>
                   {result.contradictions.map((c, i) => (
                     <div key={i} style={{ padding: '10px 12px', background: 'rgba(255,0,60,0.05)',
-                      border: '1px solid rgba(255,0,60,0.3)', borderRadius: 'var(--radius)', fontSize: 11, marginBottom: 6 }}>
+                      border: '1px solid rgba(255,0,60,0.3)', borderRadius: 'var(--radius)', fontSize: FS.chrome, lineHeight: LH.chrome, marginBottom: 6 }}>
                       <div style={{ color: 'var(--red)', fontWeight: 700 }}>{c.message}</div>
                       {c.positive && <div style={{ color: 'var(--green)', marginTop: 4 }}>Positive: {c.positive.join(', ')}</div>}
                       {c.negative && <div style={{ color: 'var(--red)', marginTop: 2 }}>Negative: {c.negative.join(', ')}</div>}
@@ -422,7 +423,7 @@ export default function Intelligence() {
               )}
 
               {/* Disclaimer */}
-              <div style={{ fontSize: 10, color: 'var(--muted)', padding: '10px 12px', background: 'var(--surface)',
+              <div style={{ fontSize: FS.chrome, color: 'var(--muted)', padding: '10px 12px', background: 'var(--surface)',
                 border: '1px solid var(--border)', borderRadius: 'var(--radius)', lineHeight: 1.6 }}>
                 ⚠ {result.disclaimer}
               </div>
@@ -452,7 +453,7 @@ export default function Intelligence() {
                   <div style={{ fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {s.query}
                   </div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                  <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: 2 }}>
                     {s.category} · {new Date(s.startedAt).toLocaleString()} ·{' '}
                     {s.claimClass
                       ? (CLAIM_CLASSES[s.claimClass] || CLAIM_CLASSES.unattributed).label
@@ -460,7 +461,7 @@ export default function Intelligence() {
                   </div>
                 </div>
                 <span className={`badge ${s.status === 'complete' ? 'badge-green' : s.status === 'error' ? 'badge-red' : 'badge-amber'}`}
-                  style={{ fontSize: 9 }}>{s.status.toUpperCase()}</span>
+                  style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>{s.status.toUpperCase()}</span>
               </div>
             ))}
           </div>

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { systemClient }  from '@services/ipcClient.js';
 import { formatBytes }   from '@services/ramaClient.js';
 import { useUserStore }  from '@store/userStore.js';
+import { FS, LH } from '@config/type.js';
 
 // ─── Gauge bar ────────────────────────────────────────────────────────────────
 function GaugeBar({ value, max = 100, color = 'var(--accent)', height = 6 }) {
@@ -25,11 +26,11 @@ function MetricCard({ icon, label, value, sub, bar, barValue, color = 'var(--acc
   return (
     <div className="hud-card" style={{ padding: '16px', minWidth: '160px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-        <span style={{ color: 'var(--muted)', fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>{label}</span>
+        <span style={{ color: 'var(--muted)', fontSize: FS.chrome, lineHeight: LH.chrome, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{label}</span>
         <span style={{ fontSize: '16px' }}>{icon}</span>
       </div>
       <div style={{ fontSize: '24px', fontWeight: 700, color, marginBottom: '4px' }}>{value}</div>
-      {sub && <div style={{ fontSize: '11px', color: 'var(--text-dim)' }}>{sub}</div>}
+      {sub && <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)' }}>{sub}</div>}
       {bar && <div style={{ marginTop: '10px' }}><GaugeBar value={barValue} color={color} /></div>}
     </div>
   );
@@ -40,7 +41,7 @@ function ProcessRow({ proc, onKill }) {
   const [confirm, setConfirm] = useState(false);
   return (
     <tr style={{ borderBottom: '1px solid var(--border)' }}>
-      <td style={{ padding: '6px 10px', color: 'var(--text-dim)', fontSize: '11px' }}>{proc.pid}</td>
+      <td style={{ padding: '6px 10px', color: 'var(--text-dim)', fontSize: FS.chrome, lineHeight: LH.chrome }}>{proc.pid}</td>
       <td style={{ padding: '6px 10px', color: 'var(--text)', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{proc.name}</td>
       <td style={{ padding: '6px 10px', color: proc.cpu > 20 ? 'var(--amber)' : 'var(--text-dim)', textAlign: 'right' }}>{proc.cpu}%</td>
       <td style={{ padding: '6px 10px', color: proc.mem > 500 ? 'var(--amber)' : 'var(--text-dim)', textAlign: 'right' }}>{proc.mem} MB</td>
@@ -85,7 +86,7 @@ function RamaFootprintPanel() {
   }, []);
 
   if (loading && !footprint) {
-    return <div style={{ color: 'var(--muted)', fontSize: '11px' }}>Reading Rāma's own footprint...</div>;
+    return <div style={{ color: 'var(--muted)', fontSize: FS.chrome, lineHeight: LH.chrome }}>Reading Rāma's own footprint...</div>;
   }
   if (!footprint) return null;
 
@@ -103,17 +104,17 @@ function RamaFootprintPanel() {
     <div className="hud-card" style={{ padding: '16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
         <div className="section-label">RĀMA'S OWN FOOTPRINT</div>
-        <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+        <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
           {footprint.totals.cpuPct}% CPU · {formatBytes(footprint.totals.memMB * 1024 * 1024)} RAM
         </span>
       </div>
-      <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 10, lineHeight: 1.6 }}>
+      <div style={{ fontSize: FS.chrome, color: 'var(--text-dim)', marginBottom: 10, lineHeight: 1.6 }}>
         {footprint.note}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8 }}>
         {Object.entries(byType).map(([label, v]) => (
           <div key={label} style={{ padding: '8px 10px', background: 'var(--surface)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
               {label} {v.count > 1 ? `(${v.count})` : ''}
             </div>
             <div style={{ fontSize: 14, fontWeight: 700, color: v.allFound ? 'var(--accent)' : 'var(--amber)', marginTop: 2 }}>
@@ -196,20 +197,21 @@ function TempCleaner({ onClose }) {
                       border: `1px solid ${selected.has(t.path) ? 'var(--accent)' : 'var(--border)'}`,
                       background: selected.has(t.path) ? 'var(--accent)' : 'transparent',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '9px', color: 'var(--bg)',
+                      fontSize: FS.chrome, color: 'var(--bg)',
+                      lineHeight: LH.chrome,
                     }}>
                       {selected.has(t.path) && '✓'}
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <span style={{ fontSize: '12px' }}>{t.label}</span>
                       {t.risky && (
-                        <div style={{ fontSize: '10px', color: 'var(--amber)', marginTop: '2px' }}>
+                        <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--amber)', marginTop: '2px' }}>
                           ⚠ {t.note || 'May affect saved logins or sessions — not selected by default.'}
                         </div>
                       )}
                     </div>
                   </div>
-                  <span style={{ fontSize: '11px', color: 'var(--amber)', flexShrink: 0, marginLeft: '10px' }}>
+                  <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--amber)', flexShrink: 0, marginLeft: '10px' }}>
                     {t.sizeBytes > 0 ? formatBytes(t.sizeBytes) : '—'}
                     {t.fileCount > 0 ? ` (${t.fileCount} files)` : ''}
                   </span>
@@ -238,7 +240,7 @@ function TempCleaner({ onClose }) {
                 background: r.ok ? 'rgba(0,255,65,0.05)' : 'rgba(255,0,60,0.05)',
                 border: `1px solid ${r.ok ? 'rgba(0,255,65,0.2)' : 'rgba(255,0,60,0.2)'}`,
               }}>
-                <div style={{ fontSize: '11px', color: r.ok ? 'var(--green)' : 'var(--red)' }}>
+                <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: r.ok ? 'var(--green)' : 'var(--red)' }}>
                   {r.ok ? `✓ ${r.path} — freed ${formatBytes(r.freedBytes)}` : `✕ ${r.path} — ${r.error}`}
                 </div>
               </div>
@@ -336,7 +338,7 @@ export default function System() {
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
         <div>
           <div style={{ fontWeight: 700, color: 'var(--green)', letterSpacing: '0.1em' }}>SYSTEM MONITOR</div>
-          <div style={{ fontSize: '10px', color: 'var(--muted)' }}>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
             {m ? `${m.os.platform} · ${m.os.hostname} · up ${m.os.uptime}s` : 'Loading...'}
           </div>
         </div>
@@ -353,7 +355,7 @@ export default function System() {
             padding: '9px 18px', border: 'none', background: 'transparent',
             color: tab === t ? 'var(--accent)' : 'var(--muted)',
             borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
-            cursor: 'pointer', fontSize: '11px', fontFamily: 'var(--font)', letterSpacing: '0.08em',
+            cursor: 'pointer', fontSize: FS.chrome, lineHeight: LH.chrome, fontFamily: 'var(--font)', letterSpacing: '0.08em',
             textTransform: 'uppercase', transition: 'color var(--transition)',
           }}>
             {t}
@@ -365,7 +367,7 @@ export default function System() {
         {error && (
           <div className="hud-card" style={{
             padding: '12px 16px', marginBottom: '16px',
-            borderColor: 'var(--amber)', color: 'var(--amber)', fontSize: '11px', lineHeight: 1.7,
+            borderColor: 'var(--amber)', color: 'var(--amber)', fontSize: FS.chrome, lineHeight: 1.7,
           }}>
             {error}
             <div style={{ color: 'var(--muted)', marginTop: '6px' }}>
@@ -376,7 +378,7 @@ export default function System() {
         )}
 
         {!m && !error && (
-          <div style={{ color: 'var(--muted)', fontSize: '11px' }}>Reading system metrics...</div>
+          <div style={{ color: 'var(--muted)', fontSize: FS.chrome, lineHeight: LH.chrome }}>Reading system metrics...</div>
         )}
 
         {tab === 'overview' && m && (
@@ -404,9 +406,9 @@ export default function System() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '8px' }}>
                   {m.cpu.cores.map((c, i) => (
                     <div key={i} style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: '10px', color: 'var(--muted)', marginBottom: '4px' }}>C{i}</div>
+                      <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginBottom: '4px' }}>C{i}</div>
                       <GaugeBar value={c} color={c > 80 ? 'var(--red)' : 'var(--accent)'} height={4} />
-                      <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '3px' }}>{c}%</div>
+                      <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', marginTop: '3px' }}>{c}%</div>
                     </div>
                   ))}
                 </div>
@@ -426,8 +428,8 @@ export default function System() {
                   ['Swap', `${formatBytes(m.ram.swapUsed)} / ${formatBytes(m.ram.swapTotal)}`],
                 ].map(([k, v]) => (
                   <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
-                    <span style={{ color: 'var(--muted)', fontSize: '11px' }}>{k}</span>
-                    <span style={{ color: 'var(--text-dim)', fontSize: '11px' }}>{v}</span>
+                    <span style={{ color: 'var(--muted)', fontSize: FS.chrome, lineHeight: LH.chrome }}>{k}</span>
+                    <span style={{ color: 'var(--text-dim)', fontSize: FS.chrome, lineHeight: LH.chrome }}>{v}</span>
                   </div>
                 ))}
               </div>
@@ -444,7 +446,7 @@ export default function System() {
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
                     {['PID', 'Name', 'CPU', 'Memory', 'Action'].map(h => (
-                      <th key={h} style={{ padding: '8px 10px', fontSize: '10px', color: 'var(--muted)',
+                      <th key={h} style={{ padding: '8px 10px', fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)',
                         letterSpacing: '0.1em', textAlign: h === 'CPU' || h === 'Memory' ? 'right' : 'left',
                         textTransform: 'uppercase', fontWeight: 700 }}>{h}</th>
                     ))}
@@ -521,12 +523,12 @@ function DiskPanel() {
   useEffect(() => { load(); }, [load]);
 
   if (loading && !drives && !error) {
-    return <div style={{ color: 'var(--muted)', fontSize: '11px' }}>Reading drive usage...</div>;
+    return <div style={{ color: 'var(--muted)', fontSize: FS.chrome, lineHeight: LH.chrome }}>Reading drive usage...</div>;
   }
 
   if (error) {
     return (
-      <div style={{ fontSize: '11px', lineHeight: 1.7 }}>
+      <div style={{ fontSize: FS.chrome, lineHeight: 1.7 }}>
         <div style={{ color: 'var(--amber)' }}>{error}</div>
         <div style={{ color: 'var(--muted)', marginTop: '6px' }}>
           Drive enumeration needs the optional <code>systeminformation</code> module;
@@ -539,7 +541,7 @@ function DiskPanel() {
 
   if (!drives || drives.length === 0) {
     return (
-      <div style={{ fontSize: '11px', lineHeight: 1.7 }}>
+      <div style={{ fontSize: FS.chrome, lineHeight: 1.7 }}>
         <div style={{ color: 'var(--text-dim)' }}>No drives reported.</div>
         <div style={{ color: 'var(--muted)', marginTop: '6px' }}>
           The call succeeded but returned an empty list — typical when
@@ -556,7 +558,7 @@ function DiskPanel() {
         <div key={i}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
             <span style={{ color: 'var(--text)', fontSize: '12px' }}>{d.mount} ({d.fs})</span>
-            <span style={{ color: 'var(--text-dim)', fontSize: '11px' }}>
+            <span style={{ color: 'var(--text-dim)', fontSize: FS.chrome, lineHeight: LH.chrome }}>
               {formatBytes(d.used)} / {formatBytes(d.size)} ({Math.round(d.usedPct)}%)
             </span>
           </div>
