@@ -102,7 +102,7 @@ export default function Unlock({ onUnlocked }) {
         pointerEvents: 'none', filter: 'blur(20px)' }} />
 
       <div className="neural-card fade-in" style={{
-        width: '400px', padding: '40px', display: 'flex',
+        width: '400px', maxWidth: '92vw', padding: '40px', display: 'flex',
         flexDirection: 'column', gap: '28px', position: 'relative', zIndex: 1,
       }}>
 

@@ -128,7 +128,7 @@ function AddCustomProviderModal({ onSave, onClose }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500 }}>
-      <div className="hud-card" style={{ width: '520px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      <div className="hud-card" style={{ width: '520px', maxWidth: '92vw', padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span style={{ fontWeight: 700, color: 'var(--accent)' }}>ADD CUSTOM OPENAI-COMPATIBLE PROVIDER</span>
           <button className="btn btn-sm" onClick={onClose}>✕</button>
@@ -200,7 +200,7 @@ function AddKeyModal({ credKey, info, onSave, onClose }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500 }}>
-      <div className="hud-card" style={{ width: '480px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div className="hud-card" style={{ width: '480px', maxWidth: '92vw', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span style={{ fontWeight: 700, color: 'var(--accent)' }}>ADD {info?.label?.toUpperCase()} API KEY</span>
           <button className="btn btn-sm" onClick={onClose}>✕</button>

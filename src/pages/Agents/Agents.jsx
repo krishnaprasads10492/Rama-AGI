@@ -162,7 +162,7 @@ function SpawnModal({ onClose, onSpawn }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500 }}>
-      <div className="hud-card" style={{ width: '520px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div className="hud-card" style={{ width: '520px', maxWidth: '92vw', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.08em' }}>SPAWN AGENT</span>
           <button className="btn btn-sm" onClick={onClose}>✕</button>
@@ -170,7 +170,8 @@ function SpawnModal({ onClose, onSpawn }) {
 
         <div>
           <div className="section-label" style={{ marginBottom: '8px' }}>AGENT TYPE</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+          {/* 150px floor: an icon over a one-word label, so it keeps 3 across at the 92vw guard. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '6px' }}>
             {AGENT_TYPES.map(at => (
               <button key={at.type} onClick={() => setType(at.type)} style={{
                 padding: '8px 6px', border: `1px solid ${type === at.type ? at.color : 'var(--border)'}`,

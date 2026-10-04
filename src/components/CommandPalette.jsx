@@ -262,6 +262,7 @@ function SearchResults({ query, pages, onSelect }) {
       left:       '50%',
       transform:  'translateX(-50%)',
       width:      '400px',
+      maxWidth:   '92vw',
       background: 'var(--elevated)',
       border:     '1px solid var(--border)',
       borderTop:  'none',

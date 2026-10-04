@@ -173,7 +173,7 @@ function TempCleaner({ onClose }) {
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500,
     }}>
-      <div className="hud-card" style={{ width: '560px', maxHeight: '70vh', display: 'flex', flexDirection: 'column', padding: '20px' }}>
+      <div className="hud-card" style={{ width: '560px', maxWidth: '92vw', maxHeight: '70vh', display: 'flex', flexDirection: 'column', padding: '20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <span style={{ color: 'var(--accent)', fontWeight: 700, letterSpacing: '0.08em' }}>SYSTEM CLEANER</span>
           <button className="btn btn-sm" onClick={onClose}>✕</button>

@@ -113,7 +113,7 @@ function AuthModal({ onClose }) {
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 900 }}
       onClick={onClose}>
       <div className="neural-card" onClick={e => e.stopPropagation()}
-        style={{ width: '380px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        style={{ width: '380px', maxWidth: '92vw', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <RamaOrb size={32} />
           <div>

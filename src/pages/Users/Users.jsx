@@ -169,7 +169,8 @@ function UserModal({ editUser, onSave, onClose }) {
 
             <div>
               <div className="section-label" style={{ marginBottom: '8px' }}>ACCESS TIER</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+              {/* 180px floor: tier names are the longest labels here and must not hyphenate. */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '6px' }}>
                 {availableTiers.map(({ key, value }) => (
                   <button key={key} onClick={() => setTier(value)} style={{
                     padding: '8px 6px', border: `1px solid ${tier === value ? TIER_COLORS[value] : 'var(--border)'}`,

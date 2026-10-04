@@ -622,7 +622,8 @@ export default function StockMind() {
               ? new here
             </button>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+          {/* 260px floor: these cells hold inputs, not labels — the widest of the four grids. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
             {/* SYMBOL IS A SEARCH (Section 102). Master's objection to the previous version was
                 exact: a curated dropdown of fifty names plus a raw text box cannot answer "what is
                 Reliance Power called", which is the question a picker exists for. This asks the
@@ -673,7 +674,8 @@ override where an unlisted ticker should be looked up.">
             <div className="section-label">2 · HOW MUCH ARE YOU RISKING</div>
             <InfoTip id="riskAmount" />
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+          {/* 260px, same as the row above, so the two read as one block as they wrap. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
             <div>
               <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginBottom: '4px',
                 display: 'flex', alignItems: 'center' }}>
