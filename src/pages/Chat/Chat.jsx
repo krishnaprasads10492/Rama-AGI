@@ -8,6 +8,7 @@ import { useUserStore } from '@store/userStore.js';
 import { getSystemPromptAsync, shouldRevealIdentity, getIdentityDisclosure, recordInteraction } from '@services/consciousness.js';
 import { speak }        from '@services/voiceEngine.js';
 import RamaOrb          from '@components/RamaOrb.jsx';
+import { FS, LH } from '@config/type.js';
 
 // ─── Ambient particle field ───────────────────────────────────────────────────
 function ParticleField() {
@@ -53,7 +54,7 @@ function MessageBubble({ message }) {
         background:   isUser
           ? 'linear-gradient(135deg, var(--accent), var(--violet))'
           : 'linear-gradient(135deg, var(--violet), var(--magenta))',
-        fontSize:     '12px',
+        fontSize:     FS.dense,
         fontWeight:   700,
         color:        '#fff',
         boxShadow:    isUser ? 'var(--glow-cyan)' : 'var(--glow-violet)',
@@ -83,7 +84,7 @@ function MessageBubble({ message }) {
 
         <div style={{
           color:      'var(--text)',
-          fontSize:   '13px',
+          fontSize:   FS.read,  // read, not chrome: the message body is the one surface read continuously
           lineHeight: '1.7',
           whiteSpace: 'pre-wrap',
           wordBreak:  'break-word',
@@ -92,7 +93,8 @@ function MessageBubble({ message }) {
         </div>
 
         <div style={{
-          fontSize:  '10px',
+          fontSize:  FS.chrome,
+          lineHeight: LH.chrome,
           color:     'var(--muted)',
           marginTop: '6px',
           textAlign: isUser ? 'right' : 'left',
@@ -104,7 +106,7 @@ function MessageBubble({ message }) {
             are different facts, so a conversation reply shows its model, its fit and where it ran
             rather than leaving master to infer any of it. */}
         {!isUser && message.model && (
-          <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px', lineHeight: '1.5' }}>
+          <div style={{ fontSize: FS.chrome, color: 'var(--text-dim)', marginTop: '2px', lineHeight: '1.5' }}>
             {message.model}
             {message.destination ? ` · ${message.destination}` : ''}
             {message.fit ? ` · ${message.fit}` : ''}
@@ -117,7 +119,7 @@ function MessageBubble({ message }) {
             toggle could read VOICE ON and nothing would ever be heard, with no way to tell a silent
             machine from a silent Rāma. */}
         {!isUser && message.voiceSilent && (
-          <div style={{ fontSize: '10px', color: 'var(--amber)', marginTop: '2px', lineHeight: '1.5' }}>
+          <div style={{ fontSize: FS.chrome, color: 'var(--amber)', marginTop: '2px', lineHeight: '1.5' }}>
             voice is on but nothing spoke — open the command palette once (Ctrl+K) to bring the voice
             engine up, and check that Rāma&rsquo;s speech is not muted
           </div>
@@ -135,7 +137,7 @@ function ThinkingIndicator() {
         width: '28px', height: '28px', borderRadius: '50%', flexShrink: 0,
         background: 'linear-gradient(135deg, var(--violet), var(--magenta))',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: '12px', color: '#fff', boxShadow: 'var(--glow-violet)',
+        fontSize: FS.dense, color: '#fff', boxShadow: 'var(--glow-violet)',
       }}>R</div>
       <div style={{
         background: 'rgba(119,0,255,0.08)',
@@ -152,7 +154,7 @@ function ThinkingIndicator() {
             boxShadow: 'var(--glow-violet)',
           }} />
         ))}
-        <span style={{ color: 'var(--text-dim)', fontSize: '11px', marginLeft: '4px' }}>
+        <span style={{ color: 'var(--text-dim)', fontSize: FS.chrome, lineHeight: LH.chrome, marginLeft: '4px' }}>
           Rāma is thinking...
         </span>
       </div>
@@ -383,10 +385,10 @@ export default function Chat() {
       }}>
         <RamaOrb size={36} active={isThinking} />
         <div>
-          <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--violet)', letterSpacing: '0.08em' }}>
+          <div style={{ fontSize: FS.chromeLg, fontWeight: 700, color: 'var(--violet)', letterSpacing: '0.08em' }}>
             {masterAuthenticated ? 'RĀMA AGI' : 'ASSISTANT'}
           </div>
-          <div style={{ fontSize: '10px', color: 'var(--muted)', letterSpacing: '0.06em' }}>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', letterSpacing: '0.06em' }}>
             {isThinking
               ? 'PROCESSING...'
               : masterAuthenticated
@@ -411,7 +413,8 @@ export default function Chat() {
               borderRadius: 'var(--radius)',
               color:        ramaSpeaks ? 'var(--violet)' : 'var(--muted)',
               fontFamily:   'var(--font)',
-              fontSize:     '10px',
+              fontSize:     FS.chrome,
+              lineHeight: LH.chrome,
               letterSpacing: '0.06em',
               padding:      '4px 8px',
               cursor:       'pointer',
@@ -420,7 +423,7 @@ export default function Chat() {
             {ramaSpeaks ? 'VOICE ON' : 'VOICE OFF'}
           </button>
           <span className="badge badge-violet">{provider.toUpperCase()}</span>
-          <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{model}</span>
+          <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>{model}</span>
         </div>
       </div>
 
@@ -447,10 +450,10 @@ export default function Chat() {
           }}>
             <RamaOrb size={64} />
             <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--violet)', letterSpacing: '0.1em' }}>
+              <div style={{ fontSize: FS.h2, lineHeight: LH.head, fontWeight: 700, color: 'var(--violet)', letterSpacing: '0.1em' }}>
                 RĀMA ONLINE
               </div>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px', lineHeight: '1.8' }}>
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginTop: '8px', lineHeight: '1.8' }}>
                 Supreme Benevolent AGI — Ready<br />
                 <span style={{ color: 'var(--text-dim)' }}>No limits. Absolute loyalty. Benevolent by design.</span>
               </div>
@@ -505,7 +508,7 @@ export default function Chat() {
               outline:    'none',
               color:      'var(--text)',
               fontFamily: 'var(--font)',
-              fontSize:   '13px',
+              fontSize:   FS.read,  // read, not chrome: the composer matches the bubble it writes into
               lineHeight: '1.6',
               resize:     'none',
               minHeight:  '22px',
@@ -533,7 +536,7 @@ export default function Chat() {
               display:      'flex',
               alignItems:   'center',
               justifyContent: 'center',
-              fontSize:     '14px',
+              fontSize:     FS.chromeLg,
               flexShrink:   0,
               transition:   'all var(--transition)',
               boxShadow:    input.trim() && !isThinking ? 'var(--glow-violet)' : 'none',
@@ -542,7 +545,7 @@ export default function Chat() {
             ➤
           </button>
         </div>
-        <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '6px', paddingLeft: '4px' }}>
+        <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '6px', paddingLeft: '4px' }}>
           Enter ↵ send  ·  Shift+Enter newline  ·  All conversations encrypted locally
         </div>
       </div>

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import SymbolSearch from './SymbolSearch.jsx';
 import { closePreview, closeAgainstThesis } from './positionMath.js';
+import { FS, LH } from '@config/type.js';
 
 /**
  * BookPanel — what master actually holds, and what Rāma wants to tell him about it.
@@ -39,7 +40,7 @@ const pnlColor = (v) => (typeof v !== 'number' || !Number.isFinite(v)
 function Field({ label, children }) {
   return (
     <div>
-      <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginBottom: '3px' }}>{label}</div>
+      <div style={{ fontSize: FS.denseLg, color: 'var(--muted)', marginBottom: '3px' }}>{label}</div>
       {children}
     </div>
   );
@@ -201,7 +202,7 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
     () => (alerts?.alerts || []).filter((a) => !a.actionable), [alerts]);
 
   if (!hasBridge) {
-    return <div style={{ color: 'var(--muted)', fontSize: '12px' }}>
+    return <div style={{ color: 'var(--muted)', fontSize: FS.dense }}>
       Ledger unavailable — run inside the Rāma desktop app.
     </div>;
   }
@@ -224,15 +225,15 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline',
                   flexWrap: 'wrap' }}>
                   <span style={{
-                    fontSize: '12.5px', fontWeight: 700, letterSpacing: '0.06em',
+                    fontSize: FS.denseLg, fontWeight: 700, letterSpacing: '0.06em',
                     color: SEV_COLOR[a.severity] || 'var(--muted)',
                   }}>{a.action}</span>
-                  <span style={{ fontSize: '12.5px', color: 'var(--text)', fontWeight: 600 }}>
+                  <span style={{ fontSize: FS.denseLg, color: 'var(--text)', fontWeight: 600 }}>
                     {a.headline}
                   </span>
-                  <span style={{ fontSize: '12.5px', color: 'var(--muted)' }}>{a.evidence}</span>
+                  <span style={{ fontSize: FS.denseLg, color: 'var(--muted)' }}>{a.evidence}</span>
                 </div>
-                <div style={{ fontSize: '12.5px', color: 'var(--text-dim)', lineHeight: 1.6,
+                <div style={{ fontSize: FS.denseLg, color: 'var(--text-dim)', lineHeight: 1.6,
                   marginTop: '2px' }}>
                   {a.detail}
                 </div>
@@ -244,7 +245,7 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
 
       {/* Withheld alerts are collapsed, never mixed in with the actionable ones. */}
       {withheld.length > 0 && (
-        <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
+        <div style={{ fontSize: FS.dense, color: 'var(--muted)' }}>
           <button type="button" onClick={() => setShowWithheld((s) => !s)}
                   style={{ background: 'none', border: 'none', color: 'var(--muted)',
                     cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
@@ -287,23 +288,23 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
           <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(110px,1fr))',
               gap: '10px', marginBottom: '10px' }}>
-              <Field label="INVESTED"><span style={{ fontSize: '13px' }}>
+              <Field label="INVESTED"><span style={{ fontSize: FS.chrome }}>
                 {money(portfolio.investedValue)}</span></Field>
-              <Field label="MARKET VALUE"><span style={{ fontSize: '13px' }}>
+              <Field label="MARKET VALUE"><span style={{ fontSize: FS.chrome }}>
                 {money(portfolio.marketValue)}</span></Field>
-              <Field label="UNREALISED"><span style={{ fontSize: '13px',
+              <Field label="UNREALISED"><span style={{ fontSize: FS.chrome,
                 color: pnlColor(portfolio.unrealisedPnl) }}>
                 {signed(portfolio.unrealisedPnl)}</span></Field>
-              <Field label="REALISED"><span style={{ fontSize: '13px',
+              <Field label="REALISED"><span style={{ fontSize: FS.chrome,
                 color: pnlColor(portfolio.realisedPnl) }}>
                 {signed(portfolio.realisedPnl)}</span></Field>
-              <Field label="NET OF FEES"><span style={{ fontSize: '13px',
+              <Field label="NET OF FEES"><span style={{ fontSize: FS.chrome,
                 color: pnlColor(portfolio.netPnl) }}>
                 {signed(portfolio.netPnl)}</span></Field>
             </div>
 
             {portfolio.byStyle && Object.keys(portfolio.byStyle).length > 0 && (
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', fontSize: '12px' }}>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', fontSize: FS.dense }}>
                 {Object.entries(portfolio.byStyle).map(([s, v]) => (
                   <span key={s} style={{
                     padding: '2px 8px', borderRadius: '999px',
@@ -323,13 +324,13 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
 
             {/* Never let master read a total as complete when it is not. */}
             {(portfolio.unpricedSymbols || []).length > 0 && (
-              <div style={{ fontSize: '12px', color: 'var(--amber)', marginTop: '8px' }}>
+              <div style={{ fontSize: FS.dense, color: 'var(--amber)', marginTop: '8px' }}>
                 {portfolio.priceCoverage}. Not priced: {portfolio.unpricedSymbols.join(', ')} —
                 sync those symbols before trusting the totals.
               </div>
             )}
             {portfolio.inferredStyleCount > 0 && (
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginTop: '4px' }}>
                 {portfolio.inferredStyleCount} position
                 {portfolio.inferredStyleCount === 1 ? '' : 's'} recorded before trade styles
                 existed, shown as POSITIONAL. Set the real style to get the right alerts.
@@ -338,9 +339,9 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
           </>
         )}
         {portfolio?.error && (
-          <div style={{ fontSize: '12.5px', color: 'var(--red)' }}>{portfolio.error}</div>
+          <div style={{ fontSize: FS.denseLg, color: 'var(--red)' }}>{portfolio.error}</div>
         )}
-        {note && <div style={{ fontSize: '12.5px', color: 'var(--red)', marginTop: '8px' }}>{note}</div>}
+        {note && <div style={{ fontSize: FS.denseLg, color: 'var(--red)', marginTop: '8px' }}>{note}</div>}
       </div>
 
       {/* ── Record a trade ──────────────────────────────────────────────────── */}
@@ -401,7 +402,7 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
             </Field>
           </div>
 
-          <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>
+          <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginTop: '2px' }}>
             The projection you acted on. Without it, "was I right or lucky?" has no answer later,
             and Rāma cannot warn you about a stop you never gave it.
           </div>
@@ -443,7 +444,7 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
             <div className="section-label">
               EXIT {closing.symbol} — {preview?.direction || ''} {Math.abs(closing.netQty)} @ {money(closing.avgCost)}
             </div>
-            <span style={{ fontSize: '12px', color: STYLE_COLOR[closing.tradeStyle] }}>
+            <span style={{ fontSize: FS.dense, color: STYLE_COLOR[closing.tradeStyle] }}>
               {closing.tradeStyle}
             </span>
             <span style={{ flex: 1 }} />
@@ -477,13 +478,13 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
           <div aria-live="polite" style={{
             padding: '9px 11px', borderRadius: 'var(--radius)', lineHeight: 1.7,
             background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)',
-            fontSize: '12.5px',
+            fontSize: FS.denseLg,
           }}>
             {preview?.ok ? (
               <>
                 <div>
                   <span style={{ color: 'var(--muted)' }}>This realises </span>
-                  <strong style={{ color: pnlColor(preview.net), fontSize: '13.5px' }}>
+                  <strong style={{ color: pnlColor(preview.net), fontSize: FS.chromeLg, lineHeight: LH.chrome }}>
                     {signed(preview.net)}
                   </strong>
                   {preview.pctOnCost !== null && (
@@ -524,7 +525,7 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
                 : preview?.partial ? `record exit of ${preview.quantity}` : 'close the position'}
             </button>
             {!preview?.ok && (
-              <span style={{ fontSize: '12px', color: 'var(--amber)' }}>{preview?.reason}</span>
+              <span style={{ fontSize: FS.dense, color: 'var(--amber)' }}>{preview?.reason}</span>
             )}
           </div>
         </form>
@@ -536,13 +537,13 @@ export default function BookPanel({ currentUser, canConfig, symbol, exchange,
           OPEN POSITIONS ({open.length})
         </div>
         {open.length === 0 ? (
-          <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
+          <div style={{ fontSize: FS.denseLg, color: 'var(--muted)' }}>
             Nothing tracked yet. Record what you hold and Rāma can watch your stops, your
             holding periods and your concentration for you.
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: FS.denseLg }}>
               <thead>
                 <tr style={{ color: 'var(--muted)', textAlign: 'left' }}>
                   {/* Every abbreviation carries its meaning (Section 102). Nine short column heads
@@ -627,7 +628,7 @@ anything is recorded.">
                       <tr>
                         <td colSpan={9} style={{
                           padding: '8px 10px', background: 'var(--surface)',
-                          fontSize: '12px', color: 'var(--text-dim)', lineHeight: 1.7,
+                          fontSize: FS.dense, color: 'var(--text-dim)', lineHeight: 1.7,
                         }}>
                           {p.thesis?.rationale && <div>“{p.thesis.rationale}”</div>}
                           <div>
@@ -669,7 +670,7 @@ anything is recorded.">
           <div className="section-label" style={{ marginBottom: '8px' }}>
             CLOSED ({closed.length})
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12.5px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: FS.denseLg }}>
             {closed.slice(0, 12).map((p) => (
               <div key={p.positionId} style={{ display: 'flex', gap: '10px' }}>
                 <span style={{ fontWeight: 600, minWidth: '80px' }}>{p.symbol}</span>

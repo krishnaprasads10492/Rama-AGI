@@ -4,6 +4,7 @@ import { getRamaStatus, getSelfModel, ramaMemory, ramaWorld,
 import { useUserStore } from '@store/userStore.js';
 import { skillSummary } from '@services/cognition.js';
 import RamaOrb from '@components/RamaOrb.jsx';
+import { FS, LH } from '@config/type.js';
 
 /**
  * RamaMind — what Rāma can actually do, what it cannot, and what would change that.
@@ -41,8 +42,8 @@ function Fact({ label, field }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', padding: '5px 0',
       borderBottom: '1px solid var(--border)', alignItems: 'baseline' }}>
-      <span style={{ fontSize: '11px', color: 'var(--muted)', flexShrink: 0 }}>{label}</span>
-      <span style={{ fontSize: '11px', textAlign: 'right',
+      <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', flexShrink: 0 }}>{label}</span>
+      <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, textAlign: 'right',
         color: measured ? 'var(--text)' : 'var(--muted)',
         fontStyle: measured ? 'normal' : 'italic' }}
         title={field ? `source: ${field.source}${field.why ? ` — ${field.why}` : ''}` : 'absent'}>
@@ -63,10 +64,10 @@ function LimitsPanel({ limits }) {
     return (
       <div className="hud-card" style={{ padding: '16px' }}>
         <div className="section-label" style={{ marginBottom: '8px' }}>◈ WHAT IS MISSING</div>
-        <div style={{ fontSize: '12px', color: 'var(--green)' }}>
+        <div style={{ fontSize: FS.dense, color: 'var(--green)' }}>
           Nothing that was checked for is currently missing.
         </div>
-        <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '6px', lineHeight: 1.5 }}>
+        <div style={{ fontSize: FS.chrome, color: 'var(--muted)', marginTop: '6px', lineHeight: 1.5 }}>
           This is a statement about the checks that ran, not a claim of completeness.
         </div>
       </div>
@@ -80,15 +81,15 @@ function LimitsPanel({ limits }) {
       {limits.map((l, i) => (
         <div key={i} style={{ padding: '10px', marginBottom: '6px', borderRadius: 'var(--radius)',
           background: 'var(--surface)', border: '1px solid var(--amber)44' }}>
-          <div style={{ fontSize: '12px', color: 'var(--text)', fontWeight: 600 }}>{l.what}</div>
-          <div style={{ fontSize: '11px', color: 'var(--text-dim, var(--muted))', marginTop: '3px',
+          <div style={{ fontSize: FS.dense, color: 'var(--text)', fontWeight: 600 }}>{l.what}</div>
+          <div style={{ fontSize: FS.chrome, color: 'var(--text-dim, var(--muted))', marginTop: '3px',
             lineHeight: 1.5 }}>{l.why}</div>
           {l.fixable && (
-            <div style={{ fontSize: '11px', color: 'var(--accent)', marginTop: '5px' }}>
+            <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--accent)', marginTop: '5px' }}>
               → {l.fixable}
             </div>
           )}
-          <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '4px' }}>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '4px' }}>
             measured from: {l.source}
           </div>
         </div>
@@ -103,7 +104,7 @@ function MeasuredPanel({ account, unavailable, reason }) {
     return (
       <div className="hud-card" style={{ padding: '16px' }}>
         <div className="section-label" style={{ marginBottom: '8px' }}>◈ MEASURED SELF-ACCOUNT</div>
-        <div style={{ fontSize: '12px', color: 'var(--muted)', lineHeight: 1.6 }}>
+        <div style={{ fontSize: FS.dense, color: 'var(--muted)', lineHeight: 1.6 }}>
           Not measured{reason ? ` — ${reason}` : ''}.{' '}
           <strong style={{ color: 'var(--text-dim, var(--muted))' }}>
             Nothing is estimated in its place
@@ -117,7 +118,7 @@ function MeasuredPanel({ account, unavailable, reason }) {
     return (
       <div className="hud-card" style={{ padding: '16px' }}>
         <div className="section-label" style={{ marginBottom: '8px' }}>◈ MEASURED SELF-ACCOUNT</div>
-        <div style={{ fontSize: '12px', color: 'var(--muted)' }}>Measuring…</div>
+        <div style={{ fontSize: FS.dense, color: 'var(--muted)' }}>Measuring…</div>
       </div>
     );
   }
@@ -129,7 +130,7 @@ function MeasuredPanel({ account, unavailable, reason }) {
 
       <div className="hud-card" style={{ padding: '16px', marginBottom: '14px' }}>
         <div className="section-label" style={{ marginBottom: '8px' }}>◈ IN ITS OWN WORDS</div>
-        <div style={{ fontSize: '12.5px', color: 'var(--text)', lineHeight: 1.65 }}>
+        <div style={{ fontSize: FS.denseLg, color: 'var(--text)', lineHeight: 1.65 }}>
           {account.summary?.text}
         </div>
       </div>
@@ -161,7 +162,7 @@ function MeasuredPanel({ account, unavailable, reason }) {
         </div>
       </div>
 
-      <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '12px', lineHeight: 1.6 }}>
+      <div style={{ fontSize: FS.chrome, color: 'var(--muted)', marginTop: '12px', lineHeight: 1.6 }}>
         {account.attestation?.rule}
         {account.attestation?.sources?.length
           ? ` Sources: ${account.attestation.sources.join(', ')}.` : ''}
@@ -182,7 +183,7 @@ function MemoryPanel({ memory }) {
           page. Procedural is a literal 0 because nothing writes it at all, and it is left visible
           rather than hidden so the gap is legible. */}
       <div className="section-label" style={{ marginBottom: '4px' }}>◈ MEMORY (CoALA shape)</div>
-      <div style={{ fontSize: '10px', color: 'var(--amber)', marginBottom: '12px', lineHeight: 1.5 }}>
+      <div style={{ fontSize: FS.chrome, color: 'var(--amber)', marginBottom: '12px', lineHeight: 1.5 }}>
         Session-scoped, not persistent — these reset when the window closes. Durable memory with
         provenance is named as the next capability step, not shipped.
       </div>
@@ -195,9 +196,9 @@ function MemoryPanel({ memory }) {
         ].map(m => (
           <div key={m.layer} style={{ background: 'var(--surface)', borderRadius: 'var(--radius)',
             border: `1px solid ${m.color}33`, padding: '10px' }}>
-            <div style={{ fontSize: '10px', color: m.color, fontWeight: 700, letterSpacing: '0.08em' }}>{m.layer}</div>
-            <div style={{ fontSize: '20px', fontWeight: 700, color: m.color, marginTop: '4px' }}>{m.count}</div>
-            <div style={{ fontSize: '10px', color: 'var(--muted)' }}>{m.desc}</div>
+            <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: m.color, fontWeight: 700, letterSpacing: '0.08em' }}>{m.layer}</div>
+            <div style={{ fontSize: FS.h2, fontWeight: 700, color: m.color, marginTop: '4px' }}>{m.count}</div>
+            <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>{m.desc}</div>
           </div>
         ))}
       </div>
@@ -222,8 +223,8 @@ function WorldModelPanel({ world }) {
         ].map(([k, v]) => (
           <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0',
             borderBottom: '1px solid var(--border)' }}>
-            <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{k}</span>
-            <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>{v}</span>
+            <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>{k}</span>
+            <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)' }}>{v}</span>
           </div>
         ))}
       </div>
@@ -236,7 +237,7 @@ function ImprovementsPanel({ improvements, onDismiss }) {
     return (
       <div className="hud-card" style={{ padding: '16px' }}>
         <div className="section-label" style={{ marginBottom: '12px' }}>⚡ SELF-REVISION INSIGHTS</div>
-        <div style={{ color: 'var(--muted)', fontSize: '12px', textAlign: 'center', padding: '12px' }}>
+        <div style={{ color: 'var(--muted)', fontSize: FS.dense, textAlign: 'center', padding: '12px' }}>
           No improvement insights yet. Rāma learns from interactions.
         </div>
       </div>
@@ -250,14 +251,14 @@ function ImprovementsPanel({ improvements, onDismiss }) {
         <div key={i} style={{ padding: '10px', marginBottom: '6px', borderRadius: 'var(--radius)',
           background: 'var(--surface)', border: `1px solid ${priorityColor[imp.priority]}44` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-            <span style={{ fontSize: '10px', color: priorityColor[imp.priority], fontWeight: 700, textTransform: 'uppercase' }}>
+            <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: priorityColor[imp.priority], fontWeight: 700, textTransform: 'uppercase' }}>
               {imp.priority} priority · {imp.type}
             </span>
             <button onClick={() => onDismiss(i)} style={{ background: 'none', border: 'none',
-              color: 'var(--muted)', cursor: 'pointer', fontSize: '10px', fontFamily: 'var(--font)' }}>✕</button>
+              color: 'var(--muted)', cursor: 'pointer', fontSize: FS.chrome, lineHeight: LH.chrome, fontFamily: 'var(--font)' }}>✕</button>
           </div>
-          <div style={{ fontSize: '12px', color: 'var(--text)', marginBottom: '4px' }}>{imp.finding}</div>
-          <div style={{ fontSize: '11px', color: 'var(--accent)' }}>→ {imp.action}</div>
+          <div style={{ fontSize: FS.dense, color: 'var(--text)', marginBottom: '4px' }}>{imp.finding}</div>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--accent)' }}>→ {imp.action}</div>
         </div>
       ))}
     </div>
@@ -308,7 +309,7 @@ export default function RamaMind() {
         <div>
           <div style={{ fontWeight: 700, color: 'var(--violet)', letterSpacing: '0.1em' }}>RĀMA MIND</div>
           {/* The subtitle is now a description of the page rather than a claim about the system. */}
-          <div style={{ fontSize: '10px', color: 'var(--muted)' }}>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
             Measured self-account · every field carries its source
           </div>
         </div>
@@ -317,9 +318,9 @@ export default function RamaMind() {
         <div className="metric-pill" style={{ marginLeft: 'auto', borderColor: 'var(--amber)44' }}
              title={'Limits derived from what is absent right now. Each names its source and, '
                + 'where there is one, the fix.'}>
-          <span style={{ color: 'var(--muted)', fontSize: '10px' }}>Missing</span>
+          <span style={{ color: 'var(--muted)', fontSize: FS.chrome, lineHeight: LH.chrome }}>Missing</span>
           <span style={{ color: limitCount === 0 ? 'var(--green)' : 'var(--amber)',
-            fontWeight: 700, fontSize: '14px' }}>
+            fontWeight: 700, fontSize: FS.chromeLg }}>
             {limitCount === null ? '—' : limitCount}
           </span>
         </div>
@@ -332,7 +333,7 @@ export default function RamaMind() {
             padding: '8px 14px', border: 'none', background: 'transparent',
             color: tab === t ? 'var(--violet)' : 'var(--muted)',
             borderBottom: tab === t ? '2px solid var(--violet)' : '2px solid transparent',
-            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: '10px',
+            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome,
             textTransform: 'uppercase', letterSpacing: '0.06em',
           }}>{t}</button>
         ))}
@@ -349,10 +350,10 @@ export default function RamaMind() {
               <div key={i} style={{ padding: '10px', marginBottom: '6px', background: 'var(--surface)',
                 borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--amber)' }}>{t.name}</span>
-                  <span className="badge badge-amber" style={{ fontSize: '9px' }}>{t.type}</span>
+                  <span style={{ fontSize: FS.dense, fontWeight: 700, color: 'var(--amber)' }}>{t.name}</span>
+                  <span className="badge badge-amber" style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>{t.type}</span>
                 </div>
-                <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '4px' }}>{t.desc}</div>
+                <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', marginTop: '4px' }}>{t.desc}</div>
               </div>
             ))}
           </div>

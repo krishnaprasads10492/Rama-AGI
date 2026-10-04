@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { localSearch } from './symbols.js';
+import { FS } from '@config/type.js';
 
 /**
  * SymbolSearch — a select dropdown over every market (spec Sections 102, 103).
@@ -295,7 +296,7 @@ export default function SymbolSearch({
         </span>
         {selectedName && (
           <span style={{ color: 'var(--muted)', flex: 1, overflow: 'hidden',
-            textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px' }}>
+            textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: FS.dense }}>
             {selectedName}
           </span>
         )}
@@ -336,7 +337,7 @@ export default function SymbolSearch({
             />
           </div>
           {rows.length === 0 && (
-            <div style={{ padding: '10px 12px', fontSize: '12.5px', color: 'var(--muted)',
+            <div style={{ padding: '10px 12px', fontSize: FS.denseLg, color: 'var(--muted)',
               lineHeight: 1.6 }}>
               {busy ? 'Searching…' : (note || 'Keep typing, or press Enter to use what you typed.')}
             </div>
@@ -353,7 +354,7 @@ export default function SymbolSearch({
               onMouseDown={(e) => { e.preventDefault(); commit(r); }}
               style={{
                 display: 'flex', alignItems: 'baseline', gap: '8px', padding: '6px 10px',
-                cursor: 'pointer', fontSize: '12.5px',
+                cursor: 'pointer', fontSize: FS.denseLg,
                 background: i === active
                   ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'transparent',
                 borderBottom: '1px solid var(--border)',
@@ -367,18 +368,18 @@ export default function SymbolSearch({
                 {r.name || '—'}
               </span>
               {r.kind && (
-                <span style={{ fontSize: '12px', color: KIND_COLOR[r.kind] || 'var(--muted)' }}>
+                <span style={{ fontSize: FS.dense, color: KIND_COLOR[r.kind] || 'var(--muted)' }}>
                   {r.kind}
                 </span>
               )}
-              <span style={{ fontSize: '12px', color: 'var(--muted)', minWidth: '52px',
+              <span style={{ fontSize: FS.dense, color: 'var(--muted)', minWidth: '52px',
                 textAlign: 'right' }}>
                 {r.exchangeName || r.exchange}
               </span>
             </div>
           ))}
           {hint && (
-            <div style={{ padding: '6px 10px', fontSize: '12px', color: 'var(--muted)',
+            <div style={{ padding: '6px 10px', fontSize: FS.dense, color: 'var(--muted)',
               lineHeight: 1.5 }} aria-live="polite">
               {hint}
               {source === 'provider' && (

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import RamaOrb from '@components/RamaOrb.jsx';
 import { instanceApi, authApi } from '@services/authClient.js';
 import { TIERS, TIER_LABELS, TIER_COLORS } from '@services/accessControl.js';
+import { FS, LH } from '@config/type.js';
 
 /**
  * Setup — first-run provisioning for this copy of Rāma.
@@ -67,7 +68,7 @@ function StrengthBar({ password }) {
       </div>
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '5px' }}>
         {checks.map(c => (
-          <span key={c.label} style={{ fontSize: '9px', color: c.pass ? 'var(--green)' : 'var(--muted)' }}>
+          <span key={c.label} style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: c.pass ? 'var(--green)' : 'var(--muted)' }}>
             {c.pass ? '✓' : '·'} {c.label}
           </span>
         ))}
@@ -82,7 +83,7 @@ function Field({ label, hint, children }) {
     <div>
       <div className="section-label" style={{ marginBottom: '5px' }}>{label}</div>
       {children}
-      {hint && <div style={{ fontSize: '9px', color: 'var(--muted)', marginTop: '4px' }}>{hint}</div>}
+      {hint && <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '4px' }}>{hint}</div>}
     </div>
   );
 }
@@ -185,7 +186,7 @@ export default function Setup({ onProvisioned }) {
             <div style={{ fontSize: '17px', fontWeight: 700, color: 'var(--violet)', letterSpacing: '0.12em' }}>
               RĀMA AGI · FIRST RUN
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px' }}>
+            <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '4px' }}>
               {step === 0 && 'Create the owner account for this instance'}
               {step === 1 && 'Choose the access level for this instance'}
               {step === 2 && 'Save your access key'}
@@ -222,7 +223,7 @@ export default function Setup({ onProvisioned }) {
               <input className="input" type="password" value={confirm} autoComplete="new-password"
                 onChange={e => { setConfirm(e.target.value); setError(''); }} />
               {confirm && password !== confirm && (
-                <div style={{ fontSize: '9px', color: 'var(--red)', marginTop: '4px' }}>
+                <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--red)', marginTop: '4px' }}>
                   Passwords do not match
                 </div>
               )}
@@ -261,16 +262,16 @@ export default function Setup({ onProvisioned }) {
                       Level {t.tier} · {t.title}
                     </span>
                   </div>
-                  <div style={{ fontSize: '10px', color: 'var(--muted)', margin: '4px 0 6px 18px' }}>
+                  <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', margin: '4px 0 6px 18px' }}>
                     {t.tagline}
                   </div>
                   {active && (
                     <div style={{ marginLeft: '18px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
                       {t.grants.map(g => (
-                        <div key={g} style={{ fontSize: '9px', color: 'var(--green)' }}>✓ {g}</div>
+                        <div key={g} style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--green)' }}>✓ {g}</div>
                       ))}
                       {t.withheld.map(w => (
-                        <div key={w} style={{ fontSize: '9px', color: 'var(--muted)' }}>✕ {w}</div>
+                        <div key={w} style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>✕ {w}</div>
                       ))}
                     </div>
                   )}
@@ -282,7 +283,7 @@ export default function Setup({ onProvisioned }) {
             <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
               {!showMaster ? (
                 <button className="btn" onClick={() => setShowMaster(true)}
-                  style={{ fontSize: '10px', width: '100%', justifyContent: 'center', color: 'var(--muted)' }}>
+                  style={{ fontSize: FS.chrome, lineHeight: LH.chrome, width: '100%', justifyContent: 'center', color: 'var(--muted)' }}>
                   I hold the master enrolment secret
                 </button>
               ) : (
@@ -296,7 +297,7 @@ export default function Setup({ onProvisioned }) {
 
             {error && (
               <div style={{
-                color: 'var(--red)', fontSize: '11px', padding: '8px 10px',
+                color: 'var(--red)', fontSize: FS.chrome, lineHeight: LH.chrome, padding: '8px 10px',
                 background: 'rgba(255,0,60,0.08)', border: '1px solid rgba(255,0,60,0.3)',
                 borderRadius: 'var(--radius)',
               }}>
@@ -323,7 +324,8 @@ export default function Setup({ onProvisioned }) {
             <div style={{
               padding: '10px 12px', borderRadius: 'var(--radius)',
               background: 'rgba(0,255,65,0.07)', border: '1px solid rgba(0,255,65,0.3)',
-              fontSize: '11px', color: 'var(--green)',
+              fontSize: FS.chrome, color: 'var(--green)',
+              lineHeight: LH.chrome,
             }}>
               Instance provisioned · {result.tierLabel} (level {result.tier})
             </div>
@@ -343,14 +345,14 @@ export default function Setup({ onProvisioned }) {
                   onClick={() => { navigator.clipboard?.writeText(result.accessKey); }}>
                   Copy
                 </button>
-                <span style={{ fontSize: '9px', color: 'var(--muted)', alignSelf: 'center' }}>
+                <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', alignSelf: 'center' }}>
                   Expires {new Date(result.keyExpiresAt).toLocaleDateString()}
                 </span>
               </div>
             </div>
 
             <div style={{
-              fontSize: '10px', color: 'var(--amber)', lineHeight: '1.7',
+              fontSize: FS.chrome, color: 'var(--amber)', lineHeight: '1.7',
               padding: '10px 12px', background: 'rgba(255,170,0,0.06)',
               border: '1px solid rgba(255,170,0,0.25)', borderRadius: 'var(--radius)',
             }}>
@@ -360,7 +362,7 @@ export default function Setup({ onProvisioned }) {
               the login screen using your password.
             </div>
 
-            <label style={{ display: 'flex', gap: '8px', alignItems: 'center', fontSize: '11px', color: 'var(--text-dim)', cursor: 'pointer' }}>
+            <label style={{ display: 'flex', gap: '8px', alignItems: 'center', fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', cursor: 'pointer' }}>
               <input type="checkbox" checked={keySaved} onChange={e => setKeySaved(e.target.checked)} />
               I have saved this key somewhere safe
             </label>
@@ -373,7 +375,7 @@ export default function Setup({ onProvisioned }) {
         )}
 
         {/* Footer */}
-        <div style={{ fontSize: '9px', color: 'var(--muted)', textAlign: 'center', lineHeight: '1.6' }}>
+        <div style={{ fontSize: FS.chrome, color: 'var(--muted)', textAlign: 'center', lineHeight: '1.6' }}>
           Everything you enter is written into the AES-256-GCM store that your
           passcode unlocks. No plaintext account file is ever created.
         </div>

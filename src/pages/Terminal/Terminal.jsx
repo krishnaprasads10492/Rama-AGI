@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { terminalClient } from '@services/ipcClient.js';
 import { useUserStore } from '@store/userStore.js';
+import { FS, LH } from '@config/type.js';
 
 /**
  * Terminal page — wraps node-pty output in a simple xterm-style renderer.
@@ -131,17 +132,17 @@ export default function Terminal() {
               padding: '8px 14px', border: 'none', background: 'transparent',
               color: activeId === sess.id ? 'var(--green)' : 'var(--muted)',
               borderBottom: activeId === sess.id ? '2px solid var(--green)' : '2px solid transparent',
-              cursor: 'pointer', fontFamily: 'var(--font)', fontSize: '11px',
+              cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome,
             }}>
               {'>_'} {sess.title}
             </button>
             <button onClick={() => closeSession(sess.id)} style={{
               padding: '2px 6px', border: 'none', background: 'transparent',
-              color: 'var(--muted)', cursor: 'pointer', fontSize: '10px', fontFamily: 'var(--font)',
+              color: 'var(--muted)', cursor: 'pointer', fontSize: FS.chrome, lineHeight: LH.chrome, fontFamily: 'var(--font)',
             }}>✕</button>
           </div>
         ))}
-        <button className="btn btn-sm" style={{ marginLeft: '8px', fontSize: '11px' }} onClick={createSession}>
+        <button className="btn btn-sm" style={{ marginLeft: '8px', fontSize: FS.chrome, lineHeight: LH.chrome }} onClick={createSession}>
           + New
         </button>
       </div>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { emitActivity } from '@components/ActivityStream.jsx';
 import { useUserStore } from '@store/userStore.js';
+import { FS, LH } from '@config/type.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -53,23 +54,23 @@ function FindingCard({ finding, onAnalyze, onReadSource }) {
               {finding.name}
             </span>
             {finding.stars && (
-              <span style={{ fontSize: 10, color: 'var(--amber)' }}>⭐ {finding.stars.toLocaleString()}</span>
+              <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--amber)' }}>⭐ {finding.stars.toLocaleString()}</span>
             )}
-            <span style={{ fontSize: 10, color: licColor, border: `1px solid ${licColor}44`,
+            <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: licColor, border: `1px solid ${licColor}44`,
               padding: '1px 6px', borderRadius: 2 }}>
               {finding.licenseOk ? '✓' : '⚠'} {finding.license}
             </span>
             {finding.language && (
-              <span style={{ fontSize: 10, color: 'var(--muted)' }}>{finding.language}</span>
+              <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>{finding.language}</span>
             )}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 3, lineHeight: 1.5 }}>
+          <div style={{ fontSize: FS.chrome, color: 'var(--text-dim)', marginTop: 3, lineHeight: 1.5 }}>
             {finding.description?.slice(0, 120) || 'No description'}
           </div>
           {finding.topics?.length > 0 && (
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 5 }}>
               {finding.topics.slice(0, 5).map(t => (
-                <span key={t} style={{ fontSize: 9, color: 'var(--accent)', background: 'rgba(0,255,255,0.06)',
+                <span key={t} style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--accent)', background: 'rgba(0,255,255,0.06)',
                   border: '1px solid rgba(0,255,255,0.2)', borderRadius: 2, padding: '1px 5px' }}>{t}</span>
               ))}
             </div>
@@ -79,13 +80,13 @@ function FindingCard({ finding, onAnalyze, onReadSource }) {
         {/* Actions */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flexShrink: 0 }}>
           {finding.licenseOk && (
-            <button className="btn btn-sm btn-primary" style={{ fontSize: 10 }}
+            <button className="btn btn-sm btn-primary" style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}
               onClick={() => onAnalyze(finding)}>
               ⚡ Analyze
             </button>
           )}
           {finding.url && (
-            <button className="btn btn-sm" style={{ fontSize: 10 }}
+            <button className="btn btn-sm" style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}
               onClick={() => isElectron && window.rama.shell.openExternal(finding.url)}>
               🌐 View
             </button>
@@ -94,7 +95,7 @@ function FindingCard({ finding, onAnalyze, onReadSource }) {
       </div>
 
       {!finding.licenseOk && (
-        <div style={{ marginTop: 8, fontSize: 10, color: 'var(--red)', padding: '4px 8px',
+        <div style={{ marginTop: 8, fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--red)', padding: '4px 8px',
           background: 'rgba(255,0,60,0.08)', borderRadius: 'var(--radius)' }}>
           ⚠ License {finding.license} may restrict use. Cannot analyze without master review.
         </div>
@@ -128,33 +129,33 @@ function ProposalCard({ proposal, onApprove, onReject, onApply, onPublish, repoP
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: statusColors[proposal.status],
+            <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, fontWeight: 700, color: statusColors[proposal.status],
               textTransform: 'uppercase', letterSpacing: '0.08em' }}>
               {proposal.status}
             </span>
-            <span style={{ fontSize: 11, color: 'var(--text)' }}>{proposal.source?.name}</span>
-            <span style={{ fontSize: 10, color: 'var(--muted)', marginLeft: 'auto' }}>
+            <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text)' }}>{proposal.source?.name}</span>
+            <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginLeft: 'auto' }}>
               {new Date(proposal.createdAt).toLocaleString()}
             </span>
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+          <div style={{ fontSize: FS.chrome, color: 'var(--text-dim)', lineHeight: 1.6 }}>
             {proposal.summary}
           </div>
           {proposal.improvementAxes?.length > 0 && (
             <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
               {proposal.improvementAxes.map(ax => (
-                <span key={ax} style={{ fontSize: 9, color: 'var(--violet)', background: 'rgba(119,0,255,0.1)',
+                <span key={ax} style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--violet)', background: 'rgba(119,0,255,0.1)',
                   border: '1px solid rgba(119,0,255,0.3)', borderRadius: 2, padding: '1px 6px' }}>
                   {ax}
                 </span>
               ))}
-              <span style={{ fontSize: 10, color: 'var(--text-dim)', marginLeft: 4 }}>
+              <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', marginLeft: 4 }}>
                 · Estimated gain: {proposal.estimatedGain}
               </span>
             </div>
           )}
           {proposal.licenseNote && (
-            <div style={{ fontSize: 10, color: proposal.licenseCompliant ? 'var(--green)' : 'var(--amber)',
+            <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: proposal.licenseCompliant ? 'var(--green)' : 'var(--amber)',
               marginTop: 5 }}>
               {proposal.licenseNote}
             </div>
@@ -165,19 +166,19 @@ function ProposalCard({ proposal, onApprove, onReject, onApply, onPublish, repoP
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flexShrink: 0 }}>
           {proposal.status === 'pending' && (
             <>
-              <button className="btn btn-sm btn-primary" style={{ fontSize: 10 }}
+              <button className="btn btn-sm btn-primary" style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}
                 onClick={() => onApprove(proposal.id)}>✓ Approve</button>
-              <button className="btn btn-sm btn-danger" style={{ fontSize: 10 }}
+              <button className="btn btn-sm btn-danger" style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}
                 onClick={() => onReject(proposal.id)}>✕ Reject</button>
             </>
           )}
           {proposal.status === 'approved' && proposal.changes?.length > 0 && (
-            <button className="btn btn-sm btn-primary" style={{ fontSize: 10, color: 'var(--violet)',
+            <button className="btn btn-sm btn-primary" style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--violet)',
               borderColor: 'var(--violet)' }}
               onClick={() => onApply(proposal.id)}>⚡ Apply</button>
           )}
           {proposal.status === 'applied' && (
-            <button className="btn btn-sm" style={{ fontSize: 10, color: 'var(--accent)',
+            <button className="btn btn-sm" style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--accent)',
               borderColor: 'var(--accent)' }}
               disabled={publishing || !repoPath}
               onClick={publish}>
@@ -188,16 +189,16 @@ function ProposalCard({ proposal, onApprove, onReject, onApply, onPublish, repoP
       </div>
 
       {publishResult && (
-        <div style={{ marginTop: 8, fontSize: 11, lineHeight: 1.6,
+        <div style={{ marginTop: 8, fontSize: FS.chrome, lineHeight: 1.6,
           color: publishResult.ok ? 'var(--green)' : 'var(--red)' }}>
           {publishResult.ok ? (
             <>
               ✓ {publishResult.note}
               <details style={{ marginTop: 4 }}>
-                <summary style={{ cursor: 'pointer', color: 'var(--muted)', fontSize: 10 }}>
+                <summary style={{ cursor: 'pointer', color: 'var(--muted)', fontSize: FS.chrome, lineHeight: LH.chrome }}>
                   Release notes ({publishResult.generatedBy === 'ai' ? 'AI-explained' : 'structured'})
                 </summary>
-                <pre style={{ whiteSpace: 'pre-wrap', fontSize: 10, color: 'var(--text-dim)',
+                <pre style={{ whiteSpace: 'pre-wrap', fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)',
                   background: 'var(--surface)', padding: 8, borderRadius: 'var(--radius)',
                   marginTop: 4, maxHeight: 220, overflow: 'auto' }}>
                   {publishResult.releaseNotes}
@@ -218,19 +219,19 @@ function AssessmentRow({ item, onScout }) {
       display: 'flex', alignItems: 'flex-start', gap: 12 }}>
       <div style={{ flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>Axis: {item.axis}</span>
-          <span style={{ fontSize: 11, color: 'var(--accent)' }}>{item.score}/10</span>
-          <span style={{ fontSize: 10, fontWeight: 700, color: priorityColor[item.priority],
+          <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, fontWeight: 700, color: 'var(--text)' }}>Axis: {item.axis}</span>
+          <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--accent)' }}>{item.score}/10</span>
+          <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, fontWeight: 700, color: priorityColor[item.priority],
             textTransform: 'uppercase', letterSpacing: '0.06em', marginLeft: 'auto' }}>
             {item.priority}
           </span>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>{item.gap}</div>
-        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 3, fontStyle: 'italic' }}>
+        <div style={{ fontSize: FS.chrome, color: 'var(--text-dim)', lineHeight: 1.5 }}>{item.gap}</div>
+        <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: 3, fontStyle: 'italic' }}>
           Scout: {item.suggestion}
         </div>
       </div>
-      <button className="btn btn-sm" style={{ fontSize: 10, flexShrink: 0 }}
+      <button className="btn btn-sm" style={{ fontSize: FS.chrome, lineHeight: LH.chrome, flexShrink: 0 }}
         onClick={() => onScout(item)}>
         Scout →
       </button>
@@ -371,7 +372,7 @@ export default function Evolution() {
           <div style={{ fontWeight: 700, color: 'var(--violet)', letterSpacing: '0.1em' }}>
             SELF-EVOLUTION ENGINE
           </div>
-          <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
             Rāma studies public repos to improve itself · Open-source only · Master approval required
           </div>
         </div>
@@ -387,10 +388,10 @@ export default function Evolution() {
             padding: '9px 16px', border: 'none', background: 'transparent',
             color: tab === t ? 'var(--violet)' : 'var(--muted)',
             borderBottom: tab === t ? '2px solid var(--violet)' : '2px solid transparent',
-            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: '11px', textTransform: 'uppercase',
+            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome, textTransform: 'uppercase',
           }}>
             {t}{t === 'proposals' && proposals.filter(p => p.status === 'pending').length > 0 &&
-              <span style={{ marginLeft: 4, fontSize: 9, color: 'var(--amber)' }}>
+              <span style={{ marginLeft: 4, fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--amber)' }}>
                 ({proposals.filter(p => p.status === 'pending').length})
               </span>}
           </button>
@@ -410,7 +411,7 @@ export default function Evolution() {
             </div>
             <div className="hud-card" style={{ overflow: 'hidden' }}>
               <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)',
-                fontSize: 10, color: 'var(--muted)', letterSpacing: '0.1em', fontWeight: 700 }}>
+                fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', letterSpacing: '0.1em', fontWeight: 700 }}>
                 IDENTIFIED CAPABILITY GAPS
               </div>
               {assessment.map((item, i) => (
@@ -445,7 +446,7 @@ export default function Evolution() {
                     padding: '4px 10px', border: `1px solid ${category === c.id ? c.color : 'var(--border)'}`,
                     borderRadius: 'var(--radius)', background: category === c.id ? `${c.color}15` : 'transparent',
                     color: category === c.id ? c.color : 'var(--muted)', cursor: 'pointer',
-                    fontFamily: 'var(--font)', fontSize: 10,
+                    fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome,
                   }}>{c.icon} {c.label}</button>
                 ))}
               </div>
@@ -456,7 +457,7 @@ export default function Evolution() {
               <div className="hud-card" style={{ padding: 14 }}>
                 <div className="section-label" style={{ marginBottom: 10 }}>SCOUT LOG</div>
                 {scoutLog.map((entry, i) => (
-                  <div key={i} style={{ fontSize: 11, color: 'var(--text-dim)', padding: '3px 0',
+                  <div key={i} style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', padding: '3px 0',
                     borderBottom: '1px solid var(--border)' }}>
                     <span style={{ color: 'var(--accent)', marginRight: 6 }}>⬢</span>
                     {entry.step}: {typeof entry.data === 'string' ? entry.data : entry.data?.message || JSON.stringify(entry.data).slice(0, 80)}
@@ -464,7 +465,7 @@ export default function Evolution() {
                 ))}
                 {scouting && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0',
-                    color: 'var(--accent)', fontSize: 11 }}>
+                    color: 'var(--accent)', fontSize: FS.chrome, lineHeight: LH.chrome }}>
                     <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)',
                       animation: 'pulse-ring 1s ease infinite' }} />
                     Scouting...
@@ -484,7 +485,7 @@ export default function Evolution() {
               </div>
             ) : (
               <>
-                <div style={{ marginBottom: 12, fontSize: 11, color: 'var(--text-dim)' }}>
+                <div style={{ marginBottom: 12, fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)' }}>
                   {findings.length} results found · {findings.filter(f => f.licenseOk).length} license-compliant
                 </div>
                 {findings.map(f => (
@@ -502,7 +503,7 @@ export default function Evolution() {
               <div className="section-label" style={{ marginBottom: 6 }}>REPO PATH FOR APPLYING</div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <input className="input" value={repoPath} onChange={e => setRepoPath(e.target.value)}
-                  placeholder="c:\CodeBase\Velvet_UI\Velvet\Rama_AGI" style={{ flex: 1, fontSize: 11 }} />
+                  placeholder="c:\CodeBase\Velvet_UI\Velvet\Rama_AGI" style={{ flex: 1, fontSize: FS.chrome, lineHeight: LH.chrome }} />
                 {isElectron && (
                   <button className="btn btn-sm" onClick={async () => {
                     const res = await window.rama.fs.selectPath({ directory: true });
@@ -527,7 +528,7 @@ export default function Evolution() {
         {tab === 'log' && (
           <div className="hud-card" style={{ overflow: 'hidden' }}>
             <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)',
-              fontSize: 10, color: 'var(--muted)', letterSpacing: '0.1em', fontWeight: 700 }}>
+              fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', letterSpacing: '0.1em', fontWeight: 700 }}>
               EVOLUTION HISTORY
             </div>
             {proposals.length === 0 ? (
@@ -537,17 +538,17 @@ export default function Evolution() {
             ) : proposals.filter(p => p.status === 'applied').map((p, i) => (
               <div key={i} style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--violet)' }}>
+                  <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, fontWeight: 700, color: 'var(--violet)' }}>
                     {p.source?.name}
                   </span>
-                  <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+                  <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
                     {new Date(p.appliedAt || p.createdAt).toLocaleString()}
                   </span>
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{p.summary}</div>
+                <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)' }}>{p.summary}</div>
                 <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
                   {p.improvementAxes?.map(ax => (
-                    <span key={ax} style={{ fontSize: 9, color: 'var(--green)', background: 'rgba(0,255,65,0.08)',
+                    <span key={ax} style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--green)', background: 'rgba(0,255,65,0.08)',
                       border: '1px solid rgba(0,255,65,0.25)', borderRadius: 2, padding: '1px 5px' }}>
                       +{ax}
                     </span>

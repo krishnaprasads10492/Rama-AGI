@@ -73,15 +73,56 @@
      not legible in a monospace face. The floor is raised here; whole-surface
      scaling is handled by the zoom factor (spec section 35), because inline pixel
      values cannot be overridden by any CSS rule. */
-  --font-size:    15px;
-  --text-xs:      12px;     /* smallest permitted — labels, badges */
-  --text-sm:      13px;
-  --text-base:    15px;
-  --text-lg:      17px;
-  --text-xl:      20px;
+  /* ── Role scale — ONE number per role, and this is where it lives ───────────
+     Twelve steps, every value already present in the codebase (spec 136.3). The
+     floor for a role is a CONTRACT held in src/config/type.js FLOORS; the value
+     here may sit above its floor but never below it, which is what makes the
+     suite's floor check an inequality that can fail. src/config/type.js exports
+     these as var() STRINGS for the inline style objects the renderer is built
+     from — the number is not duplicated there. */
+  --fs-micro:     11px;    /* a single glyph as an icon inside fixed geometry — never text to read */
+  --fs-chip:      11.5px;  /* chart chips */
+  --fs-dense:     12px;    /* dense data — the largest cohort */
+  --fs-dense-lg:  12.5px;  /* table content rather than table chrome */
+  --fs-chrome:    13px;    /* labels, buttons, tabs, worded badges */
+  --fs-chrome-lg: 14px;    /* chrome emphasis */
+  --fs-body:      15px;    /* body prose — today's base, so nothing regresses */
+  --fs-read:      16px;    /* surfaces read at length */
+  --fs-h3:        17px;
+  --fs-h2:        20px;
+  --fs-h1:        24px;
+  --fs-display:   32px;
+
+  /* Line heights. --lh-flat ships with ZERO consumers after this run: the two
+     micro-glyph sites keep their own geometry. It is kept deliberately — it is
+     the line height the next fixed-geometry glyph needs, so DO NOT DELETE it as
+     dead code (spec 136.12 [F9]). */
+  --lh-flat:      1;
+  --lh-chart:     1.2;
+  --lh-display:   1.15;
+  --lh-head:      1.3;
+  --lh-tight:     1.35;
+  --lh-chrome:    1.5;
+  --lh-body:      1.6;     /* the inherited base below, on html/body/#root */
+  --lh-read:      1.7;
+
+  /* The six legacy names are PIXEL-NEUTRAL aliases of the role scale — each is
+     the same px it has always been — so all 37 existing token sites and the
+     .text-* classes render identically with no edit (additive, I11). The role
+     floors above are where the legibility floor is set, at the authoring site. */
+  --font-size:    var(--fs-body);    /* 15px */
+  --text-xs:      var(--fs-dense);   /* 12px */
+  --text-sm:      var(--fs-chrome);  /* 13px */
+  --text-base:    var(--fs-body);    /* 15px */
+  --text-lg:      var(--fs-h3);      /* 17px */
+  --text-xl:      var(--fs-h2);      /* 20px */
 
   /* ── Layout ─────────────────────────────────────────────────────────────── */
+  /* 38px, unchanged: vertical padding is zero (Titlebar.jsx authors
+     `padding: '0 0 0 10px'`) and setZoomFactor is a uniform multiplier, so the
+     box and its text scale together and the fit is zoom-invariant (spec 136.6). */
   --titlebar-h:  38px;
+  --palette-w:   600px;    /* the command palette is the navigation in a shell with no sidebar */
   --radius:      6px;
   --radius-lg:   10px;
   --radius-xl:   16px;
@@ -89,6 +130,16 @@
   /* ── Transitions ─────────────────────────────────────────────────────────── */
   --transition:      180ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 380ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Width bands ─────────────────────────────────────────────────────────────
+   src/hooks/useLayoutBand.js writes data-band on <html>. The `:root` prefix is
+   REQUIRED, not decorative: a bare [data-band="wide"] scores (0,1,0) and TIES
+   with :root, so source order would silently decide whether this override
+   applies at all. :root[data-band="wide"] scores (0,2,0) and wins regardless of
+   order. Same rule-order trap the rejected-minimum note below already records. */
+:root[data-band="wide"] {
+  --palette-w: 760px;
 }
 
 /* ── Reset ───────────────────────────────────────────────────────────────── */

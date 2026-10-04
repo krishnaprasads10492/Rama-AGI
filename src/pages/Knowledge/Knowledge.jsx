@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { FS, LH } from '@config/type.js';
 
 /**
  * Knowledge — Rāma's persistent memory and knowledge base.
@@ -46,14 +47,14 @@ export default function Knowledge() {
           <div key={entry.id} className="hud-card glow-hover" style={{ padding: '16px', cursor: 'pointer' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
               <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '13px' }}>{entry.title}</div>
-              <span style={{ fontSize: '10px', color: 'var(--muted)' }}>{new Date(entry.ts).toLocaleDateString()}</span>
+              <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>{new Date(entry.ts).toLocaleDateString()}</span>
             </div>
             <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginBottom: '10px', lineHeight: '1.6' }}>
               {entry.excerpt}
             </div>
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
               {entry.tags.map(t => (
-                <span key={t} className="badge badge-cyan" style={{ fontSize: '9px' }}>{t}</span>
+                <span key={t} className="badge badge-cyan" style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>{t}</span>
               ))}
             </div>
           </div>

@@ -4,6 +4,7 @@ import { useUserStore } from '@store/userStore.js';
 import { authApi, keyApi, saveSession, inElectron } from '@services/authClient.js';
 import { authenticateMaster } from '@services/consciousness.js';
 import { TIERS } from '@services/accessControl.js';
+import { FS, LH } from '@config/type.js';
 
 /**
  * Login — gates 2 and 3 of the three-gate sign-in.
@@ -60,7 +61,7 @@ function ErrorBox({ children }) {
   if (!children) return null;
   return (
     <div style={{
-      color: 'var(--red)', fontSize: '11px', padding: '8px 10px',
+      color: 'var(--red)', fontSize: FS.chrome, padding: '8px 10px',
       background: 'rgba(255,0,60,0.08)', border: '1px solid rgba(255,0,60,0.3)',
       borderRadius: 'var(--radius)', lineHeight: '1.6',
     }}>
@@ -74,7 +75,7 @@ function Field({ label, hint, children }) {
     <div>
       <div className="section-label" style={{ marginBottom: '5px' }}>{label}</div>
       {children}
-      {hint && <div style={{ fontSize: '9px', color: 'var(--muted)', marginTop: '4px' }}>{hint}</div>}
+      {hint && <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '4px' }}>{hint}</div>}
     </div>
   );
 }
@@ -254,7 +255,7 @@ export default function Login({ onLogin }) {
             <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--violet)', letterSpacing: '0.12em' }}>
               RĀMA AGI
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px', letterSpacing: '0.04em' }}>
+            <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '4px', letterSpacing: '0.04em' }}>
               {subtitle}
             </div>
           </div>
@@ -263,7 +264,7 @@ export default function Login({ onLogin }) {
 
         {!inElectron() && (
           <div style={{
-            fontSize: '10px', color: 'var(--amber)', lineHeight: '1.7',
+            fontSize: FS.chrome, color: 'var(--amber)', lineHeight: '1.7',
             padding: '9px 11px', background: 'rgba(255,170,0,0.06)',
             border: '1px solid rgba(255,170,0,0.25)', borderRadius: 'var(--radius)',
           }}>
@@ -316,7 +317,7 @@ export default function Login({ onLogin }) {
 
             <button type="button" className="btn"
               onClick={() => { setPhase(PHASES.RECOVER); setError(''); }}
-              style={{ justifyContent: 'center', fontSize: '10px', color: 'var(--muted)' }}>
+              style={{ justifyContent: 'center', fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
               I lost my access key
             </button>
           </form>
@@ -338,7 +339,7 @@ export default function Login({ onLogin }) {
             </button>
 
             <button className="btn" onClick={resetToPassword}
-              style={{ justifyContent: 'center', fontSize: '10px', color: 'var(--muted)' }}>
+              style={{ justifyContent: 'center', fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
               ← Start over
             </button>
           </div>
@@ -348,7 +349,7 @@ export default function Login({ onLogin }) {
         {phase === PHASES.KEY_ISSUED && issued && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
             <div style={{
-              fontSize: '11px', color: 'var(--text-dim)', lineHeight: '1.7',
+              fontSize: FS.chrome, color: 'var(--text-dim)', lineHeight: '1.7',
               padding: '9px 11px', background: 'rgba(0,200,255,0.05)',
               border: '1px solid rgba(0,200,255,0.25)', borderRadius: 'var(--radius)',
             }}>
@@ -372,14 +373,14 @@ export default function Login({ onLogin }) {
                   onClick={() => navigator.clipboard?.writeText(issued.key)}>
                   Copy
                 </button>
-                <span style={{ fontSize: '9px', color: 'var(--muted)' }}>
+                <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
                   Expires {new Date(issued.expiresAt).toLocaleDateString()}
                 </span>
               </div>
             </div>
 
             <div style={{
-              fontSize: '10px', color: 'var(--amber)', lineHeight: '1.7',
+              fontSize: FS.chrome, color: 'var(--amber)', lineHeight: '1.7',
               padding: '9px 11px', background: 'rgba(255,170,0,0.06)',
               border: '1px solid rgba(255,170,0,0.25)', borderRadius: 'var(--radius)',
             }}>
@@ -399,7 +400,7 @@ export default function Login({ onLogin }) {
         {/* ── Recovery ───────────────────────────────────────────────────── */}
         {phase === PHASES.RECOVER && (
           <form onSubmit={recover} style={{ display: 'flex', flexDirection: 'column', gap: '13px' }}>
-            <div style={{ fontSize: '10px', color: 'var(--muted)', lineHeight: '1.7' }}>
+            <div style={{ fontSize: FS.chrome, color: 'var(--muted)', lineHeight: '1.7' }}>
               Your password alone can mint a replacement key. The new key is valid
               for 7 days, and the old one stops working immediately.
             </div>
@@ -422,13 +423,13 @@ export default function Login({ onLogin }) {
             </button>
 
             <button type="button" className="btn" onClick={resetToPassword}
-              style={{ justifyContent: 'center', fontSize: '10px', color: 'var(--muted)' }}>
+              style={{ justifyContent: 'center', fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
               ← Back to sign in
             </button>
           </form>
         )}
 
-        <div style={{ fontSize: '9px', color: 'var(--muted)', textAlign: 'center', lineHeight: '1.6' }}>
+        <div style={{ fontSize: FS.chrome, color: 'var(--muted)', textAlign: 'center', lineHeight: '1.6' }}>
           Three independent secrets guard this instance: the store passcode, your
           password, and your access key.
         </div>

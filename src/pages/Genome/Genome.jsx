@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useUserStore } from '@store/userStore.js';
+import { FS, LH } from '@config/type.js';
 
 /**
  * Genome — Rāma's capability genome and instance lattice.
@@ -34,7 +35,7 @@ function Stat({ label, value, color = 'var(--text)' }) {
   return (
     <div style={{ textAlign: 'center', minWidth: '84px' }}>
       <div style={{ fontSize: '18px', fontWeight: 700, color }}>{value}</div>
-      <div style={{ fontSize: '9px', color: 'var(--muted)', letterSpacing: '0.1em' }}>{label}</div>
+      <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', letterSpacing: '0.1em' }}>{label}</div>
     </div>
   );
 }
@@ -50,7 +51,8 @@ function GeneChip({ gene, expressed, live }) {
         border: `1px solid ${expressed ? color : 'var(--border)'}`,
         background: expressed ? `${color}18` : 'transparent',
         color: expressed ? color : 'var(--muted)',
-        fontSize: '10px', letterSpacing: '0.04em',
+        fontSize: FS.chrome, letterSpacing: '0.04em',
+        lineHeight: LH.chrome,
         opacity: live === false ? 0.45 : 1,
       }}
     >
@@ -59,7 +61,7 @@ function GeneChip({ gene, expressed, live }) {
         background: live === false ? 'var(--red)' : expressed ? color : 'var(--border)',
       }} />
       {gene.label}
-      {!expressed && <span style={{ fontSize: '8px', opacity: 0.7 }}>dormant</span>}
+      {!expressed && <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, opacity: 0.7 }}>dormant</span>}
     </div>
   );
 }
@@ -79,33 +81,34 @@ function InstanceCard({ inst, genes, onSuspend, onResume, onTerminate, onExpress
         <div style={{ flex: 1, minWidth: '180px' }}>
           <div style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text)' }}>
             {inst.label}
-            <span style={{ color: 'var(--muted)', fontWeight: 400, fontSize: '10px', marginLeft: '8px' }}>
+            <span style={{ color: 'var(--muted)', fontWeight: 400, fontSize: FS.chrome, lineHeight: LH.chrome, marginLeft: '8px' }}>
               {inst.id}
             </span>
           </div>
-          <div style={{ fontSize: '10px', color: 'var(--muted)' }}>{inst.purpose}</div>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>{inst.purpose}</div>
         </div>
 
         <span className="badge" style={{
           background: `${color}22`, color, border: `1px solid ${color}55`,
-          fontSize: '9px', padding: '2px 8px', borderRadius: '2px',
+          fontSize: FS.chrome, padding: '2px 8px', borderRadius: '2px',
+          lineHeight: LH.chrome,
         }}>
           {String(inst.status).toUpperCase()}
         </span>
 
-        <div style={{ fontSize: '10px', color: 'var(--text-dim)', textAlign: 'right' }}>
+        <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', textAlign: 'right' }}>
           <div>{inst.expressed?.length ?? 0} expressed · {inst.dormant?.length ?? 0} dormant</div>
           <div style={{ color: 'var(--muted)' }}>genome {String(inst.genomeHash || '').slice(0, 8)}</div>
         </div>
 
-        <button className="btn btn-sm" onClick={() => setOpen(o => !o)} style={{ fontSize: '10px' }}>
+        <button className="btn btn-sm" onClick={() => setOpen(o => !o)} style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>
           {open ? 'Hide genes' : 'Genes'}
         </button>
         {inst.status === 'suspended'
-          ? <button className="btn btn-sm" disabled={busy} onClick={() => onResume(inst.id)} style={{ fontSize: '10px' }}>Resume</button>
-          : <button className="btn btn-sm" disabled={busy || inst.role === 'prime'} onClick={() => onSuspend(inst.id)} style={{ fontSize: '10px' }}>Suspend</button>}
+          ? <button className="btn btn-sm" disabled={busy} onClick={() => onResume(inst.id)} style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>Resume</button>
+          : <button className="btn btn-sm" disabled={busy || inst.role === 'prime'} onClick={() => onSuspend(inst.id)} style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>Suspend</button>}
         <button className="btn btn-sm btn-danger" disabled={busy || inst.role === 'prime'}
-          onClick={() => onTerminate(inst.id)} style={{ fontSize: '10px' }}>
+          onClick={() => onTerminate(inst.id)} style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>
           Terminate
         </button>
       </div>
@@ -214,7 +217,7 @@ export default function Genome() {
         {genome && (
           <span className="badge" style={{
             background: 'rgba(119,0,255,0.13)', color: 'var(--violet)',
-            border: '1px solid rgba(119,0,255,0.35)', fontSize: '9px',
+            border: '1px solid rgba(119,0,255,0.35)', fontSize: FS.chrome, lineHeight: LH.chrome,
             padding: '2px 8px', borderRadius: '2px',
           }}>
             v{genome.version} · {genome.hash?.slice(0, 12)}
@@ -223,14 +226,14 @@ export default function Genome() {
         {genome && !genome.identityAvailable && (
           <span className="badge" style={{
             background: 'rgba(255,170,0,0.13)', color: 'var(--amber)',
-            border: '1px solid rgba(255,170,0,0.35)', fontSize: '9px',
+            border: '1px solid rgba(255,170,0,0.35)', fontSize: FS.chrome, lineHeight: LH.chrome,
             padding: '2px 8px', borderRadius: '2px',
           }}>
             NUCLEUS LOCKED — IDENTITY MASKED
           </span>
         )}
         <div style={{ flex: 1 }} />
-        <button className="btn btn-sm" onClick={load} disabled={busy} style={{ fontSize: '10px' }}>
+        <button className="btn btn-sm" onClick={load} disabled={busy} style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>
           ↻ Refresh
         </button>
       </div>
@@ -239,7 +242,7 @@ export default function Genome() {
         {error && (
           <div className="hud-card" style={{
             padding: '10px 14px', marginBottom: '14px',
-            borderColor: 'var(--red)', color: 'var(--red)', fontSize: '11px',
+            borderColor: 'var(--red)', color: 'var(--red)', fontSize: FS.chrome, lineHeight: LH.chrome,
           }}>
             {error}
           </div>
@@ -250,7 +253,7 @@ export default function Genome() {
           padding: '14px 18px', marginBottom: '16px',
           display: 'flex', gap: '18px', flexWrap: 'wrap', alignItems: 'center',
         }}>
-          <div style={{ fontSize: '10px', color: 'var(--muted)', letterSpacing: '0.1em', flex: '0 0 100%' }}>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', letterSpacing: '0.1em', flex: '0 0 100%' }}>
             GENOME HEALTH — measured on this machine, not declared
           </div>
           <Stat label="GENES"    value={verify?.total ?? '–'} />
@@ -267,7 +270,7 @@ export default function Genome() {
 
         {/* Instances */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '11px', color: 'var(--text-dim)', letterSpacing: '0.1em', fontWeight: 700 }}>
+          <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', letterSpacing: '0.1em', fontWeight: 700 }}>
             INSTANCES
           </span>
           <div style={{ flex: 1 }} />
@@ -277,7 +280,7 @@ export default function Genome() {
             style={{
               background: 'var(--surface)', color: 'var(--text)',
               border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-              padding: '4px 8px', fontSize: '11px', fontFamily: 'var(--font)',
+              padding: '4px 8px', fontSize: FS.chrome, lineHeight: LH.chrome, fontFamily: 'var(--font)',
             }}
           >
             {Object.entries(genome?.roles || {}).map(([key, r]) => (
@@ -285,11 +288,11 @@ export default function Genome() {
             ))}
           </select>
           <button className="btn btn-sm btn-primary" disabled={busy}
-            onClick={() => act(() => ipc.instance.spawn({ role }))} style={{ fontSize: '10px' }}>
+            onClick={() => act(() => ipc.instance.spawn({ role }))} style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>
             + Spawn
           </button>
           <button className="btn btn-sm" disabled={busy}
-            onClick={() => act(() => ipc.instance.ensurePrime())} style={{ fontSize: '10px' }}>
+            onClick={() => act(() => ipc.instance.ensurePrime())} style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>
             Ensure Prime
           </button>
           <button className="btn btn-sm" disabled={busy}
@@ -297,13 +300,13 @@ export default function Genome() {
               const res = await ipc.instance.failover(role);
               setFailover(res?.ok ? res.data : []);
             }}
-            style={{ fontSize: '10px' }}>
+            style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>
             Failover check
           </button>
         </div>
 
         {insts.length === 0 && (
-          <div className="hud-card" style={{ padding: '20px', textAlign: 'center', color: 'var(--muted)', fontSize: '11px', marginBottom: '16px' }}>
+          <div className="hud-card" style={{ padding: '20px', textAlign: 'center', color: 'var(--muted)', fontSize: FS.chrome, lineHeight: LH.chrome, marginBottom: '16px' }}>
             No instances yet. Spawn one, or click Ensure Prime to bring up the master-facing Rāma.
           </div>
         )}
@@ -323,15 +326,15 @@ export default function Genome() {
 
         {failover && (
           <div className="hud-card" style={{ padding: '12px 16px', margin: '10px 0 16px' }}>
-            <div style={{ fontSize: '10px', color: 'var(--muted)', letterSpacing: '0.1em', marginBottom: '8px' }}>
+            <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', letterSpacing: '0.1em', marginBottom: '8px' }}>
               FAILOVER CANDIDATES FOR {String(genome?.roles?.[role]?.label || role).toUpperCase()}
             </div>
             {failover.length === 0 ? (
-              <div style={{ fontSize: '11px', color: 'var(--amber)' }}>
+              <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--amber)' }}>
                 No running instance could take over this role right now.
               </div>
             ) : failover.map(c => (
-              <div key={c.id} style={{ fontSize: '11px', color: 'var(--text-dim)', marginBottom: '4px' }}>
+              <div key={c.id} style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', marginBottom: '4px' }}>
                 <span style={{ color: 'var(--green)' }}>✓</span> {c.id} ({c.role}) —{' '}
                 {c.needsExpressing.length === 0
                   ? 'ready immediately'
@@ -342,13 +345,14 @@ export default function Genome() {
         )}
 
         {/* Gene map */}
-        <div style={{ fontSize: '11px', color: 'var(--text-dim)', letterSpacing: '0.1em', fontWeight: 700, margin: '20px 0 10px' }}>
+        <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', letterSpacing: '0.1em', fontWeight: 700, margin: '20px 0 10px' }}>
           GENE MAP
         </div>
         {Object.entries(genesByDomain).map(([domain, genes]) => (
           <div key={domain} className="hud-card" style={{ padding: '12px 16px', marginBottom: '8px' }}>
             <div style={{
-              fontSize: '10px', letterSpacing: '0.1em', marginBottom: '8px',
+              fontSize: FS.chrome, letterSpacing: '0.1em', marginBottom: '8px',
+              lineHeight: LH.chrome,
               color: DOMAIN_COLORS[domain] ?? 'var(--accent)', fontWeight: 700,
             }}>
               {domain.toUpperCase()} · {genes.length}

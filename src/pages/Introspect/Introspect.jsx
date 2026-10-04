@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useUserStore } from '@store/userStore.js';
+import { FS, LH } from '@config/type.js';
 
 /**
  * Introspect — Meta-Cognitive Self-Audit Nexus + Timeline Flashbacks.
@@ -20,7 +21,7 @@ function Stat({ label, value, color = 'var(--text)' }) {
   return (
     <div style={{ textAlign: 'center', minWidth: '90px' }}>
       <div style={{ fontSize: '18px', fontWeight: 700, color }}>{value}</div>
-      <div style={{ fontSize: '9px', color: 'var(--muted)', letterSpacing: '0.1em' }}>{label}</div>
+      <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', letterSpacing: '0.1em' }}>{label}</div>
     </div>
   );
 }
@@ -29,7 +30,7 @@ function Section({ title, children, right }) {
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '20px 0 10px' }}>
-        <span style={{ fontSize: '11px', color: 'var(--text-dim)', letterSpacing: '0.1em', fontWeight: 700 }}>
+        <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', letterSpacing: '0.1em', fontWeight: 700 }}>
           {title}
         </span>
         <div style={{ flex: 1 }} />
@@ -42,7 +43,7 @@ function Section({ title, children, right }) {
 
 function Empty({ children }) {
   return (
-    <div className="hud-card" style={{ padding: '18px', textAlign: 'center', color: 'var(--muted)', fontSize: '11px' }}>
+    <div className="hud-card" style={{ padding: '18px', textAlign: 'center', color: 'var(--muted)', fontSize: FS.chrome, lineHeight: LH.chrome }}>
       {children}
     </div>
   );
@@ -138,14 +139,14 @@ export default function Introspect() {
         <span style={{ fontWeight: 700, color: 'var(--gold)', letterSpacing: '0.1em' }}>
           INTROSPECTION
         </span>
-        <span style={{ fontSize: '10px', color: 'var(--muted)' }}>
+        <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
           self-audit · experiential dataset · timeline
         </span>
         <div style={{ flex: 1 }} />
-        <button className="btn btn-sm" disabled={busy} onClick={runAudit} style={{ fontSize: '10px' }}>
+        <button className="btn btn-sm" disabled={busy} onClick={runAudit} style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>
           Run audit now
         </button>
-        <button className="btn btn-sm" disabled={busy} onClick={load} style={{ fontSize: '10px' }}>
+        <button className="btn btn-sm" disabled={busy} onClick={load} style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>
           ↻ Refresh
         </button>
       </div>
@@ -154,7 +155,7 @@ export default function Introspect() {
         {error && (
           <div className="hud-card" style={{
             padding: '10px 14px', marginBottom: '14px',
-            borderColor: 'var(--red)', color: 'var(--red)', fontSize: '11px',
+            borderColor: 'var(--red)', color: 'var(--red)', fontSize: FS.chrome, lineHeight: LH.chrome,
           }}>
             {error}
           </div>
@@ -165,7 +166,7 @@ export default function Introspect() {
           padding: '14px 18px', display: 'flex', gap: '18px',
           flexWrap: 'wrap', alignItems: 'center',
         }}>
-          <div style={{ fontSize: '10px', color: 'var(--muted)', letterSpacing: '0.1em', flex: '0 0 100%' }}>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', letterSpacing: '0.1em', flex: '0 0 100%' }}>
             SELF-MEASUREMENT — from Rāma's own recorded outcomes
           </div>
           <Stat label="OUTCOMES"    value={summary?.recorded ?? 0} />
@@ -198,18 +199,18 @@ export default function Introspect() {
           ) : vectors.map((v, i) => (
             <div key={i} className="hud-card" style={{ padding: '12px 16px', marginBottom: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '11px', color: 'var(--muted)', letterSpacing: '0.08em', minWidth: '110px' }}>
+                <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', letterSpacing: '0.08em', minWidth: '110px' }}>
                   {v.action}
                 </span>
                 <span style={{ fontSize: '12px', color: 'var(--green)', fontWeight: 700 }}>{v.prefer}</span>
-                <span style={{ fontSize: '10px', color: 'var(--muted)' }}>over</span>
+                <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>over</span>
                 <span style={{ fontSize: '12px', color: 'var(--text-dim)' }}>{v.over}</span>
                 <div style={{ flex: 1 }} />
-                <span style={{ fontSize: '10px', color: 'var(--accent)' }}>
+                <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--accent)' }}>
                   confidence {Math.round(v.confidence * 100)}%
                 </span>
               </div>
-              <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '4px' }}>{v.reason}</div>
+              <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', marginTop: '4px' }}>{v.reason}</div>
             </div>
           ))}
         </Section>
@@ -224,7 +225,8 @@ export default function Introspect() {
                 <div key={p.action} style={{
                   display: 'flex', alignItems: 'center', gap: '12px',
                   padding: '8px 16px', borderBottom: '1px solid var(--border)',
-                  fontSize: '11px',
+                  fontSize: FS.chrome,
+                  lineHeight: LH.chrome,
                 }}>
                   <span style={{ flex: 1, color: 'var(--text)' }}>{p.action}</span>
                   <span style={{ color: 'var(--muted)', minWidth: '70px' }}>{p.samples} runs</span>
@@ -254,13 +256,13 @@ export default function Introspect() {
               borderLeft: `2px solid ${SEV_COLORS[r.severity] ?? 'var(--muted)'}`,
             }}>
               <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '10px', color: SEV_COLORS[r.severity], letterSpacing: '0.08em' }}>
+                <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: SEV_COLORS[r.severity], letterSpacing: '0.08em' }}>
                   {String(r.severity).toUpperCase()}
                 </span>
-                <span style={{ fontSize: '11px', color: 'var(--text)' }}>{r.action}</span>
-                <span style={{ fontSize: '10px', color: 'var(--muted)' }}>{r.type}</span>
+                <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text)' }}>{r.action}</span>
+                <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>{r.type}</span>
                 <div style={{ flex: 1 }} />
-                <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>{r.detail}</span>
+                <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)' }}>{r.detail}</span>
               </div>
             </div>
           ))}
@@ -280,7 +282,8 @@ export default function Introspect() {
                 <div key={e.hash} style={{
                   display: 'flex', alignItems: 'center', gap: '12px',
                   padding: '8px 16px', borderBottom: '1px solid var(--border)',
-                  fontSize: '11px',
+                  fontSize: FS.chrome,
+                  lineHeight: LH.chrome,
                 }}>
                   <span style={{
                     width: '6px', height: '6px', borderRadius: '50%', flexShrink: 0,
@@ -296,13 +299,14 @@ export default function Introspect() {
                   {e.markers.length > 0 && (
                     <span className="badge" style={{
                       background: 'rgba(119,0,255,0.15)', color: 'var(--violet)',
-                      fontSize: '9px', padding: '1px 6px', borderRadius: '2px',
+                      fontSize: FS.chrome, padding: '1px 6px', borderRadius: '2px',
+                      lineHeight: LH.chrome,
                     }}>
                       {e.markers.length} marker{e.markers.length > 1 ? 's' : ''}
                     </span>
                   )}
                   <button className="btn btn-sm" disabled={busy}
-                    onClick={() => openFlashback(e.hash)} style={{ fontSize: '9px', padding: '2px 7px' }}>
+                    onClick={() => openFlashback(e.hash)} style={{ fontSize: FS.chrome, lineHeight: LH.chrome, padding: '2px 7px' }}>
                     Flashback
                   </button>
                 </div>
@@ -315,22 +319,22 @@ export default function Introspect() {
         {flash && (
           <div className="hud-card" style={{ padding: '14px 16px', marginTop: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-              <span style={{ fontSize: '10px', color: 'var(--muted)', letterSpacing: '0.1em' }}>
+              <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', letterSpacing: '0.1em' }}>
                 FLASHBACK {String(flash.hash).slice(0, 8)}
               </span>
               <div style={{ flex: 1 }} />
-              <button className="btn btn-sm" onClick={() => setFlash(null)} style={{ fontSize: '9px' }}>Close</button>
+              <button className="btn btn-sm" onClick={() => setFlash(null)} style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>Close</button>
             </div>
             {flash.error ? (
-              <div style={{ fontSize: '11px', color: 'var(--red)' }}>{flash.error}</div>
+              <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--red)' }}>{flash.error}</div>
             ) : (
               <>
-                <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginBottom: '8px' }}>
+                <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', marginBottom: '8px' }}>
                   +{flash.insertions ?? 0} / −{flash.deletions ?? 0} across {flash.files?.length ?? 0} file(s)
                 </div>
                 <pre style={{
                   background: 'var(--surface)', border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius)', padding: '10px', fontSize: '10px',
+                  borderRadius: 'var(--radius)', padding: '10px', fontSize: FS.chrome, lineHeight: LH.chrome,
                   color: 'var(--text-dim)', maxHeight: '300px', overflow: 'auto',
                   whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0,
                 }}>

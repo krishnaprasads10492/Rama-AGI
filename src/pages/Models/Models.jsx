@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useUserStore } from '@store/userStore.js';
+import { FS, LH } from '@config/type.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -65,12 +66,12 @@ function ModelRow({ model, status, primary, onSetPrimary, onAddKey, cloudStatus 
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontSize: '12px', fontWeight: 700, color }}>{model.id}</span>
-          {primary && <span className="badge badge-violet" style={{ fontSize: '9px' }}>PRIMARY</span>}
-          <span style={{ fontSize: '10px', color: 'var(--muted)', marginLeft: 'auto' }}>
+          {primary && <span className="badge badge-violet" style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>PRIMARY</span>}
+          <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginLeft: 'auto' }}>
             {model.ctxK}k ctx
           </span>
         </div>
-        <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '2px' }}>
+        <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '2px' }}>
           {model.caps.join(' · ')} · cost tier {model.costTier === 0 ? 'FREE' : model.costTier}
         </div>
       </div>
@@ -86,13 +87,13 @@ function ModelRow({ model, status, primary, onSetPrimary, onAddKey, cloudStatus 
                 vault locked — unlock to use the stored key
               </span>
             : <button className="btn btn-sm" onClick={() => onAddKey(model.credKey)}
-                style={{ borderColor: 'var(--amber)', color: 'var(--amber)', fontSize: '10px' }}>
+                style={{ borderColor: 'var(--amber)', color: 'var(--amber)', fontSize: FS.chrome, lineHeight: LH.chrome }}>
                 + Add Key
               </button>
         )}
         {isAvailable && !primary && (
           <button className="btn btn-sm" onClick={() => onSetPrimary(model.id)}
-            style={{ fontSize: '10px' }}>
+            style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>
             Set Primary
           </button>
         )}
@@ -127,13 +128,13 @@ function AddCustomProviderModal({ onSave, onClose }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500 }}>
-      <div className="hud-card" style={{ width: '520px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      <div className="hud-card" style={{ width: '520px', maxWidth: '92vw', padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span style={{ fontWeight: 700, color: 'var(--accent)' }}>ADD CUSTOM OPENAI-COMPATIBLE PROVIDER</span>
           <button className="btn btn-sm" onClick={onClose}>✕</button>
         </div>
 
-        <div style={{ fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.7 }}>
+        <div style={{ fontSize: FS.chrome, color: 'var(--text-dim)', lineHeight: 1.7 }}>
           Works for any endpoint that speaks the OpenAI <code>/v1/chat/completions</code> shape —
           OpenRouter, Together, Fireworks, DeepSeek, a local LM Studio/vLLM server, and most
           new providers. A provider with a different API shape (Anthropic, Gemini) needs
@@ -159,18 +160,18 @@ function AddCustomProviderModal({ onSave, onClose }) {
         <div>
           <div className="section-label" style={{ marginBottom: '6px' }}>API KEY (optional — leave blank for a keyless local server)</div>
           <input className="input" type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} />
-          <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '4px' }}>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '4px' }}>
             Stored AES-256-GCM encrypted in your local vault, same as any other provider key.
           </div>
         </div>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--text-dim)', cursor: 'pointer' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', cursor: 'pointer' }}>
           <input type="checkbox" checked={allowLocal} onChange={e => setAllowLocal(e.target.checked)} />
           This is a local/private server I run myself (localhost, LAN IP, etc.)
         </label>
 
         {error && (
-          <div style={{ fontSize: '11px', color: 'var(--red)' }}>✕ {error}</div>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--red)' }}>✕ {error}</div>
         )}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
@@ -199,7 +200,7 @@ function AddKeyModal({ credKey, info, onSave, onClose }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 500 }}>
-      <div className="hud-card" style={{ width: '480px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div className="hud-card" style={{ width: '480px', maxWidth: '92vw', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span style={{ fontWeight: 700, color: 'var(--accent)' }}>ADD {info?.label?.toUpperCase()} API KEY</span>
           <button className="btn btn-sm" onClick={onClose}>✕</button>
@@ -220,7 +221,7 @@ function AddKeyModal({ credKey, info, onSave, onClose }) {
           <input className="input" type="password" placeholder={`${credKey}...`}
             value={value} onChange={e => setValue(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && save()} />
-          <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '4px' }}>
+          <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '4px' }}>
             Stored AES-256-GCM encrypted in your local vault. Never leaves this machine.
           </div>
         </div>
@@ -352,10 +353,10 @@ export default function Models() {
       {vaultLocked && (
         <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)',
           background: 'rgba(255,170,0,0.05)', display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
-          <span style={{ fontSize: '11px', color: 'var(--amber)' }}>🔒 Vault locked — unlock to use API keys</span>
+          <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--amber)' }}>🔒 Vault locked — unlock to use API keys</span>
           <input className="input" type="password" placeholder="Master password" value={password}
             onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && unlockVault()}
-            style={{ width: '200px', fontSize: '11px' }} />
+            style={{ width: '200px', fontSize: FS.chrome, lineHeight: LH.chrome }} />
           <button className="btn btn-sm btn-primary" onClick={unlockVault}>Unlock</button>
         </div>
       )}
@@ -367,7 +368,7 @@ export default function Models() {
             padding: '9px 18px', border: 'none', background: 'transparent',
             color: tab === t ? 'var(--accent)' : 'var(--muted)',
             borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
-            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: '11px', textTransform: 'uppercase',
+            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome, textTransform: 'uppercase',
           }}>{t}</button>
         ))}
       </div>
@@ -377,7 +378,7 @@ export default function Models() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {/* THREE STATES, NEVER TWO. "no key stored" and "vault locked" mean opposite things:
                 one needs a key, the other needs a password Rāma will not ask for twice. */}
-            <div className="hud-card" style={{ padding: '10px 14px', fontSize: '11px' }}>
+            <div className="hud-card" style={{ padding: '10px 14px', fontSize: FS.chrome, lineHeight: LH.chrome }}>
               <span style={{ color: 'var(--muted)', letterSpacing: '0.08em' }}>OLLAMA CLOUD — </span>
               {cloudStatus?.present
                 ? <span style={{ color: 'var(--green)' }}>key PRESENT ({cloudStatus.source})</span>
@@ -389,7 +390,7 @@ export default function Models() {
                   base URL override rejected — using the default
                 </span>
               )}
-              <div style={{ color: 'var(--muted)', marginTop: '4px', fontSize: '10px' }}>
+              <div style={{ color: 'var(--muted)', marginTop: '4px', fontSize: FS.chrome, lineHeight: LH.chrome }}>
                 {cloudStatus?.baseUrl || 'https://ollama.com'} · cloud models need no Ollama install
               </div>
             </div>
@@ -413,7 +414,7 @@ export default function Models() {
                 <div className="section-label">OLLAMA LOCAL MODELS</div>
                 {/* A master with no daemon is told the way forward at the point he discovers the
                     problem, rather than having to find the cloud tab himself. */}
-                <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px' }}>
+                <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '4px' }}>
                   {ollamaModels.length} models detected · Ollama must be running at localhost:11434
                   {' '}— or add an Ollama Cloud key to use cloud models with no install
                 </div>
@@ -442,7 +443,7 @@ export default function Models() {
                   {pulling ? 'Pulling...' : '⬇ Pull'}
                 </button>
               </div>
-              <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '6px' }}>
+              <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '6px' }}>
                 Browse available models at{' '}
                 <span style={{ color: 'var(--accent)', cursor: 'pointer' }}
                   onClick={() => isElectron && window.rama.shell.openExternal('https://ollama.com/library')}>
@@ -463,14 +464,14 @@ export default function Models() {
                   + Add Provider
                 </button>
               </div>
-              <div style={{ fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.7 }}>
+              <div style={{ fontSize: FS.chrome, color: 'var(--text-dim)', lineHeight: 1.7 }}>
                 Add any endpoint that speaks the OpenAI <code>/v1/chat/completions</code> shape —
                 covers most current and future LLM hosts without a code change. Once added,
                 these models participate in the same routing, fallback, and rate-limit logic
                 as every built-in provider.
               </div>
               {customError && (
-                <div style={{ marginTop: 8, fontSize: 11, color: 'var(--red)' }}>✕ {customError}</div>
+                <div style={{ marginTop: 8, fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--red)' }}>✕ {customError}</div>
               )}
             </div>
 
@@ -485,10 +486,10 @@ export default function Models() {
                     display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text)' }}>
-                        {p.name} {p.hasKey && <span style={{ fontSize: 9, color: 'var(--green)' }}>🔒 keyed</span>}
+                        {p.name} {p.hasKey && <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--green)' }}>🔒 keyed</span>}
                       </div>
-                      <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '2px' }}>{p.baseUrl}</div>
-                      <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px' }}>
+                      <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '2px' }}>{p.baseUrl}</div>
+                      <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', marginTop: '2px' }}>
                         {p.models.join(', ')}
                       </div>
                     </div>
@@ -514,7 +515,7 @@ export default function Models() {
                     background: 'var(--border)' }} />
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 700, fontSize: '12px', color: 'var(--text)' }}>{info.label}</div>
-                    <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '2px' }}>{info.hint}</div>
+                    <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '2px' }}>{info.hint}</div>
                   </div>
                   <button className="btn btn-sm btn-primary"
                     onClick={() => vaultLocked ? alert('Unlock vault first') : setAddKeyFor(key)}>

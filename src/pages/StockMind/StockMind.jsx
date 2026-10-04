@@ -35,6 +35,7 @@ import {
  */
 const OPEN_INTERVAL = '30m';
 import { riskBudget, whyCannotPredict } from './positionMath.js';
+import { FS } from '@config/type.js';
 
 /**
  * StockMind — market intelligence panel.
@@ -81,11 +82,11 @@ const pct = (v) =>
 function Stat({ label, value, color, title, info }) {
   return (
     <div title={title} style={{ minWidth: '78px' }}>
-      <div style={{ fontSize: '12.5px', color: 'var(--muted)', letterSpacing: '0.08em',
+      <div style={{ fontSize: FS.denseLg, color: 'var(--muted)', letterSpacing: '0.08em',
         display: 'flex', alignItems: 'center' }}>
         {label}{info && <InfoTip id={info} />}
       </div>
-      <div style={{ fontSize: '12px', color: color || 'var(--text)', fontWeight: 600 }}>{value}</div>
+      <div style={{ fontSize: FS.dense, color: color || 'var(--text)', fontWeight: 600 }}>{value}</div>
     </div>
   );
 }
@@ -106,37 +107,37 @@ function SignalRow({ signal, selected, onSelect }) {
         cursor: 'pointer',
       }}
     >
-      <td style={{ padding: '7px 9px', fontSize: '12.5px', color: 'var(--text)' }}>
+      <td style={{ padding: '7px 9px', fontSize: FS.denseLg, color: 'var(--text)' }}>
         {signal.variant || `#${signal.rank ?? '—'}`}
         {signal.suppressed && (
           <span title={signal.suppressReason || 'Models disagreed'}
-                style={{ marginLeft: '6px', fontSize: '12.5px', color: 'var(--amber)' }}>
+                style={{ marginLeft: '6px', fontSize: FS.denseLg, color: 'var(--amber)' }}>
             ⚠ SUPPRESSED
           </span>
         )}
       </td>
       <td style={{ padding: '7px 9px', textAlign: 'center' }}>
-        <span style={{ color: dirColor, fontWeight: 700, fontSize: '12px' }}>{dir || '—'}</span>
+        <span style={{ color: dirColor, fontWeight: 700, fontSize: FS.dense }}>{dir || '—'}</span>
       </td>
-      <td style={{ padding: '7px 9px', fontSize: '12.5px', textAlign: 'right', color: 'var(--text)' }}>
+      <td style={{ padding: '7px 9px', fontSize: FS.denseLg, textAlign: 'right', color: 'var(--text)' }}>
         {num(signal.entryPrice)}
       </td>
-      <td style={{ padding: '7px 9px', fontSize: '12.5px', textAlign: 'right', color: 'var(--red)' }}>
+      <td style={{ padding: '7px 9px', fontSize: FS.denseLg, textAlign: 'right', color: 'var(--red)' }}>
         {num(signal.stopLoss)}
       </td>
-      <td style={{ padding: '7px 9px', fontSize: '12.5px', textAlign: 'right', color: 'var(--green)' }}>
+      <td style={{ padding: '7px 9px', fontSize: FS.denseLg, textAlign: 'right', color: 'var(--green)' }}>
         {num(signal.t1Price)}
       </td>
-      <td style={{ padding: '7px 9px', fontSize: '12.5px', textAlign: 'right', color: 'var(--green)' }}>
+      <td style={{ padding: '7px 9px', fontSize: FS.denseLg, textAlign: 'right', color: 'var(--green)' }}>
         {num(signal.t2Price)}
       </td>
-      <td style={{ padding: '7px 9px', fontSize: '12.5px', textAlign: 'right', color: 'var(--green)' }}>
+      <td style={{ padding: '7px 9px', fontSize: FS.denseLg, textAlign: 'right', color: 'var(--green)' }}>
         {num(signal.t3Price)}
       </td>
-      <td style={{ padding: '7px 9px', fontSize: '12.5px', textAlign: 'center', color: 'var(--text-dim)' }}>
+      <td style={{ padding: '7px 9px', fontSize: FS.denseLg, textAlign: 'center', color: 'var(--text-dim)' }}>
         {num(signal.riskRewardRatio, 2)}
       </td>
-      <td style={{ padding: '7px 9px', fontSize: '12.5px', textAlign: 'center', color: 'var(--text)' }}>
+      <td style={{ padding: '7px 9px', fontSize: FS.denseLg, textAlign: 'center', color: 'var(--text)' }}>
         {pct(signal.probability)}
       </td>
       <td style={{ padding: '7px 9px', textAlign: 'center' }}>
@@ -537,7 +538,7 @@ export default function StockMind() {
         </span>
         <div style={{ flex: 1 }} />
         {engine && !engine.error && (
-          <span style={{ fontSize: '12px', color: 'var(--muted)', display: 'inline-flex',
+          <span style={{ fontSize: FS.dense, color: 'var(--muted)', display: 'inline-flex',
             alignItems: 'center' }}
                 title={engine.note || ''}>
             {engine.registry?.models_trained || 0} models trained
@@ -587,7 +588,7 @@ export default function StockMind() {
           <button key={id} type="button" role="tab" aria-selected={tab === id}
                   onClick={() => setTab(id)}
                   style={{
-                    padding: '8px 14px', fontSize: '12.5px', letterSpacing: '0.08em',
+                    padding: '8px 14px', fontSize: FS.denseLg, letterSpacing: '0.08em',
                     background: 'none', cursor: 'pointer',
                     border: 'none',
                     borderBottom: `2px solid ${tab === id ? 'var(--magenta)' : 'transparent'}`,
@@ -621,7 +622,8 @@ export default function StockMind() {
               ? new here
             </button>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+          {/* 260px floor: these cells hold inputs, not labels — the widest of the four grids. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
             {/* SYMBOL IS A SEARCH (Section 102). Master's objection to the previous version was
                 exact: a curated dropdown of fifty names plus a raw text box cannot answer "what is
                 Reliance Power called", which is the question a picker exists for. This asks the
@@ -630,7 +632,7 @@ export default function StockMind() {
                 the exchange is a property of the instrument rather than an independent choice —
                 master could previously pick RELIANCE with NASDAQ and get nothing back. */}
             <div>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginBottom: '4px' }}>
                 <label htmlFor="stockmind-symbol">INSTRUMENT</label>
               </div>
               <SymbolSearch
@@ -644,14 +646,14 @@ export default function StockMind() {
                 }}
                 ariaLabel="Search for a stock, index, ETF, currency or crypto"
               />
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginTop: '2px' }}>
                 {heldHere
                   ? '● Rāma already holds bars for this one'
                   : 'Type a name or a ticker. Any market.'}
               </div>
             </div>
             <div>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginBottom: '4px' }}>
                 <label htmlFor="stockmind-exchange">EXCHANGE</label>
                 <InfoTip id="exchange" />
               </div>
@@ -672,9 +674,10 @@ override where an unlisted ticker should be looked up.">
             <div className="section-label">2 · HOW MUCH ARE YOU RISKING</div>
             <InfoTip id="riskAmount" />
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+          {/* 260px, same as the row above, so the two read as one block as they wrap. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
             <div>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px',
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginBottom: '4px',
                 display: 'flex', alignItems: 'center' }}>
                 <label htmlFor="stockmind-base">BASE PRICE</label>
                 <InfoTip id="basePrice" />
@@ -682,19 +685,19 @@ override where an unlisted ticker should be looked up.">
               <input className="input" id="stockmind-base" value={lastClose ?? ''} readOnly
                      placeholder="load history →"
                      title="Taken from the last stored bar rather than typed, so a signal cannot be priced off a stale number." />
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginTop: '2px' }}>
                 {lastClose == null ? 'load history first' : 'last stored close'}
               </div>
             </div>
             <div>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px',
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginBottom: '4px',
                 display: 'flex', alignItems: 'center' }}>
                 <label htmlFor="stockmind-capital">CAPITAL</label>
                 <InfoTip id="capital" />
               </div>
               <input className="input" id="stockmind-capital" type="number" min="0" step="1000"
                      value={capital} onChange={e => setCapital(e.target.value)} />
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginTop: '2px' }}>
                 {budget.capital != null
                   ? budget.capital.toLocaleString()
                   : 'the amount you are sizing against'}
@@ -704,14 +707,14 @@ override where an unlisted ticker should be looked up.">
                 choosing — how much money is at stake — was his to work out in his head on every
                 change. It is one multiplication and it is the whole point of the field. */}
             <div>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px',
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginBottom: '4px',
                 display: 'flex', alignItems: 'center' }}>
                 <label htmlFor="stockmind-risk">RISK %</label>
                 <InfoTip id="riskPct" />
               </div>
               <input className="input" id="stockmind-risk" type="number" step="0.25" min="0.25"
                      max="10" value={riskPct} onChange={e => setRiskPct(e.target.value)} />
-              <div style={{ fontSize: '12px', marginTop: '2px',
+              <div style={{ fontSize: FS.dense, marginTop: '2px',
                 color: budget.ok ? 'var(--amber)' : 'var(--muted)' }}>
                 {budget.ok
                   ? `${budget.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })} at risk`
@@ -749,7 +752,7 @@ far as the provider allows, which for intraday is a few days to two years.">
             {/* A DISABLED BUTTON WITH NO STATED CAUSE IS A DEAD END. Master could not tell whether
                 Rāma was busy, whether his tier was too low, or whether a field above was empty. */}
             {cannotPredict && (
-              <span style={{ fontSize: '12.5px', color: 'var(--amber)', maxWidth: '42ch',
+              <span style={{ fontSize: FS.denseLg, color: 'var(--amber)', maxWidth: '42ch',
                 lineHeight: 1.5 }}>
                 {cannotPredict}
               </span>
@@ -770,14 +773,14 @@ far as the provider allows, which for intraday is a few days to two years.">
               learn faster and err less while experts pay exactly one click — and neither control is
               removed, which is what separates this from simplification by deletion. */}
           <details style={{ borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
-            <summary style={{ cursor: 'pointer', fontSize: '12px', color: 'var(--muted)',
+            <summary style={{ cursor: 'pointer', fontSize: FS.dense, color: 'var(--muted)',
               letterSpacing: '0.08em' }}>
               ADVANCED — direction filter, exact bar count
             </summary>
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: '12px', flexWrap: 'wrap',
               paddingTop: '10px' }}>
               <div>
-                <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '4px',
+                <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginBottom: '4px',
                   display: 'flex', alignItems: 'center' }}>
                   <label htmlFor="stockmind-direction">DIRECTION FILTER</label>
                   <InfoTip id="directionFilter" />
@@ -789,7 +792,7 @@ far as the provider allows, which for intraday is a few days to two years.">
                   <option value="short">Short only</option>
                 </select>
               </div>
-              <span style={{ fontSize: '12px', color: 'var(--muted)', paddingBottom: '6px',
+              <span style={{ fontSize: FS.dense, color: 'var(--muted)', paddingBottom: '6px',
                 maxWidth: '52ch', lineHeight: 1.6 }}>
                 The bar count is gone — it was only interval × window restated, and a third control for
                 two facts invited them to disagree. Interval and dates live on the chart.
@@ -809,22 +812,22 @@ far as the provider allows, which for intraday is a few days to two years.">
               stays for the case the overlay cannot cover: a refresh that fails, or a truncation note
               that arrives, while the PREVIOUS fetch's candles are still drawn (Section 129). */}
           {barsNote && bars.length > 0 && (
-            <div style={{ fontSize: '12.5px', color: 'var(--amber)', lineHeight: 1.7 }}>
+            <div style={{ fontSize: FS.denseLg, color: 'var(--amber)', lineHeight: 1.7 }}>
               {barsNote}
               {engineTail.length > 0 && (
                 <details style={{ marginTop: 6 }}>
-                  <summary style={{ cursor: 'pointer', color: 'var(--text-dim)', fontSize: '12px' }}>
+                  <summary style={{ cursor: 'pointer', color: 'var(--text-dim)', fontSize: FS.dense }}>
                     engine output
                   </summary>
                   <pre style={{
                     margin: '6px 0 0', padding: '8px 10px', maxHeight: 140, overflow: 'auto',
                     background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)',
-                    fontSize: '11.5px', color: 'var(--text-dim)', whiteSpace: 'pre-wrap',
+                    fontSize: FS.chip, color: 'var(--text-dim)', whiteSpace: 'pre-wrap',
                   }}>{engineTail.join('\n')}</pre>
                 </details>
               )}
               {engineDetail && (
-                <div style={{ color: 'var(--text-dim)', fontSize: '12px', marginTop: '4px' }}>
+                <div style={{ color: 'var(--text-dim)', fontSize: FS.dense, marginTop: '4px' }}>
                   {engineDetail}
                 </div>
               )}
@@ -835,20 +838,20 @@ far as the provider allows, which for intraday is a few days to two years.">
         {/* Error */}
         {status === 'error' && error && (
           <div style={{ padding: '12px 16px', background: 'rgba(255,60,60,0.08)', border: '1px solid rgba(255,60,60,0.3)',
-            borderRadius: 'var(--radius)', color: 'var(--red)', fontSize: '12px' }}>
+            borderRadius: 'var(--radius)', color: 'var(--red)', fontSize: FS.dense }}>
             ✕ {error}
             {/* The old hint said "it may still be starting — try again" for EVERY failure, which was
                 advice to wait for a problem that waiting could never fix. A diagnosed failure now
                 shows the engine's actual last words instead (Section 99). */}
             {engineTail.length > 0 && (
               <details style={{ marginTop: 8 }}>
-                <summary style={{ cursor: 'pointer', color: 'var(--text-dim)', fontSize: '12px' }}>
+                <summary style={{ cursor: 'pointer', color: 'var(--text-dim)', fontSize: FS.dense }}>
                   engine output
                 </summary>
                 <pre style={{
                   margin: '6px 0 0', padding: '8px 10px', maxHeight: 140, overflow: 'auto',
                   background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)',
-                  fontSize: '11.5px', color: 'var(--text-dim)', whiteSpace: 'pre-wrap',
+                  fontSize: FS.chip, color: 'var(--text-dim)', whiteSpace: 'pre-wrap',
                 }}>{engineTail.join('\n')}</pre>
               </details>
             )}
@@ -856,7 +859,7 @@ far as the provider allows, which for intraday is a few days to two years.">
                 worth keeping, because "which port did Rāma knock on" is a real question — but it is
                 never the answer to "why is the engine not running". */}
             {engineDetail && (
-              <div style={{ marginTop: '6px', color: 'var(--text-dim)', fontSize: '12px' }}>
+              <div style={{ marginTop: '6px', color: 'var(--text-dim)', fontSize: FS.dense }}>
                 {engineDetail}
               </div>
             )}
@@ -933,7 +936,7 @@ far as the provider allows, which for intraday is a few days to two years.">
                                    selected={selected === s}
                                    onSelect={() => setSelected(s)} />
                       ))
-                    : <span style={{ fontSize: 12, color: 'var(--muted)' }}>No signals yet.</span>),
+                    : <span style={{ fontSize: FS.dense, color: 'var(--muted)' }}>No signals yet.</span>),
                 },
                 {
                   id: 'book',
@@ -966,19 +969,19 @@ far as the provider allows, which for intraday is a few days to two years.">
           <div className="hud-card" style={{ padding: '14px 16px 4px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
               {barsMeta?.stored != null && (
-                <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                <span style={{ fontSize: FS.dense, color: 'var(--muted)' }}>
                   {barsMeta.stored} stored from {barsMeta.storedFirstBar}
                 </span>
               )}
               <div style={{ flex: 1 }} />
               {held && (
-                <span style={{ fontSize: '12px', color: 'var(--green)' }}
+                <span style={{ fontSize: FS.dense, color: 'var(--green)' }}
                       title="your tracked position in this symbol">
                   you hold {held.netQty} @ {held.avgCost} ({held.tradeStyle})
                 </span>
               )}
               {selected && (
-                <span style={{ fontSize: '12px', color: 'var(--text-dim)' }}>
+                <span style={{ fontSize: FS.dense, color: 'var(--text-dim)' }}>
                   overlay: {selected.variant || `#${selected.rank}`} ({String(selected.type || '').toUpperCase()})
                 </span>
               )}
@@ -1022,12 +1025,12 @@ far as the provider allows, which for intraday is a few days to two years.">
               onHorizonBars={setHorizonBars}
             />
             {cone?.error && (
-              <div style={{ fontSize: '12px', color: 'var(--amber)', padding: '2px' }}>
+              <div style={{ fontSize: FS.dense, color: 'var(--amber)', padding: '2px' }}>
                 Projection unavailable: {cone.error}
               </div>
             )}
             {cone && cone.ok === false && (
-              <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '2px' }}>
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', padding: '2px' }}>
                 Projection unavailable: {cone.reason}
               </div>
             )}
@@ -1056,7 +1059,7 @@ far as the provider allows, which for intraday is a few days to two years.">
               <button key={id} type="button" role="tab" aria-selected={strat === id}
                       onClick={() => setStrat(id)} title={hint}
                       style={{
-                        padding: '5px 12px', fontSize: '12.5px', cursor: 'pointer',
+                        padding: '5px 12px', fontSize: FS.denseLg, cursor: 'pointer',
                         borderRadius: '4px', letterSpacing: '0.06em',
                         border: `1px solid ${strat === id ? 'var(--magenta)' : 'var(--border)'}`,
                         background: strat === id
@@ -1068,7 +1071,7 @@ far as the provider allows, which for intraday is a few days to two years.">
               </button>
             ))}
             <span style={{ flex: 1 }} />
-            <span style={{ fontSize: '12px', color: 'var(--muted)', maxWidth: '46ch',
+            <span style={{ fontSize: FS.dense, color: 'var(--muted)', maxWidth: '46ch',
               lineHeight: 1.6 }}>
               A signal is what a rule says now; a backtest is the same rule over years. Both are
               strategising.
@@ -1098,14 +1101,14 @@ far as the provider allows, which for intraday is a few days to two years.">
               <div className="section-label">PROJECTION</div>
               <InfoTip id="projection" />
               <span style={{ flex: 1 }} />
-              <label style={{ fontSize: '12.5px', color: 'var(--text)', display: 'flex',
+              <label style={{ fontSize: FS.denseLg, color: 'var(--text)', display: 'flex',
                 gap: '6px', alignItems: 'center', cursor: 'pointer' }}>
                 <input type="checkbox" checked={coneOn}
                        onChange={e => setConeOn(e.target.checked)} />
                 draw it on the chart
               </label>
             </div>
-            <div style={{ fontSize: '12.5px', color: 'var(--text-dim, var(--muted))',
+            <div style={{ fontSize: FS.denseLg, color: 'var(--text-dim, var(--muted))',
               lineHeight: 1.75, maxWidth: '80ch' }}>
               This draws the range {sym}&rsquo;s own volatility calls ordinary over the horizon —
               <strong> not a forecast of direction</strong>. When no model has cleared the acceptance
@@ -1114,12 +1117,12 @@ far as the provider allows, which for intraday is a few days to two years.">
               renders on the same chart rather than a second copy of one.
             </div>
             {cone?.error && (
-              <div style={{ fontSize: '12.5px', color: 'var(--amber)' }}>
+              <div style={{ fontSize: FS.denseLg, color: 'var(--amber)' }}>
                 Unavailable: {cone.error}
               </div>
             )}
             {cone && cone.ok === false && (
-              <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
+              <div style={{ fontSize: FS.denseLg, color: 'var(--muted)' }}>
                 Unavailable: {cone.reason}
               </div>
             )}
@@ -1140,7 +1143,7 @@ far as the provider allows, which for intraday is a few days to two years.">
                         value={`${(cone.points || []).length || '—'} of `
                           + `${cone.maxBarsAhead || '—'}`} />
                 </div>
-                <div style={{ fontSize: '12.5px', color: 'var(--text-dim, var(--muted))',
+                <div style={{ fontSize: FS.denseLg, color: 'var(--text-dim, var(--muted))',
                   lineHeight: 1.7 }}>
                   {cone.summary?.text}{' '}
                   <span style={{ color: cone.tilted ? 'var(--accent)' : 'var(--muted)' }}>
@@ -1164,7 +1167,7 @@ far as the provider allows, which for intraday is a few days to two years.">
           <div className="hud-card" style={{ padding: '20px', display: 'flex',
             flexDirection: 'column', gap: '10px', alignItems: 'flex-start' }}>
             <div className="section-label">SIGNALS</div>
-            <div style={{ fontSize: '12.5px', color: 'var(--muted)', lineHeight: 1.7,
+            <div style={{ fontSize: FS.denseLg, color: 'var(--muted)', lineHeight: 1.7,
               maxWidth: '62ch' }}>
               No signals yet for {sym}. A signal is a request, not a feed — Rāma does not generate
               them in the background, because a stale entry price is worse than none.
@@ -1194,7 +1197,7 @@ far as the provider allows, which for intraday is a few days to two years.">
                 </span>
               )}
               <div style={{ flex: 1 }} />
-              <span style={{ fontSize: '12px', color: 'var(--muted)' }}>{result.modelVersion}</span>
+              <span style={{ fontSize: FS.dense, color: 'var(--muted)' }}>{result.modelVersion}</span>
             </div>
 
             {signals.length > 0 ? (
@@ -1212,7 +1215,7 @@ far as the provider allows, which for intraday is a few days to two years.">
                         ['R:R', 'riskReward'], ['PROB', 'probability'], ['GRADE', 'grade']]
                         .map(([h, info], i) => (
                           <th key={h} style={{
-                            padding: '7px 9px', fontSize: '12.5px', color: 'var(--muted)',
+                            padding: '7px 9px', fontSize: FS.denseLg, color: 'var(--muted)',
                             textAlign: i === 0 ? 'left' : i >= 2 && i <= 6 ? 'right' : 'center',
                             whiteSpace: 'nowrap',
                           }}>
@@ -1235,7 +1238,7 @@ far as the provider allows, which for intraday is a few days to two years.">
                     the action was invisible (Section 102). The selection is now confirmed here, with
                     a way to go and look. */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px',
-                  flexWrap: 'wrap', fontSize: '12px', color: 'var(--muted)' }}>
+                  flexWrap: 'wrap', fontSize: FS.dense, color: 'var(--muted)' }}>
                   <span style={{ maxWidth: '62ch', lineHeight: 1.6 }}>
                     Each row is a different risk geometry over <strong>one</strong> prediction — not
                     {' '}{signals.length} independent forecasts. Column meanings: ENTRY/SL/T1–T3 are
@@ -1251,7 +1254,7 @@ far as the provider allows, which for intraday is a few days to two years.">
                 </div>
               </>
             ) : (
-              <div style={{ color: 'var(--muted)', fontSize: '12px', padding: '12px' }}>No signals returned.</div>
+              <div style={{ color: 'var(--muted)', fontSize: FS.dense, padding: '12px' }}>No signals returned.</div>
             )}
 
             {/* Why — straight from the ensemble */}
@@ -1278,11 +1281,11 @@ far as the provider allows, which for intraday is a few days to two years.">
                   <Stat label="VALID FOR" value={selected.validityBars != null ? `${selected.validityBars} bars` : '—'}
                         info="validityBars" />
                 </div>
-                <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12.5px', color: 'var(--text-dim)', lineHeight: '1.8' }}>
+                <ul style={{ margin: 0, paddingLeft: '18px', fontSize: FS.denseLg, color: 'var(--text-dim)', lineHeight: '1.8' }}>
                   {selected.reasons.map((r, i) => <li key={i}>{r}</li>)}
                 </ul>
                 {selected.probabilityBasis && (
-                  <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px' }}>
+                  <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginTop: '8px' }}>
                     Probability basis: {selected.probabilityBasis}
                   </div>
                 )}
@@ -1298,7 +1301,7 @@ far as the provider allows, which for intraday is a few days to two years.">
               <div className="section-label">DERIVATIVES — {derivs.symbol}</div>
               <span className="badge badge-green">BACKTESTABLE</span>
               <div style={{ flex: 1 }} />
-              <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+              <span style={{ fontSize: FS.dense, color: 'var(--muted)' }}>
                 {derivs.rows} days stored · as of {String(latestDeriv.date || '').slice(0, 10)}
               </span>
             </div>
@@ -1344,12 +1347,12 @@ far as the provider allows, which for intraday is a few days to two years.">
               )}
             </div>
             {news.error ? (
-              <div style={{ fontSize: '12.5px', color: 'var(--red)' }}>✕ {news.error}</div>
+              <div style={{ fontSize: FS.denseLg, color: 'var(--red)' }}>✕ {news.error}</div>
             ) : (
               <>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
                   {(news.items || []).map((it, i) => (
-                    <div key={i} style={{ display: 'flex', gap: '9px', alignItems: 'baseline', fontSize: '12.5px' }}>
+                    <div key={i} style={{ display: 'flex', gap: '9px', alignItems: 'baseline', fontSize: FS.denseLg }}>
                       <span style={{
                         width: '38px', flexShrink: 0, textAlign: 'right', fontWeight: 700,
                         color: it.sentiment > 0.05 ? 'var(--green)'
@@ -1361,14 +1364,14 @@ far as the provider allows, which for intraday is a few days to two years.">
                         <span className="badge" style={{ flexShrink: 0 }}>{it.event}</span>
                       )}
                       <span style={{ color: 'var(--text)' }}>{it.title}</span>
-                      <span style={{ color: 'var(--muted)', fontSize: '12.5px', flexShrink: 0, marginLeft: 'auto' }}>
+                      <span style={{ color: 'var(--muted)', fontSize: FS.denseLg, flexShrink: 0, marginLeft: 'auto' }}>
                         {it.publisher}
                       </span>
                     </div>
                   ))}
                 </div>
                 {news.note && (
-                  <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '10px' }}>{news.note}</div>
+                  <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginTop: '10px' }}>{news.note}</div>
                 )}
               </>
             )}
@@ -1388,7 +1391,7 @@ far as the provider allows, which for intraday is a few days to two years.">
                         color={engine.featureContract?.aligned ? 'var(--green)' : 'var(--red)'} />
                   <Stat label="AVAILABLE" value={String(engine.registry?.available?.length ?? '—')} />
                 </div>
-                <div style={{ fontSize: '12.5px', color: 'var(--amber)', marginTop: '12px',
+                <div style={{ fontSize: FS.denseLg, color: 'var(--amber)', marginTop: '12px',
                   lineHeight: 1.7 }}>
                   No horizon's model currently clears the acceptance gate, measured on live data.
                   Every directional reading in this page is therefore reported but not acted on —
@@ -1396,18 +1399,18 @@ far as the provider allows, which for intraday is a few days to two years.">
                   holding-period warnings do not depend on a model and are live.
                 </div>
                 {engine.note && (
-                  <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px' }}>
+                  <div style={{ fontSize: FS.dense, color: 'var(--muted)', marginTop: '8px' }}>
                     {engine.note}
                   </div>
                 )}
               </>
             ) : (
-              <div style={{ fontSize: '12.5px', color: engine?.error ? 'var(--red)' : 'var(--muted)' }}>
+              <div style={{ fontSize: FS.denseLg, color: engine?.error ? 'var(--red)' : 'var(--muted)' }}>
                 {engine?.error || 'Engine state not loaded.'}
               </div>
             )}
             {!news && (
-              <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '10px' }}>
+              <div style={{ fontSize: FS.denseLg, color: 'var(--muted)', marginTop: '10px' }}>
                 Use “Read news” above to pull headlines for {sym}.
               </div>
             )}
@@ -1427,7 +1430,7 @@ far as the provider allows, which for intraday is a few days to two years.">
         padding: '9px 20px',
         background: 'rgba(255,170,0,0.05)',
         borderTop: '1px solid rgba(255,170,0,0.28)',
-        fontSize: '11.5px', color: 'var(--amber)', lineHeight: 1.6,
+        fontSize: FS.chip, color: 'var(--amber)', lineHeight: 1.6,
       }}>
         ⚠ StockMind provides AI-generated market analysis for informational purposes only. Not
         financial advice. Past performance does not guarantee future results. All signals carry

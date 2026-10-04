@@ -3,6 +3,7 @@ import { useRamaStore } from '@store/ramaStore.js';
 import { useUserStore } from '@store/userStore.js';
 import { getFingerprint } from '@services/authClient.js';
 import SelfPanel from './SelfPanel.jsx';
+import { FS, LH } from '@config/type.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -16,8 +17,8 @@ function SettingRow({ label, desc, children }) {
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       padding: '12px 0', borderBottom: '1px solid var(--border)', gap: 16 }}>
       <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{label}</div>
-        {desc && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2, lineHeight: 1.5 }}>{desc}</div>}
+        <div style={{ fontSize: FS.dense, fontWeight: 600, color: 'var(--text)' }}>{label}</div>
+        {desc && <div style={{ fontSize: FS.chrome, color: 'var(--muted)', marginTop: 2, lineHeight: 1.5 }}>{desc}</div>}
       </div>
       <div style={{ flexShrink: 0 }}>{children}</div>
     </div>
@@ -45,11 +46,13 @@ function Toggle({ value, onChange }) {
 /**
  * AppearancePanel — whole-surface text scaling (spec Section 81, ledger row 48).
  *
- * WHY ZOOM RATHER THAN A CSS VARIABLE. Raising `--font-size` only moves text that actually reads
- * the token, and this codebase has hundreds of inline `fontSize: 10` values that no CSS rule can
- * override. `webContents.setZoomFactor` scales the rendered surface itself, so it is the only
- * control that reaches all of them. The IPC has existed since Section 35 and was reachable by
- * chat or voice command only — there was no way to find it by looking.
+ * WHY ZOOM RATHER THAN A CSS VARIABLE. A font token moves text and nothing else.
+ * `webContents.setZoomFactor` scales the rendered surface — type, fixed px boxes, gaps and borders
+ * together — so the layout keeps its proportions instead of text outgrowing the boxes around it.
+ * Since Section 136 the inline sizes do read role tokens, so raising a role reaches them as well;
+ * the two compose by multiplication (effective px = role token x zoom factor) and neither replaces
+ * the other. The IPC has existed since Section 35 and was reachable by chat or voice command only
+ * — there was no way to find it by looking.
  */
 function AppearancePanel() {
   const [zoom, setZoom] = useState(1);
@@ -331,10 +334,10 @@ export default function Settings() {
       {/* Header */}
       <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', background: 'var(--surface)',
         display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-        <span style={{ fontSize: 18 }}>⚙</span>
+        <span style={{ fontSize: FS.h2, lineHeight: LH.head }}>⚙</span>
         <div style={{ fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.1em' }}>SETTINGS</div>
         <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+        <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
           Rāma AGI v{appVersion} · {isPackaged ? 'Packaged' : 'Dev mode'}
         </span>
       </div>
@@ -346,7 +349,7 @@ export default function Settings() {
             padding: '9px 18px', border: 'none', background: 'transparent',
             color: tab === t ? 'var(--accent)' : 'var(--muted)',
             borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
-            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: '11px', textTransform: 'uppercase',
+            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome, textTransform: 'uppercase',
           }}>{t}</button>
         ))}
       </div>
@@ -361,7 +364,7 @@ export default function Settings() {
             <SettingRow label="Primary Provider" desc="Which AI service to use by default">
               <select value={provider} onChange={e => setProvider(e.target.value)}
                 style={{ background: 'var(--elevated)', border: '1px solid var(--border)',
-                  color: 'var(--accent)', fontFamily: 'var(--font)', fontSize: 11,
+                  color: 'var(--accent)', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome,
                   padding: '6px 10px', borderRadius: 'var(--radius)', outline: 'none', cursor: 'pointer' }}>
                 {PROVIDERS.map(p => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>)}
               </select>
@@ -370,13 +373,13 @@ export default function Settings() {
             <SettingRow label="Default Model" desc="Model used for general conversation">
               <select value={model} onChange={e => setModel(e.target.value)}
                 style={{ background: 'var(--elevated)', border: '1px solid var(--border)',
-                  color: 'var(--accent)', fontFamily: 'var(--font)', fontSize: 11,
+                  color: 'var(--accent)', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome,
                   padding: '6px 10px', borderRadius: 'var(--radius)', outline: 'none', cursor: 'pointer' }}>
                 {(MODELS[provider] || []).map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </SettingRow>
 
-            <div style={{ marginTop: 14, fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.7,
+            <div style={{ marginTop: 14, fontSize: FS.chrome, color: 'var(--text-dim)', lineHeight: 1.7,
               padding: '10px 12px', background: 'var(--surface)', borderRadius: 'var(--radius)',
               border: '1px solid var(--border)' }}>
               API keys are stored encrypted in your local vault.<br />
@@ -409,7 +412,7 @@ export default function Settings() {
                 the wake word is an auto-detected device capability, not a
                 manual switch — see Settings > Voice, or CommandPalette's mic
                 mode picker, for what actually controls listening mode. */}
-            <div style={{ padding: '10px 0', fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.7 }}>
+            <div style={{ padding: '10px 0', fontSize: FS.chrome, color: 'var(--text-dim)', lineHeight: 1.7 }}>
               Closing the window always minimizes Rāma to the system tray rather than quitting —
               use the tray icon or "Quit Rāma" to fully exit.
             </div>
@@ -435,8 +438,8 @@ export default function Settings() {
                 ].map(([k, v, c]) => (
                   <div key={k} style={{ textAlign: 'center', padding: '8px 14px',
                     background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: c }}>{v}</div>
-                    <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>{k}</div>
+                    <div style={{ fontSize: FS.dense, fontWeight: 700, color: c }}>{v}</div>
+                    <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: 2 }}>{k}</div>
                   </div>
                 ))}
               </div>
@@ -452,14 +455,14 @@ export default function Settings() {
                   { label: 'Confirm new passcode', value: confirmNew, set: setConfirmNew },
                 ].map(f => (
                   <div key={f.label} style={{ marginBottom: 10 }}>
-                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>{f.label.toUpperCase()}</div>
+                    <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginBottom: 4 }}>{f.label.toUpperCase()}</div>
                     <input className="input" type="password" value={f.value}
-                      onChange={e => f.set(e.target.value)} style={{ fontSize: 12 }} />
+                      onChange={e => f.set(e.target.value)} style={{ fontSize: FS.dense }} />
                   </div>
                 ))}
                 {passMsg && (
                   <div style={{ color: passMsg.startsWith('✓') ? 'var(--green)' : 'var(--red)',
-                    fontSize: 11, marginBottom: 10 }}>{passMsg}</div>
+                    fontSize: FS.chrome, lineHeight: LH.chrome, marginBottom: 10 }}>{passMsg}</div>
                 )}
                 <button className="btn btn-primary btn-sm" onClick={changePasscode}
                   style={{ width: '100%', justifyContent: 'center' }}>
@@ -477,13 +480,13 @@ export default function Settings() {
         {tab === 'about' && (
           <div className="hud-card" style={{ padding: 24, maxWidth: 480 }}>
             <div style={{ textAlign: 'center', marginBottom: 24 }}>
-              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--violet)', letterSpacing: '0.12em', marginBottom: 4 }}>
+              <div style={{ fontSize: FS.h2, fontWeight: 700, color: 'var(--violet)', letterSpacing: '0.12em', marginBottom: 4 }}>
                 RĀMA AGI
               </div>
-              <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+              <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
                 Righteous Autonomous Master Agent
               </div>
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>
+              <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', marginTop: 4 }}>
                 Version {appVersion} · {isPackaged ? 'Production Build' : 'Development Build'}
               </div>
             </div>
@@ -497,7 +500,7 @@ export default function Settings() {
               ['License',     'Private — All rights reserved'],
             ].map(([k, v]) => (
               <div key={k} style={{ display: 'flex', justifyContent: 'space-between',
-                padding: '8px 0', borderBottom: '1px solid var(--border)', fontSize: 11 }}>
+                padding: '8px 0', borderBottom: '1px solid var(--border)', fontSize: FS.chrome, lineHeight: LH.chrome }}>
                 <span style={{ color: 'var(--muted)' }}>{k}</span>
                 <span style={{ color: 'var(--text-dim)' }}>{v}</span>
               </div>
@@ -520,13 +523,13 @@ export default function Settings() {
             {updResult && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
                 <div style={{
-                  fontSize: 12, fontWeight: 600,
+                  fontSize: FS.dense, fontWeight: 600,
                   color: updResult.state === 'available' ? 'var(--green)'
                     : updResult.ok ? 'var(--text)' : 'var(--amber)',
                 }}>
                   {updResult.title}
                 </div>
-                <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 3, lineHeight: 1.6 }}>
+                <div style={{ fontSize: FS.chip, color: 'var(--muted)', marginTop: 3, lineHeight: 1.6 }}>
                   {updResult.body}
                 </div>
                 {updResult.state === 'available' && (
@@ -536,7 +539,7 @@ export default function Settings() {
                   </button>
                 )}
                 {updResult.state === 'none-published' && (
-                  <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 6, lineHeight: 1.6 }}>
+                  <div style={{ fontSize: FS.chip, color: 'var(--muted)', marginTop: 6, lineHeight: 1.6 }}>
                     This checks GitHub Releases. To update from a local folder instead, use the
                     update channel in GitSync.
                   </div>

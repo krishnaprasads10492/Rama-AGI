@@ -8,6 +8,7 @@ import { emitActivity }  from '@components/ActivityStream.jsx';
 import CodeEditor from './CodeEditor.jsx';
 import DiffReview from './DiffReview.jsx';
 import NewProject from './NewProject.jsx';
+import { FS, LH } from '@config/type.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -135,12 +136,12 @@ function FileTree({ onFileOpen, activeFile, openDir = null }) {
       <div style={{ padding:'6px 8px', borderBottom:'1px solid var(--border)', display:'flex', gap:6, flexShrink:0 }}>
         <input className="input" value={cwd} onChange={e => setCwd(e.target.value)}
           onKeyDown={e => e.key==='Enter' && listDir(cwd).then(setEntries)}
-          placeholder="Path..." style={{ fontSize:10, padding:'3px 8px', flex:1 }} />
-        <button className="btn btn-sm" style={{ fontSize:10, padding:'3px 8px', flexShrink:0 }} onClick={pickFolder}>📁</button>
+          placeholder="Path..." style={{ fontSize:FS.chrome, lineHeight: LH.chrome, padding:'3px 8px', flex:1 }} />
+        <button className="btn btn-sm" style={{ fontSize:FS.chrome, lineHeight: LH.chrome, padding:'3px 8px', flexShrink:0 }} onClick={pickFolder}>📁</button>
       </div>
       <div style={{ flex:1, overflowY:'auto', padding:'2px 0' }}>
         {entries.length === 0 ? (
-          <div style={{ padding:12, color:'var(--muted)', fontSize:11, textAlign:'center' }}>
+          <div style={{ padding:12, color:'var(--muted)', fontSize:FS.chrome, lineHeight: LH.chrome, textAlign:'center' }}>
             {cwd ? 'Empty' : 'Open a folder'}
           </div>
         ) : renderItems(entries, 0, expanded, children, toggle, activeFile)}
@@ -158,7 +159,7 @@ function renderItems(items, depth, expanded, children, toggle, activeFile) {
         <div onClick={() => toggle(item)} style={{
           display:'flex', alignItems:'center', gap:5,
           padding:`3px 10px 3px ${10 + depth * 14}px`,
-          cursor:'pointer', fontSize:11,
+          cursor:'pointer', fontSize:FS.chrome, lineHeight: LH.chrome,
           background: isActive ? 'rgba(0,200,255,0.08)' : 'transparent',
           color: isActive ? 'var(--accent)' : 'var(--text-dim)',
           borderLeft: isActive ? '2px solid var(--accent)' : '2px solid transparent',
@@ -168,7 +169,7 @@ function renderItems(items, depth, expanded, children, toggle, activeFile) {
         >
           <span style={{ fontSize:12, flexShrink:0 }}>{getFileIcon(item.name, item.isDir)}</span>
           <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>{item.name}</span>
-          {item.isDir && <span style={{ color:'var(--muted)', fontSize:10 }}>{isExp ? '▾' : '▸'}</span>}
+          {item.isDir && <span style={{ color:'var(--muted)', fontSize:FS.chrome, lineHeight: LH.chrome }}>{isExp ? '▾' : '▸'}</span>}
         </div>
         {item.isDir && isExp && children[item.path] &&
           renderItems(children[item.path], depth+1, expanded, children, toggle, activeFile)}
@@ -303,7 +304,7 @@ function AIPanel({ currentFile, currentContent, repoPath, onApplyPatch, onRunCod
             padding:'7px 10px', border:'none', background:'transparent',
             color: mode===m.id ? m.color : 'var(--muted)',
             borderBottom: mode===m.id ? `2px solid ${m.color}` : '2px solid transparent',
-            cursor:'pointer', fontFamily:'var(--font)', fontSize:10,
+            cursor:'pointer', fontFamily:'var(--font)', fontSize:FS.chrome, lineHeight: LH.chrome,
             display:'flex', flexDirection:'column', alignItems:'center', gap:2, flexShrink:0,
           }}>
             <span style={{ fontSize:12 }}>{m.icon}</span>
@@ -318,13 +319,13 @@ function AIPanel({ currentFile, currentContent, repoPath, onApplyPatch, onRunCod
         {/* Research findings */}
         {research.length > 0 && (
           <div style={{ background:'rgba(0,200,255,0.05)', border:'1px solid rgba(0,200,255,0.2)',
-            borderRadius:'var(--radius)', padding:'10px 12px', fontSize:11 }}>
+            borderRadius:'var(--radius)', padding:'10px 12px', fontSize:FS.chrome, lineHeight: LH.chrome }}>
             <div style={{ color:'var(--accent)', fontWeight:700, marginBottom:6, letterSpacing:'0.06em' }}>
               🔍 ONLINE RESEARCH ({research.length} sources)
             </div>
             {research.slice(0,4).map((r,i) => (
               <div key={i} style={{ color:'var(--text-dim)', marginBottom:4, lineHeight:1.5 }}>
-                <span style={{ color:'var(--muted)', fontSize:10 }}>[{r.source}]</span>{' '}
+                <span style={{ color:'var(--muted)', fontSize:FS.chrome, lineHeight: LH.chrome }}>[{r.source}]</span>{' '}
                 {r.content?.slice(0,120)}
                 {r.install && <span style={{ color:'var(--green)', marginLeft:8 }}>→ {r.install}</span>}
               </div>
@@ -336,14 +337,14 @@ function AIPanel({ currentFile, currentContent, repoPath, onApplyPatch, onRunCod
         {deps.length > 0 && (
           <div style={{ background:'rgba(212,169,64,0.08)', border:'1px solid rgba(212,169,64,0.3)',
             borderRadius:'var(--radius)', padding:'10px 12px' }}>
-            <div style={{ color:'var(--gold)', fontWeight:700, fontSize:11, marginBottom:6 }}>
+            <div style={{ color:'var(--gold)', fontWeight:700, fontSize:FS.chrome, lineHeight: LH.chrome, marginBottom:6 }}>
               📦 PACKAGES NEEDED
             </div>
             {deps.map((d,i) => (
               <div key={i} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
-                <code style={{ color:'var(--accent)', fontSize:11, background:'rgba(0,0,0,0.3)',
+                <code style={{ color:'var(--accent)', fontSize:FS.chrome, lineHeight: LH.chrome, background:'rgba(0,0,0,0.3)',
                   padding:'1px 6px', borderRadius:2 }}>{d.install}</code>
-                <span style={{ fontSize:10, color:'var(--muted)' }}>{d.license}</span>
+                <span style={{ fontSize:FS.chrome, lineHeight: LH.chrome, color:'var(--muted)' }}>{d.license}</span>
               </div>
             ))}
           </div>
@@ -351,18 +352,18 @@ function AIPanel({ currentFile, currentContent, repoPath, onApplyPatch, onRunCod
 
         {/* Main response */}
         {response ? (
-          <pre style={{ fontFamily:'var(--font)', fontSize:11, color:'var(--text)', lineHeight:1.7,
+          <pre style={{ fontFamily:'var(--font)', fontSize:FS.chrome, color:'var(--text)', lineHeight:1.7,
             whiteSpace:'pre-wrap', wordBreak:'break-word', margin:0, flex:1 }}>
             {response}
           </pre>
         ) : !loading && (
-          <div style={{ color:'var(--muted)', fontSize:11, textAlign:'center', padding:20, flex:1, display:'flex',
+          <div style={{ color:'var(--muted)', fontSize:FS.chrome, lineHeight: LH.chrome, textAlign:'center', padding:20, flex:1, display:'flex',
             flexDirection:'column', alignItems:'center', justifyContent:'center', gap:8 }}>
             <span style={{ fontSize:24, color:activeMode?.color }}>{activeMode?.icon}</span>
             <div style={{ fontFamily:'var(--font-display)', color:activeMode?.color }}>{activeMode?.label}</div>
-            <div style={{ fontSize:10 }}>{activeMode?.desc}</div>
+            <div style={{ fontSize:FS.chrome, lineHeight: LH.chrome }}>{activeMode?.desc}</div>
             {['research','regen','patch'].includes(mode) && (
-              <div style={{ fontSize:10, color:'var(--accent)', marginTop:4 }}>
+              <div style={{ fontSize:FS.chrome, lineHeight: LH.chrome, color:'var(--accent)', marginTop:4 }}>
                 🔍 Will search online docs + GitHub before answering
               </div>
             )}
@@ -370,7 +371,7 @@ function AIPanel({ currentFile, currentContent, repoPath, onApplyPatch, onRunCod
         )}
 
         {loading && (
-          <div style={{ display:'flex', alignItems:'center', gap:10, color:'var(--accent)', fontSize:11, padding:8 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:10, color:'var(--accent)', fontSize:FS.chrome, lineHeight: LH.chrome, padding:8 }}>
             <div style={{ width:8, height:8, borderRadius:'50%', background:'var(--accent)',
               animation:'pulse-ring 1s ease infinite', boxShadow:'var(--glow-cyan)' }} />
             {['research','regen'].includes(mode) ? 'Searching online + generating...' : 'Thinking...'}
@@ -382,17 +383,17 @@ function AIPanel({ currentFile, currentContent, repoPath, onApplyPatch, onRunCod
           <div style={{ background: execResult.ok ? 'rgba(0,214,143,0.08)' : 'rgba(255,64,96,0.08)',
             border: `1px solid ${execResult.ok ? 'rgba(0,214,143,0.3)' : 'rgba(255,64,96,0.3)'}`,
             borderRadius:'var(--radius)', padding:'10px 12px' }}>
-            <div style={{ fontSize:10, fontWeight:700, marginBottom:6,
+            <div style={{ fontSize:FS.chrome, lineHeight: LH.chrome, fontWeight:700, marginBottom:6,
               color: execResult.ok ? 'var(--green)' : 'var(--red)' }}>
               {execResult.ok ? '✓ EXECUTED' : '✕ EXECUTION FAILED'} ({execResult.tier})
             </div>
             {execResult.output && (
-              <pre style={{ fontSize:11, color:'var(--text)', whiteSpace:'pre-wrap', margin:0 }}>
+              <pre style={{ fontSize:FS.chrome, lineHeight: LH.chrome, color:'var(--text)', whiteSpace:'pre-wrap', margin:0 }}>
                 {execResult.output.slice(0,2000)}
               </pre>
             )}
             {execResult.errors && (
-              <pre style={{ fontSize:11, color:'var(--red)', whiteSpace:'pre-wrap', margin:0 }}>
+              <pre style={{ fontSize:FS.chrome, lineHeight: LH.chrome, color:'var(--red)', whiteSpace:'pre-wrap', margin:0 }}>
                 {execResult.errors.slice(0,500)}
               </pre>
             )}
@@ -414,7 +415,7 @@ function AIPanel({ currentFile, currentContent, repoPath, onApplyPatch, onRunCod
             {loading ? '...' : `${activeMode?.icon} ${activeMode?.label}`}
           </button>
           {currentContent && (
-            <button className="btn btn-sm" style={{ fontSize:10 }}
+            <button className="btn btn-sm" style={{ fontSize:FS.chrome, lineHeight: LH.chrome }}
               onClick={() => setPrompt(prev => prev || 'Explain this code and suggest improvements')}>
               Quick
             </button>
@@ -436,16 +437,17 @@ function DiffModal({ original, modified, description, onAccept, onReject }) {
           <span style={{ fontWeight:700, color:'var(--amber)', letterSpacing:'0.08em', fontFamily:'var(--font-display)' }}>
             ⚡ PROPOSED CHANGE
           </span>
-          <span style={{ fontSize:11, color:'var(--text-dim)' }}>{description}</span>
+          <span style={{ fontSize:FS.chrome, lineHeight: LH.chrome, color:'var(--text-dim)' }}>{description}</span>
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, flex:1, overflow:'hidden' }}>
           {[['BEFORE', original, 'var(--red)', 'rgba(255,64,96,0.15)'],
             ['AFTER',  modified, 'var(--green)', 'rgba(0,214,143,0.15)']].map(([label, code, color, bg]) => (
             <div key={label} style={{ display:'flex', flexDirection:'column', overflow:'hidden' }}>
-              <div style={{ fontSize:10, color, fontWeight:700, marginBottom:5, letterSpacing:'0.1em' }}>{label}</div>
+              <div style={{ fontSize:FS.chrome, lineHeight: LH.chrome, color, fontWeight:700, marginBottom:5, letterSpacing:'0.1em' }}>{label}</div>
               <pre style={{ background: bg, border:`1px solid ${color}44`,
                 borderRadius:'var(--radius)', padding:12, overflow:'auto', flex:1,
-                fontSize:11, fontFamily:'var(--font)', color:'var(--text)',
+                fontSize:FS.chrome, fontFamily:'var(--font)', color:'var(--text)',
+                lineHeight: LH.chrome,
                 whiteSpace:'pre-wrap', wordBreak:'break-all', margin:0,
                 maxHeight:'48vh' }}>
                 {(code||'').slice(0,4000)}
@@ -464,11 +466,11 @@ function DiffModal({ original, modified, description, onAccept, onReject }) {
 
 // ─── AST panel ─────────────────────────────────────────────────────────────
 function ASTPanel({ astData, loading }) {
-  if (loading) return <div style={{ padding:12, color:'var(--muted)', fontSize:11 }}>Analyzing...</div>;
+  if (loading) return <div style={{ padding:12, color:'var(--muted)', fontSize:FS.chrome, lineHeight: LH.chrome }}>Analyzing...</div>;
   if (!astData) return null;
   return (
     <div style={{ padding:'8px 12px', borderTop:'1px solid var(--border)', background:'var(--surface)',
-      fontSize:10, display:'flex', gap:16, flexWrap:'wrap', flexShrink:0 }}>
+      fontSize:FS.chrome, lineHeight: LH.chrome, display:'flex', gap:16, flexWrap:'wrap', flexShrink:0 }}>
       <span style={{ color:'var(--muted)' }}>AST:</span>
       <span style={{ color:'var(--accent)' }}>{astData.functions?.length||0} fn</span>
       <span style={{ color:'var(--violet)' }}>{astData.classes?.length||0} cls</span>
@@ -612,19 +614,20 @@ export default function IDE() {
         <span style={{ fontSize:16, filter:'drop-shadow(0 0 6px var(--violet))' }}>⬢</span>
         <div>
           <span className="title-glow" style={{ fontSize:14 }}>RĀMA IDE</span>
-          <span style={{ fontSize:10, color:'var(--muted)', marginLeft:10 }}>
+          <span style={{ fontSize:FS.chrome, lineHeight: LH.chrome, color:'var(--muted)', marginLeft:10 }}>
             Supreme AGI Code Editor · Monaco · Multi-model AI · Online Research
           </span>
         </div>
         {activeTab && (
-          <span style={{ fontSize:11, color: activeTab.dirty ? 'var(--amber)' : 'var(--muted)', marginLeft:8 }}>
+          <span style={{ fontSize:FS.chrome, lineHeight: LH.chrome, color: activeTab.dirty ? 'var(--amber)' : 'var(--muted)', marginLeft:8 }}>
             {activeTab.file.name}{activeTab.dirty ? ' ●' : ''}
           </span>
         )}
         <div style={{ flex:1 }} />
         {['split','editor','ai'].map(l => (
           <button key={l} className="btn btn-sm" onClick={() => setLayout(l)} style={{
-            fontSize:10, padding:'3px 8px',
+            fontSize:FS.chrome, padding:'3px 8px',
+            lineHeight: LH.chrome,
             borderColor: layout===l ? 'var(--violet)' : 'var(--border)',
             color: layout===l ? 'var(--violet)' : 'var(--muted)',
           }}>{l}</button>
@@ -643,17 +646,18 @@ export default function IDE() {
           {tabs.map(tab => (
             <div key={tab.id} onClick={() => setActiveTabId(tab.id)} style={{
               display:'flex', alignItems:'center', gap:6, padding:'6px 14px',
-              cursor:'pointer', fontSize:11, flexShrink:0, whiteSpace:'nowrap',
+              cursor:'pointer', fontSize:FS.chrome, lineHeight: LH.chrome, flexShrink:0, whiteSpace:'nowrap',
               background: tab.id===activeTabId ? 'rgba(0,200,255,0.06)' : 'transparent',
               borderBottom: tab.id===activeTabId ? '2px solid var(--accent)' : '2px solid transparent',
               color: tab.id===activeTabId ? 'var(--accent)' : 'var(--text-dim)',
             }}>
               <span>{getFileIcon(tab.file?.name, false)}</span>
               <span>{tab.file?.name}</span>
-              {tab.dirty && <span style={{ color:'var(--amber)', fontSize:10 }}>●</span>}
+              {tab.dirty && <span style={{ color:'var(--amber)', fontSize:FS.chrome, lineHeight: LH.chrome }}>●</span>}
               <button onClick={e => { e.stopPropagation(); closeTab(tab.id); }} style={{
                 background:'none', border:'none', color:'var(--muted)', cursor:'pointer',
-                fontSize:10, padding:'0 2px', fontFamily:'var(--font)',
+                fontSize:FS.chrome, padding:'0 2px', fontFamily:'var(--font)',
+                lineHeight: LH.chrome,
               }}>✕</button>
             </div>
           ))}
@@ -689,7 +693,7 @@ export default function IDE() {
                 flexDirection:'column', gap:12, color:'var(--muted)' }}>
                 <span style={{ fontSize:32, filter:'drop-shadow(0 0 8px var(--violet))' }}>⬢</span>
                 <span style={{ fontSize:12 }}>Open a file from the tree</span>
-                <span style={{ fontSize:10 }}>Monaco editor loads automatically</span>
+                <span style={{ fontSize:FS.chrome, lineHeight: LH.chrome }}>Monaco editor loads automatically</span>
               </div>
             )}
           </div>

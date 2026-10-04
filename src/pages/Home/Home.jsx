@@ -3,6 +3,7 @@ import { useNavigate }     from 'react-router-dom';
 import { systemClient }    from '@services/ipcClient.js';
 import { formatBytes, formatUptime } from '@services/ramaClient.js';
 import RamaOrb from '@components/RamaOrb.jsx';
+import { FS, LH } from '@config/type.js';
 
 const MODULES = [
   { route: '/',          icon: '◈', label: 'Chat',       desc: 'AGI conversation — no limits',        color: 'var(--violet)'  },
@@ -16,7 +17,7 @@ const MODULES = [
 function StatCard({ label, value, unit, color }) {
   return (
     <div className="hud-card" style={{ padding: '14px 16px', flex: 1 }}>
-      <div style={{ fontSize: '10px', color: 'var(--muted)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+      <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
         {label}
       </div>
       <div style={{ fontSize: '22px', fontWeight: 700, color, marginTop: '4px' }}>
@@ -50,7 +51,7 @@ function ModuleCard({ mod, onClick }) {
       <div style={{ fontSize: '13px', fontWeight: 700, color: hover ? mod.color : 'var(--text)', marginBottom: '4px', transition: 'color var(--transition)' }}>
         {mod.label}
       </div>
-      <div style={{ fontSize: '11px', color: 'var(--text-dim)', lineHeight: '1.5' }}>
+      <div style={{ fontSize: FS.chrome, color: 'var(--text-dim)', lineHeight: '1.5' }}>
         {mod.desc}
       </div>
     </div>

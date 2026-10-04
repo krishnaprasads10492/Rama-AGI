@@ -28,6 +28,7 @@ import {
 } from './chartProjection.js';
 import { liveReading } from './marketClock.js';
 import InfoTip from './InfoTip.jsx';
+import { FS, CHART_FS } from '@config/type.js';
 
 /**
  * PriceChart — candles, master's own fills, his levels, and the projection cone.
@@ -676,7 +677,7 @@ export default function PriceChart({
       layout: {
         background: { color: 'transparent' },
         textColor: theme.muted,
-        fontSize: 12,
+        fontSize: CHART_FS,  // CHART_FS, not a token: lightweight-charts' layout.fontSize takes a number
         attributionLogo: true,
         panes: { separatorColor: theme.border, separatorHoverColor: `${theme.accent}55`,
           enableResize: true },
@@ -1679,7 +1680,7 @@ export default function PriceChart({
     : (hoverEdit === 'move' ? 'move' : undefined);
 
   const chip = (on) => ({
-    padding: '2px 8px', fontSize: '12px', borderRadius: '999px', cursor: 'pointer',
+    padding: '2px 8px', fontSize: FS.dense, borderRadius: '999px', cursor: 'pointer',
     border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
     background: on ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent',
     color: on ? 'var(--accent)' : 'var(--muted)',
@@ -1687,7 +1688,7 @@ export default function PriceChart({
   });
 
   const seg = (on) => ({
-    padding: '3px 9px', fontSize: '12px', cursor: 'pointer',
+    padding: '3px 9px', fontSize: FS.dense, cursor: 'pointer',
     border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
     background: on ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
     color: on ? 'var(--accent)' : 'var(--muted)',
@@ -1730,16 +1731,16 @@ export default function PriceChart({
              string, so the number master looks at first was not on the chart at all. ── */}
       <div style={{
         display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap',
-        padding: '0 0 6px', fontSize: '12px', color: 'var(--muted)',
+        padding: '0 0 6px', fontSize: FS.dense, color: 'var(--muted)',
       }}>
-        <strong style={{ color: 'var(--text)', fontSize: '14px', letterSpacing: '0.02em' }}>
+        <strong style={{ color: 'var(--text)', fontSize: FS.chromeLg, letterSpacing: '0.02em' }}>
           {symbol || '—'}
         </strong>
         <span style={{ textTransform: 'uppercase' }}>
           {intervalDef(interval)?.label || interval}{rangeId ? ` · ${rangeId}` : ''}
         </span>
         {last && (
-          <span style={{ color: 'var(--text)', fontSize: '14px', fontWeight: 700,
+          <span style={{ color: 'var(--text)', fontSize: FS.chromeLg, fontWeight: 700,
             fontVariantNumeric: 'tabular-nums' }}>
             {numberFmt(last.close)}
           </span>
@@ -1820,7 +1821,7 @@ export default function PriceChart({
               borderRadius: 'var(--radius, 6px)', padding: '6px', minWidth: '260px',
               boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
             }} role="group" aria-label="Drawing tools">
-              <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '2px 6px 4px' }}>
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', padding: '2px 6px 4px' }}>
                 TOOL — click once to arm, drag on the chart
               </div>
               {DRAW.TOOL_IDS.map((id) => (
@@ -1829,7 +1830,7 @@ export default function PriceChart({
                         aria-pressed={tool === id}
                         style={{
                           display: 'block', width: '100%', textAlign: 'left',
-                          padding: '4px 6px', fontSize: '12.5px', cursor: 'pointer',
+                          padding: '4px 6px', fontSize: FS.denseLg, cursor: 'pointer',
                           background: tool === id
                             ? 'color-mix(in srgb, var(--magenta) 18%, transparent)' : 'transparent',
                           border: 'none', borderRadius: '4px',
@@ -1837,7 +1838,7 @@ export default function PriceChart({
                         }}
                         title={DRAW.TOOLS[id].hint}>
                   {DRAW.TOOLS[id].label}
-                  <span style={{ float: 'right', color: 'var(--muted)', fontSize: '12px' }}>
+                  <span style={{ float: 'right', color: 'var(--muted)', fontSize: FS.dense }}>
                     {DRAW.TOOLS[id].key}
                   </span>
                 </button>
@@ -1870,7 +1871,7 @@ export default function PriceChart({
                   </button>
                 )}
               </div>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '4px 6px 2px',
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', padding: '4px 6px 2px',
                 lineHeight: 1.5 }}>
                 Your marks, not Rāma&rsquo;s — stored per symbol and anchored to time and price, so they
                 stay put through a zoom, a window change or a different interval.
@@ -1894,7 +1895,7 @@ export default function PriceChart({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingBottom: '6px' }}>
           {onInterval && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', fontSize: '12px',
+              <span style={{ display: 'inline-flex', alignItems: 'center', fontSize: FS.dense,
                 color: 'var(--muted)' }}>
                 BAR<InfoTip id="interval" />
               </span>
@@ -1912,7 +1913,7 @@ export default function PriceChart({
                       {iv.label}
                     </button>
                   ))}
-                  <span style={{ fontSize: '12px', color: 'var(--muted)', paddingLeft: '2px' }}>
+                  <span style={{ fontSize: FS.dense, color: 'var(--muted)', paddingLeft: '2px' }}>
                     {g.label}
                   </span>
                 </div>
@@ -1922,7 +1923,7 @@ export default function PriceChart({
           {onRange && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexWrap: 'wrap' }}
                  role="group" aria-label="Lookback window">
-              <span style={{ display: 'inline-flex', alignItems: 'center', fontSize: '12px',
+              <span style={{ display: 'inline-flex', alignItems: 'center', fontSize: FS.dense,
                 color: 'var(--muted)', paddingRight: '4px' }}>
                 BACK<InfoTip id="window" />
               </span>
@@ -1966,7 +1967,7 @@ export default function PriceChart({
               than guessing, and "beginning" is one click instead of a date he has to know. */}
           {onDates && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', fontSize: '12px',
+              <span style={{ display: 'inline-flex', alignItems: 'center', fontSize: FS.dense,
                 color: 'var(--muted)', minWidth: '44px' }}>
                 DATES<InfoTip id="window" />
               </span>
@@ -1975,13 +1976,13 @@ export default function PriceChart({
                      min={coverage?.first || undefined}
                      max={toDate || coverage?.last || undefined}
                      onChange={(e) => onDates(e.target.value, toDate)}
-                     style={{ width: '138px', fontSize: '12px', padding: '2px 5px' }} />
-              <span style={{ fontSize: '12px', color: 'var(--muted)' }}>→</span>
+                     style={{ width: '138px', fontSize: FS.dense, padding: '2px 5px' }} />
+              <span style={{ fontSize: FS.dense, color: 'var(--muted)' }}>→</span>
               <input id={`${chartId}-to`} className="input" type="date" value={toDate || ''}
                      aria-label="To date"
                      min={fromDate || coverage?.first || undefined}
                      onChange={(e) => onDates(fromDate, e.target.value)}
-                     style={{ width: '138px', fontSize: '12px', padding: '2px 5px' }} />
+                     style={{ width: '138px', fontSize: FS.dense, padding: '2px 5px' }} />
 
               {coverage?.first && (
                 <button type="button" style={seg(false)}
@@ -1999,21 +2000,21 @@ export default function PriceChart({
               )}
 
               {(fromDate || toDate) && !rangeId && (
-                <span style={{ fontSize: '12px', color: 'var(--accent)' }}>custom</span>
+                <span style={{ fontSize: FS.dense, color: 'var(--accent)' }}>custom</span>
               )}
               {!fromDate && !toDate && (
-                <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                <span style={{ fontSize: FS.dense, color: 'var(--muted)' }}>
                   no date filter · everything stored
                 </span>
               )}
               {coverage?.first && (
-                <span style={{ fontSize: '12px', color: 'var(--muted)', marginLeft: 'auto' }}>
+                <span style={{ fontSize: FS.dense, color: 'var(--muted)', marginLeft: 'auto' }}>
                   stored {coverage.first} → {coverage.last || 'now'}
                 </span>
               )}
 
               {limitNote && (
-                <span style={{ fontSize: '12px', color: 'var(--muted)', marginLeft: '8px' }}
+                <span style={{ fontSize: FS.dense, color: 'var(--muted)', marginLeft: '8px' }}
                       title={limitNote}>
                   max {intervalDef(interval)?.label} depth reached
                 </span>
@@ -2050,7 +2051,7 @@ export default function PriceChart({
               borderRadius: 'var(--radius, 6px)', padding: '6px', minWidth: '200px',
               boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
             }} role="group" aria-label="Chart appearance">
-              <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '2px 6px 4px' }}>
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', padding: '2px 6px 4px' }}>
                 DRAW AS
               </div>
               <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', padding: '0 4px 6px' }}>
@@ -2069,7 +2070,7 @@ export default function PriceChart({
                      set, Rāma remembers it per browser, and the measured result is in the header. The
                      options are named by intent because nobody wants "16 pixels", they want to see the
                      candles or to see the year. ── */}
-              <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '2px 6px 4px',
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', padding: '2px 6px 4px',
                 borderTop: '1px solid var(--border)' }}>
                 CANDLE WIDTH<InfoTip id="zoom" />
               </div>
@@ -2083,7 +2084,7 @@ export default function PriceChart({
                   </button>
                 ))}
               </div>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '0 6px 6px',
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', padding: '0 6px 6px',
                 lineHeight: 1.5 }}>
                 {densityById(density)?.hint}
                 {' '}Applies on open and on <em>reset zoom</em>; the brackets <kbd>[</kbd>{' '}
@@ -2091,7 +2092,7 @@ export default function PriceChart({
                 stretching a few bars across it.
               </div>
 
-              <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '2px 6px 4px',
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', padding: '2px 6px 4px',
                 borderTop: '1px solid var(--border)' }}>
                 PRICE SCALE
               </div>
@@ -2104,7 +2105,7 @@ export default function PriceChart({
                   </button>
                 ))}
               </div>
-              <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '4px 6px 2px',
+              <div style={{ fontSize: FS.dense, color: 'var(--muted)', padding: '4px 6px 2px',
                 borderTop: '1px solid var(--border)', lineHeight: 1.5 }}>
                 {SCALE_MODES.find((m) => m.id === scaleMode)?.title}
               </div>
@@ -2141,13 +2142,13 @@ export default function PriceChart({
                   <div key={o.id}>
                     <label style={{
                       display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 6px',
-                      fontSize: '12.5px', color: 'var(--text)', cursor: 'pointer',
+                      fontSize: FS.denseLg, color: 'var(--text)', cursor: 'pointer',
                     }}>
                       <input type="checkbox" checked={on}
                              onChange={() => toggleOverlay(o.id)} />
                       {labelFor(o, overlayParams[o.id])}
                       {o.pane === 'oscillator' && (
-                        <span style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--muted)' }}>
+                        <span style={{ marginLeft: 'auto', fontSize: FS.dense, color: 'var(--muted)' }}>
                           own pane
                         </span>
                       )}
@@ -2160,7 +2161,7 @@ export default function PriceChart({
                         {fields.map((f) => (
                           <label key={f.key} style={{
                             display: 'flex', alignItems: 'center', gap: '4px',
-                            fontSize: '11.5px', color: 'var(--muted)',
+                            fontSize: FS.chip, color: 'var(--muted)',
                           }}>
                             {f.label}
                             <input className="input" type="number"
@@ -2168,14 +2169,14 @@ export default function PriceChart({
                                    min={f.min} max={f.max} step={f.step}
                                    aria-label={`${labelFor(o, overlayParams[o.id])} ${f.label}`}
                                    onChange={(e) => setOverlayParam(o.id, f.key, e.target.value)}
-                                   style={{ width: '62px', fontSize: '11.5px', padding: '1px 4px' }} />
+                                   style={{ width: '62px', fontSize: FS.chip, padding: '1px 4px' }} />
                           </label>
                         ))}
                         <InfoTip id="indicatorPeriod" />
                         {/* The consequence of the number he just typed, beside the number — the same
                             sentence the chart shows below itself, so there is one wording for it. */}
                         {shortfall && (
-                          <div style={{ flexBasis: '100%', fontSize: '11.5px', lineHeight: 1.45,
+                          <div style={{ flexBasis: '100%', fontSize: FS.chip, lineHeight: 1.45,
                             color: 'var(--amber)' }}>
                             {shortfall}
                           </div>
@@ -2186,7 +2187,7 @@ export default function PriceChart({
                 );
               })}
               <div style={{
-                fontSize: '12px', color: 'var(--muted)', padding: '6px 6px 2px',
+                fontSize: FS.dense, color: 'var(--muted)', padding: '6px 6px 2px',
                 borderTop: '1px solid var(--border)', marginTop: '4px', lineHeight: 1.5,
               }}>
                 Each of these is arithmetic on the bars above. Forecasts come from the engine and are
@@ -2255,7 +2256,7 @@ export default function PriceChart({
             position: 'absolute', inset: 0, zIndex: 5,
             display: 'flex', flexDirection: 'column', gap: '10px',
             alignItems: 'center', justifyContent: 'center',
-            color: 'var(--muted)', fontSize: '12.5px', border: '1px dashed var(--border)',
+            color: 'var(--muted)', fontSize: FS.denseLg, border: '1px dashed var(--border)',
             borderRadius: 'var(--radius)', textAlign: 'center', padding: '0 16px',
             background: 'var(--panel, #131722)', overflow: 'auto',
           }} aria-live="polite">
@@ -2299,13 +2300,13 @@ export default function PriceChart({
                 three charts used to drop them on the floor. */}
             {vacancy.tail.length > 0 && (
               <details style={{ maxWidth: '62ch', width: '100%', textAlign: 'left' }}>
-                <summary style={{ cursor: 'pointer', color: 'var(--text-dim)', fontSize: '12px' }}>
+                <summary style={{ cursor: 'pointer', color: 'var(--text-dim)', fontSize: FS.dense }}>
                   engine output
                 </summary>
                 <pre style={{
                   margin: '6px 0 0', padding: '8px 10px', maxHeight: 120, overflow: 'auto',
                   background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)',
-                  fontSize: '11.5px', color: 'var(--text-dim)', whiteSpace: 'pre-wrap',
+                  fontSize: FS.chip, color: 'var(--text-dim)', whiteSpace: 'pre-wrap',
                 }}>{vacancy.tail.join('\n')}</pre>
               </details>
             )}
@@ -2336,7 +2337,7 @@ export default function PriceChart({
               `pointer-events: none` so it cannot steal a drag. */}
           <div style={{
             position: 'absolute', top: 6, left: 8, pointerEvents: 'none',
-            fontSize: '12px', lineHeight: 1.6, fontVariantNumeric: 'tabular-nums',
+            fontSize: FS.dense, lineHeight: 1.6, fontVariantNumeric: 'tabular-nums',
             color: 'var(--text)', textShadow: '0 1px 3px rgba(0,0,0,0.75)',
           }} aria-hidden="true">
             {/* THE TIME IS NAMED WITH ITS ZONE (Section 118). The legend previously showed no time at
@@ -2425,9 +2426,9 @@ export default function PriceChart({
                        else if (ev.key === 'Escape') { ev.preventDefault(); settleNote(false); }
                      }}
                      onBlur={() => settleNote(true)}
-                     style={{ width: '228px', fontSize: '12.5px', padding: '3px 6px',
+                     style={{ width: '228px', fontSize: FS.denseLg, padding: '3px 6px',
                        borderColor: 'var(--magenta)' }} />
-              <span style={{ fontSize: '12px', color: 'var(--muted)', whiteSpace: 'nowrap',
+              <span style={{ fontSize: FS.dense, color: 'var(--muted)', whiteSpace: 'nowrap',
                 textShadow: '0 1px 3px rgba(0,0,0,0.75)' }}>
                 ⏎ keep · esc {note.id ? 'leave as it was' : 'drop'}
               </span>
@@ -2440,7 +2441,7 @@ export default function PriceChart({
           canvas and a canvas is not readable by assistive technology. */}
       <div aria-live="polite" style={{
         display: 'flex', gap: '12px', flexWrap: 'wrap', padding: '6px 2px',
-        fontSize: '12.5px', color: readout ? 'var(--text)' : 'var(--muted)',
+        fontSize: FS.denseLg, color: readout ? 'var(--text)' : 'var(--muted)',
         borderTop: '1px solid var(--border)', fontVariantNumeric: 'tabular-nums',
       }}>
         {readout ? (
@@ -2476,7 +2477,7 @@ export default function PriceChart({
       {/* The provider served less than was asked for. Said plainly, because master can now select a
           window deeper than free data reaches and a short answer must not pass as a complete one. */}
       {shortfall && (
-        <div style={{ fontSize: '12px', color: 'var(--amber)', padding: '2px', lineHeight: 1.6 }}>
+        <div style={{ fontSize: FS.dense, color: 'var(--amber)', padding: '2px', lineHeight: 1.6 }}>
           {shortfall}
         </div>
       )}
@@ -2484,14 +2485,14 @@ export default function PriceChart({
       {/* An overlay that drew nothing says so. A toggle that turns on and changes nothing visible is
           indistinguishable from a broken toggle. */}
       {shortfalls.length > 0 && (
-        <div style={{ fontSize: '12px', color: 'var(--amber)', padding: '2px', lineHeight: 1.5 }}>
+        <div style={{ fontSize: FS.dense, color: 'var(--amber)', padding: '2px', lineHeight: 1.5 }}>
           {shortfalls.map((s, i) => <div key={i}>{s}</div>)}
         </div>
       )}
 
       {cone?.ok && layers.cone && (
         <div style={{
-          fontSize: '12px', color: 'var(--muted)', padding: '4px 2px', lineHeight: 1.5,
+          fontSize: FS.dense, color: 'var(--muted)', padding: '4px 2px', lineHeight: 1.5,
         }}>
           {cone.summary?.text}{' '}
           <span style={{ color: cone.tilted ? 'var(--accent)' : 'var(--text-dim)' }}>
@@ -2506,7 +2507,7 @@ export default function PriceChart({
           not the chart's, and a horizon the engine shortened. */}
       {cone?.ok && layers.cone && projState && (
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', padding: '2px',
-          fontSize: '12px', lineHeight: 1.6, color: 'var(--muted)' }}>
+          fontSize: FS.dense, lineHeight: 1.6, color: 'var(--muted)' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center',
             color: projState.modal ? 'var(--accent)' : 'var(--text-dim, var(--muted))' }}>
             {projState.cite}{projState.modal ? ' · modal' : ''}
@@ -2537,7 +2538,7 @@ export default function PriceChart({
       {/* THE CLAMP IS SHOWN, NEVER SILENT. `capped` has been on the cone object all along and nothing
           read it, so a horizon the engine shortened looked like the one master chose. */}
       {cone?.ok && layers.cone && projState && (
-        <div style={{ fontSize: '12px', padding: '2px', lineHeight: 1.6,
+        <div style={{ fontSize: FS.dense, padding: '2px', lineHeight: 1.6,
           color: cone.capped ? 'var(--amber)' : 'var(--muted)' }}>
           {cone.capped && projState.requestedBars !== null
             ? `You asked for ${projState.requestedBars} bars ahead. The engine's ceiling is `
@@ -2552,7 +2553,7 @@ export default function PriceChart({
           were not read and found to say nothing, they are not inputs to a volatility cone at all. */}
       {cone?.ok && layers.cone && projLedger.length > 0 && (
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', padding: '2px 2px 4px',
-          fontSize: '12px', lineHeight: 1.6 }}>
+          fontSize: FS.dense, lineHeight: 1.6 }}>
           {projLedger.map((row) => (
             <span key={row.id} title={row.text}
                   style={{ color: row.used ? 'var(--text-dim, var(--muted))' : 'var(--muted)' }}>
@@ -2563,7 +2564,7 @@ export default function PriceChart({
       )}
 
       {/* Required by the charting library's licence. */}
-      <div style={{ fontSize: '12.5px', color: 'var(--muted)', padding: '2px' }}>
+      <div style={{ fontSize: FS.denseLg, color: 'var(--muted)', padding: '2px' }}>
         Charting by{' '}
         <a href={ATTRIBUTION_URL} target="_blank" rel="noreferrer"
            style={{ color: 'var(--muted)' }}>TradingView Lightweight Charts</a>

@@ -14,6 +14,14 @@ import React from 'react';
  * 2. RECOVERY. A boundary latches `hasError` forever. Navigating to a working
  *    page kept showing the error, because nothing reset the state. `resetKey`
  *    (the current route) clears it on navigation.
+ *
+ * WHY THE TYPE SCALE IS WRITTEN HERE AS `var(--fs-chrome)` AND NOT AS `FS.chrome`
+ * (spec Section 136). Every other surface imports the role names from
+ * src/config/type.js. This one must not: it is the surface that has to render when
+ * a module has already failed, so every module it depends on is one more thing that
+ * can be the reason it cannot. A var() string needs no import, resolves from :root,
+ * and reads the same number from the same place. The three sites below are the same
+ * promotion the rest of src received, with no new dependency taken on.
  */
 export default class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -71,7 +79,7 @@ export default class ErrorBoundary extends React.Component {
           {this.props.label ? `${this.props.label.toUpperCase()} FAILED` : 'MODULE FAILED'}
         </div>
 
-        <div style={{ color: 'var(--muted)', fontSize: '11px', maxWidth: '460px', lineHeight: 1.7 }}>
+        <div style={{ color: 'var(--muted)', fontSize: 'var(--fs-chrome)', maxWidth: '460px', lineHeight: 1.7 }}>
           This module stopped rendering. The rest of Rāma is unaffected — use the
           navigation bar to switch pages, or retry below.
         </div>
@@ -97,7 +105,7 @@ export default class ErrorBoundary extends React.Component {
             <button
               className="btn btn-sm"
               onClick={() => this.setState(s => ({ showStack: !s.showStack }))}
-              style={{ fontSize: '10px' }}
+              style={{ fontSize: 'var(--fs-chrome)', lineHeight: 'var(--lh-chrome)' }}
             >
               {showStack ? 'Hide' : 'Show'} component stack
             </button>
@@ -106,7 +114,8 @@ export default class ErrorBoundary extends React.Component {
               <pre style={{
                 maxWidth: '640px', maxHeight: '240px', overflow: 'auto',
                 background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: '4px', padding: '10px', fontSize: '10px',
+                borderRadius: '4px', padding: '10px', fontSize: 'var(--fs-chrome)',
+                lineHeight: 'var(--lh-chrome)',
                 color: 'var(--muted)', textAlign: 'left', margin: 0,
               }}>
                 {info.componentStack.trim()}
