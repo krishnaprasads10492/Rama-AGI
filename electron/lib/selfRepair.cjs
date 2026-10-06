@@ -56,7 +56,7 @@ function note(entry) {
   if (log.length > 100) log.pop();
 }
 
-// ─── Where repaired modules live ──────────────────────────────────────────────
+// Where repaired modules live
 function appRoot() {
   return path.join(__dirname, '..', '..');
 }
@@ -173,7 +173,7 @@ function registerRepairPath() {
   return { ok: true, dir };
 }
 
-// ─── The lockfile is the allowlist ────────────────────────────────────────────
+// The lockfile is the allowlist
 let _lock = null;
 
 function lockfile() {
@@ -212,7 +212,7 @@ function lockEntry(name) {
   return null;
 }
 
-// ─── Download, verified ───────────────────────────────────────────────────────
+// Download, verified
 function download(url, redirectsLeft = 4) {
   return new Promise((resolve) => {
     let req;
@@ -272,7 +272,7 @@ function integrityMatches(buffer, integrity) {
   } catch { return false; }
 }
 
-// ─── Minimal tar reader (core only, on purpose) ───────────────────────────────
+// Minimal tar reader (core only, on purpose)
 /**
  * npm tarballs are ustar with every path under `package/`. Only what is needed to
  * unpack one is implemented: regular files, directories, the ustar `prefix` field
@@ -339,7 +339,7 @@ function extractTar(buffer, destDir) {
     : { ok: false, error: 'archive contained no files' };
 }
 
-// ─── Repair ───────────────────────────────────────────────────────────────────
+// Repair
 function alreadyResolvable(name) {
   try { require.resolve(name); return true; }
   catch { return false; }
@@ -391,7 +391,6 @@ async function fetchOne(name) {
  * nothing to the queue, and the total is capped so a pathological graph cannot
  * spin here forever.
  *
- * @param {string} name
  * @returns {Promise<{ok:boolean, repaired:string[], failed:Array, error?:string}>}
  */
 async function repairModule(name, { maxPackages = 40 } = {}) {
