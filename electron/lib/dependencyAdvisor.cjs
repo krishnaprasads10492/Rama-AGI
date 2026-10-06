@@ -70,13 +70,10 @@ function classifyJump(from, to) {
 /**
  * Assess one package.
  *
- * @param {object} input
- * @param {string} input.name
  * @param {string} input.pinned           the version in package.json
  * @param {string} input.latest           the registry's newest
  * @param {object} [input.advisory]       `{checked:boolean, found:Array}` from an advisory source
  * @param {number} [input.sizeBytes]      current unpacked size, if known
- * @param {number} [input.latestSizeBytes]
  * @param {Array}  [input.signals]        `[{claim, source, date}]` — online commentary
  * @param {number} [input.releaseAgeDays] how long the new version has been out
  */
@@ -91,7 +88,7 @@ function assess(input = {}) {
   const jump = classifyJump(pinned, latest);
   const sensitive = SENSITIVE.has(name);
 
-  // ── Security ─────────────────────────────────────────────────────────────
+  // Security
   //
   // THE MOST TEMPTING DISHONESTY IN THIS MODULE. An advisory lookup that returns nothing may mean the
   // package is clean, or may mean nobody looked. `verified-clean` is only ever claimed when a check
@@ -118,14 +115,14 @@ function assess(input = {}) {
     };
   }
 
-  // ── Disk, master's binding constraint ────────────────────────────────────
+  // Disk, master's binding constraint
   //
   // Reported as a DELTA: "42 MB" matters far less than "+31 MB". Absent rather than zero when unknown.
   const diskDeltaBytes = (Number.isFinite(sizeBytes) && Number.isFinite(latestSizeBytes))
     ? latestSizeBytes - sizeBytes
     : null;
 
-  // ── Concerns, each traceable to its cause ────────────────────────────────
+  // Concerns, each traceable to its cause
   const concerns = [];
   if (jump.kind === 'breaking') concerns.push(`Breaking: ${jump.why}.`);
   if (jump.kind === 'downgrade') {
@@ -146,7 +143,7 @@ function assess(input = {}) {
     concerns.push('Security status is unknown because no advisory source was consulted.');
   }
 
-  // ── Online commentary: signal, never measurement ─────────────────────────
+  // Online commentary: signal, never measurement
   //
   // Master asked Rāma to read comments online. Those are CLAIMS. An issue thread saying a release is
   // broken is worth surfacing and worth attributing; it is not a fact about the package. So it is
@@ -163,7 +160,7 @@ function assess(input = {}) {
     }));
   const negative = cleanSignals.filter(s => /break|regress|crash|revert|broken|bug/i.test(s.claim));
 
-  // ── Recommendation ───────────────────────────────────────────────────────
+  // Recommendation
   let recommend;
   let urgency;
   if (jump.kind === 'current') {
