@@ -16934,3 +16934,250 @@ every run, then each entry in full, the verdict-reachability table with `'ok'` s
 unreachable entry renders as the literal word **`UNVERIFIED`**, as does a null `kind` and the legacy
 value `'not-run'` — asserted never to render as a pass. *A table of six transforms that one sensor can
 address is not six capabilities,* and the output says so rather than leaving a reader to count.
+
+### 137.5 The rule — what a comment has to earn, written before a single one is edited
+
+Numbering note: the plan calls this half's two parts "§§6–7". They land as **137.5** and **137.6**,
+because **137.4** was taken by the contract's build record. `137.1`, `137.2` and `137.3` are **not
+renumbered** — `timeline.cjs` and `verifyUpgradeApplier.cjs` will cite `Section 137.2` literally, and
+both suites' `REDBY` headers already cite `Section 137.3`.
+
+**This section exists before the pass, not after it.** A floor recorded after the pass records whatever
+the pass happened to leave, and so cannot redden on the only pass this task performs. Master's
+instruction was *"concise the comments everywhere"*; concision is not deletion, and the whole purpose of
+writing the rule first is that the instrument can then be pointed at **this** pass rather than at some
+future one.
+
+#### KEEP — five classes, each with a real instance from this repo
+
+| # | Class | Real instance, kept verbatim |
+|---|---|---|
+| **K1** | **a measured finding** — a number, a timing, an observed behaviour | `selfRepair.cjs:25` — *"`package-lock.json` ships inside the app and names 745 packages with EXACT versions"*. `upgradeApplier.cjs:144` — `fs.realpathSync` returns an 8.3 short path **unchanged** while `realpathSync.native` resolves it. |
+| **K2** | **provenance** — which file, line, commit, section or source a value came from, including a deliberate duplication pinned by a drift test | `dependencyAdvisor.cjs` **line 8** — the line ending *"(spec Section 96)"*. **Measured: the token is on line 8; line 9 is a bare `*`.** `chartProjection.js:35` — `MAX_BARS_AHEAD` *"duplicated here deliberately and pinned by a drift test"*. |
+| **K3** | **why-this-shape-not-the-obvious-one** — the obvious approach named, and the reason it lost | `selfRepair.cjs:83` — *"DO NOT CALL `Module._initPaths()` HERE. That is what this function used to do, and it broke every packaged build."* `autonomyPolicy.cjs:353` — *"a gate whose level defaults is a gate whose refusal is 'not allowed'"*. |
+| **K4** | **a trap** — what must not be done again, and what happened when it was | `package.json` lines 7–9: `_buildFilesNote`, `_extraResourcesNote`, `_nativeRebuildNote`. All three **survive byte-identical** — the contract's `transform` is built around that guarantee and asserts it. |
+| **K5** | **an honesty boundary** — a distinction a reader would otherwise collapse | `dependencyAdvisor.cjs:98` — `unchecked` ≠ `no-advisory-found` ≠ a guarantee of safety, *"which is a different sentence"* (the state it describes is the code at `:114`). `:149` — *"Online commentary: signal, never measurement"*. `upgradeApplier.cjs` — `verification: 'not-run'` is *"a declared value that must never render as 'passed'"*. |
+
+#### CUT — four classes, each with a real instance
+
+| # | Class | Real instance |
+|---|---|---|
+| **C1** | **restating what the code plainly does** | `timeline.cjs` — `// newest-first` beside `markers.unshift`; the 10-minute-window sentence above the loop that does exactly that against a visible `10 * 60 * 1000`; and the four-bullet MARKERS / FLASHBACK / DIFF / RESTORE list in the module header, which restates four exported function names. |
+| **C2** | **duplicated spec narrative** | `verifyUpgradeApplier.cjs:4–27` reproduces the Section 132 apply-refusal story and both residuals at paragraph length. The history **moves** to 137.2 behind a pointer; the module keeps the measured sentence and the decision. |
+| **C3** | **ceremonial banners** | the box-drawing and `=` rules. **Measured repo-wide at `21bb12d`: 1,304**; **121 of them inside the twelve-file tranche.** |
+| **C4** | **repeating a signature** | `dependencyAdvisor.cjs`'s `@param {string} input.name` — the parameter is `name`, the type is visible, nothing is added. **Measured: 400 JSDoc tag lines repo-wide at `21bb12d`.** A tag carrying a unit, a range, a nullability rule or a provenance note is **K1/K2, not C4**: `startupDoctor.cjs:87`'s `@param {{safeRequireFailures?: Array, crashReports?: Array, appRoot?: string}} ctx` **stays**, because it is the only written record of that `ctx` shape. |
+
+#### MOVE, never delete — and the pointer must resolve
+
+Long narrative worth keeping that does not belong in a source header **moves into 137.2** and is
+replaced by exactly one line naming where it went.
+
+**The pointer must name a section that EXISTS.** `verifyCommentCensus.cjs` extracts every
+`(?i)section \d+(\.\d+)?` token from the twelve tranche files and asserts a matching `^## SECTION <n>`
+or `### <n>.<m>` heading in this file. Measured on the unedited tree, **all twelve distinct tokens
+resolve today** — Sections 49, 53, 62, 64, 80, 91, 92, 96, 99, 106, 124 and 127 — so the row starts
+green and a planted `Section 999` is what proves it can go red.
+
+**Deleting reasoning because it is long is forbidden.** That is the single failure mode this whole rule
+exists to prevent, and the pre-pass floors below are what make the prohibition mechanical rather than
+hortatory.
+
+#### REDUCE rather than remove
+
+A banner that is the only structural marker in a long file becomes a plain one-line label:
+
+```js
+// ─── The revert ───────────────────────────────────────────────   →   // The revert
+```
+
+The rule is **concision, not austerity**. `electron/lib/dependencyAdvisor.cjs` is the **reference case
+and is expected to lose little or nothing** (FR-B10): its five banner lines reduce to labels, its
+`@param` restatements go, and nothing else. Its `unchecked` / `no-advisory-found` boundary and
+*"Online commentary: signal, never measurement"* survive **verbatim**. **If the pass strips it, the rule
+is wrong and the pass stops.**
+
+#### ANCHOR by amending an existing line, never by adding one
+
+A `Section N` token added to a comment line **that is already there** raises the provenance floor
+without raising the comment-line ceiling, so the two opposed counters stay satisfiable together. **This
+is a rule, not an observation** — it is the only move that can satisfy both counters at once, and
+without it the cheapest way to balance them would be to delete.
+
+---
+
+### 137.6 The census — published, reproduced, and frozen before the pass
+
+Every number here was **re-derived from the git tree at `21bb12d`**, not copied forward. A census
+number is only reproducible if the pattern is reproduced character for character, so the patterns are
+published verbatim.
+
+#### The six patterns, verbatim
+
+```
+file set       : *.cjs, *.js, *.jsx, *.mjs   excluding node_modules | build | dist
+comment line   : ^\s*(//|/\*|\*)
+banner line    : comment line AND [─—=]{6,}
+jsdoc tag line : comment line AND @(param|returns|type|property)\b
+spec pointer   : comment line AND (?i)section \d+
+evidence word  : comment line AND (?i)\b(measured|verified|benchmark|observed)\b
+trap marker    : comment line AND (?i)(DO NOT|must not|refusing|was wrong)
+```
+
+**Two corrections, both measured.**
+
+1. **The spec-pointer pattern is published as `(?i)section \d+`, and both totals are stated: 501
+   case-insensitive, 496 case-sensitive.** PowerShell's `-match` is case-insensitive by default and a
+   Node suite is not, so the same "pattern" gave two answers. The **five** differing lines are
+   `scripts/buildInstaller.cjs:11`, `scripts/shipLog.cjs:11`, `scripts/verifyIndicators.mjs:533`,
+   `src/pages/StockMind/indicators.js:407` and `:1056` — **all five outside the tranche**, which is why
+   the tranche's 29 is engine-independent. The suite uses the `(?i)` form, as the evidence pattern
+   already did.
+2. **The banner class is the EXACT `[─—=]{6,}`** — U+2500, U+2014, `=`. Widening it to the box-drawing
+   block `[\u2500-\u257F\u2014=]{6,}` measures **1,398** rather than **1,304**. Both numbers are stated
+   so the difference cannot be mistaken for drift.
+
+#### Repo-wide, at `21bb12d`
+
+| | |
+|---|---|
+| source files | **216** |
+| lines | **82,915** |
+| comment lines | **15,350** — **18.5%** |
+| banner (exact class) | **1,304** (wide class: 1,398) |
+| JSDoc tag lines | **400** |
+| spec pointers | **501** case-insensitive / **496** case-sensitive |
+| evidence words | **174** |
+| trap markers | **182** |
+
+**Master's word was "everywhere", and this pass covers 12 of 216 files.** That is stated plainly rather
+than rounded up. The twelve are the repair-contract neighbourhood, chosen because half one already
+required reading every one of them — *a comment can only defensibly be judged by a reader who has just
+verified what the code does.*
+
+**The repo-wide figures have already moved, and that is recorded rather than hidden.** This task added
+four source files of its own (`electron/lib/repairContract.cjs`, `scripts/verifyRepairContract.cjs`,
+`scripts/verifyCommentCensus.cjs`, `scripts/printRepairContract.cjs`), so measured live on this branch:
+**220 files, 86,071 lines, 15,933 comment lines (still 18.5%), 1,352 banner, 402 JSDoc, 508/503
+pointers, 207 evidence, 182 trap.** The suite therefore **asserts the tranche** — a fixed twelve-file
+list, stable by construction — and merely **prints** the repo-wide figure. Pinning a repo-wide count
+would redden on every new file, and the cheapest escape from such a red is deleting the row.
+
+#### The tranche, and the pre-pass floors — frozen here as history
+
+`PRE_PASS` is the comment-line **ceiling** per file. `PRE_KEEP` is the **floor** per file per counter.
+`PRE_PASS_BANNER` is what banner reduction is measured against. All three were frozen **before any
+comment was edited**, which is the only ordering under which the floor can redden on this pass.
+
+| file | lines | comment | banner | pointer | evidence | trap |
+|---|---|---|---|---|---|---|
+| `electron/lib/autonomyGate.cjs` | 480 | 256 | 12 | 0 | 11 | 4 |
+| `electron/lib/upgradeApplier.cjs` | 602 | 237 | 18 | 0 | 7 | 3 |
+| `scripts/verifyUpgradeApplier.cjs` | 1,343 | 197 | 16 | 0 | 8 | 2 |
+| `electron/lib/autonomyPolicy.cjs` | 452 | 193 | 8 | 2 | 2 | 2 |
+| `electron/lib/autonomyStop.cjs` | 487 | 192 | 12 | 1 | 1 | 2 |
+| `electron/lib/selfRepair.cjs` | 440 | 140 | 5 | 3 | 2 | 2 |
+| `electron/ipc/aiProcess.cjs` | 432 | 118 | 7 | 15 | 0 | 1 |
+| `electron/lib/startupDoctor.cjs` | 301 | 98 | 6 | 1 | 1 | 0 |
+| `scripts/verifyAutonomyStop.cjs` | 745 | 83 | 21 | 0 | 1 | 1 |
+| `electron/lib/dependencyAdvisor.cjs` | 307 | 71 | 5 | 3 | 1 | 0 |
+| `electron/ipc/timeline.cjs` | 275 | 48 | 6 | 0 | 0 | 0 |
+| `scripts/verifyEngineDiagnosis.cjs` | 212 | 34 | 5 | 4 | 0 | 3 |
+| **TOTAL** | **6,076** | **1,667** | **121** | **29** | **34** | **20** |
+
+Comment lines are **27.4%** of the tranche, against 18.5% repo-wide — which is why this neighbourhood
+was picked first.
+
+**The zero floors are named as zero rather than hidden.** A zero floor constrains nothing, so what
+binds those files has to be said:
+
+- `timeline.cjs` — zero on **all three** counters. Bound instead by its `PRE_PASS` ceiling of 48, by
+  the block-threshold rule (its 3–23 block is one of the three unanchored ones), and by its `codeView`
+  digest.
+- `autonomyGate.cjs`, `upgradeApplier.cjs`, `verifyUpgradeApplier.cjs`, `verifyAutonomyStop.cjs` —
+  zero on **pointer**. Bound by their evidence and trap floors (11/4, 7/3, 8/2, 1/1) and by the
+  block-threshold rule.
+- `aiProcess.cjs`, `dependencyAdvisor.cjs`, `verifyEngineDiagnosis.cjs` — zero on **evidence**. Bound
+  by their pointer floors (15, 3, 4) and trap floors (1, 0, 3).
+
+#### The two opposed counters
+
+> **CEILING:** `live <= PRE_PASS[file]` per file. A file that grows comment lines is **red**.
+> **FLOOR:** `live >= PRE_KEEP[file][counter]` per file per counter. A file that loses a pointer, an
+> evidence word or a trap marker is **red** — *on this pass, not only on later ones.*
+
+A comment-line budget on its own rewards deletion, which is the opposite of the instruction. The floor
+is what makes the ceiling safe: **the only way to satisfy both at once is to remove restatement and
+keep findings**, and the anchor-by-amending rule is what keeps the pair satisfiable.
+
+#### The block-threshold rule
+
+> **Every contiguous comment block of more than 20 lines must contain a provenance token** — an
+> `(?i)section \d+` reference, a `docs/research/*.md` filename, or an evidence word.
+
+**Threshold 20 has a measured reason, not a chosen one.** `dependencyAdvisor.cjs`'s module header is a
+**14-line** block already carrying `(spec Section 96)` at line 8, and that file has **no** block over
+20 — so the reference case sits under the line and passes unedited. A threshold that reddened the file
+the rule holds up as the posture to copy would be the wrong threshold.
+
+Measured on the unedited tree, the tranche holds **eighteen** comment blocks over 20 lines, of which
+**exactly three are unanchored**. Those three, with their dispositions — **none of which is "delete"**:
+
+| block | lines | disposition |
+|---|---|---|
+| `electron/lib/autonomyStop.cjs` 295–327 | 33 | **ANCHOR IN PLACE.** Keep the capability-absence and write-then-unlink paragraphs; reduce the banner sub-rule to a label; add a `Section 132` token **to a line that already exists**. |
+| `scripts/verifyUpgradeApplier.cjs` 4–27 | 24 | **SPLIT.** Keep and anchor the two measured sentences; move the two residual paragraphs to 137.2 behind one pointer line. ≈ 12–14 lines. |
+| `electron/ipc/timeline.cjs` 3–23 | 21 | **REDUCE.** Cut the four-bullet MARKERS / FLASHBACK / DIFF / RESTORE list that restates four exported names; keep the SAFETY paragraph and anchor it with a `Section 137.2` pointer. ≈ 8–10 lines. |
+
+#### D7 — `selfRepair.cjs` is limited, and the reason is measured
+
+`selfRepair.cjs` has **two** blocks over 20 lines — 3–40 (38) and 80–119 (40) — and **both are already
+anchored**, so no rule forces a move. It is therefore limited to **banner reduction and `@param`
+restatement removal**, and **removed from 137.2's move list** rather than given a fabricated
+disposition. Its header's `:25` *"745 packages with EXACT versions"* (K1) and `:83` *"DO NOT CALL
+`Module._initPaths()` HERE"* (K3) are both **KEEP**, and its floors are pointer 3 / evidence 2 / trap 2.
+
+This is finding 16 answered by measurement: the previous plan promised `selfRepair.cjs` a move it had
+no need of, and an intention is not a disposition.
+
+#### D4 — three change-detectors live behind `--pass-audit`, OFF in the chain
+
+Master's reason, endorsed: the twelve `codeView` digests, the frozen suite tails (197 / 483 / 34) and
+the `BASE_REF = '21bb12d'` comment-only comparison all redden on any **lawful** future edit. One added
+assertion in `verifyAutonomyStop.cjs` — an additive act I11 positively encourages — reddens the frozen
+tail at 197, for a reason that has nothing to do with what the suite guards. **The cheapest escape from
+such a red is deleting the assertion**, which trains exactly the wrong reflex. So they are a
+**pass-time instrument, not a standing gate**: off with no argument, on under `--pass-audit`, and their
+green output is recorded here.
+
+What stays in the chain unconditionally: both counters, the pointer-resolution check, the
+block-threshold rule, and the `codeView` corpus and idempotence rows.
+
+**The comment-only proof never silently passes.** For each tranche file the suite reads the base bytes
+with `git show 21bb12d:<path>`, applies `codeView` to both sides, and asserts them byte-identical. If
+`git` is unavailable or the ref is missing it prints a **loud `SKIP`** naming the reason, counts skips
+**separately** in the tail (`N passed, M failed, K skipped`), and prints **no `PASS`** for that
+criterion; it exits non-zero only under `--require-comment-only`. *A silently-not-run check is the shape
+of a green suite that proves nothing.*
+
+The twelve `codeView` digests frozen at this point — the state the pass must not change:
+
+| file | `sha256(codeView(src))` |
+|---|---|
+| `electron/lib/autonomyGate.cjs` | `8f318c77…ca15f5` |
+| `electron/lib/upgradeApplier.cjs` | `8635a727…73b02a` |
+| `scripts/verifyUpgradeApplier.cjs` | `617bfa09…85ec1d71` |
+| `electron/lib/autonomyPolicy.cjs` | `9738ce98…effbfca` |
+| `electron/lib/autonomyStop.cjs` | `36dc8ffd…242aecd9` |
+| `electron/lib/selfRepair.cjs` | `5c2759fc…20e74d31` |
+| `electron/ipc/aiProcess.cjs` | `769ecde8…4bb55ab7` |
+| `electron/lib/startupDoctor.cjs` | `19310801…acfbe1d0` |
+| `scripts/verifyAutonomyStop.cjs` | `e9ebe64f…f98e0043` |
+| `electron/lib/dependencyAdvisor.cjs` | `91536356…1e59f4b8` |
+| `electron/ipc/timeline.cjs` | `a59fcd7b…1faf66d3` |
+| `scripts/verifyEngineDiagnosis.cjs` | `2ccee0db…87165f8c` |
+
+The full digests are in `scripts/verifyCommentCensus.cjs`'s `CODEVIEW_DIGESTS` table; the truncations
+above are for reading, and the suite compares the whole value.
+
+**No comment was edited in writing any of this.** The pass itself is the next step, and it is judged
+against these numbers rather than against its own result.
