@@ -94,7 +94,7 @@ function diagnose(ctx = {}) {
 
   const add = (label, pass, note = '') => report.push({ label, pass, note });
 
-  // ── Runtime dependencies ───────────────────────────────────────────────────
+  // Runtime dependencies
   for (const dep of RUNTIME_CRITICAL) {
     const present = resolves(dep.name);
     add(dep.name, present, present ? '' : 'not resolvable');
@@ -116,7 +116,7 @@ function diagnose(ctx = {}) {
     }
   }
 
-  // ── Renderer bundle ────────────────────────────────────────────────────────
+  // Renderer bundle
   const appRoot = ctx.appRoot ?? path.join(__dirname, '..', '..');
   const buildIndex = path.join(appRoot, 'build', 'index.html');
   const hasBuild = fs.existsSync(buildIndex);
@@ -133,7 +133,7 @@ function diagnose(ctx = {}) {
     if (packaged) fatal.push(entry); else degraded.push(entry);
   }
 
-  // ── Capability matrix ──────────────────────────────────────────────────────
+  // Capability matrix
   // A missing matrix does not throw: capability.can() returns false for unknown
   // capabilities by design (fail closed). The result is an app that starts and
   // then refuses every action, which looks like a permissions bug rather than a
@@ -154,13 +154,13 @@ function diagnose(ctx = {}) {
     });
   }
 
-  // ── Subsystems that degraded while loading ─────────────────────────────────
+  // Subsystems that degraded while loading
   for (const f of ctx.safeRequireFailures ?? []) {
     add(f.name, false, f.reason);
     degraded.push({ id: `load-${f.name}`, detail: `${f.name} did not load — ${f.reason}` });
   }
 
-  // ── What was true when this build was made ─────────────────────────────────
+  // What was true when this build was made
   // Without this, every runtime degradation looks like damage. The manifest lets
   // Rāma say "node-pty was not compiled into this build" — an accepted trade-off
   // recorded at build time — rather than "node-pty is missing", which reads as a
@@ -190,7 +190,7 @@ function diagnose(ctx = {}) {
     }
   }
 
-  // ── A crash on a previous run ──────────────────────────────────────────────
+  // A crash on a previous run
   const previousCrash = (ctx.crashReports ?? [])[0] ?? null;
 
   return {

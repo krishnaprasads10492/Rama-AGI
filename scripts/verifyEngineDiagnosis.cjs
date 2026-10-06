@@ -48,7 +48,7 @@ function check(label, ok, detail) {
 
 console.log('\nengine failure diagnosis — the reason, not the symptom\n');
 
-// ── The case master is almost certainly hitting ───────────────────────────────
+// The case master is almost certainly hitting
 console.log('  missing python packages');
 {
   const d = diagnoseFailure({
@@ -72,7 +72,7 @@ console.log('  missing python packages');
     !/exited with code/.test(d.reason), d.reason);
 }
 
-// ── The other real causes ─────────────────────────────────────────────────────
+// The other real causes
 console.log('\n  other causes are distinguished');
 {
   const port = diagnoseFailure({
@@ -104,7 +104,7 @@ console.log('\n  other causes are distinguished');
   check('and names the interpreter that produced it', /py/.test(generic.reason));
 }
 
-// ── Absence must not be reported as a diagnosis ───────────────────────────────
+// Absence must not be reported as a diagnosis
 console.log('\n  silence is its own answer');
 {
   const silent = diagnoseFailure({ stderr: [], exit: null });
@@ -130,7 +130,7 @@ console.log('\n  silence is its own answer');
       }));
 }
 
-// ── THE CASE MASTER ACTUALLY HIT (spec Section 106) ───────────────────────────
+// THE CASE MASTER ACTUALLY HIT (spec Section 106)
 //
 // He reported: "engine is not running, showing the IP and the above message." That was the caller's raw
 // fallback, and it fired because `getRunningStatus` gated the whole diagnosis behind
@@ -184,7 +184,7 @@ console.log('\n  the silent cases, which were unreachable before');
     inputs.every((i) => diagnoseFailure(i) !== null && diagnoseFailure(i) !== undefined));
 }
 
-// ── The gate that made the above unreachable must not come back ───────────────
+// The gate that made the above unreachable must not come back
 console.log('\n  the status object always offers a diagnosis when the engine is down');
 {
   const src = fs.readFileSync(path.join(ROOT, 'electron', 'ipc', 'aiProcess.cjs'), 'utf8');
