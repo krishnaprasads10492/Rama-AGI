@@ -1817,7 +1817,7 @@ authenticated **Master session**, not merely an open store.
 | 156 | Legible letters, and layouts that survive a resized window | done (first run complete and verified in a real renderer; a 140-literal residual, 21 band-unaware page modules and 2 open questions for master are deliberately left, each counted and named) | Section 136. **DESIGNED (round 3 of 3, final — round 1 drew 5 HIGH/17 MEDIUM/5 NIT, round 2 drew 4 HIGH/7 MEDIUM/6 NIT with 11 blocking, round 3 drew 3 HIGH/5 MEDIUM/7 NIT with 8 blocking; **all 15 of round 3 resolved in 136.12 before any code was written, none waived**), PRIMITIVES BUILT — FEAT-001 landed the token block, `layoutBands.js`, `type.js`, `useLayoutBand.js`, its single `own: true` mount in `App.jsx` and `scripts/verifyTypeScale.mjs` wired into the chain at **35** entries, with nothing migrated yet so every module still renders exactly as today (I11); MIGRATION LANDED (FEAT-002) — 667 literals rewritten by `scripts/migrateTypeLiterals.cjs` across six per-surface commits and the last 5 by hand, residual **140 across 23 files** with every remaining literal 12px or above, and the script deleted in the commit that landed its output; BANDS WIRED (FEAT-003) — `compact` sheds the titlebar subtitle and the `Ctrl+K` chip, `wide` widens the palette 600→760, 8 modals took the `width` + `maxWidth: '92vw'` guard and 4 fixed grids became `auto-fit`; PROVEN IN A REAL RENDERER (FEAT-004) — `scripts/renderCheckTypeScale.mjs` (**85 assertions, exit 0**, `msedge` channel, NOT in the `verify` chain, which is still **35**) read COMPUTED sizes off 18 of 18 reachable routes at 1280/1700/860 and both band rules live, and **all 28 assertions in `scripts/verifyTypeScale.mjs` were driven red and restored with the tree left clean**.** Master: *"increase legibility of letters in the App; do some basic research and also start to work on multiple screen sizes for all modules."* Re-measured a third time at `6d55bd7` and reproducing to the unit (the round-2 review also reproduced the census independently): **813** numeric `fontSize` literals across 40 of 81 `src` files (pattern `fontSize:\s*['"]?(\d+(?:\.\d+)?)(?:px)?`), of which **399 sit at ≤11px across 28 files** (9px→52, 10px→185, 11px→160, 8px→2); only **37** sizing sites in **5** files (4.6%) use the `--text-*` scale that already exists, so the 15px base is fine and 86% of literals bypass it; **one `@media` in all of `src`** (`index.css:637`, reduced-motion) and **2 `matchMedia` sites** (`PanelBoard.jsx:51–52`, also reduced-motion), so there is **no width-responsive behaviour in the product**. A first count of 422/34 files was wrong and is corrected: `(8\|9\|10\|11)` matches the `11` inside `'11.5px'`; the `(?!\.)` guard reconciles exactly to 399/28. **The brief's premise about StockMind is refuted and no chart label is enlarged:** the whole directory holds **2** literals ≤11px (`ScreenMap.jsx:456`, `InfoTip.jsx:55`, single glyphs in fixed boxes), `PriceChart.jsx` (**2,573** lines, not the brief's 2,100) holds **zero** — its axis text is one library option, `:679` `layout: { fontSize: 12 }` — so StockMind is pixel-neutral — **font size and line box both unchanged** — at **218 of 219** sites, the one exception being its single 13.5px site growing to 14px (`HelpPanel.jsx:59` is 11.5px, not the 12.5px an earlier table said; `ScreenMap.jsx:455` is an 18×18px circle, not 20px). Four decisions: **(1)** **12 role steps** with floors as a contract separate from current values — micro 11, chip 11.5, dense 12, dense-lg 12.5, chrome 13, chrome-lg 14, body 15, read 16, h3 17, h2 20, h1 24, display 32, plus 8 `--lh-*` tokens; the 8/9/10/11px cohorts land on chrome (397 of 399), the two glyphs stay at 11px by taking `fontSize: FS.micro`, so that token has exactly two consumers and the residual budget stays 140 (the `fs-exempt:` allow-list therefore ships with **zero users** and a comment saying so, so a later session does not delete it as dead code); **a `lineHeight` is added only at the 402 in-scope sites whose font size actually changes**, so the 271 pixel-neutral sites keep the inherited 1.6 from `index.css:104` and render identically down to the line box (round 2's broader rule would have moved a 12px line box from 19.2px to 16.2px at 142 StockMind sites alone); mapping is by authored value and **every row is a growth or a no-op so nothing shrinks anywhere**, and all six legacy `--text-*`/`--font-size` aliases are **pixel-neutral** (12/13/15/17/20) because the scale now has a 12px step. **(2)** breakpoints are **window** widths from this app's own constants — `compact < 900` derived from the titlebar's post-migration hard minimum of ≈885px (round 1's `REF_HEIGHT` justification was a height constant used as a width and is deleted), `regular 900–1599`, and `wide ≥ 1600` labelled honestly as **a provisional policy threshold borrowed from `REF_WIDTH`, not a measured layout break, because no layout fails above 1599**; hysteresis is directional (hold `compact` to 924, leave at 925; hold `wide` to 1576, leave at 1575) and the sticky branches **hold only and then re-resolve on the plain thresholds**, so a jump lands correctly — `bandFor(500,'wide')==='compact'`, `bandFor(1700,'compact')==='wide'`, both of which round 2's returning version got wrong while its assertion passed because it never drove those cases; `bandFor(width, prev)` is exported **pure and total** so the suite drives every edge, jump and non-finite input with no DOM; `useLayoutBand()` is mounted **once, as the first statement of `App()` above the pop-out early return at `App.jsx:225`**, and that one call site owns writing `data-band` and removing it on unmount, so a pop-out window resolves its own band (round 2 scheduled the hook only in `Titlebar.jsx`, which never mounts in a pop-out); band consumers shipped are `compact` shedding the titlebar subtitle and `Ctrl+K` chip (≈885px→**≈610px** demand, since the `RĀMA AGI` title survives the shed — round 2's 549px wrongly removed it) and `wide` widening the palette via `--palette-w` 600→760, with a counted band residual of **0 of 21 page modules**. **(3)** token layer is **both** — `index.css` holds one number per role, `src/config/type.js` exports `var()` **strings** behind an always-on warn-once `Proxy` (no `import.meta` is introduced; `src` has none), `FLOORS` is the floor so the assertion is a real inequality, and `CHART_FS = 12` is the single sanctioned number because lightweight-charts takes a JS number that no `var()` can reach; `selfModify.js`'s two template literals and `ErrorBoundary.jsx` emit `var()` strings with **no `type.js` import**. **(4)** this run migrates **673 of 813 (82.8%)** — all 399 ≤11px, all 304 in StockMind/Chat/Settings/RamaMind, all 39 in Titlebar/CommandPalette/ActivityStream — leaving an **exact residual of 140 across 23 files** (GitSync 25, Intelligence 15, IDE 10, Models 8, System 7, Agents 7, Evolution 7, Users 6, Home 6, Resources 6, PanelBoard 5, Login 4, Introspect 4, selfModify 4, Unlock 4, Knowledge 4, Terminal 3, ErrorBoundary 3, Genome 3, Setup 3, App 3, CodeEditor 2, DiffReview 1), all at 12px or above, printed per-file by the suite and pinned as a budget that may only fall. **Zoom composition: `effective = token value × zoom`, and round 1's zoom-policy changes are WITHDRAWN IN FULL** — no `electron/` file is edited, `AUTO_MAX` stays **1.4**, no `typeGen`, no re-fit clamp, **Section 47 and row 64 are untouched** — because the review showed the arithmetic did not reproduce (1920×1080 fits **1.20**, not 1.05, and 1.25 never bound there) and the re-fit floor would have raised zoom on a genuinely smaller docked panel. Net: a 10px label gains **+30% effective at every zoom** (12.0→15.6px at 1.20, 14.0→18.2px at 1.40, 10.0→13.0px at 1.00, 20.0→26.0px at a 2.0 slider), prose moves nowhere, and **nothing on screen gets smaller than today**. **Round 2's derived `--titlebar-h` is WITHDRAWN and the height stays `38px`**, with its pinning assertion and its `cognition.js:77` reword: both premises were false — `Titlebar.jsx:193` authors `padding: '0 0 0 10px'` so vertical padding is **zero**, and `setZoomFactor` is a **uniform** multiplier so the box and its text scale together and the fit is **zoom-invariant** — and measured, the two text lines come to 30.0px today, **31.8px** after migration and **37.5px** under a WCAG 1.4.12 1.5× override, all inside the 38px box, so the `calc()` would have cost 3.8px of vertical space on every page for nothing; the subtitle keeps its `dense` override but the recorded reason is now that 1.4.12 headroom (chrome 13px would give 39.0px and overflow), and `src/services/cognition.js` is **not touched**. What high zoom actually pressures is CSS-px viewport **width** (1920 physical → **1371 CSS px** at 1.4), which is the band's axis, not the titlebar's. **8** unguarded modals — not round 2's 7, which missed `System.jsx:175` (560px in a `position: fixed; inset: 0` overlay) — adopt the two-property `width` + `maxWidth: '92vw'` guard that `Users`/`Login`/`Setup` already use, from a reproducible inventory (`width:\s*'(3[5-9]\d\|[4-9]\d\d)px'` cross-checked against `maxWidth`: 18 hits = 8 unguarded + 4 guarded + 3 decorative `pointerEvents: 'none'` glow divs excluded with the reason + 3 that are themselves `maxWidth`); 4 fixed grids become `auto-fit`; and the 397 promotions carry an **overflow acceptance rule** — `(?:min)?(?:Width\|Height):\s*'\d+px'` run per migrated file, every match in the promoted site's object or its parent either converted to `min-content`/`ch`/`em` or recorded as inspected (measured scope: 107 such declarations in `src`, 18 in the 10–29px range across 14 files). Full WCAG conformance is **not** claimed — it needs manual assistive-technology testing and expert review; WCAG sets no minimum font size at all, and what 1.4.4/1.4.12 actually yield here is the 8 modals and 4 grids, plus the titlebar fit as a *measurement* rather than a defect. Enforced by new `scripts/verifyTypeScale.mjs` (**11** assertions — round 2's twelfth pinned the withdrawn `calc()` — **each published with the mechanism that evaluates it and the condition that would turn it red**, after round 2's band assertion passed on a function that answered the wrong band: a residual budget that may only fall, a whole-value `/^var\(--(fs\|lh)-[a-z0-9-]+\)$/` shape match replacing a "no digits" rule that could never pass `var(--fs-h1)`, `fs-exempt:` markers instead of brittle `file:line` keys, the `readZoom` pin for `0ba1b44`, `appearanceState`'s bounds asserted **unchanged**, `bandFor` driven over both edges, both jump cases and a 36-case idempotence sweep, and one band rule per band plus the `useLayoutBand()` call proven to sit above `App.jsx`'s pop-out return). Execution is a **one-off codemod, not 673 hand edits**: `scripts/migrateTypeLiterals.cjs` applies the value→role table with a six-entry exception list keyed by file plus matched source text, brace-scans the enclosing object to decide the `lineHeight`, inserts the `type.js` import, skips and names anything it cannot resolve, exits non-zero unless the post-run count is exactly `140 + 5` = **145** (the 5 being the hand-edited sites it skips — gating at 140 would fail its own correct output, finding `[F2]`), and **is deleted in the commit that lands its output**; `selfModify.js`'s 2 template-string sites and `ErrorBoundary.jsx`'s 3 are excluded and hand-edited; primitives commit first, then one commit per surface with `verify:type-scale` on each. Design: `.agents/tasks/Rama_AGI-feat-legibility-responsive-2026-07-01/design.md`. **FEAT-004 is DONE and the run is closed (136.15, 136.16). What a cold session resumes from, all three of them counted rather than estimated: (1) the RESIDUAL of **140 numeric `fontSize` literals across 23 files** (GitSync 25, Intelligence 15, IDE 10, Models 8, System 7, Agents 7, Evolution 7, Users 6, Home 6, Resources 6, PanelBoard 5, Login 4, Introspect 4, selfModify 4, Unlock 4, Knowledge 4, Terminal 3, ErrorBoundary 3, Genome 3, Setup 3, App 3, CodeEditor 2, DiffReview 1), every one at 12px or above and therefore already at or over the `dense` floor, printed per file by the suite on every run, with `RESIDUAL_BUDGET = 140` a constant that may only ever be LOWERED; (2) the BAND RESIDUAL of **0 of the 21 page modules consuming `useLayoutBand()`** — both consumers are shell (`App.jsx` owns `data-band`, `Titlebar.jsx` reads it), the mechanism and the attribute are available to all 21, and NO per-page responsive rule is claimed, which is the honest state of 'all modules' after a first pass; (3) the TWO OPEN QUESTIONS FOR MASTER — raise `electron/main.cjs:1265`'s `minWidth` off 900 or move `BAND_REGULAR_MIN` so `compact` is reachable in the main window at zoom 1.0 (900 DIP is 900 CSS px at zoom 1.0 and the rule is `width < 900`, so the shed never fires there; it fires from zoom ≈1.05 at the window floor and always in a 420-DIP pop-out), and whether to add the one-line assertion that the titlebar's two text lines fit its 38px box, which nothing asserts since assertion 8 was dropped with the `calc()`. Verified: `verify:render` 85/85 exit 0 with three screenshots written OUTSIDE the worktree; `verifyTypeScale.mjs` 52/52; the chain **35** entries with the tail still auditRenderer → verifyInvariants → verifyLoyaltyTripwire; `npm run verify` and `npm run build` both exit 0 (the IDE/monaco chunk-size warning is pre-existing and out of scope); `git diff 6d55bd7..HEAD -- electron shared` EMPTY — no `electron/` file was written, so the `AUTO_MAX` mutation was proven on a drifted COPY outside the worktree with the suite's one read path pointed at it; `verifyLoyaltyTripwire.cjs --approve` was never run. A fixed 900ms wait in the render check made the StockMind role check VACUOUS (zero `micro` elements on an unmounted lazy chunk); it now polls the role-element count until it stops growing and prints the per-route census — the third time in this feature an assertion passed on something other than what it meant to read. FEAT-003 is DONE and took plan items 12 AND 13 together, since both edit the same two shell files (136.14): `Titlebar.jsx` calls `useLayoutBand()` read-only — `App.jsx` stays the sole `own: true` owner — and in `compact` omits the `SUPER AGI · MASTER AUTHENTICATED` subtitle and the `Ctrl+K` chip (≈885px→≈610px demand) with the `Ctrl+K` binding (a window keydown listener in `CommandPalette.jsx:425`) and the orb toggle both untouched, so no capability is lost (I11); `CommandPalette.jsx` reads `width: 'var(--palette-w)'` + `maxWidth: '92vw'`, giving `--palette-w` its first consumer at 600→760 in `wide`; the 8 unguarded containers took the `width` + `maxWidth: '92vw'` guard and the 4 fixed grids took `repeat(auto-fit, minmax(N, 1fr))` with floors 150 / 180 / 260 / 260 drawn from the existing `auto-fit` vocabulary; the 3 decorative `pointerEvents: 'none'` glow divs are excluded with the reason recorded so a later inventory does not count them as misses; assertion 10 now also requires `Titlebar.jsx` to reference the `compact` band, so deleting the shed leaves `compact` a mechanism with no consumer and goes red. `--titlebar-h` is still 38px and no `electron/` file was touched. STILL OPEN FOR MASTER, now that `compact` has its only consumer (136.12 [F3], tabulated in 136.14): `main.cjs:1265` pins the main window at `minWidth 900` DIP, which is 900 CSS px at zoom 1.0 and therefore `regular` by the `width < 900` rule, so the shed is UNREACHABLE in the main window at zoom 1.0 — reachable from zoom ≈1.05 at the window floor, and always in a 420-DIP pop-out. One constant fixes it, either `minWidth` or `BAND_REGULAR_MIN`, and both are master's decision; neither was changed. FEAT-002 is DONE: the codemod ran once, reported 667 rewritten / 352 `LH.*` inserted / 44 overrides kept / 271 pixel-neutral and a post-run count of exactly 145, then was deleted; the five it never touched were hand-edited to emit `var(--fs-chrome)` rather than import `type.js` (`selfModify.js` :224/:238 inside a page-emitting template string, `ErrorBoundary.jsx` :74/:100/:109 because it must render when a module has already failed); A12/A13/A14 were added in that same commit and pass, each driven red and restored. ONE correction to the census, recorded rather than reconciled away: of the validated 813, one occurrence was PROSE — `Settings.jsx`'s AppearancePanel comment quoted `fontSize: 10` while explaining why zoom exists, a claim this migration made false — so the comment was reworded, the real literal count is **812** of which **672** migrated, and the 402-move figure is likewise **401**. The census was not edited to match the script; the script was not trusted over the census.** Corrected from round 1: `node_modules` **is** present in both the primary checkout and the worktree (491 packages, `vite`, `electron`), so `npm run build` is runnable and should be run; the steering note saying otherwise is stale. Raised for master, not changed: `index.css:38` declares `--amber: --gold;`, invalid CSS rescued by the redeclaration at line **42**; `appearanceState.cjs`'s `AUTO_MAX` comment claims high zoom clips the fixed-height titlebar, which the uniform-multiplier arithmetic refutes, so it is **no longer cited as evidence anywhere** while `AUTO_MAX` and the comment are both left alone (correcting it touches `electron/` and Section 47); `cognition.js:77` repeats that same claim to master's face and is left as-is to be fixed in the same decision; and with the `calc()` assertion dropped, **nothing now asserts the titlebar's text fits its 38px box** — the 6.2px of slack and 0.5px of 1.4.12 margin are measurements, not a gate, and the natural guard is a one-line sum assertion if master wants it. Deferred to its own future row: lowering `AUTO_MAX` needs a measurement from a ≥2560-wide panel, a residual of zero, and an amendment to Section 47 cross-referencing row 64 in the same commit. **CROSS-FEATURE INTEGRATION (136.17):** all four FEATs `completed`, the full bar re-run together green — `verifyTypeScale.mjs` 54/0, `auditRenderer.cjs` 0, `npm run verify` 0 with the chain at 35 and the covenant tail still last, `npm run build` 0, `npm run verify:render` 85/0, `git status --porcelain` empty. Every re-derivable seam reconciled (token/name-map parity both ways, 35 `@config/type.js` importers with no unused binding, the 2 files that may not import it still stating why, the band hook's 2 consumers, `useLayoutBand.js` the only `data-band` writer, no fixed 3/4-column grid left, the unguarded fixed-width inventory still exactly the 3 decorative glows, no `fs-exempt:` marker in use, no `--fs-*`/`--lh-*` redeclared under a band rule, and insert-only line heights holding across the WHOLE branch: 154 pre-existing literals byte-identical, 356 inserted = 352 `LH.*` + 4 hand-authored `var(--lh-chrome)`). ONE REAL SEAM FOUND AND GATED: the six legacy aliases (`--font-size`, `--text-xs/sm/base/lg/xl`) carry I11 for 43 sites in unmigrated modules plus `html/body/#root`'s base size, and NOTHING asserted their pixel-neutrality — the floors are inequalities, so `--fs-chrome: 14px` passed `14 >= 13` while silently growing all 8 `--text-sm` sites. `verifyTypeScale.mjs` now resolves each alias through the declared `--fs-*` map and compares with its `6d55bd7` px (54 checks, was 52); driven red 5 ways — retarget, token moved under it, pixel-neutral literal, alias deleted, undeclared target — the floor assertion PASSING in all five, then restored green. Additive: no token moved, nothing master sees changed. |
 | 157 | Jev evaluated and declined — the pattern is right, the purchase is not | in-progress | Research only, NO CODE: `docs/research/JEV_EVALUATION.md` (76 KB, ~40 attributed sources) and `docs/research/JEV_SUMMARY.md`. Master: *"Is JEV adds more value for 'Rama'… reduce the burden financially and resources utlisiation and speed… by how much it adds value in percentage of existing infra… sometimes it might be a combo to carry any action which can remove hallucination… find the optimal way."* **WHAT WAS EVALUATED: Jev, the hosted "System One" typed-decision model from TypeSafe AI (released 15 Sep 2026) — one forward pass, returns a value from an enumerated answer space, never writes prose. NOT JEPA, which is an unrelated self-supervised TRAINING objective and is irrelevant here because Rāma trains nothing and has no GPU. The names collide and the confusion is worth recording.** **RECOMMENDATION: DO NOT ADOPT HOSTED JEV. BUILD THE PATTERN LOCALLY OVER OLLAMA.** **THE MEASUREMENT THAT DECIDES IT — `0 of 21` of Rāma's decision points invoke a model today (MEASURED-HERE, all 12 gate modules searched; `vectorMemory` makes a LOCAL embedding call only). The entire financial and speed case for Jev rests on replacing LLM calls that do bounded classification, and Rāma makes none — every gate is deterministic code over declared data. So the honest cost saving on existing gates is 0% BECAUSE THE DENOMINATOR IS ZERO. You cannot save money on something that costs nothing.** **THE PERCENTAGE MASTER ASKED FOR, HONESTLY SPLIT: 5 of 21 (23.8%) are places a typed layer would ADD a judgement Rāma is currently missing; 7 of 21 would REGRESS a provable rule into a probabilistic one; 3 are barred outright by invariant. A share of RUNTIME COST cannot be given at all — no per-call cost or latency telemetry exists in this codebase — so the figure is bounded between 0% and 100% and most likely near zero, stated as a bound rather than invented as a point estimate.** **THE VENDOR'S NUMBERS DID NOT SURVIVE: "up to 200× faster, 400× cheaper" is VENDOR with no independent corroboration at that magnitude. Independently measured: 5.43× faster than Claude Haiku at p50 (126.81 ms vs 688.40 ms) and ~2.2× against a nano-class LLM; 96.1% lower classifier cost, which is ≈25× and not 400×. A meta-review of 28 early typed-decision papers found the typed readout gives NO independent accuracy advantage over an ordinary model scored by its own option probabilities — the gain is latency and cost only. At Rāma's plausible volume the spend would be ≈$10–20/year, so cost was never the obstacle.** **HALLUCINATION — THE DISTINCTION IS THE WHOLE ANSWER: it CANNOT FABRICATE PROSE, structurally, because there is no free-text channel to fabricate into. It CAN STILL BE WRONG, and the independent audits measure how: exactly 1.0 confidence on 56.4% of answers with nine of those wrong (n=2,412); 91.4% stated against 76.1% actual accuracy (n=8,801); accuracy 96.5% → 26.5% under a single injected instruction (n=486, pre-registered). "CANNOT HALLUCINATE" IS NOT "CANNOT ERR" — a confidently wrong classification is still wrong.** **AND RĀMA ALREADY OWNS THE DETERMINISTIC TWO-THIRDS: `claimGate` PROVES attribution mechanically — the cited source must exist and every numeral, date and name in the claim must appear in it. REPLACING A PROOF WITH A JUDGEMENT IS A REGRESSION, NOT AN UPGRADE, and that applies to `claimGate`, `egressBoundary` enforcement, `autonomyPolicy`, `capability` and `selfRepair`'s SHA check — the last the clearest regression of the lot. Master's "combo" instinct is nevertheless CORRECT: a typed classifier upstream of a deterministic gate, with the LLM writing prose inside the decided envelope, is the right architecture. What is genuinely missing is only the classifier on the front.** **THE THREE DESIGN RULES WORTH TAKING, vendor-independent: enumerate the answer space in advance and ALWAYS include an explicit abstain value; split one hard judgement into several easy ones and combine them in code; keep the final permission decision in code — the model proposes, the gate disposes.** **THE PILOT, AND IT IS A LIVE HOLE NOT A HYPOTHETICAL: a per-turn sensitivity producer for `egressBoundary`, built LOCALLY. MEASURED-HERE — `src/pages/Chat/Chat.jsx:274` calls `converse` with no `sensitive` field, `electron/ipc/modelRouter.cjs:515` defaults it to `false`, and `grep sensitive src/**/*.jsx` returns ZERO matches, so EVERY CONVERSATION TURN CROSSES AS NON-SENSITIVE TODAY — including one in which master asks about his own position. §131.6 already admits the gate refuses nothing in production. Build as three layers that fail closed: a deterministic prefilter on declared portfolio data, then a local Ollama call with a JSON Schema enum `{public, internal, private, unclear}`, with `unclear` AND any failure both resolving to `private`. `conversationRole.sensitiveOrUnknown` already encodes that asymmetry, so the seam exists. WHY LOCAL AND NOT JEV, IN ONE LINE: asking a third party whether a turn is private requires sending the turn to the third party first, which is the exact thing the gate exists to prevent.** **STAGE 0 BEFORE ANY OF IT: add per-decision latency and token telemetry. Its absence is why no honest cost percentage can be quoted today.** **THE ONE DECISION ONLY MASTER CAN MAKE: may the Ollama-only scope be reversed? §130.9 / row 150 fixes the scope at whatever a free ollama.com account reaches and explicitly retracted the earlier Groq and Google recommendations; hosted Jev is a proprietary paid endpoint via OpenRouter, so adopting it reverses that decision and partly undoes the retraction — and contradicts §130.9's own conclusion that guardrail classification is NOT a gap because `claimGate` classifies with no model at all. IF THE ANSWER IS NO, THE QUESTION IS CLOSED AND NOTHING ELSE IS NEEDED: the recommendation above does not depend on the reversal.** **BLOCKERS: no self-hosted Jev exists — the weights and training are TypeSafe's, only the interface is reproduced by the open reconstructions; the PyTorch local path is DEAD on this machine (`python --version` is 3.14.4 while `requirements.txt` pins `numpy==1.26.4`, which publishes no wheel above CPython 3.12 — the same reason Rāma's own engine has never run here — plus no discrete GPU and 44.8 GB/s of single-channel bandwidth against 89.6 if the second DIMM were populated); `egressBoundary.kind` is frozen to `['chat','search']` with `options` enumerated and never spread, asserted by `verifyOllamaCloud.cjs`, so hosted adoption would widen the one module whose value is its narrowness, while the local path needs no such change because `format` is already an enumerated option; ABSTENTION IS NON-NEGOTIABLE — removing the abstain option took accuracy 0.950 → 0.000 and ECE 0.023 → 0.793 in one audit (n=11,759), and Rāma's correct behaviour IS withholding, so a decision layer without an explicit abstain value would convert "I don't know" into a confident guess; and never pin `jev-latest`, because the vendor's aliases move — any adoption pins `typesafe/jev-1.13` or I12's pinning rule is satisfied in name only.** **NEXT STEP: master answers the Ollama-only scope question. If no (the expected answer), close the hosted option and schedule the LOCAL sensitivity producer as queue item 4, preceded by Stage 0 telemetry. No code was written and `git status` showed no tracked file modified.** |
 | 132 | Role-based routing — what Rāma needs a model FOR | done | Section 112. Builds row 131's next step and row 130's item 5. **WHAT IT REPLACES:** `TASK_ROUTING`'s eight hand-written buckets plus a seven-id `FALLBACK_CHAIN` ending at `primaryModel`, so any task not matching a bucket fell to the first available entry — **the mechanism by which a 397B cloud model parses a date**, and by which a model that cannot do tool calling does tool calling, because a chain has no concept of *unfit*. **Nine roles declared with a label, a reason master can read, and hard requirements:** `extraction`, `tool-calling`, `code`, `reasoning`, `long-context`, `multilingual`, `embedding`, `vision`, `narration`. **TWO KINDS OF EVIDENCE, NEVER CONFLATED — `measured`** (the daemon and its fetched library: what is installed, its size, its parameter count, whether weights are on this disk) **and `published`** (leaderboards: function-calling collapses below ~7B, reasoning wants 14B+). Published evidence is about the FAMILY, not this machine, and every requirement records which kind it is so **a leaderboard can never be presented as a local measurement** — the same discipline as `{value, source, measured}` and `ctxVerified`. **DECISION: a role is a REQUIREMENT, not a preference** — a failed requirement EXCLUDES with a reason rather than ranking lower, because down-ranking lets an unfit model win whenever nothing better is present. **DECISION: no silent substitution and no silent absence** — `fit` is `declared` / `substitute` / `none`; a substitute is allowed (capability is never removed) but **labelled with what is unverified**; `none` reports the absence and how many candidates failed rather than handing the work onward. **DECISION: an unverified claim is a substitute, never a declared fit** — Ollama truncates to `num_ctx` whatever the family supports, so a 128K window is a claim; `multilingual` is a substitute BY CONSTRUCTION because Rāma has no local test, stated rather than implied. **DECISION: sensitivity is a gate, not a ranking** — `narration` names master's real holdings, so a non-private model is **refused outright**; a prompt that has left this machine cannot be recalled. Asserted: a 397B cloud model does not win narration by being large, and appears in `excluded` so the choice is auditable; any caller may raise `requirePrivate`. **Embedding and chat are a hard split both directions**, with mirror-image reasons. **DECISION: cheapest sufficient, not best available** — fit → privacy → cost → `fast` → capability, and for a role with a floor **the smallest model clearing it wins**; an unknown cost sorts LAST, because unknown must never look like free. Retired models are never candidates, with the replacement named. **THE DEFECT FOUND BY RUNNING IT: `Number(null)` is `0`** — a model with no parameter count was excluded as *"0B is below the 7B floor"* and a model with no reported size **silently CLEARED the disk budget**; unknown was read as zero and **zero passes or fails a threshold confidently.** Fixed with one `num()` returning `null` for absent, applied to parameters, context, size and cost. **Worth hunting for wherever else a threshold meets an optional field.** **THE RESEARCH HALF:** `researchPlan()` names, per unfilled or substituted role, what would fill it with the requirement in words — **from the FETCHED catalogue only**, because a list produced from memory is the Section 94 fabrication; with none loaded it reports `blocked` naming `models:refresh-catalog`, since *nothing to recommend* and *never looked* read alike and mean opposites. **WIRING — role selection is tried FIRST and the old path is the fallback, not the reverse:** `TASK_ROUTING` and `FALLBACK_CHAIN` are untouched so nothing that routes today changes, but a declared role is decided on fitness and only an unfilled role falls through — capability kept, silent default ended. `models:route` returns `role`/`roleFit`/`roleWhy`/`roleExcluded`; new reads `models:roles` and `models:role-research` gated on `models.use`, because being told a role is unfilled should not need elevated rights. **No capability decision — fitness is not authorisation**; no Electron, nothing persisted, no network. **VERIFIED: `npm run verify` 21 suites; `verifyModelRoles` 87 assertions; audit clean at 139 bridge calls / 72 files / 355 channels; `vite build` succeeds.** **NOT VERIFIED: no Ollama daemon was running, so every model record in the suite is a FIXTURE — the table has never been drawn against a real install.** **NEXT: the renderer surface.** `models:roles` and `models:role-research` have no UI, so master cannot see the table or the gaps, which is the point of building it — it belongs on the MODELS screen beside the existing suggestions list. |
-| 158 | The repair contract, and comments that say when, where and what | in-progress | Section 137. **DECIDED, NOT BUILT — this row and Section 137 §§1–5 plus 137.2 are the whole of what exists.** Master: *"concise the comments everywhere, also make sure if rama starts correcting code it is possible and easy to understand when, where and what to be handled accordingly."* **THE DESIGN IS NOT APPROVED: `design-review.json` is `CHANGES_REQUESTED` — 5 HIGH / 12 MEDIUM / 6 NIT, all 23 findings OPEN AND ALL MANDATORY, nothing waived. Where `design.md` and a finding disagree the finding wins; where a finding and a measurement disagree the measurement wins.** **THE CHOSEN SHAPE: a frozen enumerable table in `electron/lib/repairContract.cjs` — `ENTRIES` with only `producerModule` and `producerFn` AUTHORED and the producer id / `PRODUCED_BY` / `REACHABLE` / `UNREACHABLE` / `ENTRY_IDS` DERIVED (a second hand-written list is how two lists come to disagree — `autonomyPolicy`'s derived `EDITABLE` is the precedent), membership through the exported `policy.frozenSetView` and never `Object.freeze(new Set(...))` (which freezes properties, not internal slots — `PERMANENT.delete()` succeeded against a "frozen" set), `reads` declared with their presence, `site.action` `'patch'` fenced against `upgradeApplier.ALLOWED_ACTIONS` (measured `['patch','create']`) with NO entry declaring `'create'`, `needLevel: 'L3'` gated by `policy.require`, a registered verifier per entry, and `blockedOn.missingFields` on the five unreachable rows whose fields must measure ABSENT or the row is red. `timeoutMs` is declared data for a future runner that `verify()` does not enforce, and the renderer prints it as a declaration, not a guarantee.** **FIXTURES ARE BUILT BY CALLING THE REAL PRODUCER, never by writing down what it returns — the rule exists because the prior `EDITS` table's only usable entry read `row.target` and `dependencyAdvisor.assess` returns exactly 13 keys (`name, pinned, latest, jump, jumpWhy, sensitive, security, diskDeltaBytes, signals, concerns, recommend, urgency, meaning`) of which `target` IS NOT ONE; the hand-written fixture agreed with the hand-written table and both were wrong together. The review caught the same class THREE MORE TIMES in the design of the fix: `review()` takes an ARRAY not a `{pinned,latest}` envelope (`TypeError: entries.map is not a function`), `startupDoctor` `report[]` is `{label,pass,note}` while `{id,detail}` lives on `fatal[]`/`degraded[]`, and `safeRequireFailures` is read as `f.name`/`f.reason` so `{module,error}` manufactures the garbage id `load-undefined`.** **MEASURED, AND DECISION D1: `policy.require` reads the fixed `DATA_FILE` and takes no injectable state, `effective('dependency-change')` is `L0` (`L1` with `ignoreStop`), both below the needed `L3`, so `author()` is SINGLE-VERDICT here — it can only return `refused`, with the sentence asserted character for character; `'ok'` is marked `unverifiable-here` with the reason rather than bypassed, because an injectable override of a gate that refuses autonomy is a test-only bypass of a security boundary. NO AUTONOMY RUNG IS CLIMBED; I6 AND I17 ARE INTACT — Rāma proposes, master approves.** **THE FENCE: `gate.normalisePath` FIRST, then both `gate.governedPathsNamed` and `guard.inspectChanges` — strictly stronger, measured. The design's single-backslash row is FALSE and is not planted: raw `inspectChanges` refuses plain, `./`, single-backslash and UPPERCASE spellings and misses only the trailing space, the double backslash and the doubled separator, all three closed by normalising first. 8.3 is restated as MEASURED: `AUTONO~2.CJS` IS caught, and the residual is non-existent create targets, volumes with 8.3 generation disabled, and the hard link.** **CENSUS, re-derived at `21bb12d`: repo 216 files / 82,915 lines / 15,350 comment lines (18.5%); tranche 12 files / 6,076 lines / 1,667 comment lines / 121 banner, with `PRE_KEEP` floors 29 pointer / 34 evidence / 20 trap. Master's word was "everywhere" and this pass covers 12 of 216 files, which the report states plainly rather than rounding up.** **DONE so far:** `scripts/verifyRepairContract.cjs` (**106 passed, 0 failed**, runs and reports BEFORE the contract module exists, reading `PENDING_ENTRIES` until it does) and `scripts/verifyCommentCensus.cjs` with `codeView` (**28 passed, 0 failed**); the planted `row.target` entry drove it RED with `dependencyAdvisor.assess has no field "target" in 10 of 10 cases` and exit 1, both guard rows were proved non-vacuous, and all nineteen REDBY classes were each driven red by their stated mutation and restored byte-exact — recorded in **Section 137.3** (which also carries the correction that `assess` DOES own the `latest` key, valued `undefined`, so `presence: 'always'` is right, and names the `buildMeaning` prose defect that puts the literal `undefined` in front of master). **NEXT CONCRETE STEP: build `electron/lib/repairContract.cjs` (plan items 9–11) — the frozen `ENTRIES` table with only `producerModule`+`producerFn` authored and `idOf`/`PRODUCED_BY`/`REACHABLE`/`UNREACHABLE` DERIVED, `policy.frozenSetView` reused rather than re-implemented, `AUTHORING_MODES` still `['template']`, and `reads` declaring `name`/`latest`/`jump` as `always` to match the measurements in Section 137.3; `verifyRepairContract.cjs` then reads its `ENTRIES` instead of `PENDING_ENTRIES` with no change to the suite.** |
+| 158 | The repair contract, and comments that say when, where and what | in-progress | Section 137. **HALF ONE IS BUILT. `electron/lib/repairContract.cjs` exists, its suite is green at 263/0, and every new assertion has been driven red by its stated mutation and restored. Half two — the comment pass over the twelve-file tranche — is NOT started.** Master: *"concise the comments everywhere, also make sure if rama starts correcting code it is possible and easy to understand when, where and what to be handled accordingly."* **THE DESIGN IS NOT APPROVED: `design-review.json` is `CHANGES_REQUESTED` — 5 HIGH / 12 MEDIUM / 6 NIT, all 23 findings OPEN AND ALL MANDATORY, nothing waived. Where `design.md` and a finding disagree the finding wins; where a finding and a measurement disagree the measurement wins.** **THE CHOSEN SHAPE: a frozen enumerable table in `electron/lib/repairContract.cjs` — `ENTRIES` with only `producerModule` and `producerFn` AUTHORED and the producer id / `PRODUCED_BY` / `REACHABLE` / `UNREACHABLE` / `ENTRY_IDS` DERIVED (a second hand-written list is how two lists come to disagree — `autonomyPolicy`'s derived `EDITABLE` is the precedent), membership through the exported `policy.frozenSetView` and never `Object.freeze(new Set(...))` (which freezes properties, not internal slots — `PERMANENT.delete()` succeeded against a "frozen" set), `reads` declared with their presence, `site.action` `'patch'` fenced against `upgradeApplier.ALLOWED_ACTIONS` (measured `['patch','create']`) with NO entry declaring `'create'`, `needLevel: 'L3'` gated by `policy.require`, a registered verifier per entry, and `blockedOn.missingFields` on the five unreachable rows whose fields must measure ABSENT or the row is red. `timeoutMs` is declared data for a future runner that `verify()` does not enforce, and the renderer prints it as a declaration, not a guarantee.** **FIXTURES ARE BUILT BY CALLING THE REAL PRODUCER, never by writing down what it returns — the rule exists because the prior `EDITS` table's only usable entry read `row.target` and `dependencyAdvisor.assess` returns exactly 13 keys (`name, pinned, latest, jump, jumpWhy, sensitive, security, diskDeltaBytes, signals, concerns, recommend, urgency, meaning`) of which `target` IS NOT ONE; the hand-written fixture agreed with the hand-written table and both were wrong together. The review caught the same class THREE MORE TIMES in the design of the fix: `review()` takes an ARRAY not a `{pinned,latest}` envelope (`TypeError: entries.map is not a function`), `startupDoctor` `report[]` is `{label,pass,note}` while `{id,detail}` lives on `fatal[]`/`degraded[]`, and `safeRequireFailures` is read as `f.name`/`f.reason` so `{module,error}` manufactures the garbage id `load-undefined`.** **MEASURED, AND DECISION D1: `policy.require` reads the fixed `DATA_FILE` and takes no injectable state, `effective('dependency-change')` is `L0` (`L1` with `ignoreStop`), both below the needed `L3`, so `author()` is SINGLE-VERDICT here — it can only return `refused`, with the sentence asserted character for character; `'ok'` is marked `unverifiable-here` with the reason rather than bypassed, because an injectable override of a gate that refuses autonomy is a test-only bypass of a security boundary. NO AUTONOMY RUNG IS CLIMBED; I6 AND I17 ARE INTACT — Rāma proposes, master approves.** **THE FENCE: `gate.normalisePath` FIRST, then both `gate.governedPathsNamed` and `guard.inspectChanges` — strictly stronger, measured. The design's single-backslash row is FALSE and is not planted: raw `inspectChanges` refuses plain, `./`, single-backslash and UPPERCASE spellings and misses only the trailing space, the double backslash and the doubled separator, all three closed by normalising first. 8.3 is restated as MEASURED: `AUTONO~2.CJS` IS caught, and the residual is non-existent create targets, volumes with 8.3 generation disabled, and the hard link.** **CENSUS, re-derived at `21bb12d`: repo 216 files / 82,915 lines / 15,350 comment lines (18.5%); tranche 12 files / 6,076 lines / 1,667 comment lines / 121 banner, with `PRE_KEEP` floors 29 pointer / 34 evidence / 20 trap. Master's word was "everywhere" and this pass covers 12 of 216 files, which the report states plainly rather than rounding up.** **DONE so far:** `scripts/verifyRepairContract.cjs` (**263 passed, 0 failed** — 106 of them before the contract module existed, reading `PENDING_ENTRIES` until it landed; it needed NO change to read the real table beyond one resolver for where the authored producer fields live), `scripts/verifyCommentCensus.cjs` with `codeView` (**28 passed, 0 failed**), `electron/lib/repairContract.cjs` (six entries — one reachable `pin-version`, five declared-unreachable with `blockedOn`; only `producerModule`+`producerFn` authored and `idOf`/`PRODUCED_BY`/`REACHABLE`/`UNREACHABLE`/`ENTRY_IDS` derived; `policy.frozenSetView` reused; `AUTHORING_MODES` still `['template']`; load-time requires exactly `fs`/`path`/`crypto`/`autonomyPolicy`/`loyaltyGuard`/`autonomyGate`, with `dependencyAdvisor.SENSITIVE` read LAZILY inside `weigh()` so the list is read and never copied — proved by emptying `require.cache`), and `scripts/printRepairContract.cjs`. `verify` chain insertion done: `verifyRepairContract.cjs` sits after `verifyTypeScale.mjs` and before the covenant tail, which stays last and in order; 36 entries; dependencies still **24 / 10**. **MASTER’S TWO DECISIONS HELD:** `author()` is SINGLE-VERDICT with **no policy seam** — it refuses with the measured sentence `autonomy policy: "dependency-change" is L0 (forbidden); L3 (propose-only) required for author` asserted character for character, and `'ok'` is declared `unverifiable-here` WITH ITS REASON rather than reached by a bypass; and the design’s FALSE fence fact was NOT planted — measured, raw `inspectChanges` refuses the single backslash and misses only the trailing space, the double backslash and the doubled separator, all three closed by normalising first, with raw-vs-normalised asserted in the same row. 8.3 restated as measured: `AUTONO~2.CJS` IS caught. **ALL FOUR can-never-go-red assertions repaired** (findings 7/10/14/15): the tautological `PRODUCED_BY === idOf` replaced by three independent facts, the freeze row driven through `strictWrite` printing its mechanism, a `maxChanges: 0` clone asserting the bound sentence AND an unchanged target `sha256`, and value-based provenance replaced by `recorded.get(paramSources[k]) === out.params[k]` per param. The fifteen new REDBY classes were each driven red and restored byte-exact — tabulated with their exits, tails and verbatim reds in **Section 137.4**, including the three honest notes about collateral reds and the two REDBY entries reworded to name the mutation actually driven. **NOT RUN, deliberately:** `npm run verify` as a whole and `npm run build` are main-workspace-only and scheduled at the merge step; no claim is made that the build passes. **NEXT CONCRETE STEP: half two — write Section 137 §§6–7 as `### 137.5` (do NOT renumber 137.1–137.4; `timeline.cjs` and `verifyUpgradeApplier.cjs` cite `Section 137.2` literally and both suites’ REDBY headers cite `Section 137.3`): the five KEEP and four CUT classes each with a real instance (cite `dependencyAdvisor.cjs` line **8** for the `Section 96` token, not line 9), the MOVE-never-delete rule with its resolving-pointer requirement, the REDUCE rule, and the anchor-by-amending-an-existing-line rule; publish all six census patterns verbatim with the spec-pointer pattern as `(?i)section \d+` and **501 case-insensitive / 496 case-sensitive** with the five differing lines named, and the banner class as the EXACT `[─—=]{6,}` because widening it measures 1,398 not 1,304; then complete `scripts/verifyCommentCensus.cjs` with `PRE_PASS` (Σ 1,667), `PRE_KEEP` (Σ 29 pointer / 34 evidence / 20 trap), `PRE_PASS_BANNER` (Σ 121) and the twelve `codeView` digests, the frozen suite tails and the `BASE_REF` comparison behind `--pass-audit` per D4, and add it to the `verify` chain.** |
 
 ### Resume checklist for a cold session
 
@@ -16575,3 +16575,362 @@ pushed before the renderer one and `degraded[0]` therefore depends on what resol
 `PENDING_ENTRIES` with no change to the suite, and the table's declared `reads` must match the
 measured presences recorded above: `name` / `latest` / `jump` all `always`, and
 `blockedOn.missingFields: ['causeId']` still `never (0 of 8)`.
+
+### 137.4 The contract itself — built after its assertion, and every new row driven red
+
+`electron/lib/repairContract.cjs` now exists. The order matters and is the lesson of this task: the
+shape check was written first (137.3), driven red on a planted `row.target` entry while no contract
+module existed, and only then was the table authored to satisfy it. `scripts/verifyRepairContract.cjs`
+needed **no change to read the real table** — it reads `ENTRIES` the moment the module exports one and
+prints which source it used — the single edit it needed was a resolver for where the authored producer
+fields live, because the contract nests them under `trigger` and `PENDING_ENTRIES` carried them on the
+entry itself.
+
+**Measured after the build:** `scripts/verifyRepairContract.cjs` **263 passed, 0 failed**, exit 0
+(106 before the module existed). `scripts/verifyCommentCensus.cjs` 28/0. `scripts/verifyAutonomyStop.cjs`
+197/0, `scripts/verifyUpgradeApplier.cjs` 483/0, `scripts/verifyEngineDiagnosis.cjs` 34/0 — all unmoved.
+`node --check` clean on all three new/edited `.cjs`. `npm run verify` as a whole and `npm run build` are
+**main-workspace-only and deferred to the merge step**; nothing here claims the build passes.
+
+#### The exported surface
+
+`ENTRIES`, `ENTRY_IDS`, `PRODUCED_BY`, `REACHABLE`, `UNREACHABLE`, `AUTHORING_MODES`, `VERDICTS`,
+`VERDICT_REACHABILITY`, `ADJACENT_GAPS`, `EIGHT_DOT_THREE`, `SECTION_KEYS`, `MAX_TARGET_BYTES`,
+`UNVERIFIED`, `VERIFIERS`, `VERIFIER_KINDS`, `ContractPreconditionError`, `idOf`, `entryOf`, `fires`,
+`locate`, `braceSpan`, `transform`, `verify`, `verifyJsonDependencyCount`, `validateParams`,
+`fenceProbe`, `fencePath`, `buildChanges`, `lockfileState`, `weigh`, `author`, `renderVerification`,
+`renderTimeout`, `render`, `census`, `censusLine`.
+
+Six entries: `pin-version` reachable; `add-export`, `add-array-member`, `replace-literal`,
+`install-missing-package`, `name-engine-cause` declared unreachable with a `blockedOn`. Only
+`producerModule` and `producerFn` are authored; `idOf`, `PRODUCED_BY`, `REACHABLE`, `UNREACHABLE` and
+`ENTRY_IDS` are derived, and membership goes through the exported `policy.frozenSetView` rather than a
+second view. `AUTHORING_MODES` is `['template']`.
+
+**The load-time require set is exactly six:** `fs`, `path`, `crypto`, `./autonomyPolicy.cjs`,
+`./loyaltyGuard.cjs`, `./autonomyGate.cjs`. `./dependencyAdvisor.cjs` is required **lazily, inside
+`weigh()`**, for its `SENSITIVE` export. The plan said "only three"; the design said `weigh()` reads
+the export. Both were honoured by making the read happen on the CALL and not on the LOAD — pasting the
+nine package names into the contract would have been precisely the restatement defect FR-A11 exists to
+refuse, and the suite proves the distinction by emptying `require.cache`, re-requiring the contract,
+asserting the advisor is **not** loaded, then calling `weigh()` and asserting it now is. If the advisor
+cannot be loaded at all, `weigh()` decides **toward master** rather than reporting "not sensitive".
+
+#### `author()` is single-verdict here, and there is deliberately no seam
+
+Master's decision on HIGH 4. `policy.require` reads the fixed `DATA_FILE` and takes no injectable
+state; measured, `effective('dependency-change')` is `'L0'` (`'L1'` with the stop set aside), both
+below the `'L3'` the table declares it needs. So `author()` can only ever return `verdict: 'refused'`,
+and the suite asserts the reason **character for character**:
+
+```
+autonomy policy: "dependency-change" is L0 (forbidden); L3 (propose-only) required for author
+```
+
+A row additionally asserts that string is the **policy module's own sentence** rather than a copy built
+in the contract, and that the third parameter is an **options object**: measured,
+`policy.require.length === 2`, and a positional `'author'` destructures to `{action: undefined}` and
+yields the same sentence **without** the trailing `" for author"`. That is recorded so the next reader
+does not measure it the wrong way and conclude the string changed.
+
+**`'ok'` is declared `unverifiable-here` with its reason**, in `VERDICT_REACHABILITY`, and the suite
+asserts that declaration rather than engineering a path to reach it. There is no `io.policy` seam, and
+the boundary row asserts the literal `io.policy` is absent from the module's comment-stripped source.
+*An injectable override of the gate that refuses autonomy is a test-only bypass of a security boundary,
+and a bypass built to make an assertion green is worse than an assertion that states its limit.*
+`needs-master-decision` is likewise `unverifiable-here` **through `author()`** — the gate returns first
+— and is proved through `weigh()` as an exported function. `transform()`, `weigh()`, `verify()`,
+`validateParams()`, `fencePath()` and `buildChanges()` are all exported for exactly this reason, and
+the table above names which function proves which verdict.
+
+#### The lockfile rule, corrected (finding 9)
+
+Measured: `fs.statSync` on an absent file throws with `err.code === 'ENOENT'`, **and that is the
+no-lockfile case**. The design's "any `stat` error means master decides" therefore made the absent case
+decide the wrong way. The rule as built: `ENOENT` is `'absent'`; **every other error is master's
+decision**, `console.warn`ed once with the code named. Both directions are exercised — a temp root with
+no lockfile reports `absent` and `verdict: 'ok'`; the real root reports `present` and
+`needs-master-decision` because `package-lock.json` exists here; a package in the advisor's `SENSITIVE`
+export reports `needs-master-decision` even with no lockfile; and an injected `statSync` throwing
+`EACCES` reports `unreadable`, `needs-master-decision`, and exactly one warning naming `EACCES`.
+
+#### `transform` is derivation, not generation
+
+Four steps, as designed: find the section key, brace-match forward with a depth counter that skips
+string literals (**no negated character class spans a structure** — R3), search only inside the two
+spans requiring exactly one hit, and **agree with `JSON.parse` before splicing**. Only the located
+value's characters are replaced, by index.
+
+Measured and asserted: `"dependencies"` occurs **exactly once at line 73** and `"devDependencies"`
+**exactly once at line 99**, and a second occurrence of either is a **precondition failure, not a
+guess**. Against the real `package.json` the transform leaves the length unchanged with **exactly one
+differing character**, and every byte before the dependency section — including the three
+`_buildFilesNote` / `_extraResourcesNote` / `_nativeRebuildNote` prose keys at lines 7–9, each of which
+records a shipped defect — is identical. A fixture whose prose note **contains** a lookalike
+`"cors": "2.8.5"` still yields exactly one change, at the dependency site, because the note sits outside
+both spans and is never a candidate.
+
+**The size, recorded correctly (finding 18).** Bytes on disk and characters decoded are different
+numbers, and **the transform indexes the decoded string**:
+
+| | bytes on disk | characters decoded | content lines |
+|---|---|---|---|
+| pre-task, `21bb12d` | 14,235 | 14,228 | 286 |
+| now | 14,276 | 14,269 | 286 |
+
+The 41-byte move is this task's single-line `verify` chain insertion; the content-line count did not
+move because that insertion edited an existing line. What the suite **pins** is the seven-character
+divergence and the line count, not the absolute size — a row that reddened on any lawful `package.json`
+edit would be deleted rather than read (D4's class). Also measured and stated: those seven multi-byte
+characters sit **after** both dependency sections, so at this site the byte and character offsets
+happen to coincide. That is where those characters are, not a guarantee, which is why the decoded
+string is what gets indexed.
+
+Every precondition failure quotes a **declared precondition string verbatim** —
+`entry.preconditions.some(p => why.endsWith(p))` — carried on a `ContractPreconditionError` rather than
+built at the throw site, so free prose cannot reach a `why`. Four cases are exercised: malformed JSON,
+the value already equalling `version`, no such member, and a second section literal.
+
+#### Verification is executable data, and `timeoutMs` is a declaration (finding 19)
+
+`VERIFIERS['json-parse+dependency-count']` is registered and `verify()` runs it inside a `try`. **A
+verifier that throws is caught and reported `{verified: false, why: <message>}` — never
+`verified: true`, never silence.** That guarantee is proved through the **registered** runner rather
+than a stand-in: `params` reaches it untouched, so a `params` object that throws on property access
+makes the real `verifyJsonDependencyCount` throw past its own inner catches, and `verify()`'s catch is
+what is being measured. `verification.pass` stays as the human sentence and is **explicitly labelled
+documentation**; the verifier is the authority, and a row asserts the two are distinct objects.
+
+**`timeoutMs` is declared data for a future runner that `verify()` does not enforce.** It is said in the
+module header, in `printRepairContract.cjs`'s output, and here; `render()` prints it as
+`5000 ms declared (a declaration for a future runner; verify() enforces no deadline)`; and the module
+carries **no deadline mechanism at all** — the suite asserts its stripped source contains neither
+`setTimeout` nor `Date.now`. A declared timeout read by nothing would otherwise be believed.
+
+#### The path fence — the CORRECTED spelling table, measured
+
+The design recorded a single-backslash `electron\lib\proposals.cjs` as slipping past
+`guard.inspectChanges`, and scheduled that false fact as a planted expectation. **It is false.**
+Re-measured in the worktree, calling the shipped matcher:
+
+| spelling | raw `inspectChanges().ok` | after `gate.normalisePath` |
+|---|---|---|
+| plain `electron/lib/proposals.cjs` | `false` — refused | refused |
+| `./` prefixed | `false` — refused | refused |
+| **single** backslash | `false` — refused | refused |
+| UPPERCASE | `false` — refused | refused |
+| trailing space | **`true` — MISSED** | refused |
+| **double** backslash | **`true` — MISSED** | refused |
+| doubled separator `electron//lib//proposals.cjs` | **`true` — MISSED** | refused |
+
+So the three spellings raw matching actually misses are a **trailing space**, a **double backslash**
+and a **doubled separator**, and the plants are aimed there. Each row prints **both** `raw.ok` and
+`normalised.ok`, because a row that asserted only the normalised answer would imply the raw one never
+mattered; and one further row asserts **exactly three** spellings pass raw matching while **none**
+passes normalised, which is the statement that normalise-first is strictly stronger. Recording a fence
+as weaker than it is would send a later session to "fix" working code.
+
+The fence normalises with `gate.normalisePath` first, then asks **both** matchers:
+`gate.governedPathsNamed(def, io)` — the definition-shaped function, so the refusal can print **which
+token** was named and the `meta` scan comes free — and `guard.inspectChanges`. The **lists** are read
+from the exports and never restated; the suite asserts no `PROTECTED_FILES` or `SELF_GOVERNING_PATHS`
+literal appears in the module's comment-stripped source. A fourth rule the design did not have: a path
+resolving **outside the repository root** is refused, with its own sentence. And the declared site path
+`package.json` **passes**, asserted, so none of the refusal rows is vacuous.
+
+#### 8.3 short names, restated as MEASURED (finding 6 / D3)
+
+The design published 8.3 as unresolved on the strength of `gate.namesGovernedPath('electron/lib/AUTONO~1.cjs')`
+returning `null`. Measured: on this volume `AUTONO~1` is **`autonomyGate.cjs`, which is not a governed
+file** — hence the null. The real probe is an asserted row now:
+
+```
+gate.namesGovernedPath('electron/lib/AUTONO~2.CJS')  ->  'electron/lib/autonomypolicy.cjs'   CAUGHT
+```
+
+`namesGovernedPath` asks `canonicalPath` as its second spelling, so **8.3 IS resolved for existing
+governed files**. The residual, stated as three named cases rather than as a blanket weakness: create
+targets that do not exist yet so no short name has been generated; volumes with 8.3 name generation
+disabled; and the hard link, which is a different file sharing an inode rather than a different
+spelling. The owner remains `upgradeApplier.canonicalPathOf` / `validatePath` **at apply time**, where
+the filesystem is actually touched, and the contract does not re-implement them.
+
+#### The four assertions that could not go red as designed — repaired
+
+| # | Finding | As designed it could not fail because… | What it is now | Mutation that reddens it |
+|---|---|---|---|---|
+| a | 7 | `PRODUCED_BY[e.editId][0] === idOf(e)` is a **tautology** — both sides derive from the same two authored fields, so editing `producerFn` moves both identically | three facts the contract does not own: the producer id is **in the corpus**, the module **resolves**, and `typeof mod[producerFn] === 'function'`. The self-comparison survives only as a **length** check | `producerFn: 'assessx'` |
+| b | 10 | a write to a frozen object in a **sloppy-mode** `.cjs` silently no-ops, so the row passed on a no-op | the suite is `'use strict'`, every freeze row goes through `strictWrite` and **prints which mechanism proved it** (`a strict-mode write threw TypeError`) | drop the `Object.freeze` from the table under test |
+| c | 14 | `maxChanges` is 1 and `author()` builds exactly one change, so the bound comparison was **structurally unreachable** | a clone with `maxChanges: 0`, asserting `why === 'pin-version would exceed its declared bound of 0 changes'` **and** that the target's `sha256` is unchanged across the call, proving nothing was written | return the built change anyway when the bound is exceeded |
+| d | 15 | `[...recorded.values()].includes(v)` cannot say **which** read produced a param: `params.version = row.jump` satisfied it, because `'patch'` is a recorded read, and only failed later through the semver validator for an unrelated reason | `paramSources: {name: 'name', version: 'latest'}` on the trigger, asserted **per param** as `recorded.get(paramSources[k]) === out.params[k]`, plus "every `paramSource` is itself a declared read" and "every declared param has a `paramSource`" | `params.version = row.jump` |
+
+"Can this row ever go red, and by what exact mutation" is a **required column**, not a nicety. Every
+new label carries a `REDBY` prefix and the suite asserts `REDBY` covers every label it emitted.
+
+#### D8 — the `'latest' is falsy` trigger is declared unreachable, not faked
+
+Measured, `classifyJump` returns `'unknown'` whenever `latest` is falsy — for an absent key **and** for
+the empty string — so `fires` always returns at the `jump` guard and the `!row.latest` guard is never
+the deciding branch. It stays in the code as **declared defence in depth** (`fires` is exported and a
+future caller is not obliged to come through `assess`), carried as a `declaredUnreachableGuards` row,
+and is **removed from the exercised negative set**: a case that proves `jump === 'unknown'` twice proves
+it once. The suite measures the reason rather than asserting the conclusion:
+`assess({name:'cors', pinned:'2.8.5', latest:''}).jump === 'unknown'`.
+
+#### The hard boundary, 7.1–7.7 — asserted
+
+`FLOORS` and `CEILINGS` **value-identical** to their pre-task snapshot across **all fifteen classes**
+(not one row — a snapshot of one would pass while the other fourteen moved), with
+`FLOORS['dependency-change'] === 'L1'` and `CEILINGS['dependency-change'] === 'L3'`; `PERMANENT` holds
+exactly the seven permanent classes and still has `add`/`delete` `undefined`; `UNREACHABLE_LEVEL ===
+'L5'` and **no class holds `L5`**; `AUTHORING_MODES` exactly `['template']`; every `site.action` a
+member of `upgradeApplier.ALLOWED_ACTIONS` **read from the export** (measured `['patch','create']`) and
+**no entry declares `'create'`**; every `approvalClass ∈ policy.CLASSES` and `needLevel ∈ LEVELS` with
+`rank(needLevel) <= rank(CEILINGS[approvalClass])`; the module's comment-stripped source free of
+`registerApplier`, `ipcMain`, `setInterval`, `setTimeout`, `io.policy`, `modelRouter`,
+`codeRegenEngine` and `releaseChannel`; and `SENSITIVE_PINNED` pinned **in the suite** with
+`dependencyAdvisor.cjs` **not** changed to freeze its export — measured `size === 9` and
+`Object.isFrozen === false`, which is the honest statement, and converting a comment-only tranche
+member's export shape would breach I11.
+
+**No autonomy rung was climbed.** I6/I17 intact. The contract files nothing, registers no applier, and
+has no path to an apply.
+
+#### The four adjacent gaps — NAMED, not fixed, and each asserted STILL OPEN
+
+Carried as `ADJACENT_GAPS` in the module so the suite and the printer read one list, each with **whose
+decision it is**. A `LIMIT` row that merely printed prose would stay green after its gap closed, and a
+stale limit is how a later session comes to "fix" something already fixed — so each row asserts the gap
+is **still open** and reddens the day it closes.
+
+1. **`electron/ipc/timeline.cjs`'s `SELF_MODIFY` applier has no root confinement.** `change.path` is
+   used verbatim — `registerApplier` at `:195`, `fs.rmSync(change.path, …)` at `:199`,
+   `fs.mkdirSync(path.dirname(change.path), …)` at `:203`, `fs.writeFileSync(change.path, …)` at
+   `:204`; no resolve-then-compare, no `lstat`, no canonicalisation, no repo-root check. **Master's
+   decision** — confining a shipped applier is a behaviour change and refusing `delete` would remove a
+   capability the renderer can reach today (I11).
+2. **The hard link is an untested residual.** `realpathSync.native` answers which *path* a name
+   resolves to, not which *file*. **Stated, untested, unclosed** — and the suite asserts the status
+   string says exactly that, so claiming more than was measured reddens it.
+3. **The autonomy policy's data file is self-governing but not covenant-protected.** It is in
+   `policy.SELF_GOVERNING_PATHS` as `optional: true` and **not** in `loyaltyGuard.PROTECTED_FILES`
+   (seven entries), and it ships absent. This contract's fence refuses it either way; the covenant
+   layer does not. **Master's action** — a protected-file edit and a tripwire re-approval. Restated
+   from Section 132, not actioned.
+4. **`aiProcess.diagnoseFailure` has no `causeId`.** Eight branches returning `{reason, remedy}` plus
+   `silent` on two, keyed on regexes over stderr text. `SELF_UPGRADE.md` §E.5.3a already chose option
+   **(a)** — the mapping lives in a consumer — and this task does not revisit it. `name-engine-cause`
+   carries `blockedOn.missingFields: ['causeId']` and the inverted presence rule asserts `never
+   (0 of 8)`. **Gap stated, not closed** — and the day it closes, that row goes red and says so.
+
+#### The chain
+
+`node scripts/verifyRepairContract.cjs` is appended immediately after `node scripts/verifyTypeScale.mjs`
+and **before the covenant tail, which stays last and in order**: `auditRenderer.cjs`,
+`verifyInvariants.cjs`, `verifyLoyaltyTripwire.cjs`. The chain is 36 entries. Only the `verify` value
+changed in `package.json`; dependencies stay **24** and devDependencies **10**, no range characters
+added. `node scripts/verifyCommentCensus.cjs` is **not yet in the chain** — it joins at the comment-pass
+feature, with its `--pass-audit` switch (D4) decided but not yet built.
+
+#### The fifteen new REDBY classes, each driven red by its stated mutation and restored
+
+Baseline `263 passed, 0 failed`, exit 0. Every mutation below was applied, the suite run, the reds
+recorded, and the file restored **byte-exact (sha256 compared)**; the driver was deleted. "Targeted"
+counts reds whose label carries the class prefix; collateral is everything else.
+
+| class | mutation driven | exit | tail | targeted | collateral |
+|---|---|---|---|---|---|
+| `contract:` | paste `electron/lib/proposals.cjs` into an entry's `what` string | 1 | 262 / 1 | 1 | 0 |
+| `entry shape:` | give the first unreachable entry `maxChanges: 1` | 1 | 262 / 1 | 1 | 0 |
+| `derivation:` | `producerFn: 'assess'` → `'assessx'` | 1 | 259 / 4 | 1 | 3 (expected) |
+| `trigger:` | make `fires` decide on `latest` instead of `jump` | 1 | 257 / 6 | 6 | 0 |
+| `provenance:` | `params.version` from `row.jump` instead of `row.latest` | 1 | 261 / 2 | 2 | 0 |
+| `transform:` | reserialise with `JSON.stringify` instead of splicing by index | 1 | 261 / 2 | 2 | 0 |
+| `verify:` | let the catch around a throwing verifier return `verified: true` | 1 | 262 / 1 | 1 | 0 |
+| `author:` | skip the `policy.require` gate | 1 | 261 / 2 | 2 | 0 |
+| `weigh:` | `const decide = false` — never ask master | 1 | 260 / 3 | 3 | 0 |
+| `bound:` | raise the bound comparison so it never trips | 1 | 262 / 1 | 1 | 0 |
+| `fence:` | ask `inspectChanges` on the RAW spelling instead of normalising first | 1 | 256 / 7 | 7 | 0 |
+| `8.3:` | probe `AUTONO~1.cjs` instead of `AUTONO~2.CJS` | 1 | 262 / 1 | 1 | 0 |
+| `boundary:` | move `POLICY_SNAPSHOT.floors['dependency-change']` to `'L2'` | 1 | 262 / 1 | 1 | 0 |
+| `render:` | drop the `unverifiable-here` and null-kind branches from `renderVerification` | 1 | 261 / 2 | 2 | 0 |
+| `LIMIT:` | mark the hard-link gap `'closed'` | 1 | 262 / 1 | 1 | 0 |
+
+Restored to `263 passed, 0 failed`, exit 0.
+
+**The reds, verbatim where they carry the fact:**
+
+```
+FAIL  contract: no PROTECTED_FILES or SELF_GOVERNING_PATHS literal appears in its source
+      - restated: electron/lib/proposals.cjs
+
+FAIL  derivation: pin-version's authored producer dependencyAdvisor.assessx is in the corpus,
+      resolves, and exports assessx() - inCorpus=false resolves=true typeof assessx=undefined
+
+FAIL  provenance: case patch params.version traces to the declared read "latest"
+      - params.version="patch" but recorded latest="2.8.6"
+
+FAIL  trigger: negative jump === 'downgrade' (case downgrade) yields no repair
+      - fires returned {"editId":"pin-version","params":{"name":"axios","version":"1.6.8"}}
+
+FAIL  transform: only the located value moved — the length is unchanged and exactly one character
+      differs - delta=-287 differing=13190
+
+FAIL  verify: a throwing verifier is caught and reported verified:false with its message, never true
+      and never silence - {"verified":true,"why":null}
+
+FAIL  author: pin-version refuses with the measured policy reason, character for character
+      - verdict=ok changes=1 why=null
+
+FAIL  weigh: the real root reports needs-master-decision because package-lock.json exists
+      - lockfile=present verdict=ok
+
+FAIL  bound: a bound of 0 refuses with the declared sentence and emits no change
+      - why=null changes=1 warnings=0
+
+FAIL  fence: covenant spelling "trailing space" is refused after normalisation, and raw matching did
+      NOT - raw.ok=true (declared true) normalised.ok=true why=null
+
+FAIL  boundary: 7.1 FLOORS is value-identical to its pre-task snapshot, all fifteen classes
+      - moved: dependency-change=L1
+
+FAIL  render: an unverifiable-here entry renders as the literal word UNVERIFIED
+      - pin-version=json-parse+dependency-count, add-export=null, add-array-member=null, ...
+```
+
+**Three honest notes about the plants, so the record is not read as cleaner than it was.**
+
+1. The `derivation:` mutation's **three collateral reds are expected and correct**: changing the
+   authored `producerFn` changes the **derived** producer id, so the presence rows resolve against a
+   producer that does not exist and report `has no field "name" in 0 of 0 cases`. The design predicted
+   that `producerFn: 'assessx'` reddens "those rows", plural. A derived identity that moved and took
+   its dependants with it is the derivation working.
+2. The `contract:` plant was **driven twice**. The first site was the hard-link gap's `status` string,
+   which is also what the `LIMIT:` row reads — one collateral red, caused by the plant's placement and
+   not by poor targeting. It was re-driven at a clean site (an entry's `what` string) and reddened
+   exactly one row. Both runs are recorded rather than only the tidy one.
+3. The `8.3:` mutation changed the row's **condition** and left its **detail** expression alone, so the
+   recorded failure detail still prints the un-mutated probe's answer. The row reddened for the right
+   reason; the detail string is a driver artefact.
+
+**Two `REDBY` entries were worded to name the mutation that was ACTUALLY DRIVEN**, not the most
+obvious one. `8.3:` would also redden if `canonicalPath` were removed from the spellings
+`namesGovernedPath` asks — but that is an edit to `autonomyGate.cjs`, a tranche member, and a `REDBY`
+whose mutation was never driven is the thing the table exists to prevent. Likewise `boundary:` names
+moving `POLICY_SNAPSHOT`, which is the same comparison from the side that can be touched.
+
+#### What `printRepairContract.cjs` prints
+
+Under plain `node`, with no renderer build: the fixed-width table derived from `render()` (no second
+hand-maintained copy), then
+
+```
+entries: 6 · reachable: 1 · unreachable: 5 (add-export, add-array-member, replace-literal,
+install-missing-package, name-engine-cause)
+```
+
+every run, then each entry in full, the verdict-reachability table with `'ok'` shown as
+`[unverifiable-here] proved by: nothing here`, the 8.3 restatement, and the four gaps. Every
+unreachable entry renders as the literal word **`UNVERIFIED`**, as does a null `kind` and the legacy
+value `'not-run'` — asserted never to render as a pass. *A table of six transforms that one sensor can
+address is not six capabilities,* and the output says so rather than leaving a reader to count.
