@@ -5,7 +5,7 @@ const path          = require('path');
 const fs            = require('fs');
 const { app }       = require('electron');
 
-// ─── AI backend process state ─────────────────────────────────────────────────
+// AI backend process state
 const processes = {};   // key: 'python' | 'node-server'
 
 /**
@@ -30,11 +30,9 @@ let resolvedBackendDir = null;
 
 let ipcMainRef  = null;
 
-// ─── Register all AI process IPC handlers ────────────────────────────────────
 function register(ipcMain) {
   ipcMainRef = ipcMain;
 
-  // ── Start Python AI backend ────────────────────────────────────────────────
   ipcMain.handle('ai:start-backend', async () => {
     if (processes['python']?.killed === false) {
       return { ok: true, message: 'already running', pid: processes['python'].pid };
@@ -47,12 +45,10 @@ function register(ipcMain) {
     }
   });
 
-  // ── Stop Python AI backend ────────────────────────────────────────────────
   ipcMain.handle('ai:stop-backend', async () => {
     return stopProcess('python');
   });
 
-  // ── Get status ────────────────────────────────────────────────────────────
   ipcMain.handle('ai:get-status', async () => {
     return {
       ok: true,
@@ -66,7 +62,6 @@ function register(ipcMain) {
   });
 }
 
-// ─── Start Python FastAPI backend ─────────────────────────────────────────────
 async function startPythonBackend() {
   const backendPath = resolveBackendPath();
   if (!backendPath) {
@@ -185,7 +180,6 @@ async function startPythonBackend() {
   child.stdout.on('data', (data) => {
     const line = data.toString().trim();
     if (ipcMainRef) {
-      // Broadcast to all renderer windows
       const { BrowserWindow } = require('electron');
       BrowserWindow.getAllWindows().forEach(win => {
         win.webContents.send('ai:log', { stream: 'stdout', line, ts: Date.now() });
@@ -243,15 +237,12 @@ function stopProcess(key) {
 }
 
 function resolveBackendPath() {
-  // Packaged: resources/ai_backend
   const packed = path.join(process.resourcesPath || '', 'ai_backend');
   if (fs.existsSync(packed)) return packed;
 
-  // Dev: sibling directory
   const devPath = path.join(app.getAppPath(), '..', 'ai_backend');
   if (fs.existsSync(devPath)) return devPath;
 
-  // Same root
   const samePath = path.join(app.getAppPath(), 'ai_backend');
   if (fs.existsSync(samePath)) return samePath;
 
@@ -275,7 +266,7 @@ function stopAll() {
   }
 }
 
-// ─── Direct (non-IPC) access for other main-process modules ─────────────────
+// Direct (non-IPC) access for other main-process modules
 // marketIntel.cjs calls these to auto-start the backend on first use without
 // round-tripping through ipcMain.handle from inside the main process itself.
 /**
