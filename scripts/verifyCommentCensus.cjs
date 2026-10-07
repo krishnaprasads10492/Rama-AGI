@@ -949,12 +949,51 @@ function main(argv = []) {
       + ` \u00b7 ${thousands(totals.comment)} comment \u00b7 ${totals.banner} banner`
       + ` \u00b7 ${totals.pointer} pointer \u00b7 ${totals.evidence} evidence \u00b7 ${totals.trap} trap`;
     console.log(`    ${line}`);
-    check('census: the tranche reproduces its published totals',
-      totals.files === TRANCHE_TOTALS.files && totals.lines === TRANCHE_TOTALS.lines
-      && totals.comment === TRANCHE_TOTALS.comment && totals.banner === TRANCHE_TOTALS.banner
-      && totals.pointer === TRANCHE_TOTALS.pointer && totals.evidence === TRANCHE_TOTALS.evidence
-      && totals.trap === TRANCHE_TOTALS.trap,
-      `measured ${JSON.stringify(totals)} against ${JSON.stringify(TRANCHE_TOTALS)}`);
+    // MEASURED AT THE BASE REF, NOT IN THE WORKING TREE, and the distinction is the whole point.
+    //
+    // This row exists to prove the six published patterns still reproduce the published figures — its
+    // REDBY is widening the banner class or making the pointer case-sensitive. Measured against the
+    // LIVE tree it proved something else entirely: that no comment had moved yet. So it could only
+    // ever pass BEFORE the pass it was written to accompany, and the pass itself reddened it
+    // (1,654 comment / 85 banner against the frozen 1,667 / 121 after five of twelve files).
+    //
+    // The cheapest escape from that red was to re-freeze TRANCHE_TOTALS to whatever the pass had
+    // left — which is exactly the practice this file's own header condemns in the floors: a baseline
+    // recorded after the pass records the pass's own output and can no longer redden. A row whose
+    // easiest satisfaction is the wrong act is not a safeguard.
+    //
+    // The base ref is immutable, so counting there is stable against any lawful pass, partial or
+    // complete, while still failing the instant a pattern changes. The live totals stay on the
+    // printed line above, where a reader can watch the pass move them. An unavailable ref SKIPs
+    // loudly and is never a PASS.
+    {
+      const label = 'census: the published patterns reproduce the published totals at ' + BASE_REF;
+      let usable = true;
+      try { execFileSync('git', ['-C', ROOT, 'rev-parse', '--verify', `${BASE_REF}^{commit}`], { encoding: 'utf8', stdio: 'pipe' }); }
+      catch (e) { usable = false; }
+      if (!usable) skip(label, `git could not verify the base ref "${BASE_REF}"`);
+      else {
+        const base = { files: 0, lines: 0, comment: 0, banner: 0, pointer: 0, evidence: 0, trap: 0 };
+        let unreadable = '';
+        for (const rel of TRANCHE_FILES) {
+          let text = null;
+          try { text = execFileSync('git', ['-C', ROOT, 'show', `${BASE_REF}:${rel}`], { encoding: 'utf8', maxBuffer: 1 << 28 }); }
+          catch (e) { unreadable = rel; break; }
+          const c = countLines(linesOf(text));
+          base.files += 1;
+          for (const k of ['lines', 'comment', 'banner', 'pointer', 'evidence', 'trap']) base[k] += c[k];
+        }
+        if (unreadable) skip(label, `"${unreadable}" is not in ${BASE_REF}`);
+        else {
+          check(label,
+            base.files === TRANCHE_TOTALS.files && base.lines === TRANCHE_TOTALS.lines
+            && base.comment === TRANCHE_TOTALS.comment && base.banner === TRANCHE_TOTALS.banner
+            && base.pointer === TRANCHE_TOTALS.pointer && base.evidence === TRANCHE_TOTALS.evidence
+            && base.trap === TRANCHE_TOTALS.trap,
+            `measured ${JSON.stringify(base)} at ${BASE_REF} against the published ${JSON.stringify(TRANCHE_TOTALS)}`);
+        }
+      }
+    }
 
     // The two pattern corrections, asserted on real text rather than described.
     const banner = '// \u2500\u2500\u2500\u2500\u2500\u2500 label';

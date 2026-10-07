@@ -9,7 +9,7 @@
  * naming the safeguard it requires, a rung entered only when an evaluation says so, and **an
  * undetermined evaluation defaulting to the stricter rung**.
  *
- * ── THE ONE QUESTION THIS FILE HAS TO ANSWER MECHANICALLY ─────────────────────────────────────────
+ * THE ONE QUESTION THIS FILE HAS TO ANSWER MECHANICALLY
  *
  * *If the policy table lives in a data file, what stops Rāma proposing an edit to that file which
  * raises a permanent class?*
@@ -21,7 +21,7 @@
  * `proposals.cjs` (I6), visible in a diff. `scripts/verifyAutonomyStop.cjs` goes RED if a permanent
  * class is moved into the editable set.
  *
- * ── THE FLOOR IS A FALLBACK, NOT A MINIMUM ───────────────────────────────────────────────────────
+ * THE FLOOR IS A FALLBACK, NOT A MINIMUM
  *
  * `shared/autonomy-policy.json` SHIPS ABSENT, so the floor is the shipped level. A present file may
  * RESTRICT an editable class below its floor — that is how master puts Rāma offline — and may RAISE one
@@ -38,7 +38,7 @@
  * read for it, a file that so much as names it is rejected whole, and turning the automatic revert off
  * is not something this design offers at all.
  *
- * ── AND THE STOP DOMINATES ───────────────────────────────────────────────────────────────────────
+ * AND THE STOP DOMINATES
  *
  * `effective()`'s first line is the stop, so on a shipped install every class is `L0` before the
  * resolver ever looks at the data file. The floors describe what the policy resolves to ONCE MASTER HAS
@@ -56,7 +56,7 @@ const fs     = require('fs');
 const path   = require('path');
 const crypto = require('crypto');
 
-// ─── The levels ───────────────────────────────────────────────────────────────
+// The levels
 /**
  * L5 is declared and UNREACHABLE. A ladder that stopped at L4 would make autonomous application a new
  * concept to be invented later, which is exactly how a stop gets retrofitted onto a running loop.
@@ -103,7 +103,7 @@ function frozenSetView(ids) {
   });
 }
 
-// ─── The fifteen classes ──────────────────────────────────────────────────────
+// The fifteen classes
 const CLASSES = Object.freeze([
   'observe', 'research-local', 'research-network', 'propose-question',
   'propose-source', 'dependency-change', 'build-repair', 'author-change',
@@ -206,7 +206,7 @@ const SELF_GOVERNING_PATHS = Object.freeze([
 
 const DATA_FILE = path.join(__dirname, '..', '..', 'shared', 'autonomy-policy.json');
 
-// ─── Loading the data file ────────────────────────────────────────────────────
+// Loading the data file
 
 let loaded = null;   // { levels, rejected, why, source, fileSha256 }
 
@@ -300,7 +300,7 @@ function stop() {
   catch { return { isStopped: () => true };   /* no stop module means stopped — fail-safe */ }
 }
 
-// ─── The resolver ─────────────────────────────────────────────────────────────
+// The resolver
 
 /**
  * A PURE RESOLVER. It carries no exception for an in-flight revert: a pure resolver cannot know a
@@ -408,7 +408,7 @@ function requireMasterDriven(classId, need) {
   return gate(effective(classId, { ignoreStop: true }), classId, need, 'a master-driven act');
 }
 
-// ─── Reporting ────────────────────────────────────────────────────────────────
+// Reporting
 
 /** Every field carries its own truth; nothing is inferred by the renderer. */
 function policyStatus() {
