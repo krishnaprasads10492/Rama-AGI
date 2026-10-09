@@ -281,6 +281,46 @@ for (const bad of [null, undefined, 0, '', {}, [], NaN, 'x', { netQty: 'x', avgC
       Number(niftyLot[1]) !== 25,
       'LOT_SIZES has regressed to the table that was wrong by two exchange revisions');
   }
+
+  // ── STRIKE_STEPS: the two tables must describe the same universe ───────────
+  //
+  // `_step()` and `_lot()` each fall back to a hardcoded default for a symbol the table does not
+  // name, so a symbol added to ONE table and not the other is sized or struck from a default
+  // silently — no error, no log, just a wrong number. The guarantee is therefore that both tables
+  // carry the SAME KEY SET.
+  //
+  // STRIKE_STEPS itself was verified 2026-10-09 against live option chains and is CORRECT, unlike
+  // LOT_SIZES was: NIFTY strikes run 23,000 / 23,050 / 23,100 (50), MIDCPNIFTY 12,200 / 12,225 /
+  // 12,250 (25), BANKNIFTY 100 near the money, and SENSEX 100 against Nifty's 50. FINNIFTY's 50 was
+  // NOT independently verified.
+  //
+  // THE NUANCE THAT MATTERS IF THIS CONSTANT IS EVER REUSED: a strike interval is not uniform across
+  // the chain. NSE widens it away from the money — BANKNIFTY shows 100 near ATM and 500 far out. A
+  // single near-ATM number is correct for `_atm()`, whose whole job is rounding spot to the nearest
+  // strike, and WRONG for enumerating a ladder far from spot. Anything that walks a strike range
+  // needs the real per-chain scheme, not this.
+  const stepTable = dispatcher && /^STRIKE_STEPS\s*=\s*\{([^}]*)\}/m.exec(dispatcher);
+  if (stepTable && lotTable) {
+    const keysOf = (body) => (body.match(/"([A-Z0-9]+)"\s*:/g) || [])
+      .map((k) => k.replace(/["\s:]/g, '')).sort();
+    const stepKeys = keysOf(stepTable[1]);
+    const lotKeys = keysOf(lotTable[1]);
+    // REDBY: add a symbol to either table without the other.
+    eq('STRIKE_STEPS and LOT_SIZES name the same symbols',
+      stepKeys.join(','), lotKeys.join(','));
+
+    const niftyStep = /"NIFTY"\s*:\s*(\d+)/.exec(stepTable[1]);
+    const nifty50Step = /"NIFTY50"\s*:\s*(\d+)/.exec(stepTable[1]);
+    if (niftyStep && nifty50Step) {
+      // `_step` normalises NIFTY50 to NIFTY, so an unequal pair is a contradiction waiting for a
+      // caller that reads the key directly. REDBY: make them differ.
+      eq('the NIFTY50 alias carries the same strike step as NIFTY',
+        Number(nifty50Step[1]), Number(niftyStep[1]));
+    }
+  } else {
+    check('the dispatcher declares a STRIKE_STEPS table', false,
+      'STRIKE_STEPS not found in ai_backend/engine/dispatcher.py');
+  }
 }
 
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILURES'} — ${pass} passed, ${fail} failed\n`);
