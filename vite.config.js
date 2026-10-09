@@ -38,7 +38,7 @@ export default defineConfig({
 
   build: {
     outDir:     'build',
-    sourcemap:  false,
+    sourcemap:  process.env.RAMA_BUNDLE_AUDIT === '1',
     target:     ['es2020', 'chrome87'],
     rollupOptions: {
       // No `input` override: the root index.html is the entry for both dev and
