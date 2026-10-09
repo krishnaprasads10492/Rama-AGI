@@ -3,7 +3,7 @@
 /**
  * autonomyGate.cjs — the policy and the stop, consulted where a proposal is CREATED.
  *
- * ── THE HOLE THIS CLOSES ──────────────────────────────────────────────────────────────────────────
+ * THE HOLE THIS CLOSES
  *
  * `proposals:create` is renderer-reachable at tier 1 (`self-modify.view`) and consults neither the
  * autonomy policy nor the stop. `meta` is passed straight through, and `restore()` later rehydrates it
@@ -17,7 +17,7 @@
  *   2. `fileProposal(ledger, def)` — the ONLY path by which Rāma may create a proposal of a kind this
  *      design owns. It consults the stop, then the policy, before calling `ledger.create`.
  *
- * ── AUTONOMY IS DERIVED FROM THE CALLER, NEVER READ FROM A FIELD ──────────────────────────────────
+ * AUTONOMY IS DERIVED FROM THE CALLER, NEVER READ FROM A FIELD
  *
  * The earlier design decided whether the stop applied by reading `opts.autonomous` — which arrives from
  * the renderer (`preload.cjs` 680) and reaches the applier untouched (`proposals.cjs` 235,
@@ -26,7 +26,7 @@
  * `guardLedgerIpc` passes `'ipc'` because it IS the IPC handler, and `fileProposal` passes `'rama'`
  * because it IS Rāma's path. `inspectCreate` throws on anything else rather than guessing.
  *
- * ── WHAT AN IPC CREATE IS, AND WHY THE STOP DOES NOT GOVERN IT ────────────────────────────────────
+ * WHAT AN IPC CREATE IS, AND WHY THE STOP DOES NOT GOVERN IT
  *
  * A create arriving over IPC with an authenticated user is master at the keyboard. The stop halts RĀMA
  * STARTING WORK; it does not refuse master. Gating the IPC path on the policy would also break
@@ -40,7 +40,7 @@
  *     ANY kind. That is additive — nothing shipped names them — and it closes the renderer half of the
  *     "the stop's state is unreachable by any proposal" claim, which was measurably false.
  *
- * ── THE PATH FENCE ASKS THE FILESYSTEM, NOT THE CHARACTERS ────────────────────────────────────────
+ * THE PATH FENCE ASKS THE FILESYSTEM, NOT THE CHARACTERS
  *
  * Four review rounds found four spellings that addressed a governed file without naming it, the last of
  * them an 8.3 short basename that shares a six-character prefix with the long name and nothing else. A
@@ -49,7 +49,7 @@
  * filesystem's answer. See its header for what was measured. The refusal reports the spelling the caller
  * wrote, because that is the string master is looking at.
  *
- * ── THE RESIDUAL, PRINTED RATHER THAN IMPLIED ─────────────────────────────────────────────────────
+ * THE RESIDUAL, PRINTED RATHER THAN IMPLIED
  *
  * In-process `proposals.create()` is NOT gated: it is reached directly by five existing callers and
  * `proposals.cjs` cannot be modified. And `electron/ipc/timeline.cjs`'s pre-existing SELF_MODIFY
@@ -86,7 +86,7 @@ const DIFF_CLASSES = Object.freeze(['propose-source', 'dependency-change', 'buil
 
 const ORIGINS = Object.freeze(['ipc', 'rama']);
 
-// ─── Path fencing ─────────────────────────────────────────────────────────────
+// Path fencing
 
 /**
  * Canonicalise for comparison: forward slashes, **structure RESOLVED**, lower case.
@@ -108,7 +108,7 @@ const ORIGINS = Object.freeze(['ipc', 'rama']);
  * `normalize` only ever collapses `/`-delimited segments, so a path-like run hidden inside a JSON string
  * is canonicalised in place and the surrounding text is left as it is.
  *
- * ── AND THE TWO SPELLINGS `normalize` DOES NOT COLLAPSE ───────────────────────────────────────────
+ * AND THE TWO SPELLINGS `normalize` DOES NOT COLLAPSE
  *
  * It leaves a TRAILING DOT and a TRAILING SPACE on a segment alone, so `autonomyStop.cjs.` and
  * `autonomyStop.cjs ` both read as naming nothing governed. Measured end to end: `inspectCreate`
@@ -164,7 +164,7 @@ function normalise(p) {
  * stream suffix (`:evil` alone) is left exactly as it was, for the same reason `trimSegments` leaves a
  * dots-only segment alone: an empty segment is not a canonicalisation of anything.
  *
- * ── WHY THIS IS SEPARATE FROM `normalise` AND NOT FOLDED INTO IT ───────────────────────────────────
+ * WHY THIS IS SEPARATE FROM `normalise` AND NOT FOLDED INTO IT
  *
  * `normalise` is applied to the stringified `meta` blob, which is JSON — and JSON is full of colons.
  * Measured: folding a colon strip into `trimSegments` turns `{"plan":"then patch electron/lib/x.cjs"}`
@@ -197,7 +197,7 @@ function normalisePath(p) {
 }
 
 /**
- * ── ASK THE FILESYSTEM WHICH FILE A PATH NAMES, INSTEAD OF ASKING THE CHARACTERS ──────────────────
+ * ASK THE FILESYSTEM WHICH FILE A PATH NAMES, INSTEAD OF ASKING THE CHARACTERS
  *
  * This fence missed a spelling class in each of four review rounds: unresolved structure, a trailing dot
  * and a trailing space, an NTFS `::$DATA` stream suffix, and then an **8.3 SHORT BASENAME**. The first
@@ -355,7 +355,7 @@ function governedPathsNamed(def, io) {
   return hits;
 }
 
-// ─── Which policy class does this filing belong to? ───────────────────────────
+// Which policy class does this filing belong to?
 
 /**
  * A ledger entry is a `propose-*` act, and which one depends on what is being filed.
@@ -370,7 +370,7 @@ function classFor(def) {
   return { classId, need: 'L3' };
 }
 
-// ─── The create gate ──────────────────────────────────────────────────────────
+// The create gate
 
 /**
  * @param {object} def       the proposal definition
@@ -443,7 +443,7 @@ function fileProposal(ledger, def = {}) {
   return { ok: true, data: ledger.create({ ...def, meta }) };
 }
 
-// ─── The IPC seam ─────────────────────────────────────────────────────────────
+// The IPC seam
 
 /**
  * Wrap the recorder `proposals.register()` is given, so the `proposals:create` handler is validated

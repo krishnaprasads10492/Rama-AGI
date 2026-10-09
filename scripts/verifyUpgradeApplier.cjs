@@ -4,7 +4,7 @@
 /**
  * verifyUpgradeApplier.cjs — the create gate, and the applier's entry validation.
  *
- * ── THE DEFECT THIS SUITE IS BUILT AROUND ─────────────────────────────────────────────────────────
+ * THE DEFECT THIS SUITE IS BUILT AROUND
  *
  * On a SHIPPED install there is no allow-file, so the stop is engaged and every policy class resolves
  * to L0. An unconditional `policy.require('revert-own-apply', 'L4')` at the applier's entry therefore
@@ -12,16 +12,11 @@
  * allow-file fixture, so it never ran in the state a real install boots into. **The first assertions
  * below run with NO allow-file and NO policy file, and require master's apply to SUCCEED.**
  *
- * The companion defect is the other direction: deciding whether the stop applied by reading
- * `opts.autonomous`, which arrives from the renderer untouched. A predicate the caller supplies is
- * bypassable by omitting a field, so it is recorded and never read — asserted here both behaviourally
- * (an apply carrying the flag is treated identically to one without it) and on the source shape.
- *
- * ── AND THE TWO RESIDUALS, PRINTED RATHER THAN ARGUED AWAY ─────────────────────────────────────────
- *
- * In-process `proposals.create()` is not gated, and `electron/ipc/timeline.cjs`'s pre-existing
- * SELF_MODIFY applier writes `changes[].path` verbatim with no root confinement. Both are printed on
- * every run with what master would have to decide to close them.
+ * `opts.autonomous` arrives from the renderer untouched, so it is recorded and NEVER READ — asserted
+ * both behaviourally (an apply carrying the flag is treated identically to one without it) and on the
+ * source shape. That reasoning, and the two residuals this suite still prints on every run (ungated
+ * in-process `proposals.create()`, and `timeline.cjs`'s unconfined SELF_MODIFY write), are in spec
+ * Section 137.2.
  *
  * Run: node scripts/verifyUpgradeApplier.cjs   (or npm run verify:applier)
  */
@@ -96,7 +91,7 @@ console.log('\nthe create gate and the applier — the stop halts Rāma, never m
 
 async function main() {
 
-// ─── 1. THE SHIPPED STATE: master's approved apply must succeed ───────────────
+// 1. THE SHIPPED STATE: master's approved apply must succeed
 console.log('  the shipped state — no allow-file, no policy file');
 {
   const userData = scratch('shipped');
@@ -124,7 +119,7 @@ console.log('  the shipped state — no allow-file, no policy file');
     fs.readFileSync(path.join(result.snapshotDir, 'files', 'electron', 'lib', 'target.cjs'), 'utf8') === 'module.exports = 1;\n');
 }
 
-// ─── 2. and again under the environment override ──────────────────────────────
+// 2. and again under the environment override
 console.log('\n  the second reachable form of the same defect: RAMA_AUTONOMY=stop over a valid allow-file');
 {
   const userData = scratch('envstop');
@@ -142,7 +137,7 @@ console.log('\n  the second reachable form of the same defect: RAMA_AUTONOMY=sto
   delete process.env[stop.ENV_KEY];
 }
 
-// ─── 3. the flag is recorded, never read ──────────────────────────────────────
+// 3. the flag is recorded, never read
 console.log('\n  opts.autonomous is a datum for the audit, not a gate');
 {
   const userData = scratch('flag');
@@ -202,7 +197,7 @@ console.log('\n  opts.autonomous is a datum for the audit, not a gate');
     optsReads.every(k => applier.RECOGNISED_OPTS.includes(k)), optsReads.join(', '));
 }
 
-// ─── 4. the snapshot directory is derived, never read from the record ─────────
+// 4. the snapshot directory is derived, never read from the record
 console.log('\n  the snapshot directory is DERIVED — a persisted one is display-only');
 {
   const userData = scratch('derived');
@@ -228,7 +223,7 @@ console.log('\n  the snapshot directory is DERIVED — a persisted one is displa
     applier.PID.source === '^[0-9a-f]{20}$');
 }
 
-// ─── 5. the seven entry validations ───────────────────────────────────────────
+// 5. the seven entry validations
 console.log('\n  the applier refuses at the door, and the ledger records FAILED');
 {
   const userData = scratch('entry');
@@ -315,7 +310,7 @@ console.log('\n  the applier refuses at the door, and the ledger records FAILED'
   }
 }
 
-// ─── 6. the revert ────────────────────────────────────────────────────────────
+// 6. the revert
 console.log('\n  the revert restores the recorded prior state, and a token is the authority');
 {
   const userData = scratch('revert');
@@ -395,7 +390,7 @@ console.log('\n  the revert restores the recorded prior state, and a token is th
   stop.configure({ userDataRoot: userData });
 }
 
-// ─── 7. retention ─────────────────────────────────────────────────────────────
+// 7. retention
 console.log('\n  snapshots are purged on both bounds, and a fatal one never is');
 {
   const userData = scratch('evict');
@@ -431,7 +426,7 @@ console.log('\n  snapshots are purged on both bounds, and a fatal one never is')
   check('and a directory that is not a proposal id is left alone', fs.existsSync(notAnId) === true);
 }
 
-// ─── 8. the create gate: origin is derived, never supplied ────────────────────
+// 8. the create gate: origin is derived, never supplied
 console.log('\n  the create gate — origin is a literal at the call site, never a field');
 {
   const userData = scratch('gate');
@@ -449,7 +444,7 @@ console.log('\n  the create gate — origin is a literal at the call site, never
     /origin: 'ipc'/.test(gateCode) && /origin: 'rama'/.test(gateCode));
 }
 
-// ─── 9. what an IPC create may and may not do ─────────────────────────────────
+// 9. what an IPC create may and may not do
 console.log('\n  over IPC: pre-existing kinds unchanged (I11), this design\'s kinds refused');
 {
   const userData = scratch('ipc');
@@ -494,7 +489,7 @@ console.log('\n  over IPC: pre-existing kinds unchanged (I11), this design\'s ki
   }
 }
 
-// ─── 10. the in-process path: stop first, then policy ─────────────────────────
+// 10. the in-process path: stop first, then policy
 console.log('\n  fileProposal — the only path by which Rāma may file one of these kinds');
 {
   const userData = scratch('file');
@@ -575,7 +570,7 @@ console.log('\n  the wiring in main.cjs, and who can reach proposals.apply');
     callSites.length === 2, callSites.map(c => c.rel).join(', '));
 }
 
-// ─── 12. the residuals ────────────────────────────────────────────────────────
+// 12. the residuals
 console.log('\n  what this does NOT close');
 {
   const timeline = strip(read('electron/ipc/timeline.cjs'));
@@ -603,7 +598,7 @@ console.log('\n  what this does NOT close');
     !/verified:\s*true/.test(read('electron/lib/upgradeApplier.cjs')));
 }
 
-// ─── 13. EVERY SPELLING OF A GOVERNED PATH, AT EVERY GATE ─────────────────────
+// 13. EVERY SPELLING OF A GOVERNED PATH, AT EVERY GATE
 //
 // The hole this section exists to close, measured end to end before it was fixed: the path fence
 // compared strings that had only had their separators swapped and a leading './' stripped, so
@@ -1073,7 +1068,7 @@ console.log('\n  the path fence resolves structure — every spelling of a gover
     + 'other gate in this file already governs.');
 }
 
-// ─── 14. the data file cannot refuse master's apply either ────────────────────
+// 14. the data file cannot refuse master's apply either
 // The companion door to §1: with revert-own-apply merely EDITABLE, a validated data edit lowering it to
 // L0 made this applier's entry gate throw on a MASTER-APPROVED apply — the §1 defect, reached through a
 // documented edit instead of through the stop.
@@ -1110,7 +1105,7 @@ console.log('\n  a real shared/autonomy-policy.json cannot refuse master\'s appr
   }
 }
 
-// ─── 15. THE CLASS THAT NAMES THE ACT IS A CLASS THIS APPLIER CONSULTS ────────
+// 15. THE CLASS THAT NAMES THE ACT IS A CLASS THIS APPLIER CONSULTS
 // The applier used to resolve `revert-own-apply` alone — the safety net — and never `apply-source`,
 // whose entire description is applying a source change. No behavioural difference today (both
 // MASTER_ACT, both PERMANENT, both pinned FLOOR === CEILING === L4), which is exactly why it needed a

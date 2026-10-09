@@ -3,17 +3,9 @@
 /**
  * timeline.cjs — Timeline Flashbacks: git-backed state replay.
  *
- * Rāma modifies its own source. That is only safe if any past state can be
- * inspected and returned to. This module turns the git history of Rāma's own
- * repository into a navigable timeline:
- *
- *   - MARKERS   named points in time, correlated with what Rāma was doing
- *               (proposal applied, evolution absorbed, regen written)
- *   - FLASHBACK read any file as it existed at any commit, without touching
- *               the working tree — pure inspection, zero risk
- *   - DIFF      what changed between two points, and who caused it
- *   - RESTORE   bring a past version of a file back — routed through the
- *               proposal ledger, so a rollback is approved like any other change
+ * What the timeline exposes — MARKERS, FLASHBACK, DIFF, RESTORE — and why Rāma
+ * needs any past state inspectable: spec Section 137.2. Those four names are the
+ * exports below, so the narrative lives there rather than being restated here.
  *
  * SAFETY:
  *   - Read paths (`show`, `diff`, `markers`) never mutate the repository
@@ -31,7 +23,7 @@ try {
   console.warn('[timeline] simple-git not installed — timeline flashbacks disabled');
 }
 
-// ─── Correlated markers ───────────────────────────────────────────────────────
+// Correlated markers
 // Commits alone say what changed; markers say why. Populated from the event bus.
 const markers = [];        // newest-first
 const MAX_MARKERS = 300;
@@ -51,7 +43,7 @@ function git(repoPath) {
   return simpleGit(repoRoot(repoPath));
 }
 
-// ─── Timeline construction ────────────────────────────────────────────────────
+// Timeline construction
 /**
  * Build the timeline: commits, enriched with any markers that fall near them.
  * @param {object} opts { repoPath, limit, file }
@@ -96,7 +88,7 @@ async function buildTimeline(opts = {}) {
   };
 }
 
-// ─── Flashback: read the past ─────────────────────────────────────────────────
+// Flashback: read the past
 /**
  * Read a file exactly as it was at a commit. Does not touch the working tree.
  * @returns {{ok:boolean, content?:string, error?:string}}
@@ -157,7 +149,7 @@ async function fileHistory({ repoPath = null, file, limit = 40 }) {
   }
 }
 
-// ─── Restore: bring the past back, through the approval gate ───────────────────
+// Restore: bring the past back, through the approval gate
 /**
  * Propose restoring a file to a past version. Deliberately does NOT write.
  * A rollback is a change to Rāma's source like any other, so it gets the same
@@ -211,7 +203,7 @@ try {
   }
 } catch { /* ledger unavailable at load time */ }
 
-// ─── Event bus wiring — markers come from what Rāma actually did ───────────────
+// Event bus wiring — markers come from what Rāma actually did
 function wireBus() {
   let bus;
   try { bus = require('../ramaEventBus.cjs').bus; } catch { return; }
@@ -243,7 +235,7 @@ function summarisePayload(p) {
   };
 }
 
-// ─── IPC ──────────────────────────────────────────────────────────────────────
+// IPC
 function register(ipcMain) {
   wireBus();
 

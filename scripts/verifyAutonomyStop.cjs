@@ -4,7 +4,7 @@
 /**
  * verifyAutonomyStop.cjs — the stop halts Rāma, never master, and the permanent classes cannot be raised.
  *
- * ── THE THREE THINGS THIS SUITE EXISTS TO CATCH ───────────────────────────────────────────────────
+ * THE THREE THINGS THIS SUITE EXISTS TO CATCH
  *
  * 1. **A fail-safe default that deletes working behaviour.** `ollama-catalog`, `dependency-review`, the
  *    metacognition audit, selfCare's 120-second sweep and marketIntel's two ticks ship and run today.
@@ -21,7 +21,7 @@
  *    that must never happen is "stopped" printed over five live timers — `badgeLabel`'s defect, in the
  *    place it would be least acceptable.
  *
- * ── WHY LINE CITATIONS ARE A RESIDUAL AND NOT A ROW ───────────────────────────────────────────────
+ * WHY LINE CITATIONS ARE A RESIDUAL AND NOT A ROW
  *
  * `PRE_EXISTING` carries measured line numbers. The SYMBOL still existing is asserted (RED if it is
  * gone — a named dispatcher that does not exist is the badge defect inverted). A DRIFTED LINE NUMBER is
@@ -75,7 +75,7 @@ delete process.env[stop.ENV_KEY];
 
 console.log('\nthe autonomy stop and the policy table — the fence, asserted\n');
 
-// ─── 1. the module can always load ────────────────────────────────────────────
+// 1. the module can always load
 console.log('  a stop that can fail to load is not a stop');
 const stopSrc = read('electron/lib/autonomyStop.cjs');
 const stopCode = stopSrc.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
@@ -90,7 +90,7 @@ check('and reaches the capability matrix only inside lift()',
 check('it holds no timer of its own — it describes, it does not schedule',
   !/setInterval|setTimeout/.test(stopCode));
 
-// ─── 2. fail-safe: absence means stopped ──────────────────────────────────────
+// 2. fail-safe: absence means stopped
 console.log('\n  isStopped() — absence of configuration means STOPPED');
 {
   const root = scratch('failsafe');
@@ -118,7 +118,7 @@ console.log('\n  isStopped() — absence of configuration means STOPPED');
   check('a directory at the allow-file path means stopped', stop.isStopped() === true);
 }
 
-// ─── 3. the env override, checked first ───────────────────────────────────────
+// 3. the env override, checked first
 console.log('\n  the environment override outranks a valid allow-file');
 {
   const root = scratch('env');
@@ -134,7 +134,7 @@ console.log('\n  the environment override outranks a valid allow-file');
   check('removing it restores the allow-file\'s answer', stop.isStopped() === false);
 }
 
-// ─── 4. the two predicates are genuinely two ──────────────────────────────────
+// 4. the two predicates are genuinely two
 console.log('\n  two predicates, and collapsing them back into one goes red');
 {
   const root = scratch('two');
@@ -152,7 +152,7 @@ console.log('\n  two predicates, and collapsing them back into one goes red');
     engaged.teardown.performed === false && typeof engaged.teardown.reason === 'string');
 }
 
-// ─── 5. engage records BEFORE it destroys ─────────────────────────────────────
+// 5. engage records BEFORE it destroys
 console.log('\n  engage() records before it destroys');
 {
   const root = scratch('order');
@@ -169,7 +169,7 @@ console.log('\n  engage() records before it destroys');
     stopCode.indexOf('writeFileSync(stoppedRecordPath()') < stopCode.indexOf('unlinkSync(allowPath()'));
 }
 
-// ─── 6. lift() degrades honestly, and Rāma can never call it ──────────────────
+// 6. lift() degrades honestly, and Rāma can never call it
 console.log('\n  lift() — the only gated direction');
 {
   const root = scratch('lift');
@@ -198,7 +198,7 @@ console.log('\n  lift() — the only gated direction');
     callers.length === 0, callers.join(', '));
 }
 
-// ─── 7. the empty note, and the ordering on the way back ──────────────────────
+// 7. the empty note, and the ordering on the way back
 console.log('\n  the resume path, asserted on the source because the capability blocks the behaviour');
 {
   const liftBody = stopCode.slice(stopCode.indexOf('function lift('));
@@ -209,7 +209,7 @@ console.log('\n  the resume path, asserted on the source because the capability 
     /unlinkSync\(stoppedRecordPath\(\)\)/.test(liftBody));
 }
 
-// ─── 8. what the stop governs, and what it must not ───────────────────────────
+// 8. what the stop governs, and what it must not
 console.log('\n  the dispatch points, enumerated — the member that behaves differently is declared');
 check('every declared list is frozen',
   Object.isFrozen(stop.CHOKEPOINTS) && Object.isFrozen(stop.PRE_EXISTING)
@@ -276,7 +276,7 @@ for (const d of stop.PRE_EXISTING) {
     /NOTHING CALLS IT YET/.test(stopSrc) && /governedByWhenBuilt/.test(stopSrc));
 }
 
-// ─── 9. the behavioural proof for I11 ─────────────────────────────────────────
+// 9. the behavioural proof for I11
 async function provePreExistingStillDispatches() {
   console.log('\n  I11, measured: a default install still dispatches the work that already ships');
   const root = scratch('i11');
@@ -305,7 +305,7 @@ async function provePreExistingStillDispatches() {
   scheduler.unregister('stop-suite-probe');
 }
 
-// ─── 10. the label describes what is true ─────────────────────────────────────
+// 10. the label describes what is true
 function rest() {
 console.log('\n  statusText() — both halves, by name, in both states');
 {
@@ -328,7 +328,7 @@ console.log('\n  statusText() — both halves, by name, in both states');
   check('with an allow-file it says the loop is allowed, and by whom', /loop is allowed \(master/.test(allowed), allowed);
 }
 
-// ─── 11. the policy table: shape and arithmetic ───────────────────────────────
+// 11. the policy table: shape and arithmetic
 console.log('\n  the policy table — fifteen classes over frozen floors, ceilings and permanence');
 check('fifteen classes', policy.CLASSES.length === 15);
 check('every class has a floor and a ceiling',
@@ -374,7 +374,7 @@ check('exactly four classes are raisable at all, and only to L3',
   && ['propose-source', 'dependency-change', 'build-repair', 'author-change']
     .every(c => policy.CEILINGS[c] === 'L3' && policy.rank(policy.FLOORS[c]) < policy.rank('L3')));
 
-// ─── 12. THE ROW THAT GOES RED IF A PERMANENT CLASS IS MADE EDITABLE ──────────
+// 12. THE ROW THAT GOES RED IF A PERMANENT CLASS IS MADE EDITABLE
 console.log('\n  the permanent classes are mechanically unraisable');
 const EXPECTED_PERMANENT = [
   'apply-source', 'revert-own-apply', 'release-classify', 'capability-grant', 'loyalty-core',
@@ -418,7 +418,7 @@ check('a legitimate raise of one of the four is accepted',
 check('and so is a restriction below the floor, which is master putting Rāma offline',
   policy.validate({ version: 1, levels: { 'research-network': 'L1' } }).ok === true);
 
-// ─── 13. the resolver, with the stop dominating ───────────────────────────────
+// 13. the resolver, with the stop dominating
 console.log('\n  effective() — the stop is the first line, and nothing routes around it');
 {
   const root = scratch('resolve');
@@ -460,7 +460,7 @@ console.log('\n  effective() — the stop is the first line, and nothing routes 
     policy.effectiveFrom(forgedState, 'master-record') === policy.FLOORS['master-record']);
 }
 
-// ─── 14. require() and the master-driven carve-out ────────────────────────────
+// 14. require() and the master-driven carve-out
 console.log('\n  require() names what it needed; requireMasterDriven() is a two-class door');
 {
   const root = scratch('require');
@@ -508,7 +508,7 @@ console.log('\n  require() names what it needed; requireMasterDriven() is a two-
   check('no other module passes ignoreStop at all', borrowers.length === 0, borrowers.join(', '));
 }
 
-// ─── 15. the policy's own authority is not nameable by a diff ─────────────────
+// 15. the policy's own authority is not nameable by a diff
 console.log('\n  the policy\'s own authority');
 check('four self-governing paths are declared, in the policy module rather than in a consumer',
   policy.SELF_GOVERNING_PATHS.length === 4 && Object.isFrozen(policy.SELF_GOVERNING_PATHS));
@@ -530,7 +530,7 @@ if (unprotected.length) {
 check('the tripwire manifest is one of the self-governing paths',
   policy.SELF_GOVERNING_PATHS.some(p => p.path === 'shared/loyalty-tripwire.json'));
 
-// ─── 16. MASTER'S OWN ACT IS NOT GOVERNABLE BY A FILE ─────────────────────────
+// 16. MASTER'S OWN ACT IS NOT GOVERNABLE BY A FILE
 // The defect this section exists to catch: with `revert-own-apply` merely EDITABLE, a validated,
 // documented data edit lowering it to L0 made the applier's entry gate refuse A MASTER-APPROVED APPLY
 // again — the same defect the first rows of verifyUpgradeApplier.cjs exist to catch, reached through a
@@ -617,7 +617,7 @@ check('and so is one that only lowers it alongside legitimate edits',
   }
 }
 
-// ─── 17. lift()'s SUCCESS path, executed rather than read ─────────────────────
+// 17. lift()'s SUCCESS path, executed rather than read
 // It is the only writer of `allowed: true` — the single act that enables autonomy — and with the real
 // capability module it cannot succeed for anyone, so every one of these facts used to be asserted by
 // regex over the function's own source text. The injected module is not a weakening: isStopped() reads
@@ -680,7 +680,7 @@ console.log('\n  lift() — the success path, with the capability module injecte
     && /if \(!capability\) \{/.test(stopCode));
 }
 
-// ─── 18. a degraded create fence is visible where autonomy is reported ────────
+// 18. a degraded create fence is visible where autonomy is reported
 // The stop is fail-safe; the create fence is fail-open by design, so that a gate that cannot load never
 // costs the ledger its channels (I11). safeRequire records that in the BOOT LOG, which is not the
 // autonomy surface — so status() and statusText() would have gone on describing a fence that was not
@@ -721,7 +721,7 @@ console.log('\n  the create fence reports its own absence');
 
 }
 
-// ─── done ─────────────────────────────────────────────────────────────────────
+// done
 provePreExistingStillDispatches()
   .then(rest)
   .then(() => {

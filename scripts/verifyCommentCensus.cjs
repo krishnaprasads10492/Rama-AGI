@@ -168,8 +168,10 @@ const ZERO_FLOORS = Object.freeze([
   Object.freeze({
     file: 'electron/ipc/timeline.cjs',
     counters: Object.freeze(['pointer', 'evidence', 'trap']),
-    boundBy: 'its PRE_PASS ceiling of 48, the block-threshold rule (its 3-23 block is one of the three '
-      + 'unanchored ones), and its codeView digest',
+    boundBy: 'its PRE_PASS ceiling of 48 (now at 40) and its codeView digest. Its 3-23 block was one '
+      + 'of the three unanchored at the freeze and is RESOLVED: the four-bullet list that restated '
+      + 'four exported names moved to Section 137.2, the SAFETY paragraph stayed, and the pointer the '
+      + 'anchor added took this file from 0 to 1 — so the pointer floor of 0 no longer binds alone',
   }),
   Object.freeze({
     file: 'electron/lib/autonomyGate.cjs',
@@ -184,7 +186,11 @@ const ZERO_FLOORS = Object.freeze([
   Object.freeze({
     file: 'scripts/verifyUpgradeApplier.cjs',
     counters: Object.freeze(['pointer']),
-    boundBy: 'its evidence floor of 8, its trap floor of 2, and the SPLIT disposition of its 4-27 block',
+    boundBy: 'its evidence floor of 8 and its trap floor of 2. The SPLIT of its 4-27 block is APPLIED: '
+      + 'the opts.autonomous elaboration and the two-residuals paragraph moved to Section 137.2, the '
+      + 'measured shipped-install defect stayed, and the pointer went 0 to 1. The split yielded 5 '
+      + 'lines, not the 12-14 the design estimated, because the rest of that block is measured content '
+      + 'that legitimately stays — the estimate was wrong, not the pass',
   }),
   Object.freeze({
     file: 'scripts/verifyAutonomyStop.cjs',

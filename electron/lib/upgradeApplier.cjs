@@ -3,14 +3,14 @@
 /**
  * upgradeApplier.cjs — entry validation for the kind this design owns, and the byte snapshot behind it.
  *
- * ── WHY THE VALIDATION IS HERE AND NOT AT THE LEDGER ──────────────────────────────────────────────
+ * WHY THE VALIDATION IS HERE AND NOT AT THE LEDGER
  *
  * `proposals.cjs` is protected and cannot change. `proposals.create` is renderer-reachable at tier 1
  * with `meta` passed straight through, and `restore()` rehydrates `meta` and `changes` on an id check
  * alone — so a guard that ran once, before a restart, is not a guard that holds at apply time. The one
  * component this design owns that WRITES SOURCE therefore has to be the one that refuses.
  *
- * ── THE SIGNATURE IS NOT NEGOTIABLE ───────────────────────────────────────────────────────────────
+ * THE SIGNATURE IS NOT NEGOTIABLE
  *
  * Measured: `proposals.cjs` 235 invokes `await applier(p, opts)` — TWO arguments. A registered applier
  * cannot receive a third injected parameter, so a closure is the only seam, and `applyWith` is exported
@@ -18,7 +18,7 @@
  *
  *     register(ledger, io)  →  ledger.registerApplier(KIND.DIFF, (p, opts) => applyWith(io, p, opts))
  *
- * ── THE THREE THINGS THE STOP GOT WRONG, AND WHAT REPLACES THEM ───────────────────────────────────
+ * THE THREE THINGS THE STOP GOT WRONG, AND WHAT REPLACES THEM
  *
  * 1. **`opts.autonomous` is never read in a conditional.** It arrives from the renderer
  *    (`preload.cjs` 680 → `proposals.cjs` 235) untouched, so a predicate built on it is supplied by the
@@ -53,7 +53,7 @@
  *    is rejected whole; `requireMasterDriven` throws outright for a `MASTER_ACT` class that is not
  *    permanent, so the two sets cannot drift apart quietly.
  *
- * ── WHAT THIS DOES NOT DO, STATED SO NOTHING READS AS PASSED ──────────────────────────────────────
+ * WHAT THIS DOES NOT DO, STATED SO NOTHING READS AS PASSED
  *
  * There is NO verification plan, NO breakage analysis and NO corrected proposal in this slice: the
  * result carries `verification: 'not-run'`, a declared value that must never render as "passed". The
@@ -102,7 +102,7 @@ function register(ledger, io = {}) {
   return { ok: true, kind: KIND.DIFF };
 }
 
-// ─── Path validation ──────────────────────────────────────────────────────────
+// Path validation
 
 /**
  * Refuse a path SPELLING outright, before anything resolves it — because resolution is exactly what
@@ -264,7 +264,7 @@ function writabilityOf(fs, target) {
   }
 }
 
-// ─── The applier ──────────────────────────────────────────────────────────────
+// The applier
 
 /**
  * @param {object} io        injected `{fs, repoRoot, userDataRoot, policy, guard, capability, now}`
@@ -277,7 +277,7 @@ async function applyWith(io, proposal, opts = {}) {
   const { fs, repoRoot, policy, guard, capability, now } = defaultIo(io);
   const userDataRoot = io?.userDataRoot || stop.userDataRoot();
 
-  // ── 0. master-driven, derived from the caller — and declared insufficient ──────────────────────
+  // 0. master-driven, derived from the caller — and declared insufficient
   // `proposals.apply` already authorised `opts.user` before this runs, so the predicate is
   // tautologically TRUE where it is evaluated. And `capability.can` reads only `user.tier`, so a
   // `{tier: 0}` object is enough — which matters more than "forgeable in-process" conceded, because
@@ -342,11 +342,11 @@ async function applyWith(io, proposal, opts = {}) {
   delete proposal.meta.autonomy.appliedBy;
   delete proposal.meta.autonomy.appliedAt;
 
-  // ── the id, and the DERIVED snapshot directory ─────────────────────────────────────────────────
+  // the id, and the DERIVED snapshot directory
   if (!PID.test(String(proposal?.id ?? ''))) throw new Error('malformed proposal id');
   const dir = path.join(userDataRoot, stop.STATE_DIR, stop.SNAPSHOT_DIR, proposal.id);
 
-  // ── 1. the schema marker ───────────────────────────────────────────────────────────────────────
+  // 1. the schema marker
   if (proposal.meta?.schema !== SCHEMA) {
     throw new Error(`an entry of kind "${KIND.DIFF}" needs meta.schema "${SCHEMA}" — this one was not filed by this loop`);
   }
@@ -354,7 +354,7 @@ async function applyWith(io, proposal, opts = {}) {
   const changes = Array.isArray(proposal.changes) ? proposal.changes : [];
   if (changes.length === 0) throw new Error('a diff-bearing entry needs at least one change');
 
-  // ── 2. the loyalty guard, RE-RUN rather than trusted from creation ─────────────────────────────
+  // 2. the loyalty guard, RE-RUN rather than trusted from creation
   // CANONICALISED FIRST. `loyaltyGuard.normalise` swaps separators, strips a leading `./` and lower-cases
   // — it does not resolve structure and it does not strip a stream suffix, so `loyaltyGuard.cjs::$DATA`
   // reached this re-run and it refused NOTHING, for a spelling that reads and writes the real file's
@@ -382,7 +382,7 @@ async function applyWith(io, proposal, opts = {}) {
     throw new Error(`refused: these files constitute the loyalty covenant (I15): ${covenantRefused.join(', ')}`);
   }
 
-  // ── 3. nothing may name the policy's own authority, or the stop's own state ────────────────────
+  // 3. nothing may name the policy's own authority, or the stop's own state
   // `io` is handed over so the comparison is made against the root these writes would land in, and so
   // the filesystem half of the fence asks about the right volume rather than about this install.
   const governed = gate.governedPathsNamed(proposal, { fs, repoRoot });
@@ -391,7 +391,7 @@ async function applyWith(io, proposal, opts = {}) {
       + governed.map(g => `${g.token} (in ${g.where})`).join(', '));
   }
 
-  // ── 4 + 5. one pass over the changes: paths, actions, and what already exists ──────────────────
+  // 4 + 5. one pass over the changes: paths, actions, and what already exists
   const targets = [];
   for (const change of changes) {
     if (!ALLOWED_ACTIONS.includes(change?.action)) {
@@ -412,7 +412,7 @@ async function applyWith(io, proposal, opts = {}) {
     targets.push({ ...v, action: change.action, content: change.content, baseSha256: change.baseSha256 ?? null });
   }
 
-  // ── 6. the file on disk is still the file the change was computed from ─────────────────────────
+  // 6. the file on disk is still the file the change was computed from
   for (const t of targets) {
     if (t.action !== 'patch') continue;
     if (!/^[0-9a-f]{64}$/.test(String(t.baseSha256 ?? ''))) {
@@ -424,7 +424,7 @@ async function applyWith(io, proposal, opts = {}) {
     }
   }
 
-  // ── 7. is the DESTINATION even writable? Probed before the snapshot is taken ───────────────────
+  // 7. is the DESTINATION even writable? Probed before the snapshot is taken
   // A write that fails because the destination is unwritable sends `revert()` to restore the
   // snapshotted bytes to those same unwritable paths, so the revert fails too — and a failed revert is
   // FATAL: it writes `fatal.json` and `stop.engage()` revokes master's allow-file. A read-only
@@ -441,7 +441,7 @@ async function applyWith(io, proposal, opts = {}) {
     }
   }
 
-  // ── the snapshot, taken and VERIFIED before the first write ────────────────────────────────────
+  // the snapshot, taken and VERIFIED before the first write
   const files = [];
   fs.mkdirSync(path.join(dir, 'files'), { recursive: true });
   for (const t of targets) {
@@ -464,7 +464,7 @@ async function applyWith(io, proposal, opts = {}) {
 
   const token = { proposalId: proposal.id, dir, at, snapshot: { files } };
 
-  // ── the writes ─────────────────────────────────────────────────────────────────────────────────
+  // the writes
   const applied = [];
   try {
     for (const t of targets) {
@@ -500,7 +500,7 @@ async function applyWith(io, proposal, opts = {}) {
   };
 }
 
-// ─── The revert ───────────────────────────────────────────────────────────────
+// The revert
 
 /**
  * Restore each snapshotted file to its RECORDED PRIOR STATE. `existed: true` restores the bytes;
@@ -558,7 +558,7 @@ function revert(token, io = {}) {
   return { ok: true, failures, restored, removed };
 }
 
-// ─── Retention ────────────────────────────────────────────────────────────────
+// Retention
 
 /**
  * A whole-file copy per apply accumulates, and this design mandates a real purge for every other byte it

@@ -8,7 +8,7 @@
  * any proposal, fail-safe.* SELF_UPGRADE.md §E.2 is the design; this is the narrowed slice of it the
  * orchestrator cut, and what is NOT here is named rather than implied (DEFERRED, below).
  *
- * ── TWO PREDICATES, AND THE ASYMMETRY IS THE DECISION ─────────────────────────────────────────────
+ * TWO PREDICATES, AND THE ASYMMETRY IS THE DECISION
  *
  *   isStopped()  governs NEW autonomous action. FAIL-SAFE: absence of configuration means STOPPED.
  *                It has a real consumer: `autonomyGate.fileProposal`, the one chokepoint in this slice.
@@ -28,21 +28,21 @@
  * hand-created a file nobody had told him about. That is a regression wearing a fail-safe argument,
  * and I11 has no exception for it.
  *
- * ── WHY A FILE WHOSE PRESENCE GRANTS, RATHER THAN WHOSE PRESENCE FORBIDS ──────────────────────────
+ * WHY A FILE WHOSE PRESENCE GRANTS, RATHER THAN WHOSE PRESENCE FORBIDS
  *
  * A stop-flag means the default state of a fresh install, a wiped profile, a half-written file, a disk
  * error or a permissions change is RUNNING. Fail-safe requires the uncertain state to be the safe one,
  * so the safe state must be the one that needs nothing to be true. `o?.allowed !== true` is strict on
  * purpose: `"true"`, `1`, `{}`, `null`, a directory and a zero-byte file all resolve to stopped.
  *
- * ── DEPENDENCY-FREE AND SYNCHRONOUS, DELIBERATELY ────────────────────────────────────────────────
+ * DEPENDENCY-FREE AND SYNCHRONOUS, DELIBERATELY
  *
  * `fs`, `path`, `os` and nothing else at module scope. No `electron`, no `dataStore`, no `cryptoCore`,
  * so this is callable from `before-quit`, from a suite under plain `node`, from a module loaded before
  * the store is unlocked, and from inside a `catch` during a failing boot. A stop that can fail to load
  * is not a stop — `selfRepair.cjs` already made this argument for itself.
  *
- * ── WHERE THE STATE LIVES, AND WHY OUTSIDE THE REPOSITORY ────────────────────────────────────────
+ * WHERE THE STATE LIVES, AND WHY OUTSIDE THE REPOSITORY
  *
  *   <userData>/rama/autonomy.allow          {"allowed": true, "by": "...", "at": "<ISO>", "note": "..."}
  *   <userData>/rama/autonomy.stopped.json   {at, reason, by, priorAllow}
@@ -56,7 +56,7 @@
  * because `proposals.cjs` is protected. `scripts/verifyAutonomyStop.cjs` prints that residual on every
  * run. See the build note's "for master" list.
  *
- * ── DEFERRED IN THIS SLICE, NAMED SO THE COUNT CANNOT LIE ────────────────────────────────────────
+ * DEFERRED IN THIS SLICE, NAMED SO THE COUNT CANNOT LIE
  *
  * `engage()` records the halt and performs NO teardown of the pre-existing timers. Reason: the resume
  * path is `lift()`, `lift()` requires `system.suspend-autonomy`, and that capability is not in
@@ -70,7 +70,7 @@ const fs   = require('fs');
 const path = require('path');
 const os   = require('os');
 
-// ─── Names, in one place ──────────────────────────────────────────────────────
+// Names, in one place
 const ENV_KEY        = 'RAMA_AUTONOMY';
 const STATE_DIR      = 'rama';
 const ALLOW_FILE     = 'autonomy.allow';
@@ -119,7 +119,7 @@ function envStop() {
   return String(process.env[ENV_KEY] || '').toLowerCase() === 'stop';
 }
 
-// ─── The two predicates ───────────────────────────────────────────────────────
+// The two predicates
 
 /**
  * Fail-safe. Governs the NEW autonomous dispatch points in `CHOKEPOINTS`.
@@ -144,7 +144,7 @@ function isHalted() {
   try { fs.accessSync(stoppedRecordPath()); return true; } catch { return false; }
 }
 
-// ─── What each predicate governs. Declared data, printed by the suite ─────────
+// What each predicate governs. Declared data, printed by the suite
 
 /**
  * The NEW autonomous dispatch points that consult `isStopped()`. One, in this slice.
@@ -251,7 +251,7 @@ const STOP_EXEMPT = Object.freeze([
   }),
 ]);
 
-// ─── Engaging ─────────────────────────────────────────────────────────────────
+// Engaging
 
 /**
  * Engage the halt. No capability check and no `user`: a stop that can be refused is not a stop, and
@@ -290,10 +290,10 @@ function engage(reason, by = 'unknown') {
   };
 }
 
-// ─── Lifting — the only gated direction, and it degrades honestly ─────────────
+// Lifting — the only gated direction, and it degrades honestly
 
 /**
- * The ONLY writer of `allowed: true`.
+ * The ONLY writer of `allowed: true` (spec Section 132).
  *
  * Refuses, in order: a string `user` (a name is not an identity — `proposals.authorise`'s own words);
  * a `user` with no numeric tier; a user without `system.suspend-autonomy`; an empty note.
@@ -308,7 +308,7 @@ function engage(reason, by = 'unknown') {
  * ORDERING: the allow-file is written FIRST, the stopped-record removed SECOND, so a crash between
  * them leaves "allowed but still halted" — the recoverable direction.
  *
- * ── WHY THE CAPABILITY MODULE IS INJECTABLE, AND WHY THAT IS NOT A WEAKENING ──────────────────────
+ * WHY THE CAPABILITY MODULE IS INJECTABLE, AND WHY THAT IS NOT A WEAKENING
  *
  * `system.suspend-autonomy` is absent from the matrix, so with the real module this function CANNOT
  * SUCCEED FOR ANYONE — which meant its success path, the only act in the system that writes
@@ -369,7 +369,7 @@ function lift(user, note, { capability: injectedCapability = null } = {}) {
   return { ok: true, allow, haltCleared };
 }
 
-// ─── Reporting ────────────────────────────────────────────────────────────────
+// Reporting
 
 /**
  * Did the create fence's module load?
