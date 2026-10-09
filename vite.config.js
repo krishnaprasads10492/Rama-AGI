@@ -44,10 +44,55 @@ export default defineConfig({
       // No `input` override: the root index.html is the entry for both dev and
       // build. Overriding it here is what let dev and production diverge.
       output: {
-        manualChunks: {
-          'vendor-react':   ['react', 'react-dom'],
-          'vendor-router':  ['react-router-dom'],
-          'vendor-zustand': ['zustand'],
+        // A FUNCTION, NOT THE ARRAY FORM, AND THE REASON IS MEASURED.
+        //
+        // `manualChunks: { 'vendor-react': ['react', 'react-dom'] }` produced a
+        // `vendor-react` chunk of **0.00 kB**. The array form matches the bare
+        // package entry, but `@vitejs/plugin-react` uses the automatic JSX
+        // runtime, so components import `react/jsx-runtime` and the app imports
+        // `react-dom/client` — different module ids that the array never caught.
+        // React-DOM therefore landed in a shared chunk that Rollup named after
+        // whichever module anchored it: `WhyPanel-*.js`, 386 kB, for a source
+        // file of 10 kB that imports nothing but React and a font token. A
+        // vendor chunk named after a page is re-fetched whenever that page's
+        // graph changes, which is the opposite of what pinning vendors is for.
+        //
+        // Matching on the resolved path under `node_modules` catches every
+        // sub-path entry instead.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          const p = id.replace(/\\/g, '/');
+
+          // MONACO CORE ONLY. `basic-languages/` is deliberately LEFT ALONE so
+          // Rollup keeps emitting one lazy chunk per Monarch grammar — that is
+          // what makes ~90 languages available on demand instead of up front,
+          // and folding them in here would undo it and build one larger blob.
+          // Splitting the core out means editing IDE page code no longer
+          // invalidates 4.2 MB of editor that never changed.
+          if (p.includes('/node_modules/monaco-editor/')) {
+            // THE GRAMMARS ARE AT `esm/vs/languages/definitions/<lang>/<lang>.js`,
+            // which is MEASURED, not assumed. `esm/vs/basic-languages/` holds
+            // exactly one file — `monaco.contribution.js`, the barrel — and an
+            // exclusion aimed there silently caught nothing: the build dropped
+            // from ~110 chunks to 30 and `vendor-monaco` grew to 4,596 kB,
+            // because every one of the ~90 grammars had been folded in and
+            // would download up front.
+            //
+            // Returning `undefined` to "let Rollup decide" does not work either,
+            // also measured: once `vendor-monaco` claims the surrounding graph
+            // the dynamic imports collapse into it. Each grammar therefore gets
+            // an EXPLICIT chunk name, so opening a `.rs` file still fetches only
+            // Rust and the ~90 languages stay available on demand.
+            const lang = /\/languages\/definitions\/([^/]+)\//.exec(p);
+            if (lang) return `lang-${lang[1]}`;
+            return 'vendor-monaco';
+          }
+
+          if (/\/node_modules\/(react|react-dom|scheduler)\//.test(p)) return 'vendor-react';
+          if (p.includes('/node_modules/react-router')) return 'vendor-router';
+          if (p.includes('/node_modules/zustand/')) return 'vendor-zustand';
+          if (p.includes('/node_modules/lightweight-charts/')) return 'vendor-charts';
+          return undefined;
         },
       },
     },
