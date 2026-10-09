@@ -348,6 +348,94 @@ function spanLabel(bars, iv) {
  * @param {string} intervalId
  * @returns {Array<{bars: number, label: string, span: string, title: string, atCap: boolean}>}
  */
+/**
+ * The horizon for a period MASTER CHOSE, in whatever unit he chose it in.
+ *
+ * `horizonChoices` offers four bar-count presets and stays, because a preset is one click. But a
+ * preset list is not a period master selected, and the engine never required one: `projection.py`'s
+ * `cone(bars_ahead=...)` takes any integer and clamps it itself at :165
+ * (`n = max(1, min(int(bars_ahead or 1), MAX_BARS_AHEAD))`). **The fixed horizons were a renderer
+ * limitation, not an engine one** — which is why this is additive and needs no engine change.
+ *
+ * A PERIOD IS CONVERTED TO BARS, NOT GUESSED AT. `minutes` and `hours` are wall-clock; `sessions` is
+ * trading sessions, which is the only honest unit for daily and coarser bars because a calendar day
+ * is not a bar. The conversion ROUNDS UP: asking for 90 minutes on a 15m chart is 6 bars, and asking
+ * for 100 minutes is 7 — covering the period asked for rather than stopping short of it.
+ *
+ * WHAT IT REFUSES, rather than quietly fixing: a period that is not a positive finite number, and an
+ * interval it cannot measure. A zero or negative horizon is not clamped up to 1, because "project
+ * nothing" and "project one bar" are different requests and only one of them was made.
+ *
+ * THE CAP IS REPORTED, NEVER HIDDEN. Over 40 bars the result carries `capped: true`, the pre-clamp
+ * `requestedBars`, and a `why` that names both numbers and the period actually covered — the same
+ * contract `projectionState` already honours, so the existing cap sentence in `PriceChart.jsx` keeps
+ * working without change.
+ *
+ * @param {{bars?: number, minutes?: number, hours?: number, sessions?: number}} want
+ * @param {string} intervalId
+ * @returns {{ok: boolean, bars: number|null, requestedBars: number|null, capped: boolean,
+ *   span: string, label: string, why: string}}
+ */
+export function horizonFor(want, intervalId) {
+  const refuse = (why) => ({
+    ok: false, bars: null, requestedBars: null, capped: false, span: '', label: '', why,
+  });
+
+  const iv = intervalDef(text(intervalId));
+  if (!iv || !finite(Number(iv.span)) || Number(iv.span) <= 0) {
+    return refuse(`no bar span is known for ${text(intervalId) || 'this interval'}, so a period `
+      + 'cannot be converted to bars.');
+  }
+  const w = (want && typeof want === 'object' && !Array.isArray(want)) ? want : {};
+
+  // Exactly one unit, so an ambiguous request is refused rather than silently ranked.
+  const given = ['bars', 'minutes', 'hours', 'sessions'].filter((k) => w[k] !== undefined && w[k] !== null);
+  if (given.length === 0) return refuse('no period was given.');
+  if (given.length > 1) {
+    return refuse(`a period was given in ${given.length} units at once (${given.join(', ')}); `
+      + 'name one.');
+  }
+
+  const unit = given[0];
+  const value = Number(w[unit]);
+  if (!finite(value) || value <= 0) {
+    return refuse(`${unit} must be a positive number — ${JSON.stringify(w[unit])} is not a period.`);
+  }
+
+  // Minutes of wall-clock the request covers. SESSION_MINUTES is imported rather than restated, so a
+  // session here is the same length `timeframes.js` uses everywhere else.
+  let minutes;
+  if (unit === 'bars') minutes = value * iv.span;
+  else if (unit === 'minutes') minutes = value;
+  else if (unit === 'hours') minutes = value * 60;
+  else minutes = value * SESSION_MINUTES;
+
+  const requestedBars = unit === 'bars' ? Math.ceil(value) : Math.ceil(minutes / iv.span);
+  // DECLARED UNREACHABLE for any positive finite period, and asserted as such: rounding UP means
+  // even a fraction of a bar covers to 1. Kept as defence against a future unit whose conversion
+  // could yield zero — not as a live branch. A suite row that claimed this REFUSED went red.
+  if (!finite(requestedBars) || requestedBars < 1) {
+    return refuse(`that period is shorter than one ${iv.label} bar.`);
+  }
+
+  const bars = Math.min(requestedBars, MAX_BARS_AHEAD);
+  const capped = requestedBars > MAX_BARS_AHEAD;
+  const span = spanLabel(bars, iv);
+
+  return {
+    ok: true,
+    bars,
+    requestedBars,
+    capped,
+    span,
+    label: `${bars} bars`,
+    why: capped
+      ? `${requestedBars} ${iv.label} bars is past the engine's ${MAX_BARS_AHEAD}-bar ceiling, so the `
+        + `projection covers ${bars} bars — about ${span} — and stops there.`
+      : `${bars} ${iv.label} bar${bars === 1 ? '' : 's'} ahead — about ${span}.`,
+  };
+}
+
 export function horizonChoices(intervalId) {
   const iv = intervalDef(text(intervalId));
   if (!iv || !finite(Number(iv.span)) || Number(iv.span) <= 0) return [];

@@ -33,7 +33,7 @@ import { fileURLToPath } from 'url';
 
 import {
   MAX_BARS_AHEAD, IQR_Z, projectionMode, quantileBars, projectionState, projectionInputs,
-  horizonChoices,
+  horizonChoices, horizonFor,
 } from '../src/pages/StockMind/chartProjection.js';
 import { interval as intervalDef, SESSION_MINUTES } from '../src/pages/StockMind/timeframes.js';
 
@@ -530,6 +530,83 @@ check('and that panel shows the cap beside the bars-ahead count',
   /cone\.maxBarsAhead \|\| '—'/.test(page));
 check('PopoutPanel is untouched by the projection half — it has no cone',
   !/projectionMeta/.test(read(path.join(SM, 'PopoutPanel.jsx'))));
+
+// ── horizonFor: the period MASTER selected, not a preset ─────────────────────
+//
+// Master: the projection "should be calculated for the time period that user selects not a fixed
+// one". `projection.py:165` already clamps any `bars_ahead` itself, so the four presets were a
+// renderer limitation and never an engine one. These rows assert the conversion, the refusals and
+// the cap — each with the mutation that reddens it.
+console.log('\n  horizonFor — an arbitrary period, converted and capped');
+{
+  // 15m bars: 90 minutes is exactly 6. REDBY: floor instead of ceil, or read iv.span wrongly.
+  const h90 = horizonFor({ minutes: 90 }, '15m');
+  check('90 minutes on a 15m chart is 6 bars', h90.ok === true && h90.bars === 6,
+    JSON.stringify(h90));
+
+  // ROUNDING UP IS THE DECISION: 100 minutes does not fit in 6 bars, so it takes 7 and covers the
+  // period asked for rather than stopping short. REDBY: switch ceil to floor and this reads 6.
+  const h100 = horizonFor({ minutes: 100 }, '15m');
+  check('100 minutes rounds UP to 7 bars rather than stopping short at 6',
+    h100.ok === true && h100.bars === 7, JSON.stringify(h100));
+
+  // Hours are wall-clock. REDBY: drop the x60.
+  const h2h = horizonFor({ hours: 2 }, '15m');
+  check('2 hours on a 15m chart is 8 bars', h2h.ok === true && h2h.bars === 8, JSON.stringify(h2h));
+
+  // Sessions are the only honest unit for daily bars — a calendar day is not a bar. On 1d, one
+  // session is one bar. REDBY: convert sessions as wall-clock minutes (1 session would become 0).
+  const h5s = horizonFor({ sessions: 5 }, '1d');
+  check('5 sessions on a 1d chart is 5 bars', h5s.ok === true && h5s.bars === 5, JSON.stringify(h5s));
+
+  // A bar count still works, so the presets keep their meaning. REDBY: ignore the `bars` unit.
+  const h20 = horizonFor({ bars: 20 }, '15m');
+  check('an explicit bar count is honoured unchanged', h20.ok === true && h20.bars === 20,
+    JSON.stringify(h20));
+
+  // THE CAP IS REPORTED, NOT HIDDEN, and the pre-clamp request survives for the sentence that names
+  // both numbers. REDBY: clamp without setting `capped`, or without keeping `requestedBars`.
+  const hBig = horizonFor({ bars: 500 }, '15m');
+  check('500 bars is capped to the engine ceiling with the request preserved',
+    hBig.ok === true && hBig.bars === MAX_BARS_AHEAD && hBig.capped === true
+    && hBig.requestedBars === 500, JSON.stringify(hBig));
+  check('and the capped reason names both the request and the ceiling',
+    hBig.why.includes('500') && hBig.why.includes(String(MAX_BARS_AHEAD)), hBig.why);
+
+  // An uncapped horizon must NOT claim it was capped. REDBY: set capped unconditionally.
+  check('an in-range horizon is not marked capped', h20.capped === false, JSON.stringify(h20));
+
+  // REFUSALS. Zero is not clamped up to 1: "project nothing" and "project one bar" are different
+  // requests. REDBY: coerce with Math.max(1, ...) and these three go green while meaning nothing.
+  for (const bad of [{ bars: 0 }, { bars: -5 }, { minutes: 0 }, { bars: 'many' }, { bars: NaN }]) {
+    const r = horizonFor(bad, '15m');
+    check(`${JSON.stringify(bad)} is refused rather than coerced`,
+      r.ok === false && r.bars === null && r.why.length > 0, JSON.stringify(r));
+  }
+  // An ambiguous request is refused rather than silently ranked. REDBY: pick the first unit.
+  const amb = horizonFor({ minutes: 30, bars: 4 }, '15m');
+  check('a period given in two units at once is refused and says so',
+    amb.ok === false && /units at once/.test(amb.why), amb.why);
+
+  // An unmeasurable interval cannot convert a period. REDBY: default the span to 1.
+  const noIv = horizonFor({ minutes: 30 }, 'not-an-interval');
+  check('an unknown interval is refused rather than assumed', noIv.ok === false,
+    JSON.stringify(noIv));
+
+  // A SUB-BAR PERIOD YIELDS ONE BAR, which is the round-up rule applied at its edge rather than a
+  // special case: the smallest unit that covers the period asked for is one bar. This row exists
+  // because the first version of it asserted a REFUSAL and went red — the `requestedBars < 1` guard
+  // in `horizonFor` is therefore UNREACHABLE for any positive finite period, and is kept only as
+  // defence against a future conversion that could produce zero. REDBY: switch ceil to floor, and
+  // this collapses to 0 bars.
+  const tiny = horizonFor({ minutes: 0.0001 }, '1d');
+  check('a period shorter than one bar still covers it with exactly 1 bar',
+    tiny.ok === true && tiny.bars === 1, JSON.stringify(tiny));
+
+  // The presets still exist — this is additive, and removing a capability is not allowed.
+  check('horizonChoices still offers its presets alongside', horizonChoices('15m').length >= 1,
+    String(horizonChoices('15m').length));
+}
 
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILURES'} — ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);
