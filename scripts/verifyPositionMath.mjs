@@ -16,6 +16,7 @@
  * Run: node scripts/verifyPositionMath.mjs   (or npm run verify:position-math)
  */
 
+import { readFileSync } from 'node:fs';
 import * as pm from '../src/pages/StockMind/positionMath.js';
 
 let pass = 0;
@@ -216,6 +217,70 @@ for (const bad of [null, undefined, 0, '', {}, [], NaN, 'x', { netQty: 'x', avgC
     pm.whyCannotPredict(bad);
   } catch (e) { threw = e.message; }
   check(`${JSON.stringify(bad)} is handled`, threw === null, threw);
+}
+
+// ── The lot size, across two languages and three files ───────────────────────
+//
+// WHY THIS LIVES IN A NODE SUITE. The Python tests cannot run on this machine — the engine needs
+// CPython 3.12 and the box has 3.14 with no numpy — so a Python-side invariant is unverified here by
+// construction. Parsing the Python from a Node suite is the project's established answer to exactly
+// that: `verifyChartProjection.mjs` pins the engine's bar clamp this way and `verifyTimeframes.mjs`
+// pins `providers.py`.
+//
+// WHAT WENT WRONG, measured 2026-10-09. `dispatcher.LOT_SIZES` held NIFTY 25 while
+// `strategy_spec`'s warning told master NIFTY is 75 units. Both were stale and they disagreed by a
+// FACTOR OF THREE, on the number that decides `lotCount` and `maxRisk` — so master was told one
+// contract size and sized at another. NSE took NIFTY 25 -> 75 in Nov 2024 and 75 -> 65 for the
+// January 2026 series; the correct figure is 65 and neither file had it.
+//
+// A lot size is exchange-set and will change again, so the guarantee worth asserting is not the
+// VALUE but the AGREEMENT: whatever the number is, all three files say the same one.
+{
+  const read = (rel) => {
+    try { return readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8'); }
+    catch { return null; }
+  };
+
+  const dispatcher = read('ai_backend/engine/dispatcher.py');
+  const spec = read('ai_backend/engine/strategy_spec.py');
+  const pyTest = read('ai_backend/tests/test_instrument.py');
+
+  // Only the LOT_SIZES assignment, so a lot size quoted in a comment cannot satisfy this.
+  const lotTable = dispatcher && /^LOT_SIZES\s*=\s*\{([^}]*)\}/m.exec(dispatcher);
+  const niftyLot = lotTable && /"NIFTY"\s*:\s*(\d+)/.exec(lotTable[1]);
+  const nifty50Lot = lotTable && /"NIFTY50"\s*:\s*(\d+)/.exec(lotTable[1]);
+  // The warning master actually reads.
+  const warned = spec && /NIFTY is (\d+) units/.exec(spec);
+  // The Python test's own expectation, so it cannot drift from the string it checks.
+  const tested = pyTest && /"(\d+) units" in w/.exec(pyTest);
+
+  check('the dispatcher declares a NIFTY market lot', niftyLot !== null && niftyLot !== undefined,
+    'LOT_SIZES["NIFTY"] not found in ai_backend/engine/dispatcher.py');
+  check('strategy_spec names a NIFTY lot in its warning', warned !== null && warned !== undefined,
+    'the "NIFTY is N units" warning not found in ai_backend/engine/strategy_spec.py');
+
+  if (niftyLot && warned) {
+    // REDBY: change either number alone. This is the row that would have caught 25-versus-75.
+    eq('the dispatcher lot and the warning master reads agree',
+      Number(warned[1]), Number(niftyLot[1]));
+  }
+  if (niftyLot && tested) {
+    // REDBY: fix the warning without fixing the test that asserts it, or vice versa.
+    eq('the Python test asserts that same lot', Number(tested[1]), Number(niftyLot[1]));
+  }
+  if (niftyLot && nifty50Lot) {
+    // `_lot` normalises NIFTY50 to NIFTY, so an unequal pair is a contradiction waiting for a caller
+    // that reaches the key directly. REDBY: make them differ.
+    eq('the NIFTY50 alias carries the same lot as NIFTY',
+      Number(nifty50Lot[1]), Number(niftyLot[1]));
+  }
+  if (niftyLot) {
+    // Not a claim that 65 is forever right — a claim that the PRE-2024 table is not back. REDBY:
+    // restore NIFTY 25, the value that shipped.
+    check(`the NIFTY lot (${niftyLot[1]}) is not the stale pre-November-2024 25`,
+      Number(niftyLot[1]) !== 25,
+      'LOT_SIZES has regressed to the table that was wrong by two exchange revisions');
+  }
 }
 
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILURES'} — ${pass} passed, ${fail} failed\n`);

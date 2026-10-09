@@ -87,10 +87,33 @@ def bs_greeks(S, K, T, iv, opt_type):
 # ── Config ────────────────────────────────────────────────────────────────────
 
 STRIKE_STEPS = {"NIFTY": 50, "BANKNIFTY": 100, "FINNIFTY": 50, "MIDCPNIFTY": 25, "SENSEX": 100, "NIFTY50": 50}
-LOT_SIZES    = {"NIFTY": 25, "BANKNIFTY": 15, "FINNIFTY": 40, "MIDCPNIFTY": 75, "SENSEX": 10, "NIFTY50": 25}
+
+# EXCHANGE-SET DATA WITH AN EXPIRY DATE. These are NSE/BSE market lots, not Rama's choice, and the
+# exchange revises them. This table was wrong in BOTH directions before it was corrected, which is why
+# it now carries its provenance:
+#
+#   - it held the PRE-NOVEMBER-2024 set (NIFTY 25, BANKNIFTY 15, FINNIFTY 40, MIDCPNIFTY 75, SENSEX 10)
+#     and so was stale by TWO revisions;
+#   - NSE tripled NIFTY 25 -> 75 effective 20 Nov 2024 (SEBI's derivatives framework), then REDUCED it
+#     75 -> 65 for contracts from the January 2026 series (circular effective 30 Dec 2025), with
+#     BANKNIFTY 35 -> 30, FINNIFTY 65 -> 60 and MIDCPNIFTY 140 -> 120 in the same revision.
+#
+# Verified 2026-10-09 against broker and exchange-summary publications, NOT against an NSE circular PDF
+# nor a live broker feed. So treat it as the best available figure and not as attested: a lot size is
+# worth real money per unit, and this file is the fallback that decides `lotCount` and `maxRisk` when a
+# caller supplies none.
+#
+# THE REAL FIX IS NOT A BETTER CONSTANT. A hardcoded contract size goes stale silently and a trader
+# only finds out by placing a trade. These belong in the broker/exchange feed, with this table as a
+# dated fallback that says how old it is. Until then, re-verify on every review.
+LOT_SIZES    = {"NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60, "MIDCPNIFTY": 120, "SENSEX": 20, "NIFTY50": 65}
 
 def _step(sym): return STRIKE_STEPS.get(sym.upper().replace("50", "").replace("NIFTY50", "NIFTY"), 50)
-def _lot(sym):  return LOT_SIZES.get(sym.upper().replace("50", "").replace("NIFTY50", "NIFTY"), 25)
+
+# The default is NIFTY's lot, and for an unrecognised symbol that is a GUESS rather than a fact —
+# stock contracts differ per symbol. It stays an int because both call sites do `... or _lot(symbol)`
+# and expect one, but a wrong lot here mis-sizes a position silently.
+def _lot(sym):  return LOT_SIZES.get(sym.upper().replace("50", "").replace("NIFTY50", "NIFTY"), 65)
 def _atm(price, sym): s = _step(sym); return round(price / s) * s
 
 # ── Mode-aware probability adjustment ────────────────────────────────────────

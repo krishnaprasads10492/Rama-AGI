@@ -110,8 +110,8 @@ check("and that basis and rollover are not modelled",
 print("\n  lot size")
 check("a lot size of 1 on futures warns that real contracts trade in lots",
       any("fixed lots" in w for w in S.validate_spec(spec(instrument="futures"))["warnings"]))
-check("NIFTY's 75 is named in that warning",
-      any("75 units" in w for w in S.validate_spec(spec(instrument="futures"))["warnings"]))
+check("NIFTY's 65 is named in that warning",
+      any("65 units" in w for w in S.validate_spec(spec(instrument="futures"))["warnings"]))
 check("a zero lot size is an error", S.validate_spec(spec(lotSize=0))["ok"] is False)
 check("a negative lot size is an error", S.validate_spec(spec(lotSize=-5))["ok"] is False)
 check("a non-numeric lot size is an error", S.validate_spec(spec(lotSize="many"))["ok"] is False)

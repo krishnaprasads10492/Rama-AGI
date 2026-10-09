@@ -962,7 +962,11 @@ def _normalise_instrument(s: dict, interval: str, max_bars: int,
         lot = 1
     if instrument in ("futures", "options") and lot == 1:
         warnings.append(
-            "Lot size is 1, but futures and options trade in fixed lots — NIFTY is 75 units, and stock "
+            # 65 is NIFTY's market lot from the January 2026 series (NSE revised 75 -> 65, effective
+            # 30 Dec 2025). It must stay equal to LOT_SIZES['NIFTY'] in dispatcher.py; the two
+            # disagreed by a factor of three until 2026-10-09, master being TOLD 75 while being SIZED
+            # at 25.
+            "Lot size is 1, but futures and options trade in fixed lots — NIFTY is 65 units, and stock "
             "contracts differ per symbol. With a lot size of 1 the position sizing will report a "
             "quantity master cannot actually trade.")
 
