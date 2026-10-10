@@ -41,7 +41,12 @@ let autoSaveTimer = null;
 
 // `proposals` added in Section 58: the self-change approval ledger was in-memory
 // only, so every pending approval and the entire audit trail vanished on restart.
-const DOMAINS = ['users', 'conversations', 'knowledge', 'memory', 'worldmodel', 'agents', 'config', 'instances', 'proposals'];
+// `tracking` is the Function-tracking domain (Section 138). It is HERE rather than in a store of its
+// own precisely because I14 re-keys by iterating this array: a database outside it would be the one
+// island left unreadable after a passcode change. Adding a domain is therefore the cheap, safe way
+// to add a store, and `verifyInvariants.cjs` asserts markAllDirty/loadAll are driven by this array
+// rather than a literal, so the next domain inherits the re-key too.
+const DOMAINS = ['users', 'conversations', 'knowledge', 'memory', 'worldmodel', 'agents', 'config', 'instances', 'proposals', 'tracking'];
 
 // ─── Load all domains on unlock ───────────────────────────────────────────────
 function loadAll() {
@@ -137,6 +142,12 @@ function find(domain, arrayKey, predicate) {
 // ─── Default data structures ──────────────────────────────────────────────────
 function getDefaultData(domain) {
   const defaults = {
+    // Function tracking (Section 138). `calls` is a CAPPED ring — `functionTracking.prune` drops the
+    // oldest once it passes its ceiling, because an unbounded per-call log grows fastest exactly
+    // when the app is busiest and makes every autosave of this domain slower.
+    tracking: {
+      calls: [],      // { module, fn, outcome, ms?, detail?, window?, sample?, _id, _ts }
+    },
     users: {
       accounts: [],   // User objects (passwords hashed by auth.cjs)
       settings: {},

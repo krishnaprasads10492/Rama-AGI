@@ -881,6 +881,27 @@ const INVARIANTS = [
         /Current passcode is incorrect/.test(v.raw));
       r.check('the nucleus is re-sealed under the new passcode too',
         /nucleus/i.test(body));
+
+      // ── THE COVERAGE HALF, which was missing ──────────────────────────────
+      //
+      // The rows above prove `markAllDirty()` is CALLED. Nothing proved it REACHES EVERY DOMAIN.
+      // A `markAllDirty` written over a literal subset, or a tenth domain added to a store of its
+      // own, would leave every assertion above green while the re-key quietly skipped data — and
+      // the failure only ever surfaces as one unreadable file after master changes his passcode.
+      // So the invariant asserted here is that the re-key, the load and the save are all DRIVEN BY
+      // `DOMAINS`, which is what makes any domain added later inherit the re-key by construction.
+      const ds = viewOf(root, 'electron/dataStore.cjs');
+      if (!ds) { r.fail('electron/dataStore.cjs is missing'); return; }
+      r.check('dataStore declares its domains as one array',
+        /const DOMAINS\s*=\s*\[/.test(ds.nc));
+      const mad = bodyOf(ds.nc, 'function markAllDirty');
+      r.check('markAllDirty iterates DOMAINS rather than a literal list',
+        mad !== null && /for\s*\(const \w+ of DOMAINS\)/.test(mad) && !/\[\s*'/.test(mad));
+      const la = bodyOf(ds.nc, 'function loadAll');
+      r.check('loadAll is driven by the same array, so every domain is decrypted on unlock',
+        la !== null && /for\s*\(const \w+ of DOMAINS\)/.test(la));
+      r.check('and DOMAINS is exported, so a suite can count what the re-key covers',
+        /\bDOMAINS,/.test(ds.nc));
     },
   },
   {

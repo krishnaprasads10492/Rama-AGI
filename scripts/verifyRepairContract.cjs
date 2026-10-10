@@ -1108,19 +1108,31 @@ async function main() {
         // size — a row that reddened on any lawful package.json edit would be deleted rather than read.
         const declaredLines = realPkg.replace(/\n$/, '').split('\n').length;
         console.log(`    package.json: ${realPkgBytes.length} bytes on disk \u00b7 ${realPkg.length} characters decoded \u00b7 ${declaredLines} content lines`);
+        // THE ABSOLUTE LINE NUMBERS AND TOTAL WERE PINNED HERE AND SHOULD NOT HAVE BEEN. The comment
+        // above states the intent correctly — pin the seven-character divergence, not the absolute
+        // size, because "a row that reddened on any lawful package.json edit would be deleted rather
+        // than read" — and then the row pinned `declaredLines === 286` and lines 73 and 99 anyway.
+        // Adding one `verify:*` script, which is as lawful an edit as this file gets, reddened both
+        // rows for a reason that has nothing to do with whether the transform is correct.
+        //
+        // What is a REAL precondition of `pin-version` is asserted instead: the divergence, that each
+        // section literal is UNIQUE (a second occurrence would make `indexOf` ambiguous), that
+        // `"dependencies"` precedes `"devDependencies"`, and that the byte and character offsets
+        // coincide at the site actually indexed. The live line numbers are PRINTED above for a reader
+        // and deliberately not asserted.
         check('transform: bytes on disk and characters decoded differ by seven, and it is the decoded string that is indexed',
-          realPkgBytes.length - realPkg.length === 7 && declaredLines === 286
+          realPkgBytes.length - realPkg.length === 7
           && realPkgBytes.indexOf('"dependencies"') === realPkg.indexOf('"dependencies"'),
           `bytes=${realPkgBytes.length} chars=${realPkg.length} lines=${declaredLines}`
           + ' — the seven multi-byte characters sit AFTER both dependency sections, so the two offsets'
           + ' happen to coincide at this site; that is where those characters are, not a guarantee,'
           + ' which is why the decoded string is what gets indexed');
-        check('transform: each section literal occurs exactly once, at lines 73 and 99',
+        check('transform: each section literal occurs exactly once, and in order',
           realPkg.split('"dependencies"').length - 1 === 1
           && realPkg.split('"devDependencies"').length - 1 === 1
-          && realPkg.slice(0, realPkg.indexOf('"dependencies"')).split('\n').length === 73
-          && realPkg.slice(0, realPkg.indexOf('"devDependencies"')).split('\n').length === 99,
-          'a second occurrence of either literal is a precondition failure, not a guess');
+          && realPkg.indexOf('"dependencies"') < realPkg.indexOf('"devDependencies"'),
+          'a second occurrence of either literal makes indexOf ambiguous, which is a precondition'
+          + ' failure rather than a guess');
 
         const after = contract.transform(realPkg, PARAMS);
         check('transform: it is reproducible — the same bytes and params yield the same bytes',
