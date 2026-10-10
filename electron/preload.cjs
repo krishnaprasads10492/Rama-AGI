@@ -658,6 +658,16 @@ const RAMA_API = {
   },
 
   // ── Timeline (git-backed flashbacks & state replay) ────────────────────────
+  // Function tracking, READ ONLY (Section 138). There is deliberately no `record` here: the renderer
+  // may ASK what modules did and may never WRITE a measurement, because a record the renderer can
+  // author is a record master cannot trust. Writing stays in the main process beside the work it
+  // measures.
+  tracking: {
+    query:   (opts) => ipcRenderer.invoke('tracking:query',   opts),
+    summary: (opts) => ipcRenderer.invoke('tracking:summary', opts),
+    shape:   ()     => ipcRenderer.invoke('tracking:shape'),
+  },
+
   timeline: {
     get:            (opts) => ipcRenderer.invoke('timeline:get',             opts),
     flashback:      (opts) => ipcRenderer.invoke('timeline:flashback',       opts),

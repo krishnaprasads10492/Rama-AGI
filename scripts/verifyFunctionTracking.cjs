@@ -221,5 +221,56 @@ console.log('\n  I14 — the domain is inside the re-keyed store');
     Object.isFrozen(ft.OUTCOMES) && ft.OUTCOMES.length === 4, JSON.stringify(ft.OUTCOMES));
 }
 
-console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILURES'} — ${pass} passed, ${fail} failed\n`);
-process.exit(fail === 0 ? 0 : 1);
+// ── The read channel: gated, refusing, and honest about being empty ──────────
+console.log('\n  the IPC read side');
+{
+  const ipc = require('../electron/ipc/tracking.cjs');
+
+  // REDBY: point NEEDS at a key that is not in the matrix, or invent a new one. `audit.all` already
+  // exists at tier 2, which is what lets this ship without touching the PROTECTED capabilities file.
+  eq('it gates on an existing capability rather than a new one', ipc.NEEDS, 'audit.all');
+
+  const handles = {};
+  ipc.register({ handle: (ch, fn) => { handles[ch] = fn; } });
+  for (const ch of ['tracking:query', 'tracking:summary', 'tracking:shape']) {
+    check(`${ch} is registered`, typeof handles[ch] === 'function');
+  }
+  // READ ONLY. A record the renderer can author is a record master cannot trust, so there must be no
+  // write channel at all. REDBY: add a `tracking:record` handle.
+  check('there is NO write channel — the renderer may ask, never record',
+    Object.keys(handles).every((ch) => !/record|write|append|clear|delete/i.test(ch)),
+    Object.keys(handles).join(','));
+
+  // A refusal is a SENTENCE, not an exception — a renderer that may not read telemetry gets
+  // something it can show. REDBY: throw instead of returning {ok:false,error}.
+  (async () => {
+    for (const [label, user] of [
+      ['no user at all', undefined],
+      ['a guest', { tier: 5 }],
+      ['a string pretending to be a user', 'master'],
+    ]) {
+      let threw = null;
+      let res = null;
+      try { res = await handles['tracking:query']({}, { user }); }
+      catch (e) { threw = e.message; }
+      check(`${label} is refused with a reason and no throw`,
+        threw === null && res && res.ok === false && typeof res.error === 'string'
+        && res.error.includes('audit.all'),
+        threw || JSON.stringify(res));
+    }
+
+    // `shape` carries no user data, so it needs no gate and tells a caller the vocabulary rather
+    // than making it guess. REDBY: gate it, and a caller can no longer discover the filters.
+    const shape = await handles['tracking:shape']({});
+    check('shape answers ungated, and names the filters and the capability needed',
+      shape.ok === true && Array.isArray(shape.filters) && shape.filters.includes('module')
+      && shape.needs === 'audit.all' && shape.capacity === ft.CAP,
+      JSON.stringify(shape));
+
+    check('anyRecords is exported, which is what separates "not instrumented" from "quiet"',
+      typeof ipc.anyRecords === 'function');
+
+    console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILURES'} — ${pass} passed, ${fail} failed\n`);
+    process.exit(fail === 0 ? 0 : 1);
+  })();
+}

@@ -49,6 +49,7 @@ const resourceResearchIPC  = safeRequire('./ipc/resourceResearchEngine.cjs', 'Re
 const resourceOrchestrator = safeRequire('./resourceOrchestrator.cjs', 'Resource orchestrator');
 // ─── Upgrade layer (additive — wraps existing, never replaces) ───────────────
 const vectorMemoryIPC  = safeRequire('./ipc/vectorMemory.cjs',   'Vector memory');
+const trackingIPC  = safeRequire('./ipc/tracking.cjs',           'Function tracking');
 const sandboxIPC       = safeRequire('./ipc/sandboxEngine.cjs',  'Execution sandbox');
 const graphIPC         = safeRequire('./ipc/graphReasoner.cjs',  'Graph planner');
 const selfCareIPC      = safeRequire('./ipc/selfCare.cjs',       'Self-care monitor');
@@ -1808,6 +1809,10 @@ app.whenReady().then(async () => {
     ['Evolution engine',      () => evolutionIPC.register(ipcRec)],
     ['Resource research',     () => resourceResearchIPC.register(ipcRec)],
     ['Resource orchestrator', () => resourceOrchestrator.register(ipcRec)],
+    // Function tracking's READ side (Section 138). Registered like every other subsystem so that a
+    // throw here costs only this channel — the comment above records that one unguarded `register()`
+    // once abandoned every later one.
+    ['Function tracking',     () => trackingIPC.register(ipcRec)],
     // Upgrade layer
     ['Vector memory',         () => vectorMemoryIPC.register(ipcRec)],
     ['Execution sandbox',     () => sandboxIPC.register(ipcRec)],
