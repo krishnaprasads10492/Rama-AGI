@@ -1203,6 +1203,99 @@ export function pointAndFigure(bars, box, reversal = 3) {
   return out;
 }
 
+/**
+ * Make one of the four price-indexed outputs drawable, and SAY what that cost.
+ *
+ * THE PROBLEM THIS EXISTS FOR, and it would have shipped as a silent data loss. A chart library needs
+ * times that strictly increase and never repeat. These four types do not provide that: a single
+ * source bar can complete several bricks on a gap, and every one of them carries that bar's time. Fed
+ * straight in, the library either throws or keeps only one of them — and keeping one silently
+ * discards exactly the fast move the chart was chosen to reveal.
+ *
+ * SO DUPLICATES ARE NUDGED FORWARD, ONE UNIT AT A TIME, AND THE COUNT IS RETURNED. Nudging is a small
+ * untruth — a brick is placed a second after it happened — and it is the smaller of the two available
+ * untruths, the other being a synthetic ordinal axis that would put every brick at a time it did not
+ * happen at all. `nudged` is returned so the renderer can tell master the axis has been adjusted
+ * rather than leaving him to trust spacing that was never a clock.
+ *
+ * OVERLAYS CANNOT FOLLOW. Every study, marker and level in this chart is keyed on REAL bar times, and
+ * after this transform the series no longer has a one-to-one relationship with them. `alignsWith
+ * Overlays: false` is returned to say so plainly; a moving average drawn over a Renko series is a line
+ * through points that do not correspond to it.
+ *
+ * @param {Array} rows output of `renko`, `lineBreak`, `kagi` or `pointAndFigure`
+ * @param {'renko'|'linebreak'|'kagi'|'pnf'} kind
+ * @returns {{ok: boolean, shape: 'candles'|'line'|null, data: Array, nudged: number,
+ *   alignsWithOverlays: boolean, why: string}}
+ */
+export function priceIndexedData(rows, kind) {
+  const src = Array.isArray(rows) ? rows : [];
+  const refuse = (why) => ({ ok: false, shape: null, data: [], nudged: 0,
+    alignsWithOverlays: false, why });
+  if (src.length === 0) return refuse('no rows to draw.');
+
+  // Kagi is a polyline; the other three are bodies.
+  const shape = kind === 'kagi' ? 'line' : 'candles';
+  const out = [];
+  let nudged = 0;
+  let prev = null;
+
+  for (const r of src) {
+    const t = Number(r?.time);
+    if (!Number.isFinite(t)) continue;
+    // STRICTLY INCREASING. `prev + 1` rather than `t + 1` so a run of duplicates keeps marching
+    // forward instead of colliding again on the next one.
+    let time = t;
+    if (prev !== null && time <= prev) {
+      time = prev + 1;
+      nudged += 1;
+    }
+    prev = time;
+
+    if (shape === 'line') {
+      const value = Number(r?.price);
+      if (!Number.isFinite(value)) continue;
+      out.push({ time, value });
+      continue;
+    }
+    if (kind === 'pnf') {
+      // A COLUMN IS A RANGE, drawn as a body from one end of the box run to the other. An X rises so
+      // it opens low and closes high; an O is the reverse. That is the column, not a guess at a path
+      // inside it — a P&F column has no path.
+      const lo = Number(r?.fromPrice);
+      const hi = Number(r?.toPrice);
+      if (!Number.isFinite(lo) || !Number.isFinite(hi)) continue;
+      const up = r.mark === 'X';
+      out.push({ time, open: up ? lo : hi, close: up ? hi : lo, high: Math.max(lo, hi),
+        low: Math.min(lo, hi) });
+      continue;
+    }
+    const o = Number(r?.open);
+    const c = Number(r?.close);
+    if (!Number.isFinite(o) || !Number.isFinite(c)) continue;
+    out.push({ time, open: o, close: c,
+      high: Number.isFinite(r?.high) ? r.high : Math.max(o, c),
+      low: Number.isFinite(r?.low) ? r.low : Math.min(o, c) });
+  }
+
+  if (out.length === 0) return refuse('no row carried a usable time and price.');
+
+  return {
+    ok: true,
+    shape,
+    data: out,
+    nudged,
+    // ALWAYS false for these four, and stated rather than implied.
+    alignsWithOverlays: false,
+    why: nudged > 0
+      ? `${out.length} drawn; ${nudged} placed a moment after they occurred so the axis strictly `
+        + 'increases, because several can complete within one source bar. The axis is an ordering, '
+        + 'not a clock, and overlays keyed on real bar times do not correspond to it.'
+      : `${out.length} drawn. The axis is an ordering, not a clock, and overlays keyed on real bar `
+        + 'times do not correspond to it.',
+  };
+}
+
 // ── The catalogue additions ───────────────────────────────────────────────────
 //
 // `kind: 'series'` is a GENERIC multi-line shape: `make` returns `{series: [{data, label, ...}]}`, so a

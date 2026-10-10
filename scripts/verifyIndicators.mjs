@@ -885,6 +885,51 @@ console.log('\n  price-indexed chart types');
       ind.pointAndFigure(ramp, bad, 3).length, 0);
   }
 
+  // ── priceIndexedData: strictly increasing times, or the library loses data ──
+  //
+  // THIS IS THE ROW THAT STOPS A SILENT DATA LOSS. A chart library needs times that strictly
+  // increase and never repeat, and one source bar can complete several bricks — every one carrying
+  // that bar's time. Fed straight in, the library keeps one and discards the rest, which throws away
+  // exactly the fast move the chart was chosen to reveal, with no error anywhere.
+  const gapBricks = ind.renko(gap, 2);
+  const adapted = ind.priceIndexedData(gapBricks, 'renko');
+  check('the gap produced several bricks sharing one source time',
+    new Set(gapBricks.map((b) => b.time)).size < gapBricks.length,
+    JSON.stringify(gapBricks.map((b) => b.time)));
+  // REDBY: return the rows untouched, and this goes red while the chart silently loses bricks.
+  check('after adapting, every time is STRICTLY greater than the one before it',
+    adapted.ok === true
+    && adapted.data.every((d, i) => i === 0 || d.time > adapted.data[i - 1].time),
+    JSON.stringify(adapted.data.map((d) => d.time)));
+  eq('no row is dropped in the process', adapted.data.length, gapBricks.length);
+  check('and the number nudged is REPORTED rather than hidden',
+    adapted.nudged > 0 && /after they occurred/.test(adapted.why), adapted.why);
+
+  // OVERLAYS CANNOT FOLLOW, and that is stated rather than implied. REDBY: report true.
+  for (const k of ['renko', 'linebreak', 'kagi', 'pnf']) {
+    const rowsFor = { renko: ind.renko(ramp, 2), linebreak: ind.lineBreak(ramp, 3),
+      kagi: ind.kagi(ramp, 3), pnf: ind.pointAndFigure(ramp, 2, 3) }[k];
+    const a = ind.priceIndexedData(rowsFor, k);
+    check(`${k} declares that overlays do NOT align with it`,
+      a.ok === true && a.alignsWithOverlays === false, JSON.stringify(a.alignsWithOverlays));
+    check(`${k} says the axis is an ordering, not a clock`,
+      /ordering, not a clock/.test(a.why), a.why);
+  }
+
+  // Kagi is a polyline; the other three are bodies. REDBY: give kagi a candle shape.
+  eq('kagi adapts to a line shape', ind.priceIndexedData(ind.kagi(ramp, 3), 'kagi').shape, 'line');
+  eq('renko adapts to a candle shape', ind.priceIndexedData(ind.renko(ramp, 2), 'renko').shape, 'candles');
+  check('a line shape carries value, not open/close',
+    ind.priceIndexedData(ind.kagi(ramp, 3), 'kagi').data.every((d) => Number.isFinite(d.value)
+      && d.open === undefined));
+
+  // A P&F column is drawn as a body across its box run — an X opens low, an O opens high.
+  const pfData = ind.priceIndexedData(ind.pointAndFigure(ramp, 2, 3), 'pnf');
+  check('a P&F X column is drawn rising', pfData.data.every((d) => d.high >= d.low));
+
+  eq('adapting nothing refuses', ind.priceIndexedData([], 'renko').ok, false);
+  eq('adapting junk refuses', ind.priceIndexedData(null, 'renko').ok, false);
+
   // ── atrSize: a suggestion, or an honest null ──
   check('atrSize suggests a positive size from enough bars',
     ind.atrSize(ramp, 3) > 0, String(ind.atrSize(ramp, 3)));
