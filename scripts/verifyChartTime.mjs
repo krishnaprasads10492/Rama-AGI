@@ -391,10 +391,26 @@ check('NOT as a width-derived logical range — that was the Section 110 defect'
 check('the newest bars are scrolled into view', /scrollToRealTime\(\)/.test(chart));
 check('there is exactly one application of the plan',
   (chart.match(/function applyLegibleZoom/g) || []).length === 1);
+// THREE CALL SITES, PINNED ON THE PLUMBING AND NOT ON THE COUNT ARGUMENT. The earlier form required
+// all three to pass `candles.length` verbatim, which went red the moment the data effect started
+// passing the DRAWN count instead — correctly, because a price-indexed series has its own length and
+// fitting the bar count would set a spacing for a series that is not on screen (Section 139). What
+// matters is that every site routes through the one function with the one holder, target and setter;
+// WHICH count each passes is the next two rows' business.
 check('the data effect, the density control and reset zoom all call that one function',
-  (chart.match(/applyLegibleZoom\(chart, candles\.length, holder\.current,\s*\n?\s*targetPxRef\.current, setZoom\)/g)
+  (chart.match(/applyLegibleZoom\(chart, [A-Za-z.]+, holder\.current,\s*\n?\s*targetPxRef\.current, setZoom\)/g)
     || []).length === 3,
   (chart.match(/applyLegibleZoom\(/g) || []).length);
+check('and no site reaches past it to set a bar spacing of its own',
+  (chart.match(/applyLegibleZoom\(/g) || []).length === 4,
+  (chart.match(/applyLegibleZoom\(/g) || []).length);
+// THE COUNT THAT IS FITTED IS THE ONE THAT IS DRAWN. REDBY: pass `candles.length` in the data effect.
+check('the data effect fits the DRAWN count, not the bar count',
+  /applyLegibleZoom\(chart, drawnCount, holder\.current/.test(chart));
+check('and `drawnCount` starts as the bar count, so a time-indexed chart is unchanged',
+  /let drawnCount = candles\.length;/.test(chart));
+check('and is replaced by the price-indexed series length when there is one',
+  /drawnCount = built\.data\.length;/.test(chart));
 check('the 900px width fallback that disagreed with the chart\'s own 600 is gone',
   !/clientWidth \|\| 900/.test(chart));
 

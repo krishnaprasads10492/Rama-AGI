@@ -1456,3 +1456,98 @@ export const OVERLAY_NEEDS = {
   // values, so the pair is complete at 18. At 16 there is a %K and no %D.
   atrPct: 15, adx: 29, stoch: 18, williams: 14, cci: 20, mfi: 15, obv: 2, roc: 13,
 };
+
+/**
+ * The four price-indexed types, by the SAME ids `projectionMode` refuses. One list, so a type cannot
+ * be drawable here and unknown to the refusal — that divergence is how a cone ends up on an axis that
+ * is not a clock.
+ */
+export const PRICE_INDEXED_TYPES = ['renko', 'linebreak', 'kagi', 'pnf'];
+
+/** Whether a chart type's x-axis is an ordering rather than a clock. */
+export function isPriceIndexed(type) {
+  return PRICE_INDEXED_TYPES.includes(type);
+}
+
+/**
+ * ONE call for the renderer: pick the transform, settle the size, adapt the result.
+ *
+ * WHY THIS IS HERE AND NOT IN THE CHART. Section 121 settled it: the arithmetic is pure and tested,
+ * the renderer as thin as it can be, so a wrong brick is one bug to look for rather than two. The
+ * chart gets a shape and an array; every decision below is asserted in `verifyIndicators.mjs`.
+ *
+ * THE SIZE IS DERIVED, NOT DEMANDED. Renko, Kagi and P&F all need a price distance, and a number
+ * master types is wrong on every symbol but the one he typed it for — ₹5 is a sensible brick on a
+ * ₹400 stock and noise on NIFTY. So an unset size falls back to `atrSize`, and `sizeFrom` says which
+ * of the two it was, because a chart whose granularity changed for an unstated reason is one master
+ * cannot read. If neither is available it REFUSES; it does not pick a number.
+ *
+ * LINE BREAK TAKES A COUNT, NOT A DISTANCE, so its `size` is null rather than a fabricated price. That
+ * is also why `bandBoxes` cannot be offered on it: there are no bricks to count a distance in.
+ *
+ * @param {Array} bars real OHLC bars
+ * @param {'renko'|'linebreak'|'kagi'|'pnf'} type
+ * @param {{size?: number, lines?: number, reversal?: number, atrPeriod?: number}} [opts]
+ * @returns {{ok: boolean, type: string|null, shape: 'candles'|'line'|null, data: Array,
+ *   rows: Array, nudged: number, size: number|null, sizeFrom: 'given'|'atr'|'count'|null,
+ *   alignsWithOverlays: boolean, why: string}}
+ */
+export function priceIndexedSeries(bars, type, opts) {
+  const refuse = (why) => ({ ok: false, type: isPriceIndexed(type) ? type : null, shape: null,
+    data: [], rows: [], nudged: 0, size: null, sizeFrom: null, alignsWithOverlays: false, why });
+
+  if (!isPriceIndexed(type)) return refuse('not a price-indexed chart type.');
+  const src = Array.isArray(bars) ? bars : [];
+  if (src.length === 0) return refuse('no bars to build from.');
+
+  const o = (opts && typeof opts === 'object') ? opts : {};
+  const given = Number(o.size);
+  const useGiven = Number.isFinite(given) && given > 0;
+
+  let size = null;
+  let sizeFrom = null;
+  if (type === 'linebreak') {
+    // A COUNT, not a price. Named separately so a reader is not left thinking a distance was dropped.
+    sizeFrom = 'count';
+  } else if (useGiven) {
+    size = given;
+    sizeFrom = 'given';
+  } else {
+    const derived = atrSize(src, Number.isFinite(Number(o.atrPeriod)) ? Number(o.atrPeriod) : 14);
+    if (!Number.isFinite(derived) || derived <= 0) {
+      return refuse('too few bars to derive a brick size, and none was given — '
+        + 'a size picked at random would change what every brick means.');
+    }
+    size = derived;
+    sizeFrom = 'atr';
+  }
+
+  let rows;
+  if (type === 'renko') rows = renko(src, size);
+  else if (type === 'kagi') rows = kagi(src, size);
+  else if (type === 'pnf') {
+    rows = pointAndFigure(src, size,
+      Number.isFinite(Number(o.reversal)) ? Number(o.reversal) : 3);
+  } else {
+    rows = lineBreak(src, Number.isFinite(Number(o.lines)) ? Number(o.lines) : 3);
+  }
+
+  const adapted = priceIndexedData(rows, type);
+  if (!adapted.ok) {
+    return { ...refuse(adapted.why), size, sizeFrom };
+  }
+
+  return {
+    ok: true,
+    type,
+    shape: adapted.shape,
+    data: adapted.data,
+    rows,
+    nudged: adapted.nudged,
+    size,
+    sizeFrom,
+    // Carried through rather than re-derived: one source for the claim.
+    alignsWithOverlays: adapted.alignsWithOverlays,
+    why: adapted.why,
+  };
+}

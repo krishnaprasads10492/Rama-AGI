@@ -15,6 +15,9 @@
  */
 
 import * as ind from '../src/pages/StockMind/indicators.js';
+// Imported for ONE purpose: to assert the four price-indexed types named here are the same four
+// `projectionMode` refuses a cone on. Two lists that must agree, checked rather than trusted.
+import * as proj from '../src/pages/StockMind/chartProjection.js';
 
 let pass = 0;
 let fail = 0;
@@ -937,6 +940,103 @@ console.log('\n  price-indexed chart types');
   eq('atrSize returns null when there are too few bars, rather than guessing',
     ind.atrSize([bar(1, 1, 1, 1, 1)], 14), null);
   eq('atrSize on no bars is null', ind.atrSize([], 14), null);
+}
+
+// ── The renderer's single entry point ────────────────────────────────────────
+//
+// `priceIndexedSeries` is what the chart calls, so it is where a wrong default would reach a screen.
+// Two things matter most: the size must be DERIVED rather than invented when master has not set one,
+// and the list of price-indexed types must be the SAME list `projectionMode` refuses — a type that is
+// drawable here and unknown there is exactly how a cone lands on an axis that is not a clock.
+console.log('\n  priceIndexedSeries — one call, and the size it settles on');
+{
+  const bar = (t, o, h, l, c) => ({ time: t, open: o, high: h, low: l, close: c, volume: 1 });
+  const ramp = [];
+  for (let i = 0; i <= 40; i += 1) ramp.push(bar(i + 1, 100 + i, 100 + i + 1, 100 + i - 1, 100 + i));
+
+  eq('there are exactly four price-indexed types', ind.PRICE_INDEXED_TYPES.length, 4);
+  check('and each is recognised by isPriceIndexed',
+    ind.PRICE_INDEXED_TYPES.every((t) => ind.isPriceIndexed(t) === true));
+  eq('candles is not one of them', ind.isPriceIndexed('candles'), false);
+  eq('nor is heikin, which IS time-indexed', ind.isPriceIndexed('heikin'), false);
+  eq('junk is not one of them', ind.isPriceIndexed(null), false);
+
+  // THE NON-DIVERGENCE ROW. REDBY: add a fifth type here without teaching projectionMode about it.
+  for (const t of ind.PRICE_INDEXED_TYPES) {
+    const mode = proj.projectionMode(t);
+    eq(`projectionMode refuses a cone on ${t}`, mode.mode, 'refused');
+    check(`and the refusal on ${t} names the axis rather than just saying no`,
+      /not a clock/.test(mode.reason), mode.reason);
+  }
+  // The other side of the same guard: the refusal must not have spread to a time-indexed chart.
+  check('candles is not refused', proj.projectionMode('candles').mode !== 'refused',
+    proj.projectionMode('candles').mode);
+  // HEIKIN-ASHI IS ALSO REFUSED, FOR A DIFFERENT REASON, and the two must not be conflated: HA is
+  // time-indexed and refused because a projected HA bar averages a guess compounded forward. Asserting
+  // the reasons differ is what stops the axis argument being quietly reused where it does not apply.
+  const ha = proj.projectionMode('heikin');
+  eq('heikin is refused too', ha.mode, 'refused');
+  check('but NOT on the axis argument — it is time-indexed', !/not a clock/.test(ha.reason), ha.reason);
+  check('it is refused on compounding an average of a guess', /average of a/.test(ha.reason), ha.reason);
+
+  // ── The size is derived, and says so ──
+  const given = ind.priceIndexedSeries(ramp, 'renko', { size: 2 });
+  eq('a given size is used', given.size, 2);
+  eq('and reported as given', given.sizeFrom, 'given');
+  const derived = ind.priceIndexedSeries(ramp, 'renko', {});
+  eq('an unset size falls back to ATR', derived.sizeFrom, 'atr');
+  check('and the ATR size is positive', derived.size > 0, String(derived.size));
+  eq('an unset size is identical to no options at all',
+    JSON.stringify(ind.priceIndexedSeries(ramp, 'renko').data), JSON.stringify(derived.data));
+  eq('and to a null options object',
+    JSON.stringify(ind.priceIndexedSeries(ramp, 'renko', null).data), JSON.stringify(derived.data));
+  // ABSENT IS NOT ZERO, the same rule as every indicator parameter.
+  eq('a zero size is read as unset rather than accepted',
+    ind.priceIndexedSeries(ramp, 'renko', { size: 0 }).sizeFrom, 'atr');
+  eq('a negative size too', ind.priceIndexedSeries(ramp, 'renko', { size: -2 }).sizeFrom, 'atr');
+  eq('and a non-numeric one', ind.priceIndexedSeries(ramp, 'renko', { size: 'two' }).sizeFrom, 'atr');
+  // REFUSES RATHER THAN PICKING A NUMBER. REDBY: return a constant brick size here.
+  const tooFew = ind.priceIndexedSeries([bar(1, 1, 1, 1, 1)], 'renko', {});
+  eq('too few bars to derive a size REFUSES', tooFew.ok, false);
+  eq('and does not invent a size', tooFew.size, null);
+  check('and says why', /size/.test(tooFew.why), tooFew.why);
+
+  // ── Line break takes a COUNT, so it has no brick distance ──
+  const lb = ind.priceIndexedSeries(ramp, 'linebreak', {});
+  eq('line break builds without a brick size', lb.ok, true);
+  eq('its size is null rather than a fabricated price', lb.size, null);
+  eq('and that is stated as a count', lb.sizeFrom, 'count');
+
+  // ── Shapes, which decide which series the chart creates ──
+  eq('renko is a candle shape', ind.priceIndexedSeries(ramp, 'renko', { size: 2 }).shape, 'candles');
+  eq('pnf is a candle shape', ind.priceIndexedSeries(ramp, 'pnf', { size: 2 }).shape, 'candles');
+  eq('line break is a candle shape', lb.shape, 'candles');
+  eq('kagi is a line shape', ind.priceIndexedSeries(ramp, 'kagi', { size: 2 }).shape, 'line');
+
+  // ── What every result carries, so the renderer never has to infer it ──
+  for (const t of ind.PRICE_INDEXED_TYPES) {
+    const res = ind.priceIndexedSeries(ramp, t, { size: 2 });
+    eq(`${t} builds from a ramp`, res.ok, true);
+    eq(`${t} never claims overlays align`, res.alignsWithOverlays, false);
+    check(`${t} reports how many times were nudged`, Number.isFinite(res.nudged));
+    check(`${t} explains itself in words`, typeof res.why === 'string' && res.why.length > 20);
+    check(`${t} returns the raw rows as well as the drawable data`, Array.isArray(res.rows));
+    check(`${t}'s data is strictly increasing in time`,
+      res.data.every((d, i) => i === 0 || d.time > res.data[i - 1].time));
+  }
+
+  // ── Refusals ──
+  eq('an unknown type refuses', ind.priceIndexedSeries(ramp, 'candles', {}).ok, false);
+  eq('and names no type', ind.priceIndexedSeries(ramp, 'candles', {}).type, null);
+  eq('no bars refuses', ind.priceIndexedSeries([], 'renko', { size: 2 }).ok, false);
+  eq('junk bars refuse', ind.priceIndexedSeries(null, 'renko', { size: 2 }).ok, false);
+  check('every refusal carries a reason',
+    [ind.priceIndexedSeries(ramp, 'candles', {}), ind.priceIndexedSeries([], 'renko', { size: 2 }),
+      ind.priceIndexedSeries(null, 'renko', { size: 2 })]
+      .every((r) => typeof r.why === 'string' && r.why.length > 10));
+  check('and no refusal returns drawable data',
+    [ind.priceIndexedSeries(ramp, 'candles', {}), ind.priceIndexedSeries([], 'renko', { size: 2 })]
+      .every((r) => Array.isArray(r.data) && r.data.length === 0));
 }
 
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILURES'} — ${pass} passed, ${fail} failed\n`);

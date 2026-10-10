@@ -242,6 +242,19 @@ export const TERMS = {
       + 'opened.',
     seeAlso: ['avgCost'],
   },
+  priceIndexedChart: {
+    term: 'Price-indexed charts', group: 'chart',
+    short: 'Renko, Line Break, Kagi and Point & Figure: a mark appears when price MOVES, not when '
+      + 'time passes.',
+    long: 'A Renko brick is added once price travels one brick, whether that took four seconds or '
+      + 'four sessions — so the sideways grind that fills a time chart produces almost nothing here. '
+      + 'The cost is that the axis is no longer a timeline, so overlays, volume, session bands, your '
+      + 'fills and the projection are withheld: all are keyed on real bar times, which do not line '
+      + 'up with what is drawn. Where several marks complete inside one bar, each is nudged a second '
+      + 'forward to keep the axis increasing and the count is shown. The box size is derived from '
+      + 'the instrument\'s own ATR unless you set it.',
+    seeAlso: ['candles', 'projection', 'overlay', 'sessionBand'],
+  },
   linScale: {
     term: 'Linear scale', group: 'chart',
     short: 'Equal price moves get equal height.',

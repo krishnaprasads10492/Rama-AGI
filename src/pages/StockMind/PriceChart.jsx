@@ -5,6 +5,7 @@ import {
 } from 'lightweight-charts';
 import {
   overlaysFor, overlayById, overlayShortfall, heikinAshi, resolveParams, labelFor,
+  priceIndexedSeries, isPriceIndexed,
 } from './indicators';
 import {
   intervalGroups, allRangesFor, shortfallNote, describeLimit, showsClock,
@@ -189,6 +190,21 @@ const CHART_TYPES = [
   { id: 'heikin',   label: 'Heikin-Ashi', key: '6',
     warn: 'Smoothed: HA open and close are averages, not traded prices. Read direction from it, never '
       + 'levels — a stop taken off an HA body sits at a price that never existed.' },
+  // THE FOUR PRICE-INDEXED TYPES (Section 139). Their ids are the ones `projectionMode` refuses and
+  // `PRICE_INDEXED_TYPES` lists — one spelling, asserted in verifyIndicators, because a type drawable
+  // here and unknown there is how a forecast cone lands on an axis that is not a clock.
+  { id: 'renko',    label: 'Renko',       key: '7',
+    warn: 'Price-indexed: a brick forms when price travels one brick, so the x-axis is an ORDERING, '
+      + 'not a clock. Overlays and the projection are withheld — they are keyed on real bar times.' },
+  { id: 'linebreak', label: 'Line Break', key: '8',
+    warn: 'Price-indexed: a line is added on a new extreme, not on a schedule. The x-axis is an '
+      + 'ordering, not a clock, so overlays and the projection are withheld.' },
+  { id: 'kagi',     label: 'Kagi',        key: '9',
+    warn: 'Price-indexed, drawn as a single line: the yang/yin THICKNESS is computed but not '
+      + 'rendered, so read reversals from the shape and not from weight. The x-axis is an ordering.' },
+  { id: 'pnf',      label: 'Point & Figure', key: '0',
+    warn: 'Price-indexed: each body is one X or O COLUMN spanning its box run, not a bar — a column '
+      + 'has no path inside it. The x-axis is an ordering, not a clock.' },
 ];
 
 // The market-state chip's colour, by the tone `marketClock.js` decided. Green is only ever the open
@@ -395,6 +411,11 @@ export default function PriceChart({
   const [note, setNote] = useState(null);
   const noteRef = useRef(null);
   const [fitted, setFitted] = useState(0);           // container height when `fillHeight`
+
+  // What the price-indexed build actually did: the brick size it settled on, where that size came
+  // from, and how many timestamps it had to nudge (Section 139). Held in state rather than recomputed
+  // for display, so the number on screen is the one the series was built with and not a second run.
+  const [indexedNote, setIndexedNote] = useState(null);
 
   const [readout, setReadout] = useState(null);
   const [full, setFull] = useState(false);
@@ -622,7 +643,10 @@ export default function PriceChart({
   useEffect(() => {
     const el = holder.current;
     sessionStateRef.current = {
-      bands: layers.sessions ? bands : [],
+      // A THIRD THING THAT IS THE SAME TO A RENDERER: a price-indexed axis has no sessions to shade,
+      // because a brick spans whatever time the move took. Withheld here with the other two, so the
+      // layer still holds no opinion (Section 139).
+      bands: (layers.sessions && !isPriceIndexed(chartType)) ? bands : [],
       theme: el ? readTheme(el) : {},
     };
     sessionLayerRef.current?.redraw();
@@ -720,7 +744,11 @@ export default function PriceChart({
     let price;
     if (chartType === 'bars') {
       price = chart.addSeries(BarSeries, { ...common, upColor: theme.green, downColor: theme.red });
-    } else if (chartType === 'line') {
+    } else if (chartType === 'line' || chartType === 'kagi') {
+      // KAGI IS A POLYLINE, so it takes a line series. Its yang/yin flag is a per-SEGMENT thickness
+      // and a LineSeries has one width for the whole line — so the flag is computed, not drawn, and
+      // the chart type's own warning says so. Faking it with two overlaid series would put a second
+      // line through the same points and read as two instruments.
       price = chart.addSeries(LineSeries, { ...common, color: theme.accent, lineWidth: 2 });
     } else if (chartType === 'area') {
       price = chart.addSeries(AreaSeries, {
@@ -890,17 +918,45 @@ export default function PriceChart({
     if (!price || !chart) return;
 
     const forLine = chartType === 'line' || chartType === 'area' || chartType === 'baseline';
-    // Heikin-Ashi is a transform of the SAME bars, not a different series — so it shares every overlay,
-    // marker and level, and the indicators still read the real closes rather than the smoothed ones.
-    // Computing studies on HA values is a well-known way to produce an RSI of a price that never traded.
-    const drawn = chartType === 'heikin' ? heikinAshi(candles) : candles;
-    price.setData(forLine
-      ? drawn.map((c) => ({ time: c.time, value: c.close }))
-      : drawn.map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
+
+    // THE PRICE-INDEXED TYPES TAKE A DIFFERENT PATH, because they are a different SERIES and not a
+    // transform of these bars (Section 139). `priceIndexedSeries` settles the brick size, runs the
+    // transform and adapts the result; everything below it is already asserted, so the chart only
+    // hands over bars and takes back a shape. The adapter's `data` is used VERBATIM — re-mapping it
+    // here would re-derive the nudged timestamps it worked to make strictly increasing.
+    const indexed = isPriceIndexed(chartType);
+    // The count the ZOOM must fit. A price-indexed series has its own length — 600 bars can become 40
+    // bricks or 400, and fitting the bar count would set a bar spacing for a series that is not there.
+    let drawnCount = candles.length;
+
+    if (indexed) {
+      const built = priceIndexedSeries(candles, chartType, {});
+      setIndexedNote(built.ok
+        ? { nudged: built.nudged, size: built.size, sizeFrom: built.sizeFrom, count: built.data.length }
+        : { why: built.why });
+      // A REFUSAL CLEARS THE SERIES rather than leaving the previous type's bars on screen under the
+      // new type's label — the one outcome worse than an empty chart.
+      price.setData(built.ok ? built.data : []);
+      if (!built.ok) return;
+      drawnCount = built.data.length;
+    } else {
+      setIndexedNote(null);
+      // Heikin-Ashi is a transform of the SAME bars, not a different series — so it shares every
+      // overlay, marker and level, and the indicators still read the real closes rather than the
+      // smoothed ones. Computing studies on HA values is a well-known way to produce an RSI of a
+      // price that never traded.
+      const drawn = chartType === 'heikin' ? heikinAshi(candles) : candles;
+      price.setData(forLine
+        ? drawn.map((c) => ({ time: c.time, value: c.close }))
+        : drawn.map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
+    }
 
     if (volRef.current) {
       const theme = holder.current ? readTheme(holder.current) : null;
-      volRef.current.setData(volumes.map((v) => ({
+      // VOLUME IS WITHHELD ON A PRICE-INDEXED AXIS, not re-bucketed. Each volume point is keyed on a
+      // real bar time; against an ordering those times land arbitrarily, and a histogram that looks
+      // like volume while standing beside the wrong brick is worse than an empty volume pane.
+      volRef.current.setData(indexed ? [] : volumes.map((v) => ({
         time: v.time, value: v.value,
         color: theme ? `${v.up ? theme.green : theme.red}66` : undefined,
       })));
@@ -911,12 +967,15 @@ export default function PriceChart({
     // ZOOM TO LEGIBLE CANDLES, NOT TO EVERY BAR (Section 110), as bar spacing rather than a
     // width-derived range (Section 119), VERIFIED RATHER THAN ASSUMED (Section 122).
     // `applyLegibleZoom` above holds the reasoning and the only copy of the arithmetic.
-    const fitLegible = () => applyLegibleZoom(chart, candles.length, holder.current,
+    const fitLegible = () => applyLegibleZoom(chart, drawnCount, holder.current,
       targetPxRef.current, setZoom);
 
     // The DATES are part of the series identity, not just the preset name: with a hand-typed window
     // `rangeId` is null, so a key from the preset alone would keep the old zoom over a different span.
-    const fitKey = `${symbol}|${interval}|${rangeId || ''}|${fromDate || ''}|${toDate || ''}`;
+    // `chartType` IS part of the identity now: switching to a price-indexed type replaces the series
+    // with one of a different LENGTH, so a zoom saved for 600 bars would show a handful of bricks.
+    const fitKey = `${symbol}|${interval}|${rangeId || ''}|${fromDate || ''}|${toDate || ''}`
+      + `|${isPriceIndexed(chartType) ? chartType : 'time'}`;
     if (fitKeyRef.current !== fitKey) {
       fitKeyRef.current = fitKey;
       savedRangeRef.current = null;
@@ -939,6 +998,13 @@ export default function PriceChart({
     }
     overlayRefs.current = [];
     if (candles.length === 0) return;
+    // OVERLAYS ARE WITHHELD ON A PRICE-INDEXED AXIS, and the removal above has already run so a type
+    // change clears whatever was drawn. Every study here is computed on real bar times; against an
+    // ordering those times do not correspond to the series, so the line would be drawn through points
+    // that are not the ones it was computed from — a plausible-looking moving average of nothing.
+    // `priceIndexedSeries` returns `alignsWithOverlays: false` for exactly this; the toggles stay
+    // visible and the chart says why rather than silently ignoring a press.
+    if (isPriceIndexed(chartType)) return;
 
     const theme = readTheme(holder.current);
     // Oscillators go below price, and below volume when volume is shown, so the panes read
@@ -1082,7 +1148,11 @@ export default function PriceChart({
     //
     // `starts` is now the hoisted memo rather than a second call, because the session bands need the
     // same map. One boundary list per chart, and it is the tested one.
-    const marks = (layers.fills ? (fills || []) : [])
+    // AND A FILL MARKER IS WITHHELD ON A PRICE-INDEXED AXIS (Section 139). A fill happened at a TIME;
+    // these four place nothing at a time, so the arrow would land on whichever brick happened to
+    // inherit that timestamp — an arrow pointing at a price master did not trade at. The fill is still
+    // in the ledger and still on the position panel; it is the placement that has no meaning here.
+    const marks = (layers.fills && !isPriceIndexed(chartType) ? (fills || []) : [])
       .map((f) => {
         const time = markerTime(f?.date, starts);
         if (time === null) return null;
@@ -1168,6 +1238,12 @@ export default function PriceChart({
 
     const points = cone?.points || [];
     if (!layers.cone || !cone?.ok || points.length === 0) return;
+    // THE CONE IS WITHHELD ENTIRELY ON A PRICE-INDEXED AXIS, bands as well as projected bodies
+    // (Section 139). `projectionMode` refuses the BODY for these four, but the band lines below are
+    // plotted at forward TIMES, and on an axis that is an ordering a forward time is not a forward
+    // position — the band would be drawn somewhere the chart has no meaning for. The sigma edges are
+    // offered instead as a distance in bricks, which is the unit this axis actually has.
+    if (isPriceIndexed(chartType)) return;
     const theme = readTheme(holder.current);
     const tilted = !!cone.tilted;
     const bandColor = tilted ? theme.accent : theme.muted;
@@ -1736,7 +1812,10 @@ export default function PriceChart({
     // "l" and "r" while master types a symbol into the field above.
     <div ref={shellRef} style={shell} onKeyDown={onKeyDown} tabIndex={0} role="group"
          aria-label={`Price chart for ${symbol || 'the selected symbol'}. `
-           + 'Press 1 to 6 for chart type, L for log scale, V for volume, '
+           // 1 THROUGH 0, in the order CHART_TYPES declares, so the spoken list cannot drift from the
+           // table: ten types now, and a label still saying "1 to 6" would hide the last four.
+           + `Press 1 to 0 for chart type (${CHART_TYPES.map((t) => t.label).join(', ')}), `
+           + 'L for log scale, V for volume, '
            + 'open and close bracket to widen or narrow the candles, R to reset zoom, '
            + 'F for fullscreen.'}>
 
@@ -2065,14 +2144,19 @@ export default function PriceChart({
               boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
             }} role="group" aria-label="Chart appearance">
               <div style={{ fontSize: FS.dense, color: 'var(--muted)', padding: '2px 6px 4px' }}>
-                DRAW AS
+                DRAW AS <InfoTip id="priceIndexedChart" />
               </div>
               <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', padding: '0 4px 6px' }}>
+                {/* THE `warn` STRING WAS DECLARED AND NEVER RENDERED — Heikin-Ashi has carried one
+                    since Section 120 that nothing showed. It is in the tooltip now, so the caveat is
+                    readable BEFORE the type is selected as well as on the chart after. The on-chart
+                    notice remains the one that matters: master will have forgotten a tooltip by the
+                    time he reads a level off a body. */}
                 {CHART_TYPES.map((t) => (
                   <button key={t.id} type="button" style={seg(t.id === chartType)}
                           aria-pressed={t.id === chartType}
                           onClick={() => setChartType(t.id)}
-                          title={`${t.label} (press ${t.key})`}>
+                          title={`${t.label} (press ${t.key})${t.warn ? `\n\n${t.warn}` : ''}`}>
                     {t.label}
                   </button>
                 ))}
@@ -2385,12 +2469,20 @@ export default function PriceChart({
                  + (last ? `, last ${numberFmt(last.close)}` : '')
                  + (changePct !== null ? `, ${changePct >= 0 ? 'up' : 'down'} `
                    + `${Math.abs(changePct).toFixed(2)} percent on the bar` : '')
-                 + (active.length ? `, with ${active
+                 // THE LABEL MUST NOT ANNOUNCE WHAT IS WITHHELD. A screen reader told there is a
+                 // projection drawn forward, on a chart where it was deliberately refused, is given a
+                 // worse account of the screen than a sighted reader gets (Section 139).
+                 + (active.length && !isPriceIndexed(chartType) ? `, with ${active
                    .map((id) => labelFor(overlayById(id), activeParams[id])).join(', ')}`
                    : '')
-                 + (fills?.length ? `, with ${fills.length} of your own fills marked` : '')
-                 + (cone?.ok ? ', with a volatility projection drawn forward' : '')
-                 + (layers.sessions && bandNote ? `, ${bandNote}` : '')} />
+                 + (fills?.length && !isPriceIndexed(chartType)
+                   ? `, with ${fills.length} of your own fills marked` : '')
+                 + (cone?.ok && !isPriceIndexed(chartType)
+                   ? ', with a volatility projection drawn forward' : '')
+                 + (layers.sessions && bandNote && !isPriceIndexed(chartType) ? `, ${bandNote}` : '')
+                 + (isPriceIndexed(chartType)
+                   ? `, drawn on a price-indexed axis, so overlays, volume, session bands, fill `
+                     + 'markers and the projection are withheld' : '')} />
 
           {/* THE LEGEND SITS ON THE CHART, not under it. The previous readout was below the canvas,
               so reading a candle's values meant moving your eyes 400px away from the candle and
@@ -2424,11 +2516,39 @@ export default function PriceChart({
                 Heikin-Ashi: averaged prices. Read direction, not levels.
               </div>
             )}
+            {isPriceIndexed(chartType) && (
+              // SAME PLACE, SAME REASON, AND IT CARRIES THE NUMBERS (Section 139). The brick size is
+              // what every brick on screen MEANS, so it is stated along with where it came from — a
+              // chart whose granularity changed for an unstated reason cannot be read. `nudged` is
+              // shown only when it is non-zero: a count of zero is noise, a count above zero is the
+              // disclosure that some bricks are drawn a moment after they happened.
+              <div style={{ color: 'var(--amber)', marginBottom: '2px', maxWidth: '52ch' }}>
+                {indexedNote?.why
+                  ? indexedNote.why
+                  : `Price-indexed axis: an ordering, not a clock. Overlays, volume, session bands, `
+                    + `fill markers and the projection are withheld.`}
+                {indexedNote && !indexedNote.why && indexedNote.size !== null && (
+                  <> {' '}Box {numberFmt(indexedNote.size)}
+                    {indexedNote.sizeFrom === 'atr' ? ' (from ATR)' : ' (set)'}.</>
+                )}
+                {indexedNote?.nudged > 0 && (
+                  <> {' '}{indexedNote.nudged} of {indexedNote.count} placed a moment after they
+                    occurred so the axis strictly increases.</>
+                )}
+              </div>
+            )}
             {readout ? (
               <>
                 <div style={{ color: 'var(--text-dim, var(--muted))', marginBottom: '2px' }}>
                   {formatStamp(readout.time)}
                   {showsClock(interval) && zoneLabel() ? ` ${zoneLabel()}` : ''}
+                  {/* ON A PRICE-INDEXED AXIS THIS STAMP IS NOT A CLOCK READING (Section 139). It is
+                      the source bar's time, and for a brick that shared its bar with others it has
+                      been nudged forward to keep the axis increasing. Saying "approx" is the whole
+                      difference between a stamp master can act on and one he cannot. */}
+                  {isPriceIndexed(chartType) && (
+                    <span style={{ color: 'var(--amber)' }}> · approx (price-indexed)</span>
+                  )}
                 </div>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   <span style={{ color: 'var(--muted)' }}>O</span>{numberFmt(readout.open)}
@@ -2522,7 +2642,7 @@ export default function PriceChart({
           </>
         ) : (
           <span>
-            Keys: 1–6 chart type · L log scale · V volume · [ ] candle width · R reset zoom ·
+            Keys: 1–0 chart type · L log scale · V volume · [ ] candle width · R reset zoom ·
             F fullscreen. Click the chart first.
           </span>
         )}
