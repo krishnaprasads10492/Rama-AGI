@@ -75,6 +75,25 @@ export function projectionMode(chartType) {
         + 'guess compounded forward. The cone\'s lines are still drawn.',
     };
   }
+  // THE FOUR PRICE-INDEXED TYPES, REFUSED FOR A STRONGER REASON THAN HEIKIN-ASHI'S.
+  //
+  // Renko, Kagi, Point & Figure and Line Break advance on PRICE MOVEMENT, not on time: a brick forms
+  // when price travels one brick, whether that takes four seconds or four sessions. **Their x-axis is
+  // not a clock.** A cone is a statement about where price may be AFTER A GIVEN TIME, so drawing one
+  // across these axes would invent a time dimension the chart does not have — and the horizon control
+  // master types a period into would be meaningless against it.
+  //
+  // The band is still useful here, just not as a cone: `bandBoxes()` converts the same sigma edges
+  // into a DISTANCE IN BRICKS, which is how these charts are read in the first place. The refusal is
+  // therefore not a dead end, and the reason names the alternative instead of just saying no.
+  if (id === 'renko' || id === 'kagi' || id === 'pnf' || id === 'linebreak') {
+    return {
+      mode: 'refused',
+      reason: `refused on ${id}: this chart advances on price movement, not time, so its axis is not `
+        + 'a clock and a forward cone would invent a time dimension it does not have. The same '
+        + 'sigma edges are still available as a distance in bricks — see the band reading.',
+    };
+  }
   if (id === 'line' || id === 'area' || id === 'baseline') {
     return {
       mode: 'path',
@@ -348,6 +367,85 @@ function spanLabel(bars, iv) {
  * @param {string} intervalId
  * @returns {Array<{bars: number, label: string, span: string, title: string, atCap: boolean}>}
  */
+/**
+ * THE PROJECTION, READ IN BRICKS — how the cone combines with a price-indexed chart.
+ *
+ * `projectionMode` refuses a cone on Renko, Kagi, Point & Figure and Line Break because their axis is
+ * not a clock. That refusal is correct and it would be a dead end if it stopped there, because the
+ * engine's sigma bounds are **price levels**, and a price level translates into bricks perfectly well.
+ *
+ * So this answers the question those charts are actually read with: *how many bricks away is the edge
+ * of the band?* A Point & Figure trader already thinks in boxes; "the 2σ edge is four boxes up" is the
+ * native sentence, where "the 2σ edge is 24,310" is not.
+ *
+ * WHAT IT IS NOT. It is NOT a forward projection and says so: there is no claim about WHEN price might
+ * reach a band edge, because the horizon that would answer that is a time and this chart has no time.
+ * It converts a distance, nothing more. **`direction` is deliberately absent** — the band is
+ * symmetric around the centre by construction, so naming a side would imply a lean the cone does not
+ * have.
+ *
+ * `bricks` is ROUNDED DOWN, because the honest answer to "how many whole bricks fit in this distance"
+ * never rounds up into a brick that has not been travelled.
+ *
+ * @param {object|null} cone the engine's `cone`, verbatim
+ * @param {number} boxSize the brick or box size the chart is drawn with
+ * @param {{at?: number}} [opts] the anchor price; defaults to the cone's last stored close
+ * @returns {{ok: boolean, boxSize?: number, anchor?: number, edges?: Array<object>, why: string}}
+ */
+export function bandBoxes(cone, boxSize, opts) {
+  const size = Number(boxSize);
+  if (!finite(size) || size <= 0) {
+    return { ok: false, why: 'a brick size is needed before a distance can be counted in bricks.' };
+  }
+  const c = (cone && typeof cone === 'object') ? cone : null;
+  if (!c || c.ok !== true) {
+    return { ok: false, why: 'no projection is available, so there is no band to measure.' };
+  }
+  const points = Array.isArray(c.points) ? c.points : [];
+  if (points.length === 0) {
+    return { ok: false, why: 'the projection carries no points, so it has no band edges.' };
+  }
+
+  const o = (opts && typeof opts === 'object') ? opts : {};
+  const vol = (c.volatility && typeof c.volatility === 'object') ? c.volatility : {};
+  const anchor = finite(Number(o.at)) ? Number(o.at)
+    : (finite(Number(vol.lastClose)) ? Number(vol.lastClose) : null);
+  if (anchor === null || anchor <= 0) {
+    return { ok: false, why: 'no anchor price is known, so a distance cannot be measured from it.' };
+  }
+
+  // THE FAR END of the band is what a distance question is about — the widest the projection gets.
+  const last = points[points.length - 1];
+  const edges = [];
+  for (const [key, label] of [['upper2', '+2σ'], ['upper1', '+1σ'], ['lower1', '−1σ'], ['lower2', '−2σ']]) {
+    const px = Number(last?.[key]);
+    if (!finite(px) || px <= 0) continue;
+    const distance = Math.abs(px - anchor);
+    edges.push({
+      edge: label,
+      price: px,
+      distance,
+      // FLOOR: whole bricks travelled, never a brick rounded up into existence.
+      bricks: Math.floor(distance / size),
+      // Stated so a reader is not left inferring it from the sign of a subtraction.
+      above: px > anchor,
+    });
+  }
+  if (edges.length === 0) {
+    return { ok: false, why: 'the projection\'s final point carries no sigma bounds to measure.' };
+  }
+
+  return {
+    ok: true,
+    boxSize: size,
+    anchor,
+    edges,
+    why: `measured from ${anchor} at the projection's far point, in bricks of ${size}. This is a `
+      + 'DISTANCE, not a forecast: it says how far the band edges sit, and nothing about when or '
+      + 'whether price reaches them.',
+  };
+}
+
 /**
  * The horizon for a period MASTER CHOSE, in whatever unit he chose it in.
  *

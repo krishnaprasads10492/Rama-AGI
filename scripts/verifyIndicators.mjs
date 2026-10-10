@@ -796,5 +796,103 @@ check('the two lists still differ only by those two', (() => {
     && [...intra].filter((id) => !day.has(id)).join() === 'vwap';
 })());
 
+// ── The four price-indexed chart types ───────────────────────────────────────
+//
+// Pure functions of stored bars: no network, no engine, no dependency. Four chart types TradingView
+// charges for. The rows below assert the RULES, because each of these is easy to implement in a way
+// that looks plausible on a screen and is wrong — a Renko that reverses on one brick instead of two
+// produces a chart that flips on every wiggle and still renders beautifully.
+console.log('\n  price-indexed chart types');
+{
+  const bar = (t, o, h, l, c) => ({ time: t, open: o, high: h, low: l, close: c, volume: 1 });
+  // A clean ramp from 100 to 110, one point per bar.
+  const ramp = [];
+  for (let i = 0; i <= 10; i += 1) ramp.push(bar(i + 1, 100 + i, 100 + i, 100 + i, 100 + i));
+
+  // ── Renko ──
+  const r = ind.renko(ramp, 2);
+  check('renko builds bricks from a ramp', r.length >= 4, String(r.length));
+  check('every brick is exactly one brick tall',
+    r.every((b) => Math.abs(Math.abs(b.close - b.open) - 2) < 1e-9),
+    JSON.stringify(r.map((b) => b.close - b.open)));
+  check('every brick is directional and says which way',
+    r.every((b) => (b.dir === 1 && b.close > b.open) || (b.dir === -1 && b.close < b.open)));
+  check('and each brick records how many source bars it consumed, because the axis is not a clock',
+    r.every((b) => Number.isFinite(b.spanBars) && b.spanBars >= 0));
+
+  // A REVERSAL COSTS TWO BRICKS. This is the rule most descriptions omit, and getting it wrong is
+  // what makes a Renko chart flip on noise. REDBY: use `size` instead of `2 * size` for a reversal.
+  const upThenBack = [...ramp, bar(12, 108, 108, 108, 108), bar(13, 107, 107, 107, 107)];
+  const rr = ind.renko(upThenBack, 2);
+  const lastUp = [...rr].reverse().find((b) => b.dir === 1);
+  const anyDownAfter = rr.slice(rr.indexOf(lastUp) + 1).some((b) => b.dir === -1);
+  check('a one-brick pullback does NOT produce a reversal brick', anyDownAfter === false,
+    JSON.stringify(rr.map((b) => b.dir)));
+
+  // One source bar may complete several bricks on a gap; dropping the extras would flatten exactly
+  // the move this chart exists to show. REDBY: replace the inner loop with a single `if`.
+  const gap = [bar(1, 100, 100, 100, 100), bar(2, 112, 112, 112, 112)];
+  check('a gap produces several bricks from ONE source bar', ind.renko(gap, 2).length >= 5,
+    String(ind.renko(gap, 2).length));
+
+  for (const bad of [0, -2, null, 'two', undefined]) {
+    eq(`renko refuses a brick size of ${JSON.stringify(bad)}`, ind.renko(ramp, bad).length, 0);
+  }
+  eq('renko on no bars is empty', ind.renko([], 2).length, 0);
+
+  // ── Line Break ──
+  const lb = ind.lineBreak(ramp, 3);
+  check('line break builds lines from a ramp', lb.length >= 3, String(lb.length));
+  check('each line is directional', lb.every((x) => x.dir === 1 || x.dir === -1));
+  // A reversal needs the extreme of the last N lines, not just the last close — that is what makes
+  // it rare. REDBY: compare against `last.close` in both directions.
+  const lbRev = ind.lineBreak([...ramp, bar(12, 109, 109, 109, 109)], 3);
+  check('a small pullback does not reverse a 3-line break',
+    lbRev[lbRev.length - 1].dir === 1, JSON.stringify(lbRev.map((x) => x.dir)));
+  eq('line break on no bars is empty', ind.lineBreak([], 3).length, 0);
+
+  // ── Kagi ──
+  const kg = ind.kagi(ramp, 3);
+  check('kagi returns a polyline of prices, not candles',
+    kg.length >= 2 && kg.every((p) => Number.isFinite(p.price) && p.open === undefined),
+    JSON.stringify(kg[0]));
+  check('kagi carries the yang/yin thickness flag as a boolean, not a colour',
+    kg.every((p) => typeof p.thick === 'boolean'));
+  // REDBY: reverse on any adverse tick rather than on the reversal amount.
+  const kgSmall = ind.kagi([...ramp, bar(12, 109, 109, 109, 109)], 3);
+  check('kagi does not reverse on less than the reversal amount',
+    kgSmall[kgSmall.length - 1].dir === 1, JSON.stringify(kgSmall.map((p) => p.dir)));
+  for (const bad of [0, -1, null, 'three']) {
+    eq(`kagi refuses a reversal of ${JSON.stringify(bad)}`, ind.kagi(ramp, bad).length, 0);
+  }
+
+  // ── Point & Figure ──
+  const pf = ind.pointAndFigure(ramp, 2, 3);
+  check('point and figure builds at least one column', pf.length >= 1, String(pf.length));
+  check('each column is an X or an O and records a RANGE of boxes, not one price',
+    pf.every((c) => (c.mark === 'X' || c.mark === 'O') && c.boxes >= 1
+      && Number.isFinite(c.fromPrice) && Number.isFinite(c.toPrice)),
+    JSON.stringify(pf));
+  check('and its prices are derived from the box size',
+    pf.every((c) => Math.abs(((c.toPrice - c.fromPrice) / 2) - c.boxes) < 1e-9),
+    JSON.stringify(pf.map((c) => [c.boxes, c.toPrice - c.fromPrice])));
+  // A reversal needs `reversal` boxes against the column. REDBY: use 1 instead of `rev`.
+  const pfRev = ind.pointAndFigure([...ramp, bar(12, 108, 108, 108, 108)], 2, 3);
+  check('a one-box pullback does not start a new column',
+    pfRev.filter((c) => c.mark === 'O').length === 0, JSON.stringify(pfRev.map((c) => c.mark)));
+  for (const bad of [0, -2, null, 'two']) {
+    eq(`pnf refuses a box size of ${JSON.stringify(bad)}`,
+      ind.pointAndFigure(ramp, bad, 3).length, 0);
+  }
+
+  // ── atrSize: a suggestion, or an honest null ──
+  check('atrSize suggests a positive size from enough bars',
+    ind.atrSize(ramp, 3) > 0, String(ind.atrSize(ramp, 3)));
+  // NULL RATHER THAN A FALLBACK GUESS. REDBY: return a constant when there are too few bars.
+  eq('atrSize returns null when there are too few bars, rather than guessing',
+    ind.atrSize([bar(1, 1, 1, 1, 1)], 14), null);
+  eq('atrSize on no bars is null', ind.atrSize([], 14), null);
+}
+
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILURES'} — ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

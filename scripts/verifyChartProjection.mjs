@@ -33,7 +33,7 @@ import { fileURLToPath } from 'url';
 
 import {
   MAX_BARS_AHEAD, IQR_Z, projectionMode, quantileBars, projectionState, projectionInputs,
-  horizonChoices, horizonFor,
+  horizonChoices, horizonFor, bandBoxes,
 } from '../src/pages/StockMind/chartProjection.js';
 import { interval as intervalDef, SESSION_MINUTES } from '../src/pages/StockMind/timeframes.js';
 
@@ -606,6 +606,80 @@ console.log('\n  horizonFor — an arbitrary period, converted and capped');
   // The presets still exist — this is additive, and removing a capability is not allowed.
   check('horizonChoices still offers its presets alongside', horizonChoices('15m').length >= 1,
     String(horizonChoices('15m').length));
+}
+
+// ── The price-indexed types: refused as a cone, offered as a distance ────────
+// This suite's only helper is `check`, so the equality shorthand is local to these two sections.
+const eq = (label, got, want) => check(label, got === want,
+  `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+
+console.log('\n  the four price-indexed chart types');
+{
+  // A CONE NEEDS A CLOCK. Renko, Kagi, P&F and Line Break advance on price movement, so their axis
+  // is not time and a forward cone would invent a dimension they do not have.
+  // REDBY: let any of them fall through to 'path' or 'quantile-candles'.
+  for (const t of ['renko', 'kagi', 'pnf', 'linebreak']) {
+    const m = projectionMode(t);
+    check(`${t} refuses a cone`, m.mode === 'refused', JSON.stringify(m));
+    check(`${t}'s reason names price-not-time rather than just saying no`,
+      /price movement, not time/.test(m.reason), m.reason);
+    // THE REFUSAL MUST NOT BE A DEAD END: it points at the alternative.
+    check(`${t}'s reason points at the bricks reading`, /bricks/.test(m.reason), m.reason);
+  }
+  // Heikin-Ashi is still refused for its OWN, different reason — the two must not be conflated.
+  check('heikin is still refused for the compounded-average reason, not the axis reason',
+    projectionMode('heikin').mode === 'refused'
+    && /average of a/.test(projectionMode('heikin').reason)
+    && !/price movement, not time/.test(projectionMode('heikin').reason));
+  // And the time-indexed types are untouched.
+  eq('candles still get quantile candles', projectionMode('candles').mode, 'quantile-candles');
+  eq('bars still get quantile bars', projectionMode('bars').mode, 'quantile-bars');
+}
+
+console.log('\n  bandBoxes — the cone read as a distance in bricks');
+{
+  const cone = {
+    ok: true,
+    volatility: { lastClose: 24000 },
+    points: [{ mid: 24000, sigmaPct: 1, upper1: 24240, lower1: 23760, upper2: 24480, lower2: 23520 }],
+  };
+
+  const b = bandBoxes(cone, 50);
+  check('a cone and a brick size yield edges', b.ok === true && b.edges.length === 4,
+    JSON.stringify(b));
+  // 24480 - 24000 = 480; 480 / 50 = 9.6 -> 9 whole bricks. FLOOR, because a brick that has not been
+  // travelled must not be rounded into existence. REDBY: switch floor to ceil or round.
+  const up2 = b.edges.find((e) => e.edge === '+2σ');
+  eq('the +2σ edge is 9 whole bricks away, floored not rounded', up2.bricks, 9);
+  eq('and its price is the engine\'s own bound', up2.price, 24480);
+  check('and which side it sits is stated rather than inferred from a sign', up2.above === true);
+
+  // THE HONESTY ROW. The band is symmetric by construction, so naming a side would imply a lean the
+  // cone does not have. REDBY: add a `direction`, `bias` or `signal` field.
+  const keys = Object.keys(b).concat(Object.keys(b.edges[0])).join(',');
+  check('no direction, bias or signal is reported — the band is symmetric by construction',
+    !/(direction|bias|signal|forecast|target)/i.test(keys), keys);
+  check('and it says in words that it is a distance, not a forecast',
+    /DISTANCE, not a forecast/.test(b.why), b.why);
+
+  // A larger brick means fewer of them. REDBY: ignore boxSize.
+  eq('a 100-point brick halves the count', bandBoxes(cone, 100).edges.find((e) => e.edge === '+2σ').bricks, 4);
+  // An explicit anchor overrides the cone's own close.
+  eq('an explicit anchor is honoured', bandBoxes(cone, 50, { at: 24480 }).edges.find((e) => e.edge === '+2σ').bricks, 0);
+
+  // REFUSALS, each with a reason rather than an empty result.
+  for (const [label, args] of [
+    ['no brick size', [cone, 0]],
+    ['a negative brick size', [cone, -50]],
+    ['a non-numeric brick size', [cone, 'fifty']],
+    ['no cone', [null, 50]],
+    ['a failed cone', [{ ok: false }, 50]],
+    ['a cone with no points', [{ ok: true, points: [] }, 50]],
+    ['no anchor anywhere', [{ ok: true, points: [{ upper2: 1 }] }, 50]],
+  ]) {
+    const r = bandBoxes(...args);
+    check(`${label} is refused with a reason`, r.ok === false && r.why.length > 0, JSON.stringify(r));
+  }
 }
 
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILURES'} — ${pass} passed, ${fail} failed\n`);

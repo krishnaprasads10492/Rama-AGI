@@ -912,6 +912,297 @@ export function heikinAshi(bars) {
   return out;
 }
 
+// ── PRICE-INDEXED CHART TYPES: Renko, Line Break, Kagi, Point & Figure ───────
+//
+// WHAT MAKES THESE FOUR DIFFERENT FROM EVERY OTHER TYPE HERE, and it governs how they may be used:
+// **they are indexed by PRICE MOVEMENT, not by time.** A Renko brick forms when price travels one
+// brick, whether that takes four seconds or four sessions. So the x-axis of a Renko chart is NOT a
+// clock, and three consequences follow that the renderer and the projection both have to respect:
+//
+//   1. Consecutive outputs can be minutes or weeks apart. Every function below therefore carries the
+//      source bar's `time` on each output purely so a chart library can place it, and ALSO returns
+//      `spanBars` — how many source bars that output consumed — because that is the honest measure of
+//      how long it took. A reader who treats the spacing as uniform will misread the chart.
+//   2. **The prices are DERIVED THRESHOLDS, not traded prices** — the same warning `heikinAshi`
+//      carries. A brick top is "one brick above the last brick top", which may be a price that never
+//      printed. A stop read off a brick edge is a stop at a fiction.
+//   3. A FORWARD-IN-TIME projection is meaningless on them. See `chartProjection.projectionMode`,
+//      which refuses all four for that reason rather than drawing a cone over an axis that is not a
+//      clock.
+//
+// Every one is a pure function of stored bars: no network, no engine, no new dependency. That is why
+// the competitive research put them in the free bucket — four chart types TradingView charges for,
+// excluded even from the library edition several Indian brokers embed.
+
+/** A positive finite size, or null. Shared by all four so one bad input behaves identically. */
+function sizeOf(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Usable OHLC bars, in order, with the junk dropped. */
+function cleanBars(bars) {
+  return asBars(bars).filter((b) => finite(b?.open) && finite(b?.high)
+    && finite(b?.low) && finite(b?.close));
+}
+
+/**
+ * The Average True Range over `period` source bars, used only to SUGGEST a brick or box size.
+ *
+ * Offered because a fixed brick size in rupees is meaningless across symbols at different price
+ * levels, and a suggestion derived from the series beats a constant someone guessed.
+ *
+ * @returns {number|null} null when there are too few bars to measure, never a fallback guess
+ */
+export function atrSize(bars, period = 14) {
+  const src = cleanBars(bars);
+  const p = Math.max(1, Math.floor(Number(period) || 14));
+  if (src.length < p + 1) return null;
+  let sum = 0;
+  for (let i = src.length - p; i < src.length; i += 1) {
+    const prev = src[i - 1];
+    const b = src[i];
+    sum += Math.max(b.high - b.low, Math.abs(b.high - prev.close), Math.abs(b.low - prev.close));
+  }
+  const atr = sum / p;
+  return atr > 0 ? atr : null;
+}
+
+/**
+ * RENKO — fixed-size bricks, each one brick of price movement.
+ *
+ * A brick is appended only when the close has travelled a full `brick` from the last brick's close.
+ * A REVERSAL COSTS TWO BRICKS, which is the rule most descriptions omit: to turn around, price must
+ * travel back across the current brick and then one more. That is why a Renko chart suppresses noise,
+ * and getting it wrong produces a chart that flips on every tick.
+ *
+ * @param {Array} bars source OHLC
+ * @param {number} brick brick size in price
+ * @returns {Array<{time, open, high, low, close, dir, spanBars}>} candle-shaped, `dir` +1/-1
+ */
+export function renko(bars, brick) {
+  const size = sizeOf(brick);
+  const src = cleanBars(bars);
+  if (!size || src.length === 0) return [];
+
+  const out = [];
+  // `last` is the CLOSE of the most recent brick, anchored to a brick boundary so the grid does not
+  // depend on where the data happens to start.
+  //
+  // TRACKING THE LAST CLOSE RATHER THAN A FLOATING BASE IS WHAT MAKES THE INNER LOOP TERMINATE. A
+  // first version advanced a `base` to `close - size`, which is the same value it started from, so a
+  // gap spun forever and the suite died with a V8 out-of-memory rather than a failed assertion. Every
+  // branch below moves `last` by at least one brick TOWARDS the close that triggered it, and each
+  // condition requires the close to be at least that far away — so the loop strictly converges.
+  let last = Math.floor(src[0].close / size) * size;
+  let dir = 0;
+  let consumed = 0;
+
+  for (const b of src) {
+    consumed += 1;
+    // A LOOP, because one source bar can complete several bricks in a gap or a fast move. Dropping
+    // the extras would silently flatten exactly the moves this chart exists to show.
+    for (;;) {
+      if (dir >= 0 && b.close >= last + size) {
+        const open = last;
+        const close = last + size;
+        out.push({ time: b.time, open, high: close, low: open, close, dir: 1, spanBars: consumed });
+        last = close;
+        dir = 1;
+        consumed = 0;
+      } else if (dir <= 0 && b.close <= last - size) {
+        const open = last;
+        const close = last - size;
+        out.push({ time: b.time, open, high: open, low: close, close, dir: -1, spanBars: consumed });
+        last = close;
+        dir = -1;
+        consumed = 0;
+      } else if (dir > 0 && b.close <= last - 2 * size) {
+        // A REVERSAL COSTS TWO BRICKS: back across the current brick, then one more.
+        const open = last - size;
+        const close = last - 2 * size;
+        out.push({ time: b.time, open, high: open, low: close, close, dir: -1, spanBars: consumed });
+        last = close;
+        dir = -1;
+        consumed = 0;
+      } else if (dir < 0 && b.close >= last + 2 * size) {
+        const open = last + size;
+        const close = last + 2 * size;
+        out.push({ time: b.time, open, high: close, low: open, close, dir: 1, spanBars: consumed });
+        last = close;
+        dir = 1;
+        consumed = 0;
+      } else break;
+    }
+  }
+  return out;
+}
+
+/**
+ * LINE BREAK — a new line only when the close breaks the extreme of the previous `lines` lines.
+ *
+ * Three-line break is the common setting and is the default. The rule is directional: to extend, beat
+ * the last line's close; to REVERSE, beat the extreme of the last `lines` lines, which is what makes
+ * a reversal rare.
+ *
+ * @returns {Array<{time, open, high, low, close, dir, spanBars}>}
+ */
+export function lineBreak(bars, lines = 3) {
+  const src = cleanBars(bars);
+  const n = Math.max(1, Math.floor(Number(lines) || 3));
+  if (src.length === 0) return [];
+
+  const out = [];
+  let consumed = 0;
+  for (const b of src) {
+    consumed += 1;
+    if (out.length === 0) {
+      out.push({ time: b.time, open: b.open, high: Math.max(b.open, b.close),
+        low: Math.min(b.open, b.close), close: b.close,
+        dir: b.close >= b.open ? 1 : -1, spanBars: consumed });
+      consumed = 0;
+      continue;
+    }
+    const last = out[out.length - 1];
+    const recent = out.slice(-n);
+    const hi = Math.max(...recent.map((r) => Math.max(r.open, r.close)));
+    const lo = Math.min(...recent.map((r) => Math.min(r.open, r.close)));
+
+    let dir = 0;
+    if (last.dir > 0) {
+      if (b.close > last.close) dir = 1;
+      else if (b.close < lo) dir = -1;
+    } else {
+      if (b.close < last.close) dir = -1;
+      else if (b.close > hi) dir = 1;
+    }
+    if (dir === 0) continue;
+
+    const open = last.close;
+    out.push({ time: b.time, open, high: Math.max(open, b.close), low: Math.min(open, b.close),
+      close: b.close, dir, spanBars: consumed });
+    consumed = 0;
+  }
+  return out;
+}
+
+/**
+ * KAGI — one continuous line that reverses only after `reversal` of adverse movement.
+ *
+ * `thick` is the yang/yin distinction and it is the whole point of a Kagi chart: the line thickens
+ * when it breaks the previous shoulder and thins when it breaks the previous waist. Returned as a
+ * flag per segment rather than as a colour, because a pure function has no business choosing one.
+ *
+ * @returns {Array<{time, price, dir, thick, spanBars}>} a polyline, NOT candles
+ */
+export function kagi(bars, reversal) {
+  const size = sizeOf(reversal);
+  const src = cleanBars(bars);
+  if (!size || src.length === 0) return [];
+
+  const out = [{ time: src[0].time, price: src[0].close, dir: 0, thick: false, spanBars: 1 }];
+  let dir = 0;
+  let extreme = src[0].close;
+  let shoulder = src[0].close;
+  let thick = false;
+  let consumed = 0;
+
+  for (let i = 1; i < src.length; i += 1) {
+    const c = src[i].close;
+    consumed += 1;
+    if (dir >= 0 && c > extreme) {
+      extreme = c;
+      if (c > shoulder) thick = true;
+    } else if (dir <= 0 && c < extreme) {
+      extreme = c;
+      if (c < shoulder) thick = false;
+    } else if (dir >= 0 && c <= extreme - size) {
+      shoulder = extreme;
+      dir = -1;
+      extreme = c;
+    } else if (dir <= 0 && c >= extreme + size) {
+      shoulder = extreme;
+      dir = 1;
+      extreme = c;
+    } else continue;
+
+    const prev = out[out.length - 1];
+    if (prev.price === extreme && prev.dir === dir) {
+      prev.spanBars += consumed;
+    } else {
+      out.push({ time: src[i].time, price: extreme, dir: dir || 1, thick, spanBars: consumed });
+    }
+    consumed = 0;
+  }
+  return out;
+}
+
+/**
+ * POINT & FIGURE — columns of X (rising) and O (falling).
+ *
+ * `box` is the quantum and `reversal` is how many boxes against the column are needed to start a new
+ * one; three is the classical setting. **A column records a RANGE of boxes, not a single price**, so
+ * the output is per-column with `from`/`to` in boxes and in price — which is what a renderer needs to
+ * draw a stack of marks rather than a line.
+ *
+ * @returns {Array<{time, mark, from, to, fromPrice, toPrice, boxes, spanBars}>}
+ */
+export function pointAndFigure(bars, box, reversal = 3) {
+  const size = sizeOf(box);
+  const rev = Math.max(1, Math.floor(Number(reversal) || 3));
+  const src = cleanBars(bars);
+  if (!size || src.length === 0) return [];
+
+  const lvl = (p) => Math.floor(p / size);
+  const out = [];
+  let mark = null;
+  let from = lvl(src[0].close);
+  let to = from;
+  let consumed = 0;
+
+  const flush = (time) => {
+    if (mark === null) return;
+    const lo = Math.min(from, to);
+    const hi = Math.max(from, to);
+    out.push({
+      time, mark, from, to,
+      fromPrice: lo * size, toPrice: (hi + 1) * size,
+      boxes: hi - lo + 1, spanBars: consumed,
+    });
+    consumed = 0;
+  };
+
+  for (const b of src) {
+    consumed += 1;
+    // High then low within one source bar: the classical resolution of an ambiguous bar, declared
+    // rather than left implicit, because the opposite order yields a different chart on the same data.
+    const up = lvl(b.high);
+    const down = lvl(b.low);
+    if (mark === null) {
+      if (up > from) { mark = 'X'; to = up; }
+      else if (down < from) { mark = 'O'; to = down; }
+      continue;
+    }
+    if (mark === 'X') {
+      if (up > to) to = up;
+      else if (down <= to - rev) {
+        flush(b.time);
+        from = to - 1;
+        to = down;
+        mark = 'O';
+      }
+    } else if (down < to) to = down;
+    else if (up >= to + rev) {
+      flush(b.time);
+      from = to + 1;
+      to = up;
+      mark = 'X';
+    }
+  }
+  flush(src[src.length - 1].time);
+  return out;
+}
+
 // ── The catalogue additions ───────────────────────────────────────────────────
 //
 // `kind: 'series'` is a GENERIC multi-line shape: `make` returns `{series: [{data, label, ...}]}`, so a
