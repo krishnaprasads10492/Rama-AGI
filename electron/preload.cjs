@@ -790,6 +790,16 @@ const RAMA_API = {
   // (tier 0, master-only) — every credential in here is master's, not a
   // per-user store. `status` alone stays user-less: it exposes no secret
   // (just locked/unlocked + a count), matching os.metrics-read's openness.
+  // ── Broker data connectors (Section 145) ──────────────────────────────────
+  // READ ONLY, and gated on `vault.read` in the main process. There is deliberately no "apply"
+  // member: `driftReport` proposes and master decides, so an apply channel would be the one thing
+  // that could turn a documentation page into a credential pointed somewhere new.
+  brokers: {
+    list:       (user)              => ipcRenderer.invoke('brokers:list', { user }),
+    fields:     (user, id)          => ipcRenderer.invoke('brokers:fields', { user, id }),
+    driftCheck: (user, id, docText) => ipcRenderer.invoke('brokers:drift-check', { user, id, docText }),
+  },
+
   vault: {
     unlock:  (user, password)        => ipcRenderer.invoke('vault:unlock', { user, password }),
     lock:    (user)                  => ipcRenderer.invoke('vault:lock', { user }),
@@ -839,6 +849,12 @@ const RAMA_API = {
     // and never any part of the key; `searchWeb` runs the egress classification gate above backend
     // selection. Both sit inside the `models:` prefix genome.cjs already declares for this gene.
     cloudStatus:      ()           => ipcRenderer.invoke('models:cloud-status'),
+    // THE LAST TWO UNREACHABLE CHANNELS (Section 145, audit H6). `models:roles` and
+    // `models:role-research` were the only 2 of 377 registered channels named in neither the preload
+    // nor `src/` — `modelRoles.plan()`, `researchPlan()` and `describeRequirement()` existed solely
+    // for them, so the role planner was built, gated and unreachable. Both are gated READS.
+    roles:            (opts)       => ipcRenderer.invoke('models:roles', opts),
+    roleResearch:     (opts)       => ipcRenderer.invoke('models:role-research', opts),
     cloudList:        (opts)       => ipcRenderer.invoke('models:cloud-list', opts),
     searchWeb:        (opts)       => ipcRenderer.invoke('models:search-web', opts),
     // Custom OpenAI-compatible providers — master-only (models.add-key).

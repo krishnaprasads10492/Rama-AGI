@@ -255,6 +255,16 @@ export default function Models() {
   // `exists` + `unreadable` from vault:status, so the banner can tell "nothing
   // stored yet" from "stored but undecryptable" instead of calling both locked.
   const [vaultState,  setVaultState]  = useState({ exists: false, unreadable: false });
+
+  // ── Roles and brokers (Section 145) ──────────────────────────────────────
+  // Loaded ON DEMAND, not with the page: `models:roles` calls `refreshOllamaModels()` first, and
+  // probing the daemon on every visit to a tab master may not open is work for nothing.
+  const [roles,        setRoles]        = useState(null);
+  const [roleResearch, setRoleResearch] = useState(null);
+  const [rolesError,   setRolesError]   = useState(null);
+  const [brokers,      setBrokers]      = useState(null);
+  const [brokerFields, setBrokerFields] = useState(null);
+  const [brokersError, setBrokersError] = useState(null);
   const [tab,         setTab]         = useState('cloud');
   const [customProviders,   setCustomProviders]   = useState([]);
   const [showAddCustom,     setShowAddCustom]     = useState(false);
@@ -336,6 +346,104 @@ export default function Models() {
       setUnlocking(false);
     }
   };
+
+  /**
+   * The role planner's two reads, and the broker connectors' three. Every one reports its own
+   * failure — these channels are gated on a capability, so `ok:false` is a likely and meaningful
+   * answer rather than an edge case.
+   */
+  const loadRoles = useCallback(async () => {
+    if (!isElectron) return;
+    setRolesError(null);
+    try {
+      const res = await window.rama.models.roles({ user: currentUser });
+      if (res?.ok) setRoles(res);
+      else setRolesError(res?.error || 'the role plan could not be read');
+    } catch (err) {
+      setRolesError(`the roles channel did not answer: ${err?.message || String(err)}`);
+    }
+  }, [currentUser]);
+
+  const loadRoleResearch = useCallback(async () => {
+    if (!isElectron) return;
+    setRolesError(null);
+    try {
+      const res = await window.rama.models.roleResearch({ user: currentUser });
+      if (res?.ok) setRoleResearch(res);
+      else setRolesError(res?.error || 'the role research could not be read');
+    } catch (err) {
+      setRolesError(`the role-research channel did not answer: ${err?.message || String(err)}`);
+    }
+  }, [currentUser]);
+
+  const loadBrokers = useCallback(async () => {
+    if (!isElectron) return;
+    setBrokersError(null);
+    try {
+      const res = await window.rama.brokers.list(currentUser);
+      if (res?.ok) setBrokers(res);
+      else setBrokersError(res?.error || 'the broker list could not be read');
+    } catch (err) {
+      setBrokersError(`the brokers channel did not answer: ${err?.message || String(err)}`);
+    }
+  }, [currentUser]);
+
+  const loadBrokerFields = useCallback(async (id) => {
+    if (!isElectron) return;
+    setBrokersError(null);
+    try {
+      const res = await window.rama.brokers.fields(currentUser, id);
+      if (res?.ok !== false) setBrokerFields({ id, ...res });
+      else setBrokersError(res?.error || `the fields for ${id} could not be read`);
+    } catch (err) {
+      setBrokersError(`the broker fields channel did not answer: ${err?.message || String(err)}`);
+    }
+  }, [currentUser]);
+
+  /**
+   * FETCH THE BROKER'S OWN DOCUMENTATION AND REPORT DRIFT — master's request from ledger row 163,
+   * *"Rama should be able to verify documents online to update the API structure"*, finally reachable.
+   *
+   * THE SPLIT IS THE WHOLE POINT. The renderer fetches; `brokers:drift-check` compares. `driftReport`
+   * stays pure and never touches the network, so it remains testable against a fixture, and this
+   * channel cannot be turned into an outbound request by a crafted argument.
+   *
+   * AND IT ONLY EVER REPORTS. Nothing is applied: the declared table is the source of truth and a
+   * connector silently re-shaped from a page that could have changed for any reason is a credential
+   * pointed somewhere new (I6, I17).
+   */
+  const [drift, setDrift] = useState(null);
+  const [driftBusy, setDriftBusy] = useState(null);
+
+  const checkBrokerDrift = useCallback(async (id, docsUrl) => {
+    if (!isElectron || !docsUrl) return;
+    setBrokersError(null);
+    setDrift(null);
+    setDriftBusy(id);
+    try {
+      const page = await window.rama.browser.fetchUrl(docsUrl);
+      const text = page?.ok ? (page.text ?? page.data ?? page.body ?? '') : '';
+      if (!text) {
+        // A FAILED FETCH IS NOT AN ALL-CLEAR, and saying so here as well as in the channel means a
+        // network problem can never be read as "the declaration is still correct".
+        setBrokersError(`${docsUrl} could not be read, so nothing was compared: `
+          + `${page?.error || 'the page returned no text'}`);
+        return;
+      }
+      const res = await window.rama.brokers.driftCheck(currentUser, id, text);
+      setDrift({ id, ...res });
+      if (res?.ok === false && !res?.inconclusive) {
+        setBrokersError(res.error || 'the drift check could not run');
+      }
+    } catch (err) {
+      setBrokersError(`the drift check did not complete: ${err?.message || String(err)}`);
+    } finally {
+      setDriftBusy(null);
+    }
+  }, [currentUser]);
+
+  // The broker list is cheap and has no side effect, so it loads when its tab opens.
+  useEffect(() => { if (tab === 'brokers' && !brokers) loadBrokers(); }, [tab, brokers, loadBrokers]);
 
   const saveKey = async (credKey, value) => {
     if (!isElectron) return;
@@ -457,7 +565,11 @@ export default function Models() {
 
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
-        {['cloud', 'local', 'custom', 'keys'].map(t => (
+        {/* TWO NEW TABS, and they are the consumers the bridge never had (Section 145).
+            `models:roles` and `models:role-research` were the only two of 377 registered channels
+            that nothing named, and `brokerConnectors.cjs` had no channel at all. Exposing a preload
+            member without a page would only move the orphan one layer up. */}
+        {['cloud', 'local', 'custom', 'keys', 'roles', 'brokers'].map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '9px 18px', border: 'none', background: 'transparent',
             color: tab === t ? 'var(--accent)' : 'var(--muted)',
@@ -594,6 +706,154 @@ export default function Models() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {tab === 'roles' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <button className="btn btn-sm btn-primary" onClick={loadRoles} disabled={!isElectron}>
+                {roles ? '↺ Re-check roles' : 'Check which roles are filled'}
+              </button>
+              <button className="btn btn-sm" onClick={loadRoleResearch} disabled={!isElectron}>
+                What would fill the gaps
+              </button>
+              {rolesError && (
+                <span role="alert" style={{ color: 'var(--red)', fontSize: FS.chrome, lineHeight: LH.chrome }}>
+                  {rolesError}
+                </span>
+              )}
+            </div>
+            {!roles && !rolesError && (
+              <div style={{ color: 'var(--muted)', fontSize: FS.chrome, lineHeight: LH.chrome }}>
+                A role is a job Rāma needs a model for. Nothing is downloaded by checking.
+              </div>
+            )}
+            {(roles?.roles || []).map(r => {
+              // `plan()` returns the fill state; `roles` describes what each role IS. Both come from
+              // the one channel, so a role cannot be described without its requirement.
+              const filled = (roles?.data?.filled || roles?.data?.roles || [])
+                .find(x => (x.id ?? x.role) === r.id);
+              return (
+                <div key={r.id} className="hud-card" style={{ padding: '14px 16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 700, fontSize: FS.dense }}>{r.label}</span>
+                    <span className={`badge ${filled ? 'badge-cyan' : ''}`}
+                      style={{ fontSize: FS.chrome, lineHeight: LH.chrome,
+                        color: filled ? undefined : 'var(--amber)' }}>
+                      {filled ? (filled.model || filled.name || 'filled') : 'unfilled'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '4px' }}>
+                    {r.why}
+                  </div>
+                  <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)', marginTop: '2px' }}>
+                    Needs: {r.requirement}
+                  </div>
+                  {r.note && (
+                    <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--amber)', marginTop: '2px' }}>
+                      {r.note}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {roleResearch && (
+              <div className="hud-card" style={{ padding: '14px 16px' }}>
+                <div style={{ fontWeight: 700, fontSize: FS.dense, marginBottom: '6px' }}>
+                  Recommended, from the fetched catalogue only
+                </div>
+                {/* NOT A DOWNLOAD BUTTON. The research channel recommends; pulling a model is the
+                    Local tab's existing, separate action. */}
+                <pre style={{ margin: 0, fontSize: FS.chrome, lineHeight: LH.chrome,
+                  color: 'var(--text-dim)', whiteSpace: 'pre-wrap', maxHeight: '240px', overflow: 'auto' }}>
+                  {JSON.stringify(roleResearch.data ?? roleResearch, null, 2)}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'brokers' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div className="hud-card" style={{ padding: '12px 16px' }}>
+              <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)' }}>
+                {brokers?.note
+                  || 'Rāma never places an order. These connectors are declared data only.'}
+              </div>
+            </div>
+            {brokersError && (
+              <div role="alert" style={{ color: 'var(--red)', fontSize: FS.chrome, lineHeight: LH.chrome }}>
+                {brokersError}
+              </div>
+            )}
+            {(brokers?.data || []).map(b => (
+              <div key={b.id} className="hud-card" style={{ padding: '14px 16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 700, fontSize: FS.dense }}>{b.label}</span>
+                  {/* BOTH FLAGS SHOWN. "data only" is the promise; "declares no order path" is the
+                      mechanical fact behind it, and they are different statements. */}
+                  <span className="badge badge-cyan" style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>
+                    {b.dataOnly ? 'data only' : 'NOT data-only'}
+                  </span>
+                  <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome,
+                    color: b.declaresOrderPath ? 'var(--red)' : 'var(--muted)' }}>
+                    {b.declaresOrderPath ? 'declares an order path' : 'declares no order path'}
+                  </span>
+                  <div style={{ flex: 1 }} />
+                  <button className="btn btn-sm" onClick={() => loadBrokerFields(b.id)}>
+                    Which fields it needs
+                  </button>
+                  <button className="btn btn-sm" disabled={driftBusy === b.id}
+                    onClick={() => checkBrokerDrift(b.id, b.docsUrl)}
+                    title="Fetch the broker's own documentation and report what has changed. Nothing is applied.">
+                    {driftBusy === b.id ? 'Checking docs…' : 'Check docs for drift'}
+                  </button>
+                </div>
+                <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '4px' }}>
+                  {b.pricing ? `${b.pricing} · ` : ''}docs checked {b.docsCheckedAt} ·{' '}
+                  <a href={b.docsUrl} target="_blank" rel="noreferrer"
+                    style={{ color: 'var(--accent)' }}>{b.docsUrl}</a>
+                </div>
+                {drift?.id === b.id && (
+                  <div style={{ marginTop: '8px', fontSize: FS.chrome, lineHeight: LH.chrome }}>
+                    {/* INCONCLUSIVE IS ITS OWN STATE, shown in amber rather than folded into either
+                        "all clear" or "error" — a login wall must never read as agreement. */}
+                    <div style={{ color: drift.inconclusive ? 'var(--amber)' : 'var(--text)' }}>
+                      {drift.inconclusive ? 'Inconclusive: ' : ''}
+                      {drift.error || drift.summary || 'Compared against the declaration.'}
+                    </div>
+                    {Array.isArray(drift.findings) && drift.findings.length > 0 && (
+                      <ul style={{ margin: '4px 0 0 16px', color: 'var(--text-dim)' }}>
+                        {drift.findings.map((f, i) => (
+                          <li key={i}>{typeof f === 'string' ? f : (f.message || JSON.stringify(f))}</li>
+                        ))}
+                      </ul>
+                    )}
+                    <div style={{ color: 'var(--muted)', marginTop: '2px' }}>
+                      {drift.appliedNote || 'Nothing has been changed automatically.'}
+                    </div>
+                  </div>
+                )}
+                {brokerFields?.id === b.id && (
+                  <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {(brokerFields.fields || []).map(f => (
+                      <div key={f.key} style={{ fontSize: FS.chrome, lineHeight: LH.chrome }}>
+                        <span style={{ color: 'var(--text)' }}>{f.label}</span>
+                        <span style={{ color: 'var(--muted)' }}> · {f.kind}</span>
+                        {f.secret && <span style={{ color: 'var(--amber)' }}> · secret</span>}
+                        {f.suggest && <span style={{ color: 'var(--text-dim)' }}> · suggests {f.suggest}</span>}
+                      </div>
+                    ))}
+                    <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)' }}>
+                      These names come from {brokerFields.docsUrl || 'the connector declaration'},
+                      checked {brokerFields.docsCheckedAt || 'on the date in the declaration'}. Values
+                      are stored in the credential vault, never here.
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
 

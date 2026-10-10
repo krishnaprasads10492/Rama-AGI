@@ -1837,6 +1837,8 @@ authenticated **Master session**, not merely an open store.
 
 | 170 | Four more off the audit queue, and a count I had overstated | done | Section 144. Master: *"are the que items implemented"* — the honest answer was NO, two of nine, and this row is the next four. **A CORRECTION TO MY OWN ROW 169 FIRST: I reported `functionTracking.record()` at 4 production call sites. WRONG — my own reachability suite counted the bare string `record(` and matched `crashGuard.record(` in `main.cjs`, an unrelated function with the same name. The real number is 0. A GUARD THAT OVERSTATES PROGRESS IS WORSE THAN ONE THAT UNDERSTATES IT: IT RETIRES AN OPEN ITEM. `callSitesOf()` now matches `<binding>.<fn>(` only in files that require the defining module, and prints the sites rather than a count.** **H9 — SELF-MODIFICATION DENIED EVERY WRITE AND REPORTED SUCCESS, two bugs in one line where the second hid the first. The bridge is `fs.writeFile(user, filePath, content)`; the call was `writeFile(file.path, file.content)`, so the path arrived as `user`, the content as `filePath`, `content` was undefined — and `capability.can()` requires `typeof user.tier === 'number'`, so EVERY WRITE WAS DENIED. Then `return { ok: true, results }` regardless. Seven call sites had it (`writeFile`, `deleteFile`, `git.stage/commit/push`, `readFile`, `searchFiles`), all now thread `user`, and the summary is DERIVED from the results. An unrecognised action is REFUSED rather than skipped — skipping left `res` undefined, spreading into the row with no `ok` at all, neither success nor failure. TWO MORE FOUND WHILE FIXING IT: `git.stage`'s result was discarded, and a denied stage followed by a commit is a commit of nothing reported as a commit; and the push result was dropped, so "committed and pushed" and "committed, push failed" were the same return value. `CommandPalette`'s approve handler had `if (result.ok)` with NO ELSE — it could not have had one, the branch was unreachable — and now shows the reason and DELIBERATELY DOES NOT CLEAR the pending modification so master can retry.** **H5 — THE PRIVACY GATE FINALLY HAS A PRODUCER. `assembleTurn()` has refused sensitive cloud turns for several sections and `Chat.jsx` never passed the flag, so the gate could never fire: the sixth no-producer contract the audit found. `src/services/turnSensitivity.js` is LAYER ONE ONLY — deterministic patterns; the three-layer design with an injectable model layer is NOT built, because Ollama is on another machine and asking a third party whether a turn is private requires sending them the turn. IT ERRS TOWARD PRIVATE ALWAYS AND THE ASYMMETRY IS THE DESIGN: a false "sensitive" costs a cloud round trip row 150 already made local (zero cost today); a false "public" puts master's holdings in someone else's log. Non-string, empty turn, malformed rule and a rule that throws ALL return sensitive. THE FIRST VERSION SKIPPED a non-RegExp rule — the wrong direction, since a rule list damaged by a bad edit would then classify EVERY turn as public. Ten named patterns; A MATCH REPORTS PATTERN IDS, NEVER THE MATCHED TEXT, because returning the substring would put the secret into whatever logs the classification. `verifyTurnSensitivity.mjs` 66 assertions: 31 must-be-private fixtures, 10 must-stay-public (A CLASSIFIER THAT CALLS EVERYTHING PRIVATE HAS STOPPED CLASSIFYING and would make the cloud destination permanently unreachable), every pattern asserted to be exercised, no `/g` or `/y` allowed (lastIndex would make a second identical turn answer differently), and three rows proving it is WIRED INTO `Chat.jsx` — asserting the classifier works while nothing calls it would recreate the defect one layer up. MY OWN FIXTURES TRIPPED I-SECRETS: `verifyInvariants.cjs` went red on `sk-…` test strings, correctly, because THE GUARD CANNOT TELL A FIXTURE FROM A LEAK AND SHOULD NOT TRY; they are composed at runtime now.** **H10 — A SECURITY CONTROL THAT REPORTED ITS INTENTIONS AS ACHIEVEMENTS. `ipc-enc:status` returned `sensitiveChannels: SENSITIVE_CHANNELS.size`, which reads as "this many are protected", while `wrapHandle` has ZERO call sites so nothing is session-checked or signed. MADE HONEST, NOT QUIETLY WIRED: status now reports declared scope and ACHIEVED scope as separate facts — `wrappedChannels`, the `wrapped` list, `unprotectedChannels`, and an `enforcement` string saying in words that the control is inert, because a reader who sees three counts should not have to subtract them to learn that. THE WIRING IS RAISED, NOT TAKEN: the natural seam is `main.cjs`'s `ipcRec`, whose own comment says "it is not a policy layer and must not become one" — a recorded decision I will not override silently — and wrapping would make `CRITICAL_CHANNELS` REFUSE WITHOUT A SESSION KEY, a real behaviour change on security paths I cannot verify by running the app here. MASTER'S DECISION: make `ipcRec` a policy layer, wrap at each module's registration, or leave it declared-but-inert with the status now saying so.** **H8 — A MEMORY PAGE THAT INVENTED ITS OWN MEMORIES. Two hardcoded entries nobody wrote, that could not be deleted and survived a restart BECAUSE THEY WERE NEVER PERSISTED, beside a `+ Add Entry` button with no `onClick` at all and an empty state promising MongoDB, which this app does not use and has no dependency on. A MEMORY PAGE THAT INVENTS ITS OWN MEMORIES IS WORSE THAN AN EMPTY ONE: IT TEACHES MASTER THAT WHAT HE READS THERE IS REAL. The `knowledge` domain has existed at `dataStore.cjs:159` the whole time — encrypted, autosaved, re-keyed under I14 — loaded and saved and never written to; this page is now its producer, with `store.push` stamping `_id` so no id is invented in the renderer. Three empty states instead of one because they are three different facts (loading, nothing stored, search matched nothing), a locked store REPORTED rather than rendered as emptiness, and `key={entry._id ?? entry.id}` because `id` was the INVENTED rows' field and would have been undefined for every real row.** **THE RATCHET EARNED ITSELF IN ONE COMMIT: wiring Knowledge made `store.get/push/remove` reachable and `verifyReachability.cjs` WENT RED demanding they leave the debt register — the "no stale entry" rule doing exactly what it was built for on its first real test. Register 315 → 312, closures recorded with the reason.** **VERIFIED: chain 4,920 → 4,986 across 41 → 42 entries 0 failures exit 0, `auditRenderer` clean at 85 files / 144 bridge calls / 372 channels, build exit 0 with `verifyBundleGraph` 21/0, guide regenerated.** **NOT VERIFIED: none of this has been exercised in the running app — no modification approved through the UI, no knowledge entry stored on master's machine, no turn classified in a live conversation. The classifier's fixtures are THE AUTHOR'S, NOT A CORPUS: they prove the rules behave as written, not that they match master's real phrasing. "How much did I make on that one" carries no pattern and reads as public to layer one, which is precisely why the other layers were specified.** **STILL OPEN: H4 (`record()` at 0 producers — the engine path needs CPython 3.12 but `modelRouter` calls and `dataStore` save durations do not), H6 (the two named orphan channels), H7 (`brokerConnectors` has no channel, namespace or page), and H10's wiring decision. NEXT: H4's engine-free producers, then H6, then H7 — each closes a named gap, so progress shows as the register shrinking rather than as a claim.** |
 
+| 171 | The last three audit HIGHs, and zero orphan channels | done | Section 145. Closes H4, H6 and H7 — every HIGH from row 168's audit is now done except H10's WIRING, which is master's decision. **H4: `record()` was built in Section 138 with 61 assertions and had ZERO CALL SITES FOR THREE SECTIONS — a measurement store with nothing measuring. Two producers now, both engine-free because the backtest path master actually asked about needs CPython 3.12 this machine has never had: `dataStore.saveDomain` (encrypted-save duration per domain, success AND failure, since a record holding only successes cannot answer "how often did this fail") and `modelRouter.chatCompletion` (the single chokepoint all eight providers pass through, so one measurement covers them all rather than eight copies that could drift; `refused` where the cloud path's `unconfigured` flag is set and `error` otherwise, because a missing credential and a broken provider are different facts).** **THE TRACKING DOMAIN IS NEVER MEASURED, AND THAT GUARD IS NOT AN OPTIMISATION — WITHOUT IT THE FEATURE CANNOT WORK AT ALL. `record()` pushes into `tracking`, which marks `tracking` dirty; if saving `tracking` also recorded a measurement, every save would create a record that re-dirties it — the domain could never become clean and the 60-second autosave would write FOREVER on a completely idle app, each pass growing the ring it was writing. A self-feeding loop. The blind spot it leaves (the cost of persisting tracking itself is not in the record) is named rather than left to be found. Neither producer records anything from the data: the save measurement carries THE DOMAIN NAME ONLY because a measurement of an encrypted write must not become a plaintext copy of what it wrote, and the model measurement carries PROVIDER AND MODEL ID ONLY because a latency record must not become a transcript.** **H6: `models:roles` and `models:role-research` were the only 2 of 377 registered channels named in neither the preload nor `src/`, with `modelRoles.plan()`/`researchPlan()`/`describeRequirement()` existing solely for them. `KNOWN_ORPHAN_CHANNELS` IS NOW EMPTY — every registered channel has a caller surface, and the "no stale entry" rule FORCED that emptying: the suite failed until the two names were removed.** **H7: `brokerConnectors.cjs` had 81 assertions, three declared connectors, and no channel, no namespace and no page. `electron/ipc/brokers.cjs` adds `brokers:list`/`brokers:fields`/`brokers:drift-check`, all gated on `vault.read` — the same sensitivity class as reading the vault's contents list, because the fields describe what master is about to paste a credential into. AND MASTER'S ORIGINAL REQUEST FROM ROW 163 IS FINALLY REACHABLE: "Rama should be able to verify documents online to update the API structure" — the Brokers tab's Check docs for drift button fetches the broker's own documentation through `browser.fetchUrl` and hands the text to the channel. THE SPLIT IS THE POINT: the renderer fetches, the channel compares, so `driftReport` stays pure, remains testable against a fixture, and the channel cannot be turned into an outbound request by a crafted argument. A short body is `inconclusive` and never all-clear, checked at the channel as well as in the module; A FAILED FETCH IS REPORTED AS A FAILED FETCH, because a network problem must never read as "the declaration is still correct"; and `inconclusive` renders as its own state in amber rather than folded into either all-clear or error. NOTHING IS EVER APPLIED — no apply member on the bridge and no apply path in the channel, because the declared table is the source of truth and a connector silently re-shaped from a page that could have changed for any reason is a credential pointed somewhere new (I6, I17); the response says so in `appliedNote`, AT THE CHANNEL, because master reads the response and not the module.** **EXPOSING A BRIDGE MEMBER WITH NO PAGE WOULD ONLY MOVE THE ORPHAN ONE LAYER UP, so both tabs were built — a Roles tab showing each role, why it exists, what it requires and whether it is filled; a Brokers tab showing data-only and declares-no-order-path as TWO SEPARATE STATEMENTS, the first being the promise and the second the mechanical fact behind it.** **MY OWN COUNTER READ DOCUMENTATION AS IMPLEMENTATION, TWICE MORE: instrumenting `record()` made the suite report 2 call sites in a file with 1, because the comment EXPLAINING why `record()` needed a producer contains the literal `.record(`; and the member parser produced a phantom bridge member called `member` from a comment containing the words "apply" member:. THAT IS THE FOURTH AND FIFTH TIME THIS PROJECT HAS PAID FOR A PATTERN THAT READS PROSE AS CODE, after the `/projected/` regex, the near-match connector sentence, and `!/ok:\\s*true/` matching its own explanatory comment. Both now strip comments before matching, replacing them with SPACES so every byte offset and nesting depth is preserved. THE BASELINE WAS REGENERATED BECAUSE OF IT: the first seed of 315 was written by the parser that read comments as keys, so it held phantoms; it is now 301, the difference being phantoms removed plus the eight members genuinely closed. A DEBT REGISTER SEEDED FROM A BAD MEASUREMENT LIES IN BOTH DIRECTIONS, so regenerating was the only honest option, and the reason is recorded inside the file rather than only in the spec.** **VERIFIED: chain 4,986 across 42 entries 0 failures exit 0 — UNCHANGED IN COUNT, which is correct, since this tranche added producers and callers rather than new contracts. Reachability 377 → 380 channels, 0 ORPHAN CHANNELS, 120 of 421 bridge members reached, register 301. `auditRenderer` clean at 85 files / 377 channels. Build exit 0 with `verifyBundleGraph` 21/0. `verify:render` 85/0 with `/models` reachable at both widths. `verifyTypeScale.mjs` CAUGHT TWO NUMERIC `fontSize` LITERALS I INTRODUCED in the new tabs — 142 against a budget of 140 — and they are tokens now; the budget did exactly what Section 136 built it for.** **NOT VERIFIED, AND THIS LIST MATTERS MORE THAN THE GREEN ONES: no measurement has been recorded on master's machine (both producers are wired, the store is empty until the app runs, and the Section 138 read channel STILL HAS NO PANEL calling `tracking.summary` — the data will be there with nothing showing it); no role plan has been computed (`models:roles` calls `refreshOllamaModels()` first and Ollama is on master's OTHER machine, so the Roles tab will report unfilled roles here regardless of truth); and no broker document has been fetched — the drift path is wired end to end and HAS NEVER RUN, so the shape of what `browser.fetchUrl` returns for a real vendor page is READ FROM ITS OWN CODE rather than observed, making the `text ?? data ?? body` fallback a guess at three field names that may need a fourth on the first real run.** **NEXT: M10 and M11 are small, security-relevant and provable — both are a missing `requireLocalToken` on a route where the mechanism already exists. Then M23 (the `SELF_MODIFY` applier registered by a module-scope side effect inside a `try{}catch{}` that a load-order change would lose silently). Then a Tracking panel, so the first unverified item above stops being true.** |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -18617,3 +18619,132 @@ and that limit is precisely why the other layers were specified.
 **NEXT:** H4's engine-free producers (`modelRouter` calls and `dataStore` save durations), then H6,
 then H7. Each closes a named gap in the reachability register, so progress is visible as the register
 shrinking rather than as a claim.
+
+---
+
+## SECTION 145 — The last three, and the register reaches zero orphan channels
+
+**STATUS: H4, H6 AND H7 CLOSED. EVERY HIGH ITEM FROM THE AUDIT IS NOW DONE EXCEPT H10'S WIRING, WHICH
+IS MASTER'S DECISION.** Nine of nine, counting H10 as made-honest-and-raised.
+
+### 145.1 H4 — function tracking has producers at last
+
+`record()` was built in Section 138 with 61 assertions and had **zero call sites for three
+sections** — a measurement store with nothing measuring. Two producers now, both engine-free, because
+the backtest path master actually asked about needs CPython 3.12 that this machine has never had.
+
+**`dataStore.saveDomain`** — encrypted-save duration per domain, success and failure both. It happens
+constantly and is exactly the kind of cost that degrades invisibly as the store grows.
+
+**`modelRouter.chatCompletion`** — the single chokepoint all eight providers pass through, so one
+measurement covers them all rather than eight copies that could drift. A `refused` outcome where the
+cloud path's `unconfigured` flag is set, `error` otherwise: **a missing credential and a broken
+provider are different facts** and the outcome vocabulary exists so a reader can separate them later.
+
+**THE TRACKING DOMAIN IS NEVER MEASURED, and that guard is not an optimisation — without it the
+feature cannot work at all.** `record()` pushes into `tracking`, which marks `tracking` dirty. If
+saving `tracking` also recorded a measurement, **every save would create a record that re-dirties
+it**: the domain could never become clean, and the 60-second autosave would write forever on a
+completely idle app, each pass growing the ring it was writing. A self-feeding loop. The blind spot it
+leaves — the cost of persisting tracking itself is not in the record — is named rather than left to be
+found.
+
+Neither producer records anything from the data. The save measurement carries **the domain name only**
+(a measurement of an encrypted write must not become a plaintext copy of what it wrote); the model
+measurement carries **provider and model id only** (a latency record must not become a transcript).
+
+### 145.2 H6 and H7 — the last unreachable channels
+
+`models:roles` and `models:role-research` were the only 2 of 377 registered channels named in neither
+the preload nor `src/`. `modelRoles.plan()`, `researchPlan()` and `describeRequirement()` existed
+solely for them. **`KNOWN_ORPHAN_CHANNELS` is now empty** — every registered channel has a caller
+surface, and the "no stale entry" rule *forced* that emptying: the suite failed until the two names
+were removed.
+
+`brokerConnectors.cjs` had 81 assertions, three declared connectors, and **no channel, no namespace
+and no page.** `electron/ipc/brokers.cjs` is the read channel: `brokers:list`, `brokers:fields`,
+`brokers:drift-check`, all gated on `vault.read` — the same sensitivity class as reading the vault's
+contents list, because the fields describe what master is about to paste a credential into.
+
+**AND MASTER'S ORIGINAL REQUEST FROM ROW 163 IS FINALLY REACHABLE.** *"Rāma should be able to verify
+documents online to update the API structure."* The Brokers tab's **Check docs for drift** button
+fetches the broker's own documentation through `browser.fetchUrl` and hands the text to
+`brokers:drift-check`.
+
+**THE SPLIT IS THE POINT: the renderer fetches, the channel compares.** `driftReport` stays pure and
+never touches the network, so it remains testable against a fixture and the channel cannot be turned
+into an outbound request by a crafted argument. A short body is `inconclusive` and never all-clear,
+checked at the channel as well as in the module, and **a failed fetch is reported as a failed fetch** —
+a network problem must never read as "the declaration is still correct". `inconclusive` renders as its
+own state in amber rather than folded into either "all clear" or "error".
+
+**NOTHING IS EVER APPLIED.** There is deliberately no apply member on the bridge and no apply path in
+the channel: the declared table is the source of truth, and a connector silently re-shaped from a page
+that could have changed for any reason is a credential pointed somewhere new (I6, I17). The response
+says so in `appliedNote`, at the channel, because master reads the response and not the module.
+
+**EXPOSING A BRIDGE MEMBER WITH NO PAGE WOULD ONLY MOVE THE ORPHAN ONE LAYER UP**, so both tabs were
+built: a Roles tab showing each role, why it exists, what it requires and whether it is filled; a
+Brokers tab showing data-only and declares-no-order-path as **two separate statements**, because the
+first is the promise and the second is the mechanical fact behind it.
+
+### 145.3 My own counter read documentation as implementation — the fourth time
+
+Instrumenting `record()` made the reachability suite report **2 call sites in `dataStore.cjs`, which
+has 1.** The comment explaining why `record()` needed a producer contains the literal `.record(`.
+
+Then the member parser produced a phantom bridge member called **`member`**, from a comment containing
+the words *"apply" member:*.
+
+**That is the fourth and fifth time this project has paid for a pattern that reads prose as code** —
+after the `/projected/` regex, the near-match connector sentence, and `!/ok:\s*true/` matching its own
+explanatory comment. Both now strip comments before matching, replacing them with spaces so every
+byte offset and nesting depth is preserved.
+
+**THE BASELINE WAS REGENERATED BECAUSE OF IT.** The first seed, 315 entries, was written by the parser
+that read comments as keys, so it contained phantoms. It is now **301**, and the difference is
+phantoms removed plus the eight members genuinely closed. **A debt register seeded from a bad
+measurement is a register that lies in both directions**, so regenerating it was the only honest
+option, and the reason is recorded inside the file rather than only here.
+
+### 145.4 Verified
+
+Chain **4,986 assertions across 42 entries, 0 failures**, exit 0 — unchanged in count, which is
+correct: this tranche added producers and callers, not new contracts. Reachability: **377 → 380
+channels, 0 orphan channels, 120 of 421 bridge members reached**, register 301.
+`auditRenderer` clean at 85 files / 377 channels. `npm run build` exit 0 with `verifyBundleGraph`
+21/0. `verify:render` 85/0 with `/models` reachable at both widths.
+
+**`verifyTypeScale.mjs` caught two numeric `fontSize` literals I introduced** in the new tabs — 142
+against a budget of 140 — and they are tokens now. The budget did exactly what Section 136 built it
+for.
+
+**NOT VERIFIED, AND THIS LIST MATTERS MORE THAN THE GREEN ONES:**
+
+- **No measurement has been recorded on master's machine.** Both producers are wired and the store is
+  empty until the app runs. The Tracking read channel exists from Section 138 and there is still **no
+  panel** that calls `tracking.summary` — the data will be there with nothing showing it.
+- **No role plan has been computed.** `models:roles` calls `refreshOllamaModels()` first, and Ollama
+  is on master's *other* machine, so the Roles tab will report unfilled roles here regardless of truth.
+- **No broker document has been fetched.** The drift path is wired end to end and has never run: the
+  shape of what `browser.fetchUrl` returns for a real vendor page is read from its own code, not
+  observed, so the `text ?? data ?? body` fallback is a guess at three field names and the honest
+  thing to say is that the first real run may need a fourth.
+
+### 145.5 What remains from the audit
+
+**H10's wiring is the only HIGH left, and it is a decision, not work:** make `main.cjs`'s `ipcRec` a
+policy layer against its own documented instruction, wrap at each module's registration instead, or
+leave the control declared-but-inert now that `ipc-enc:status` says so in words. Section 144.3 has the
+tradeoff.
+
+**MEDIUM and LOW remain in `docs/MODULE_AUDIT.md`.** The three worth naming again: **M27**
+(`ai_backend`'s 20 suites, 8,585 lines, never executed — a `verify:engine` that runs only when a venv
+exists and skips with a stated reason otherwise), **M10** (`/api/ai/history/:id` unauthenticated, and
+in browser dev mode it holds the revealed nucleus prompt), **M23** (the `SELF_MODIFY` applier
+registered by a module-scope side effect inside a `try{}catch{}` that a load-order change would lose
+silently).
+
+**NEXT:** M10 and M11 are small, security-relevant and provable — both are a missing
+`requireLocalToken` on a route that already has the mechanism available. Then M23. Then a Tracking
+panel, so §145.4's first unverified item stops being true.

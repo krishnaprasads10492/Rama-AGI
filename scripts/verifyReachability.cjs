@@ -97,13 +97,11 @@ console.log(`        ${electronFiles.length} main-process files, ${rendererFiles
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** Channels registered in main that no preload or renderer code names. */
-const KNOWN_ORPHAN_CHANNELS = Object.freeze({
-  'models:roles':
-    'HIGH/H6 in the audit: modelRoles.plan() exists only for this channel and has no preload '
-    + 'namespace or page. Fix is a models.roles preload pair plus a Roles tab, not deletion.',
-  'models:role-research':
-    'HIGH/H6, same pair as models:roles. modelRoles.researchPlan() is its only consumer.',
-});
+// EMPTY, AND THAT IS THE POINT. It held `models:roles` and `models:role-research` — the audit's H6,
+// the only 2 of 377 registered channels that nothing named. Both now have a preload pair and a Roles
+// tab (Section 145), so they were removed from here, which the "no stale entry" rule REQUIRED: the
+// suite failed until they were. Every registered channel is now named by a caller surface.
+const KNOWN_ORPHAN_CHANNELS = Object.freeze({});
 
 /**
  * Preload members with no renderer caller.
@@ -209,7 +207,16 @@ console.log('\n  every member exposed on window.rama is reached from the rendere
  * Parse `RAMA_API` into `namespace.member` paths. A brace walk rather than a regex, because the
  * object is nested and a regex over nested braces is how a parser silently under-counts.
  */
-function parsePreloadMembers(src) {
+function parsePreloadMembers(rawSrc) {
+  // COMMENTS STRIPPED FIRST, and this is the fourth time this project has paid for a pattern that
+  // read prose as code. The brace walk below matches `name:` at the right nesting depth — and a
+  // comment containing the words `member:` produced a phantom bridge member called `member`, which
+  // then failed the "no NEW orphan" row. Replaced with spaces rather than removed so every byte
+  // offset and nesting depth is preserved.
+  const src = rawSrc
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length))
+    .replace(/(^|[^:])(\/\/[^\n]*)/g, (m, pre, c) => pre + ' '.repeat(c.length));
+
   const start = /const RAMA_API\s*=\s*\{/.exec(src);
   if (!start) return null;
   let i = start.index + start[0].length;
@@ -325,7 +332,16 @@ function callSitesOf(defFile, fnName, files) {
   for (const f of files) {
     if (path.basename(f) === base) continue;
     if (f.includes(`${path.sep}scripts${path.sep}`)) continue;
-    const src = fs.readFileSync(f, 'utf8');
+    const raw = fs.readFileSync(f, 'utf8');
+    // COMMENTS ARE STRIPPED BEFORE COUNTING. Without this the counter matches its own prose: the
+    // comment explaining why `functionTracking.record()` needed a producer contains the literal
+    // `.record(`, so instrumenting it reported 2 call sites in a file that has 1. This is the same
+    // class of error as the three earlier regexes that matched comments rather than code, and the
+    // fourth time it has been paid for — a counter that reads documentation as implementation
+    // reports work that was not done.
+    const src = raw
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
     // Only files that require the defining module can be calling it.
     if (!src.includes(base.replace(/\.cjs$/, ''))) continue;
     // `x.fn(` where x is a local binding — the import name is not assumed, only that it is a member

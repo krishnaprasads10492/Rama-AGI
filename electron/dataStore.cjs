@@ -65,17 +65,61 @@ function loadAll() {
   startAutoSave();
 }
 
+/**
+ * THE FIRST PRODUCER FOR FUNCTION TRACKING (Section 145, audit H4).
+ *
+ * `functionTracking.record()` was built in Section 138 with 61 assertions and had **zero call sites**
+ * for three sections — a measurement store with nothing measuring. Master asked for it so backtests
+ * could be validated rather than trusted; the engine path that answers that needs CPython 3.12, which
+ * this machine has never had. Encrypted-save duration needs no engine, happens constantly, and is
+ * exactly the kind of cost that degrades invisibly as the store grows.
+ *
+ * `functionTracking.cjs` requires NOTHING, so this import cannot create a cycle — it takes the store
+ * as a parameter precisely so the dependency runs one way.
+ */
+const tracking = require('./lib/functionTracking.cjs');
+
+/**
+ * THE TRACKING DOMAIN IS NEVER MEASURED, and this guard is not an optimisation — without it the
+ * feature cannot work at all.
+ *
+ * `record()` pushes into the `tracking` domain, which marks `tracking` dirty. If saving `tracking`
+ * also recorded a measurement, every save of it would create a new record that re-dirties it: the
+ * domain could never become clean, and the 60-second autosave would write forever on a completely
+ * idle app, each pass growing the ring it was writing. A self-feeding measurement loop.
+ *
+ * So the recorder does not measure its own storage. That is a real blind spot and it is named here
+ * rather than left to be discovered: the cost of persisting tracking itself is NOT in the record.
+ */
+function measureSave(domain, startedAt, outcome, detail) {
+  if (domain === tracking.DOMAIN) return false;
+  return tracking.record(module.exports, {
+    module: 'dataStore',
+    fn: 'saveDomain',
+    ms: Date.now() - startedAt,
+    outcome,
+    // The DOMAIN NAME only. No key, no value, nothing out of the store itself — a measurement of an
+    // encrypted write must not become a plaintext copy of what it wrote.
+    detail: detail ? `${domain}: ${detail}` : domain,
+  });
+}
+
 // ─── Save a single domain ─────────────────────────────────────────────────────
 function saveDomain(domain) {
   if (!cryptoCore.isUnlocked()) return;
   if (!cache[domain]) return;
   const dir      = getDataDir();
   const filePath = path.join(dir, `${domain}.enc`);
+  const startedAt = Date.now();
   try {
     cryptoCore.encryptToFile(filePath, cache[domain]);
     dirty.delete(domain);
+    measureSave(domain, startedAt, 'ok', null);
   } catch (err) {
     console.error(`[dataStore] Failed to save ${domain}:`, err.message);
+    // A FAILED SAVE IS RECORDED TOO. The outcome vocabulary exists so a reader can ask "how often
+    // did this fail", and a record that only ever holds successes cannot answer it.
+    measureSave(domain, startedAt, 'error', err.message);
   }
 }
 

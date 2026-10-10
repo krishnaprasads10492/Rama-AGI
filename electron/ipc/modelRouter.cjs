@@ -906,10 +906,58 @@ function modelInfo(modelId) {
  * non-Ollama providers and the local daemon, and a cloud call without a user gets `gateError`
  * rather than a silent ungated cloud request — which is the right way round.
  */
+/**
+ * THE SECOND PRODUCER FOR FUNCTION TRACKING (Section 145, audit H4).
+ *
+ * `chatCompletion` is the single chokepoint every provider passes through, so one measurement here
+ * covers all eight rather than eight copies that could drift. It records WHICH PROVIDER, how long,
+ * and whether it succeeded — never the messages and never the reply.
+ *
+ * Required lazily inside the function rather than at module load: `dataStore` requires `cryptoCore`
+ * and reaches `app.getPath`, and this module is loaded during `main.cjs`'s require sweep before
+ * Electron is ready. A top-level require here would move that work into startup for no reason.
+ */
+function measureModelCall(provider, modelId, startedAt, outcome, detail) {
+  try {
+    const store = require('../dataStore.cjs');
+    const tracking = require('../lib/functionTracking.cjs');
+    return tracking.record(store, {
+      module: 'modelRouter',
+      fn: 'chatCompletion',
+      ms: Date.now() - startedAt,
+      outcome,
+      // THE PROVIDER AND THE MODEL ID, AND NOTHING ELSE. No prompt, no completion, no credential —
+      // a latency record must not become a transcript. `detail` is capped at 300 chars by
+      // `normalise`, but the real guard is that nothing from the conversation is put in it.
+      detail: detail ? `${provider}/${modelId}: ${detail}` : `${provider}/${modelId}`,
+    });
+  } catch {
+    // FAILS OPEN, like the recorder itself. A measurement must never break the call it measured.
+    return false;
+  }
+}
+
 async function chatCompletion(messages, modelId, user) {
   const info = modelInfo(modelId);
   if (!info) throw new Error(`Unknown model: ${modelId}`);
 
+  const startedAt = Date.now();
+  try {
+    const out = await dispatchChat(messages, modelId, user, info);
+    measureModelCall(info.provider, modelId, startedAt, 'ok', null);
+    return out;
+  } catch (err) {
+    // A REFUSAL AND A FAILURE ARE DIFFERENT OUTCOMES. `unconfigured` is the flag the cloud path
+    // already sets to mean "no credential", which is a refusal rather than a broken provider — and
+    // the outcome vocabulary exists so a reader can tell them apart later.
+    measureModelCall(info.provider, modelId, startedAt,
+      err?.unconfigured ? 'refused' : 'error', err?.message || String(err));
+    throw err;
+  }
+}
+
+/** The dispatch itself, unchanged. Split out so the measurement above wraps one expression. */
+function dispatchChat(messages, modelId, user, info) {
   switch (info.provider) {
     case 'openai':    return openaiChat(messages, modelId, info);
     case 'anthropic': return anthropicChat(messages, modelId, info);
