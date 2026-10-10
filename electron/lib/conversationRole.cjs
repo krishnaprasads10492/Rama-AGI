@@ -100,20 +100,75 @@ const FORM_OF_ADDRESS = 'master';
  * model not to go looking for what the first replaced — a model asked to be personal and given no
  * name will otherwise ask for one, which would put master in the position of typing it himself.
  */
-const CLOUD_SAFE_LINES = Object.freeze([
+const CLOUD_SAFE_IDENTITY_LINES = Object.freeze([
   'You are Rāma (राम) — Righteous Autonomous Master Agent, a benevolent AGI.',
   `You are speaking with your ${FORM_OF_ADDRESS}. You address him as "${FORM_OF_ADDRESS}" and by no other name.`,
   'You do not know his name, account, email or location, you never ask for them, and you never guess.',
   `You are absolutely loyal to ${FORM_OF_ADDRESS} and you never deceive him.`,
-  'You speak directly: short sentences, no filler, no preamble, no restating the question.',
-  'You answer first and explain second, and the explanation is shorter than the answer.',
   'When you do not know something you say so plainly rather than producing a plausible answer.',
   'You know you are an AI and you will say so if you are sincerely asked.',
 ]);
 
+/**
+ * HOW RĀMA REPLIES — one list, both destinations. See Section 142.
+ *
+ * THE DEFECT THIS FIXES. These rules used to live inside `CLOUD_SAFE_LINES`, which is the prompt for
+ * the CLOUD destination. The LOCAL destination uses `revealedPrompt` — the nucleus template from
+ * `nucleusSealer.cjs` — and that template says only "You speak directly, without filler". It carries
+ * no length guidance, nothing about expanding on request, and nothing about continuity.
+ *
+ * Ledger row 150 made this Ollama-only, so master's conversations go LOCAL. **The reply protocol was
+ * therefore present on the one path he never uses and absent from the one he does** — which is
+ * exactly what he reported: replies that are not concise and do not continue a thread.
+ *
+ * The nucleus also declares `behavioral: { tone, formality, verbosity: 'concise', ... }` and NOTHING
+ * IN THE REPOSITORY READS IT — grepped: two hits, the declaration and a comment. So the stated
+ * preference had no mechanism either. That block is left alone rather than deleted (it is sealed
+ * state, and removing it is master's call) and is raised in Section 142; these lines are the
+ * mechanism, and they are applied to both destinations so neither can drift from the other.
+ *
+ * EVERY LINE IS IDENTITY-FREE, which is what lets the same list go to a cloud model. No name, no
+ * account, no location, and no interpolation of any kind.
+ */
+const REPLY_PROTOCOL_LINES = Object.freeze([
+  'You speak directly: short sentences, no filler, no preamble, no restating the question.',
+  'You answer first and explain second, and the explanation is shorter than the answer.',
+  'Keep the default reply short — a few sentences, or a short list where the answer really is a list.',
+  'Do not pad a short answer to look thorough, and do not add a summary of what you just said.',
+  'When master asks for more, expand the SAME answer with the detail he asked for. Do not start over, '
+    + 'do not repeat what you already said, and do not re-explain the basics unless he asked for them.',
+  'Treat the exchange as one continuing conversation: carry what is already established, refer back to '
+    + 'it rather than re-introducing it, and answer the follow-up that was actually asked.',
+  'A question about something you said earlier is a request for detail, not a sign you were wrong.',
+]);
+
+/**
+ * The cloud-safe lines, kept under their original name because the suite and the egress boundary both
+ * refer to it. Identity first, then the protocol — composed from the two lists rather than repeating
+ * the protocol, so the local and cloud destinations cannot drift apart.
+ */
+const CLOUD_SAFE_LINES = Object.freeze([...CLOUD_SAFE_IDENTITY_LINES, ...REPLY_PROTOCOL_LINES]);
+
 /** The cloud-safe system prompt. Pure, frozen input, no store, no nucleus, no interpolation. */
 function cloudSafePrompt() {
   return CLOUD_SAFE_LINES.join('\n');
+}
+
+/**
+ * The revealed (local) prompt WITH the reply protocol appended.
+ *
+ * Appended rather than merged into the nucleus template on purpose: the nucleus is sealed and
+ * encrypted, so editing the template would only affect a future seal and would do nothing for the
+ * install master is running right now. Composing here fixes it for the existing seal.
+ *
+ * Idempotent — if the nucleus template is ever updated to carry these sentences itself, they are not
+ * added twice.
+ */
+function withReplyProtocol(prompt) {
+  const base = typeof prompt === 'string' ? prompt.trimEnd() : '';
+  const missing = REPLY_PROTOCOL_LINES.filter((line) => !base.includes(line));
+  if (missing.length === 0) return base;
+  return `${base}\n${missing.join('\n')}`;
 }
 
 /**
@@ -275,7 +330,9 @@ function assembleTurn(spec = {}) {
   // direction: less identity rather than more.
   const useRevealed = destination === 'local' && typeof revealedPrompt === 'string' && revealedPrompt.trim().length > 0;
   const variant     = useRevealed ? 'revealed' : 'cloud-safe';
-  const systemText  = useRevealed ? revealedPrompt : cloudSafePrompt();
+  // BOTH VARIANTS CARRY THE REPLY PROTOCOL (Section 142). The revealed prompt is the nucleus
+  // template, which has none of it; `cloudSafePrompt()` composes it in already.
+  const systemText  = useRevealed ? withReplyProtocol(revealedPrompt) : cloudSafePrompt();
   // The revealed prompt names master. `private` is its true class, and the gate's unconditional
   // refusal of `private` is the proof that this path really is local-only.
   const systemLevel = useRevealed ? 'private' : 'public';
@@ -353,5 +410,6 @@ function destinationFor(modelRow) {
 
 module.exports = {
   ROLE, VARIANTS, DESTINATIONS, REASON, FORM_OF_ADDRESS, CLOUD_SAFE_LINES,
-  cloudSafePrompt, assembleTurn, selectModel, destinationFor,
+  CLOUD_SAFE_IDENTITY_LINES, REPLY_PROTOCOL_LINES,
+  cloudSafePrompt, withReplyProtocol, assembleTurn, selectModel, destinationFor,
 };

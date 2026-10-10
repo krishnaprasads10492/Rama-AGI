@@ -577,13 +577,42 @@ export default function CommandPalette({ extraPages = [] }) {
     if (started) setRecording(true);
   }, []);
 
+  /**
+   * THE "TRANSCRIBING..." THAT NEVER WENT AWAY (Section 142).
+   *
+   * This used to set the label, await the engine, and DISCARD the result. Only `onTranscript` cleared
+   * the label, and `onTranscript` only fires on success — so when there is no transcription backend
+   * (this machine has no Whisper binary on PATH and the cloud path needs an OpenAI key in the vault),
+   * the engine returned null, `onError` showed the real reason for six seconds, and then the reason
+   * vanished leaving "Transcribing..." on screen forever. Master was watching a label that implied
+   * work in progress on a machine that could not transcribe at all.
+   *
+   * The returned value is now what decides: text means the engine already pushed it through
+   * `onTranscript`, null means say so and clear.
+   */
   const endTalk = useCallback(async () => {
     const engine = voiceRef.current;
     if (!engine || !engine.recording) { setRecording(false); return; }
     setRecording(false);
-    setVoiceTranscript('Transcribing...');
-    await engine.stopRecordingAndTranscribe();
-  }, []);
+    setVoiceTranscript('Transcribing…');
+    try {
+      const text = await engine.stopRecordingAndTranscribe();
+      if (!text) {
+        // THE REASON GOES WHERE THE ACTION IS. `nextStep` already existed and was only ever a
+        // TOOLTIP on a small chip — the same mistake as a warning string nothing renders. If this
+        // machine has no transcriber, master learns it here, holding the button he just released,
+        // rather than by hovering an "L1" badge.
+        const cannot = voiceCap && voiceCap.canTranscribe === false;
+        setVoiceTranscript(cannot
+          ? `No transcriber on this machine${voiceCap.nextStep ? ` — ${voiceCap.nextStep}` : ''}`
+          : 'Not transcribed');
+        setTimeout(() => setVoiceTranscript(''), cannot ? 9000 : 3000);
+      }
+    } catch (err) {
+      setVoiceError(`Transcription failed: ${err?.message || String(err)}`);
+      setVoiceTranscript('');
+    }
+  }, [voiceCap]);
 
   const rescanVoice = useCallback(async () => {
     const engine = voiceRef.current;

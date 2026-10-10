@@ -278,6 +278,89 @@ function sectionPersona() {
     !/dataStore|require\(['"]electron['"]\)|http/.test(code));
   check('the three variants are named, so "masked" is not mistaken for this one',
     convo.VARIANTS.join(',') === 'revealed,cloud-safe,masked');
+
+  // ── THE REPLY PROTOCOL REACHES BOTH DESTINATIONS (Section 142) ─────────────
+  //
+  // It used to live only inside CLOUD_SAFE_LINES. The local destination uses the nucleus template,
+  // which says "You speak directly, without filler" and nothing about length, expansion or
+  // continuity — and ledger row 150 made this Ollama-only, so LOCAL is the path master actually
+  // uses. The protocol was present on the path he never uses and absent from the one he does.
+  check('the reply protocol is a frozen list of its own',
+    Object.isFrozen(convo.REPLY_PROTOCOL_LINES) && convo.REPLY_PROTOCOL_LINES.length >= 5,
+    String(convo.REPLY_PROTOCOL_LINES?.length));
+  check('the cloud prompt still carries every protocol line',
+    convo.REPLY_PROTOCOL_LINES.every((l) => prompt.includes(l)));
+  check('and the identity lines are kept separate from them, so neither can swallow the other',
+    convo.CLOUD_SAFE_IDENTITY_LINES.every((l) => !convo.REPLY_PROTOCOL_LINES.includes(l))
+    && convo.CLOUD_SAFE_LINES.length
+       === convo.CLOUD_SAFE_IDENTITY_LINES.length + convo.REPLY_PROTOCOL_LINES.length);
+  // THE SAFETY PROPERTY THAT LETS ONE LIST SERVE BOTH: no identity in the protocol.
+  check('no protocol line names master, a form of address, or any identifier',
+    convo.REPLY_PROTOCOL_LINES.every((l) =>
+      !/krishna|prasad|@|master'?s name|account|email|location/i.test(l)));
+  check('and none of them is interpolated',
+    convo.REPLY_PROTOCOL_LINES.every((l) => !l.includes('${') && !l.includes('{{')));
+
+  // The protocol master asked for, by its three obligations rather than by wording.
+  const protocolText = convo.REPLY_PROTOCOL_LINES.join('\n');
+  check('it asks for a short default answer', /short|few sentences/i.test(protocolText));
+  check('it says to expand the SAME answer when more is asked for',
+    /expand the SAME answer/i.test(protocolText) && /do not start over/i.test(protocolText));
+  check('and it asks for continuity rather than re-introduction',
+    /one continuing conversation/i.test(protocolText) && /rather than re-introducing/i.test(protocolText));
+
+  // ── withReplyProtocol: appended, and appended once ────────────────────────
+  const nucleusLike = 'You are Rāma. Your master is Krishna Prasad. You speak directly, without filler.';
+  const withOnce = convo.withReplyProtocol(nucleusLike);
+  check('a revealed prompt gains the protocol',
+    convo.REPLY_PROTOCOL_LINES.every((l) => withOnce.includes(l)));
+  check('and keeps its own text', withOnce.includes('Your master is Krishna Prasad'));
+  // REDBY: concatenate unconditionally. A nucleus that is later updated to carry these sentences
+  // would then state each of them twice.
+  check('applying it twice changes nothing', convo.withReplyProtocol(withOnce) === withOnce);
+  check('an empty prompt is handled rather than throwing',
+    typeof convo.withReplyProtocol(null) === 'string'
+    && typeof convo.withReplyProtocol(undefined) === 'string');
+
+  // ── The row that proves it reaches a LOCAL body ───────────────────────────
+  const localBody = convo.assembleTurn({
+    destination: 'local', model: 'gemma3:12b', text: 'what is my exposure?',
+    revealedPrompt: nucleusLike, sensitive: true,
+  });
+  check('a local turn assembles', localBody.ok === true, JSON.stringify(localBody).slice(0, 160));
+  check('and it used the revealed variant', localBody.variant === 'revealed', String(localBody.variant));
+  const sys = (localBody.body?.messages || []).find((m) => m.role === 'system');
+  check('the local system message exists', !!sys);
+  // THE DEFECT, ASSERTED. REDBY: pass `revealedPrompt` straight through as systemText.
+  check('and the LOCAL system message carries the reply protocol',
+    !!sys && convo.REPLY_PROTOCOL_LINES.every((l) => sys.content.includes(l)),
+    sys ? `${sys.content.length} chars` : 'no system message');
+  check('while still carrying the revealed identity',
+    !!sys && sys.content.includes('Krishna Prasad'));
+
+  // ── THE "TRANSCRIBING..." THAT NEVER CLEARED (Section 142) ────────────────
+  //
+  // Reported in the same breath as the reply style, and the same class of defect: the main process
+  // returned an honest error the whole time and the renderer discarded it. `endTalk` set the label,
+  // awaited the engine and ignored the result; only `onTranscript` cleared it, and that fires on
+  // success alone. On a machine with no transcriber the label stayed forever.
+  const palette = codeOf('src/components/CommandPalette.jsx');
+  check('endTalk uses the engine\'s return value rather than discarding it',
+    /const text = await engine\.stopRecordingAndTranscribe\(\)/.test(palette));
+  // REDBY: drop the `if (!text)` branch. The label then never clears on failure again.
+  // Pinned on the failure path's own timer rather than on a span between two tokens: a span wide
+  // enough to cross the explanatory comment is wide enough to match almost anything.
+  check('there is a failure branch at all', /if \(!text\) \{/.test(palette));
+  check('and it schedules the label away rather than leaving it on screen',
+    /setTimeout\(\(\) => setVoiceTranscript\(''\), cannot \? /.test(palette));
+  check('it names the missing transcriber instead of saying nothing',
+    /No transcriber on this machine/.test(palette));
+  check('and carries the ladder\'s own nextStep, which was previously only a tooltip',
+    /voiceCap\.nextStep/.test(palette));
+  check('a rejected invoke is caught separately from a failed transcription',
+    /catch \(err\)[\s\S]{0,200}Transcription failed/.test(palette));
+  check('and the handler depends on voiceCap, so the message cannot read a stale capability',
+    /\}, \[voiceCap\]\);/.test(palette));
 }
 
 // ═══ (c) one chokepoint, and the identifier never reaching a cloud body ═══════

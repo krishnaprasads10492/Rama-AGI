@@ -1830,6 +1830,9 @@ authenticated **Master session**, not merely an open store.
 
 | 166 | The credential vault was deleting its own salt | done | Section 141. Master: *"why the master password to be entered again? vault not unlocked after entering master password and enter/click on unlock."* **BOTH HALVES WERE RIGHT AND HAVE DIFFERENT ANSWERS. The first is the design: TWO independent encrypted stores with two independent KDFs and nothing connecting them — `cryptoCore` opens `data/system` with `rama.salt` and PBKDF2-SHA512 600k from the Gate 1 passcode, `credentialVault` opens `userData/rama_vault.enc` with Argon2id (scrypt fallback) from a password typed on the Models page. Grepped to confirm: `cryptoCore.cjs` names neither `credentialVault` nor `rama_vault`, and the only callers of `vault:unlock` are the preload and the Models page. Defensible — one compromised secret does not open both — but never SAID, and `Models.jsx` carried a comment promising the opposite: "the other needs a password Rāma will not ask for twice". THE CODE AND ITS OWN COMMENT DISAGREED, AND THE COMMENT WAS THE FLATTERING ONE.** **THE SECOND HALF WAS A DATA-DESTROYING BUG, FOUND BY RUNNING THE MODULE RATHER THAN READING IT — every part of it is a property of a SEQUENCE, not of a function. Exercised against a throwaway home dir (`credentialVault.cjs` falls back to `os.homedir()/.rama-agi` when Electron's `app` is absent, which is what makes it testable); master's real vault untouched. Measured on the shipped code: after one `vault:set` the file held `enc, hmac` and `SALT STILL ON DISK? : false`; the next unlock printed `Vault HMAC verification failed` and returned `{"ok":true}` with `entries:0` and the stored key gone.** **FOUR DEFECTS: (1) the salt was a FIELD INSIDE `rama_vault.enc` and `saveVault()` wrote that file as `{enc, hmac}`, so the first credential saved deleted it; (2) the next unlock MINTED A FRESH SALT, derived a different key, failed the integrity check, `loadVault()` SWALLOWED the error and returned `{}`, then wrote the new salt back — making the loss permanent rather than merely inconvenient; (3) NOTHING VERIFIED THE PASSWORD — `vaultUnlocked = true` was unconditional, so ANY password unlocked an empty vault and the next write persisted it over master's real ciphertext, meaning a TYPO was enough to destroy the vault; (4) the renderer's `if (res.ok)` had no `else`, so a wrong password, a denied capability and a dead channel were indistinguishable from a broken button — exactly what master reported. THE CAPABILITY GATE WAS NOT AT FAULT and is now asserted to stay shut: tier 3, unauthenticated, and a user whose `tier` is the STRING `'0'` are all refused.** **FIXES: the salt lives in its OWN file `rama_vault.salt` mode 0600 — removing the class rather than the instance, and not a new idea here, since `cryptoCore.cjs` has always kept `rama.salt` separately and HAS NEVER HAD THIS BUG. A new salt is only ever minted when there is NO CIPHERTEXT TO LOSE; a vault with `enc` and no salt REFUSES, says the keys cannot be recovered, leaves the file byte-for-byte untouched and mints nothing. MIGRATION for the one still-recoverable case — a vault whose salt is still inside the blob is opened, recovered and its salt copied out. `loadVault()` returns THREE outcomes (`empty`/`ok`/`unreadable`), because conflating "no vault yet" with "wrong password" is how a failure came to report success. `saveVault()` REFUSES TO WRITE OVER CIPHERTEXT IT COULD NOT READ, and every write path rolls the in-memory store back on refusal and PROPAGATES it, since `customProviders.add()` can only roll its own record back if told.** **AN HONEST NOTE ON THE VERIFIER: the REDBY test went red on the MESSAGE, not the refusal — the HMAC check was already capable of rejecting a wrong key. So `verifier` earns an accurate error ("wrong master password" rather than "may have been tampered with") and skips a pointless decrypt; it does not deserve credit for the refusal.** **`Promise.all` → `Promise.allSettled` IS A BEHAVIOUR FIX, NOT TIDYING: one rejected channel threw out of `load()` before any `set*` ran, and `vaultLocked` STARTS AS `true` — so a single unrelated IPC failure rendered a permanent "Vault locked" banner that no correct password could clear, because the unlock's own `load()` threw again on the same channel. A SECOND INDEPENDENT ROUTE TO MASTER'S EXACT SYMPTOM, fixed whether or not it is the one he hit.** **The banner now tells three states apart via new `exists`/`unreadable` on `vault:status` (asserted to expose no values and no service names), keeps the typed password on failure, disables while in flight, and catches a rejected `invoke` separately.** **VERIFIED: `verifyCredentialVault.cjs` 72/0 — a LIFECYCLE, not a source read — chain 4,778 → 4,850 across 38 → 39 entries 0 failures, `auditRenderer` clean, build exit 0 with `verifyBundleGraph` 21/0, `verify:render` 85/0 with `/models` reachable at both widths. BOTH FIXES REVERTED TO CONFIRM THE SUITE REDDENS.** **NOT VERIFIED: nothing has been unlocked in the running app. IF MASTER'S VAULT WAS WRITTEN BY THE OLD CODE IT IS ALREADY UNRECOVERABLE — the salt was deleted the first time he saved a key. The new code says so plainly and will not make it worse; the provider keys need re-entering once.** **RAISED FOR MASTER, NOT DECIDED: (a) one secret or two — derive the vault key from the Gate 1 passcode, keep two and let him reuse the string, or offer an explicit opt-in; this is a security-model decision and I did not take it. (b) `server/brain/credentialVault.cjs` is a SECOND, separate vault implementation in the Express process with its own state — two credential vaults in one product deserves a decision, and I have not established which callers depend on it, so removing a credential path blind is exactly how data is lost.** |
 
+| 167 | The reply protocol was on the path master never uses | done | Section 142. Master: *"the talk/speech recognition and communication protocol — it's not working as expected. reply should be concise, to the point and if asked do the same with more info — continuation like conversation."* and *"always seeing 'transcribing...' after talking to rama. but where it is being transcribed?"* **THE PROTOCOL ALREADY EXISTED, ON THE DESTINATION HE NEVER USES. `conversationRole.cjs`'s `CLOUD_SAFE_LINES` carried "short sentences, no filler, no preamble" and "answer first and explain second" — but the variant is chosen BY DESTINATION AND NOTHING ELSE: cloud gets those lines, local gets `revealedPrompt`, which is the nucleus template, which says only "You speak directly, without filler" and NOTHING about length, expansion or continuity. ROW 150 MADE THIS OLLAMA-ONLY, SO MASTER'S CONVERSATIONS GO LOCAL — the protocol was present on the one path he never takes and absent from the one he does, which is the literal cause of what he reported.** **A SECOND MECHANISM THAT WAS NEVER WIRED: `nucleusSealer.cjs:112` declares `behavioral: { tone, formality, verbosity: 'concise', alwaysExplain, ... }` and grepping `electron/`, `src/` and `shared/` returns TWO HITS — the declaration and a comment about it. Nothing reads it, so the stated preference had no mechanism at all: the same declared-but-unconsumed class as Section 139's `warn` strings. LEFT IN PLACE, NOT DELETED — it is sealed state and removing it is master's call.** **FIX: ONE LIST FOR BOTH DESTINATIONS. `REPLY_PROTOCOL_LINES` frozen; identity split into `CLOUD_SAFE_IDENTITY_LINES`; `CLOUD_SAFE_LINES` composed from the two so it keeps its name for the egress boundary and the suite while the protocol has exactly one definition; the local path runs `revealedPrompt` through `withReplyProtocol()`. APPENDED RATHER THAN MERGED INTO THE NUCLEUS DELIBERATELY — the nucleus is sealed and encrypted, so editing the template would only affect a FUTURE seal and do nothing for the install master is running now. `withReplyProtocol` is IDEMPOTENT so a later template update cannot state the lines twice. EVERY PROTOCOL LINE IS IDENTITY-FREE, asserted — no name, account, email, location, form of address or interpolation — which is what makes one shared list SAFE rather than merely convenient. New obligations beyond the two existing lines: a short default answer; expansion of the SAME answer when more is asked for, without starting over; and one continuing conversation, carrying what is established rather than re-introducing it — plus the line master implied rather than stated, that a question about something Rāma said earlier is a request for detail and not a signal it was wrong.** **WHERE IT IS BEING TRANSCRIBED: NOWHERE, ON THIS MACHINE. `voiceEngine.cjs` runs a two-rung ladder — level 2 a local Whisper binary (`whisper-cli`/`whisper`/`faster-whisper`/`whisper-cpp` on PATH or `RAMA_WHISPER_BIN`), level 3 `api.openai.com/v1/audio/transcriptions` model `whisper-1` keyed by `OPENAI_API_KEY` FROM THE CREDENTIAL VAULT. PROBED: none of the four binaries installed, both env vars unset. And the two rungs COMPOUND — the cloud rung needs a vault key, and Section 141 established the vault deleted its keys on first save, so even a key master had added was gone. `transcribe()` returned `{ok:false, error:'No transcription backend is available on this machine', hint}` and WAS HONEST THE WHOLE TIME. `verifyConversation.cjs` already carried the held-by-hand note that Ollama serves no STT model, so listening was always going to need a separate local runtime; Rāma can SPEAK out of the box because synthesis uses the OS voices and needs no model.** **WHY "TRANSCRIBING…" NEVER WENT AWAY: `endTalk` set the label, awaited the engine and DISCARDED THE RESULT. The only writer that cleared the label was `onTranscript`, which fires on success alone — so the error showed for six seconds, vanished, and left a label implying work in progress on a machine that could not transcribe. THE MAIN PROCESS RETURNED AN ACCURATE ERROR AND THE RENDERER THREW IT AWAY: the same shape as Section 141's silent unlock button, in a different component. The failure branch now clears the label and NAMES the missing transcriber using the ladder's own `nextStep`, which already existed and was ONLY EVER A TOOLTIP ON A SMALL CHIP — the same mistake as a `warn` string nothing renders. A rejected `invoke` is caught separately, because a missing channel and an absent backend are different facts.** **USER GUIDE GENERATED, NOT WRITTEN: `docs/UserGuide.pdf`, 17 pages, `npm run guide`. Everything factual is read out of the source that implements it — 18 pages/descriptions/voice phrases/tiers from `registry.js`, 6 tiers and 77 capabilities from `capabilities.json`, 141 glossary terms from `glossary.js`, shortcuts and 10 chart types from `CommandPalette.jsx` and `PriceChart.jsx`, the ladder and its 4 candidates from `voiceEngine.cjs`. `registry.js` imports React and an alias so it cannot be imported from a script; its page table is PARSED AS TEXT and THE PARSE ASSERTS ITS OWN COUNT (18 against 18, exits non-zero on mismatch) because a regex that silently matched nothing would produce a guide with no features. Printed by Chromium through Playwright's installed `msedge` channel, so no browser is downloaded, and the output is asserted above 20 kB since a blank print succeeds silently. IT DOCUMENTS THE LIMITS AS WELL AS THE FEATURES in their own section — the engine has never run, voice needs a transcriber, HA bodies are averaged prices and never levels, the four price-indexed charts withhold five layers, and Rāma never places an order: a guide that only lists what works teaches master to trust the parts that do not.** **VERIFIED: `verifyConversation.cjs` +24 assertions including the row that would have caught it — the assembled LOCAL body's system message carries the protocol — plus six over `CommandPalette.jsx`. Chain 4,850 → 4,874 across 39 entries 0 failures exit 0, `auditRenderer` clean, build exit 0 with `verifyBundleGraph` 21/0. ONE OF MY OWN ROWS WENT RED AND WAS REPLACED: a `[\s\S]{0,400}` span between `if (!text)` and `setVoiceTranscript` failed because my own explanatory comment sat between them — and a span wide enough to cross it is wide enough to match almost anything, so it now pins the failure path's own timer.** **NOT VERIFIED: no reply has been read and nothing has been spoken into. The protocol is proven to REACH the local system message; whether a given Ollama model OBEYS it is a property of the model, not of this repository. What to try: ask something, then ask for more detail — the second answer should extend the first rather than restart it.** **MASTER'S DECISIONS OWED: whether to install a Whisper binary for level 2 (private, free, and the Ollama-aligned answer), and whether the unconsumed `behavioral` block should be wired, removed, or left as documentation.** |
+| 168 | Module-by-module audit | in-progress | Master: *"Go through all modules and do an audit for functionality and optimization of code and functionality and speed. Start working on them after report is done."* Launched as a read-only `bundled://investigate` run (`wf_063d608f64d76374`) writing `.agents/tasks/module-audit/MODULE_AUDIT.md`. The brief requires a mechanical module enumeration with a count so coverage is provable, then per module: functionality defects with file:line, DECLARED-BUT-UNCONSUMED surfaces (the highest-value category — this project has shipped `nucleusSealer`'s `behavioral` block, `CHART_TYPES`' `warn` strings and the ladder's `nextStep` all unconsumed or unrendered), performance, and code quality. Plus five named sweeps: silent failures (`catch {}` bodies — three defects in two days came from exactly this), gates without producers (the sensitivity gate, `functionTracking.record()`, `brokerConnectors.driftReport()`), the unused direction of the IPC surface, startup cost before first paint, and a prioritised fix list with severity, evidence and whether a suite can prove the fix. **NEXT: read the report when it lands, then implement HIGH items first, each with a behavioural test where the logic is security- or data-critical.** |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -18142,3 +18145,154 @@ removing a credential path without that knowledge is exactly the kind of change 
 
 **NEXT:** master's decision on 141.1 (one secret or two) and on 141.5 (the server's second vault).
 Neither is a defect; both are forks in the design that should not be taken quietly.
+
+---
+
+## SECTION 142 — The reply protocol was on the path master never uses
+
+**STATUS: TWO DEFECTS FIXED AND GUARDED. THE USER GUIDE IS GENERATED. A FULL MODULE AUDIT IS RUNNING
+SEPARATELY.** Master: *"regarding the talk/speech recognition and communication protocol — it's not
+working as expected. reply should be concise, to the point and if asked do the same with more info —
+continuation like conversation."* and *"always seeing 'transcribing...' after talking to rama. but
+where it is being transcribed?"*
+
+Three findings, and the second one answers his question exactly.
+
+### 142.1 The reply protocol existed, on the destination he never uses
+
+`conversationRole.cjs` holds `CLOUD_SAFE_LINES`, and two of those lines are exactly the protocol
+master described:
+
+```
+You speak directly: short sentences, no filler, no preamble, no restating the question.
+You answer first and explain second, and the explanation is shorter than the answer.
+```
+
+But the variant is **chosen by destination and nothing else**. `cloud` gets those lines; `local` gets
+`revealedPrompt`, which is the nucleus template from `nucleusSealer.cjs`. That template says *"You
+speak directly, without filler"* and **nothing about length, nothing about expanding on request, and
+nothing about continuity.**
+
+**Ledger row 150 made this Ollama-only, so master's conversations go LOCAL.** The protocol was
+therefore present on the one path he never takes and absent from the one he does. The symptom he
+reported is the literal consequence.
+
+**A SECOND MECHANISM THAT WAS NEVER WIRED.** `nucleusSealer.cjs:112` declares
+`behavioral: { tone: 'direct', formality: 'peer', verbosity: 'concise', alwaysExplain: true, ... }`.
+Grepped across `electron/`, `src/` and `shared/`: **two hits, the declaration and a comment
+describing it.** Nothing reads it. So the stated preference had no mechanism at all — the same
+declared-but-unconsumed class as the `warn` strings found in Section 139. **The block is left in
+place, not deleted:** it is sealed state and removing it is master's call. It is raised here instead.
+
+**THE FIX IS ONE LIST FOR BOTH DESTINATIONS.** `REPLY_PROTOCOL_LINES` is a frozen list; the identity
+lines are separated into `CLOUD_SAFE_IDENTITY_LINES`; `CLOUD_SAFE_LINES` is composed from the two, so
+it keeps its name and its meaning for the egress boundary and the suite while the protocol has exactly
+one definition. The local path runs `revealedPrompt` through `withReplyProtocol()`.
+
+**APPENDED RATHER THAN MERGED INTO THE NUCLEUS, deliberately.** The nucleus is sealed and encrypted,
+so editing `systemPromptTemplate` would only affect a *future* seal and would do nothing for the
+install master is running now. Composing at assembly time fixes the seal he already has.
+`withReplyProtocol` is **idempotent** — if the template is ever updated to carry these sentences, they
+are not stated twice.
+
+**EVERY PROTOCOL LINE IS IDENTITY-FREE**, which is what allows one list to serve a cloud destination:
+asserted to contain no name, no account, no email, no location, no form of address and no
+interpolation. That property is what made the shared list safe rather than merely convenient.
+
+What the protocol now obliges, beyond the two lines that already existed: a short default answer;
+**expansion of the SAME answer when more is asked for**, without starting over or repeating; and
+treating the exchange as **one continuing conversation**, carrying what is established rather than
+re-introducing it. The last line is the one master implied rather than stated — *a question about
+something Rāma said earlier is a request for detail, not a signal that it was wrong.*
+
+### 142.2 Where it is being transcribed: nowhere, on this machine
+
+The honest answer to master's question. `electron/ipc/voiceEngine.cjs` implements a two-rung ladder,
+local before cloud:
+
+| level | backend | requirement | state here |
+| --- | --- | --- | --- |
+| 2 | a Whisper binary, run locally | `whisper-cli`, `whisper`, `faster-whisper` or `whisper-cpp` on PATH, or `RAMA_WHISPER_BIN` | **none installed** — all four probed, `RAMA_WHISPER_BIN` and `RAMA_WHISPER_MODEL` both unset |
+| 3 | `api.openai.com/v1/audio/transcriptions`, model `whisper-1` | an `OPENAI_API_KEY` **in the credential vault** | the vault was destroying its own keys until Section 141 |
+
+So `transcribe()` returns `{ ok: false, error: 'No transcription backend is available on this
+machine', hint }`. **It was honest the whole time.** And the two rungs compound: the cloud rung needs a
+vault key, and Section 141 established that the vault deleted its keys on the first save — so even if
+master had added one, it was gone.
+
+`verifyConversation.cjs` already carried the held-by-hand note that **Ollama serves no STT model**, so
+listening was always going to need a separate local runtime. That remains true: Rāma can *speak*
+out of the box, because speech synthesis uses the OS voices and needs no model, but *listening* needs
+Whisper installed.
+
+### 142.3 Why "Transcribing…" never went away
+
+`CommandPalette.jsx`'s `endTalk` set the label, awaited the engine, and **discarded the result.** The
+only writer that cleared the label was `onTranscript`, which fires on success alone. So:
+
+1. master releases the talk button → `'Transcribing...'`
+2. the engine fails → `onError` shows the real reason **for six seconds**
+3. the reason disappears → **`'Transcribing...'` stays on screen indefinitely**
+
+A label implying work in progress, on a machine that could not transcribe at all. **The main process
+returned an accurate error and the renderer threw it away** — the same shape as Section 141's silent
+unlock button, found in the same week in a different component.
+
+The failure branch now exists, clears the label, and **names the missing transcriber with the
+ladder's own `nextStep`** — which already existed and was **only ever a tooltip on a small chip**, the
+same mistake as a `warn` string nothing renders. Master now learns it holding the button he just
+released. A rejected `invoke` is caught separately from a failed transcription, because a missing
+channel and an absent backend are different facts.
+
+### 142.4 The user guide is generated, not written
+
+`docs/UserGuide.pdf` — **17 pages**, built by `npm run guide`.
+
+**EVERYTHING FACTUAL IN IT IS READ OUT OF THE SOURCE THAT IMPLEMENTS IT**, because a hand-written
+guide is wrong the first time a page is renamed and nothing says so:
+
+| content | source |
+| --- | --- |
+| 18 pages, descriptions, voice phrases, tiers | `src/config/registry.js` |
+| 6 tiers, 77 capabilities | `shared/capabilities.json` |
+| 141 glossary terms | `src/pages/StockMind/glossary.js` |
+| keyboard shortcuts, 10 chart types | `CommandPalette.jsx`, `PriceChart.jsx` |
+| the voice ladder and its 4 local candidates | `electron/ipc/voiceEngine.cjs` |
+
+`registry.js` imports React and an aliased module, so it cannot be imported from a plain script; its
+page table is parsed as text instead and **the parse asserts its own count** — 18 parsed against 18
+declared, and it exits non-zero on a mismatch, because a regex that silently matched nothing would
+otherwise produce a guide with no features in it. The glossary has no imports of its own and is
+imported directly. The PDF is printed by Chromium through Playwright's installed `msedge` channel —
+the mechanism `renderCheckTypeScale.mjs` already uses, so no browser is downloaded — and the output is
+asserted to exceed 20 kB, since a blank print succeeds silently.
+
+**IT DOCUMENTS THE LIMITS AS WELL AS THE FEATURES**, in their own section: the Python engine has never
+run on this machine so engine-backed numbers are unexercised; voice input needs a transcriber
+installed; Heikin-Ashi bodies are averaged prices and never levels; the four price-indexed charts
+withhold five layers because their axis is not a clock; and Rāma never places an order. **A guide that
+only lists what works teaches master to trust the parts that do not.**
+
+### 142.5 Verified
+
+`verifyConversation.cjs` gains **24 assertions** — the protocol on both destinations, the identity
+lines kept separate, no identifier in any protocol line, `withReplyProtocol` idempotent, and the row
+that would have caught the original defect: **the assembled LOCAL body's system message carries the
+protocol**. Plus six rows over `CommandPalette.jsx` for the transcript label, pinned on the failure
+path's own timer rather than on a span between two tokens — **a span wide enough to cross the
+explanatory comment is wide enough to match almost anything**, which is how the first version of that
+row went red.
+
+Chain **4,850 → 4,874 across 39 entries, 0 failures**, exit 0. `auditRenderer` clean at 84 files /
+141 bridge calls / 372 channels. `npm run build` exit 0 with `verifyBundleGraph` 21/0.
+
+**NOT VERIFIED: no reply has been read, and nothing has been spoken into.** The protocol is proven to
+reach the local system message; whether a given Ollama model *obeys* it is a property of the model,
+not of this repository, and no suite here can assert it. **What to try: ask something, then ask for
+more detail** — the second answer should extend the first rather than restart it. Voice input cannot
+be tried until a Whisper binary is installed.
+
+**NEXT:** the module audit (ledger row 168) is running as a separate investigation and will produce
+`.agents/tasks/module-audit/MODULE_AUDIT.md`. Master's decisions owed: whether to install a Whisper
+binary for level 2 (private, free, and the Ollama-aligned answer) and whether `nucleusSealer`'s
+unconsumed `behavioral` block should be wired, removed, or left as documentation.
