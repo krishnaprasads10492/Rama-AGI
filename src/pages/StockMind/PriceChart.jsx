@@ -24,11 +24,11 @@ import { sessionBands, describeBands } from './chartSessions.js';
 import { createSessionLayer } from './ChartSessionLayer.js';
 import { emptyState } from './chartEmptyState.js';
 import {
-  projectionMode, quantileBars, projectionState, projectionInputs, horizonChoices,
+  projectionMode, quantileBars, projectionState, projectionInputs, horizonChoices, horizonFor,
 } from './chartProjection.js';
 import { liveReading } from './marketClock.js';
 import InfoTip from './InfoTip.jsx';
-import { FS, CHART_FS } from '@config/type.js';
+import { FS, LH, CHART_FS } from '@config/type.js';
 
 /**
  * PriceChart — candles, master's own fills, his levels, and the projection cone.
@@ -1283,6 +1283,19 @@ export default function PriceChart({
   );
   const horizons = useMemo(() => horizonChoices(interval), [interval]);
 
+  // THE PERIOD MASTER TYPES, beside the presets rather than instead of them. The presets are one
+  // click; this is for the horizon that is not on the list, which is what master asked for. The
+  // conversion and every refusal live in `horizonFor` — this holds only what was typed, so the
+  // rule stays in the pure module where the suite can reach it.
+  const [periodText, setPeriodText] = useState('');
+  const [periodUnit, setPeriodUnit] = useState('bars');
+  const period = useMemo(
+    () => (periodText.trim() === ''
+      ? null
+      : horizonFor({ [periodUnit]: Number(periodText) }, interval)),
+    [periodText, periodUnit, interval],
+  );
+
   // ── WHETHER THE MARKET IS TRADING — DERIVED, and never claimed (plan D4) ──
   // There is no tick stream, so the session state comes from the published IST hours, the bar age from
   // what is stored, and the fetch time from the call site. Every clause is composed in
@@ -2244,10 +2257,58 @@ export default function PriceChart({
                 {h.label}{h.atCap ? ' ⌈' : ''}
               </button>
             ))}
+            {/* THE PERIOD THAT IS NOT ON THE LIST. Applying is explicit — typing does not refetch on
+                every keystroke. An invalid period disables the button and says why rather than
+                silently doing nothing, and a period past the engine's ceiling is applied at the
+                ceiling with the cap stated, never refused outright. */}
+            <input
+              type="text" inputMode="decimal" value={periodText}
+              onChange={(e) => setPeriodText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && period?.ok) onHorizonBars(period.bars); }}
+              placeholder="period"
+              aria-label="Project a period of your own"
+              style={{
+                width: '56px', fontSize: FS.chrome, background: 'var(--bg-2)',
+                color: 'var(--text-1)', border: '1px solid var(--line)', borderRadius: '3px',
+                padding: '2px 4px',
+              }}
+            />
+            <select
+              value={periodUnit} onChange={(e) => setPeriodUnit(e.target.value)}
+              aria-label="The unit that period is in"
+              style={{
+                fontSize: FS.chrome, background: 'var(--bg-2)', color: 'var(--text-1)',
+                border: '1px solid var(--line)', borderRadius: '3px', padding: '2px 4px',
+              }}
+            >
+              <option value="bars">bars</option>
+              <option value="minutes">minutes</option>
+              <option value="hours">hours</option>
+              <option value="sessions">sessions</option>
+            </select>
+            <button
+              type="button" disabled={!period?.ok}
+              onClick={() => { if (period?.ok) onHorizonBars(period.bars); }}
+              style={{ ...chip(false), opacity: period?.ok ? 1 : 0.45 }}
+              title={period ? period.why : 'Type a period, then apply it.'}
+            >
+              apply
+            </button>
             <InfoTip id="projectionHorizon" />
           </span>
         )}
       </div>
+
+      {/* The period's own reading, so a cap or a refusal is READ rather than inferred from a
+          disabled button. `horizonFor` composes the words; this only paints them. */}
+      {cone?.ok && onHorizonBars && period && (
+        <div style={{
+          fontSize: FS.chrome, lineHeight: LH.tight, padding: '2px 0',
+          color: period.ok ? 'var(--text-2)' : 'var(--amber)',
+        }}>
+          {period.why}
+        </div>
+      )}
 
       {/* ── The canvas. ALWAYS MOUNTED; the empty state sits over it (Section 107). ── */}
       <div style={{ position: 'relative' }}>
