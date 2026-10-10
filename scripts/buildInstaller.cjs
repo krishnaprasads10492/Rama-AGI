@@ -18,7 +18,14 @@
  *   4  PACKAGE       electron-builder with the target set stage 3 allows
  *   5  REPORT        what actually landed on disk, and what did not
  *
- * `npm run build:win` is deliberately left untouched as the raw escape hatch.
+ * `npm run build:win` is deliberately left as the raw escape hatch — it skips the
+ * environment repair above and assumes a prepared machine.
+ *
+ * NARROWED BY ONE CHECK, Section 140. It now calls `npm run build` rather than
+ * `vite build` directly, so it picks up `verifyBundleGraph.cjs`. The escape hatch
+ * exists to bypass the STAGED PIPELINE, not correctness: a chunk-graph defect that
+ * crashes the packaged app on launch shipped through a path that only ran
+ * `vite build`, and the check it would have failed takes under a second.
  *
  * Usage: node scripts/buildInstaller.cjs [--win|--mac|--linux] [--dir]
  *                                        [--skip-install] [--skip-renderer]

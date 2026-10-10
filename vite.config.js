@@ -60,6 +60,27 @@ export default defineConfig({
         // Matching on the resolved path under `node_modules` catches every
         // sub-path entry instead.
         manualChunks(id) {
+          // VITE'S OWN PRELOAD HELPER GETS ITS OWN CHUNK, AND THIS IS THE SINGLE
+          // MOST EXPENSIVE LINE IN THIS FILE.
+          //
+          // `__vitePreload(fn, deps, url)` is the ~1 kB helper every lazy route
+          // is wrapped in. It is a VIRTUAL module, so it never matches
+          // `node_modules` and fell through to "let Rollup decide" — and Rollup
+          // decided to park it inside `vendor-monaco`. The entry chunk then
+          // carried `import{_ as N}from"./vendor-monaco-*.js"`, a STATIC import,
+          // because it needs the helper to lazy-load literally every page.
+          //
+          // So 4,083 kB of editor sat on the STARTUP path to supply one function,
+          // while the record claimed monaco was lazy behind the IDE page. The
+          // entry chunk did shrink from 287 kB to 113 kB as measured — but the
+          // bytes before first paint went UP, which is the opposite of the point.
+          //
+          // Giving it a named chunk of its own is what breaks the dependency: the
+          // entry imports a 1 kB helper, and monaco is reached only through the
+          // dynamic import on the IDE route. `verifyBundleGraph.cjs` asserts the
+          // entry's transitive STATIC closure, so this cannot silently come back.
+          if (id.includes('vite/preload-helper')) return 'vite-preload';
+
           if (!id.includes('node_modules')) return undefined;
           const p = id.replace(/\\/g, '/');
 
@@ -83,7 +104,42 @@ export default defineConfig({
             // the dynamic imports collapse into it. Each grammar therefore gets
             // an EXPLICIT chunk name, so opening a `.rs` file still fetches only
             // Rust and the ~90 languages stay available on demand.
-            const lang = /\/languages\/definitions\/([^/]+)\//.exec(p);
+            //
+            // ONLY THE GRAMMAR. `register.js` MUST STAY WITH THE CORE, and the
+            // first version of this rule (ledger row 160) got it wrong in a way
+            // that CRASHED THE APP — see spec Section 140 for the reproduction.
+            // Each `definitions/<lang>/` folder holds exactly two modules —
+            // measured across all 81, zero irregular:
+            //
+            //   register.js   `import {registerLanguage} from '../_.contribution.js'`
+            //                 then CALLS it at module top level
+            //   <lang>.js     the Monarch grammar, reached only through that
+            //                 registration's `loader: () => import('./<lang>.js')`
+            //
+            // A rule matching the whole folder put `register.js` in `lang-<lang>`
+            // while `_.contribution.js` stayed in `vendor-monaco`. That made the
+            // two chunks MUTUALLY STATIC: the barrel imports all 81 registers, so
+            // `vendor-monaco` statically imported every `lang-*`, and every
+            // `lang-*` statically imported `vendor-monaco` back for
+            // `registerLanguage`. ESM hoists those imports, so `lang-abap` ran its
+            // top-level `registerLanguage({...})` BEFORE `vendor-monaco` had
+            // evaluated `const languageDefinitions = {}` — a textbook temporal
+            // dead zone, surfacing in the packaged app as `Cannot access 'xse'
+            // before initialization` (`xse` is that const, minified).
+            //
+            // It also silently undid the laziness this rule exists for: all 81
+            // chunks were STATIC imports (measured: 81 static, 0 dynamic), and the
+            // grammar sat in the chunk already eagerly loaded, so `loader()`
+            // resolved to `Promise.resolve()` over a module that was always there.
+            //
+            // So the match is on the GRAMMAR FILE ALONE — basename equal to its
+            // folder name. `register.js` and `_.contribution.js` both fall through
+            // to `vendor-monaco`, nothing imports a `lang-*` statically, and each
+            // grammar is reachable only by dynamic import. Verified by
+            // `scripts/verifyBundleGraph.cjs` against the real build output.
+            // The `(\?|$)` tail tolerates a Vite query suffix without loosening
+            // the backreference that is doing the actual work.
+            const lang = /\/languages\/definitions\/([^/]+)\/\1\.js(\?|$)/.exec(p);
             if (lang) return `lang-${lang[1]}`;
             return 'vendor-monaco';
           }
