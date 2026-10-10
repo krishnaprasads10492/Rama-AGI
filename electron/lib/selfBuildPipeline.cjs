@@ -139,7 +139,7 @@ async function build({ repoPath, onLog = () => {}, pull = false } = {}) {
 
   if (pull) {
     onLog('Pulling the tracked branch before building...\n');
-    const simpleGit = require('simple-git');
+    const { simpleGit } = require('simple-git');
     try {
       const git = simpleGit(repoPath);
       const status = await git.status();
@@ -308,7 +308,7 @@ async function release({ repoPath, bump = 'patch', pull = true, commitBump = tru
     return { ok: false, error: `${repoPath} is not the Rāma source (no package.json)`, steps };
   }
 
-  const simpleGit = require('simple-git');
+  const { simpleGit } = require('simple-git');
   const git = simpleGit(repoPath);
   const channel = require('./updateChannel.cjs');
 

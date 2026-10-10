@@ -1839,6 +1839,8 @@ authenticated **Master session**, not merely an open store.
 
 | 171 | The last three audit HIGHs, and zero orphan channels | done | Section 145. Closes H4, H6 and H7 — every HIGH from row 168's audit is now done except H10's WIRING, which is master's decision. **H4: `record()` was built in Section 138 with 61 assertions and had ZERO CALL SITES FOR THREE SECTIONS — a measurement store with nothing measuring. Two producers now, both engine-free because the backtest path master actually asked about needs CPython 3.12 this machine has never had: `dataStore.saveDomain` (encrypted-save duration per domain, success AND failure, since a record holding only successes cannot answer "how often did this fail") and `modelRouter.chatCompletion` (the single chokepoint all eight providers pass through, so one measurement covers them all rather than eight copies that could drift; `refused` where the cloud path's `unconfigured` flag is set and `error` otherwise, because a missing credential and a broken provider are different facts).** **THE TRACKING DOMAIN IS NEVER MEASURED, AND THAT GUARD IS NOT AN OPTIMISATION — WITHOUT IT THE FEATURE CANNOT WORK AT ALL. `record()` pushes into `tracking`, which marks `tracking` dirty; if saving `tracking` also recorded a measurement, every save would create a record that re-dirties it — the domain could never become clean and the 60-second autosave would write FOREVER on a completely idle app, each pass growing the ring it was writing. A self-feeding loop. The blind spot it leaves (the cost of persisting tracking itself is not in the record) is named rather than left to be found. Neither producer records anything from the data: the save measurement carries THE DOMAIN NAME ONLY because a measurement of an encrypted write must not become a plaintext copy of what it wrote, and the model measurement carries PROVIDER AND MODEL ID ONLY because a latency record must not become a transcript.** **H6: `models:roles` and `models:role-research` were the only 2 of 377 registered channels named in neither the preload nor `src/`, with `modelRoles.plan()`/`researchPlan()`/`describeRequirement()` existing solely for them. `KNOWN_ORPHAN_CHANNELS` IS NOW EMPTY — every registered channel has a caller surface, and the "no stale entry" rule FORCED that emptying: the suite failed until the two names were removed.** **H7: `brokerConnectors.cjs` had 81 assertions, three declared connectors, and no channel, no namespace and no page. `electron/ipc/brokers.cjs` adds `brokers:list`/`brokers:fields`/`brokers:drift-check`, all gated on `vault.read` — the same sensitivity class as reading the vault's contents list, because the fields describe what master is about to paste a credential into. AND MASTER'S ORIGINAL REQUEST FROM ROW 163 IS FINALLY REACHABLE: "Rama should be able to verify documents online to update the API structure" — the Brokers tab's Check docs for drift button fetches the broker's own documentation through `browser.fetchUrl` and hands the text to the channel. THE SPLIT IS THE POINT: the renderer fetches, the channel compares, so `driftReport` stays pure, remains testable against a fixture, and the channel cannot be turned into an outbound request by a crafted argument. A short body is `inconclusive` and never all-clear, checked at the channel as well as in the module; A FAILED FETCH IS REPORTED AS A FAILED FETCH, because a network problem must never read as "the declaration is still correct"; and `inconclusive` renders as its own state in amber rather than folded into either all-clear or error. NOTHING IS EVER APPLIED — no apply member on the bridge and no apply path in the channel, because the declared table is the source of truth and a connector silently re-shaped from a page that could have changed for any reason is a credential pointed somewhere new (I6, I17); the response says so in `appliedNote`, AT THE CHANNEL, because master reads the response and not the module.** **EXPOSING A BRIDGE MEMBER WITH NO PAGE WOULD ONLY MOVE THE ORPHAN ONE LAYER UP, so both tabs were built — a Roles tab showing each role, why it exists, what it requires and whether it is filled; a Brokers tab showing data-only and declares-no-order-path as TWO SEPARATE STATEMENTS, the first being the promise and the second the mechanical fact behind it.** **MY OWN COUNTER READ DOCUMENTATION AS IMPLEMENTATION, TWICE MORE: instrumenting `record()` made the suite report 2 call sites in a file with 1, because the comment EXPLAINING why `record()` needed a producer contains the literal `.record(`; and the member parser produced a phantom bridge member called `member` from a comment containing the words "apply" member:. THAT IS THE FOURTH AND FIFTH TIME THIS PROJECT HAS PAID FOR A PATTERN THAT READS PROSE AS CODE, after the `/projected/` regex, the near-match connector sentence, and `!/ok:\\s*true/` matching its own explanatory comment. Both now strip comments before matching, replacing them with SPACES so every byte offset and nesting depth is preserved. THE BASELINE WAS REGENERATED BECAUSE OF IT: the first seed of 315 was written by the parser that read comments as keys, so it held phantoms; it is now 301, the difference being phantoms removed plus the eight members genuinely closed. A DEBT REGISTER SEEDED FROM A BAD MEASUREMENT LIES IN BOTH DIRECTIONS, so regenerating was the only honest option, and the reason is recorded inside the file rather than only in the spec.** **VERIFIED: chain 4,986 across 42 entries 0 failures exit 0 — UNCHANGED IN COUNT, which is correct, since this tranche added producers and callers rather than new contracts. Reachability 377 → 380 channels, 0 ORPHAN CHANNELS, 120 of 421 bridge members reached, register 301. `auditRenderer` clean at 85 files / 377 channels. Build exit 0 with `verifyBundleGraph` 21/0. `verify:render` 85/0 with `/models` reachable at both widths. `verifyTypeScale.mjs` CAUGHT TWO NUMERIC `fontSize` LITERALS I INTRODUCED in the new tabs — 142 against a budget of 140 — and they are tokens now; the budget did exactly what Section 136 built it for.** **NOT VERIFIED, AND THIS LIST MATTERS MORE THAN THE GREEN ONES: no measurement has been recorded on master's machine (both producers are wired, the store is empty until the app runs, and the Section 138 read channel STILL HAS NO PANEL calling `tracking.summary` — the data will be there with nothing showing it); no role plan has been computed (`models:roles` calls `refreshOllamaModels()` first and Ollama is on master's OTHER machine, so the Roles tab will report unfilled roles here regardless of truth); and no broker document has been fetched — the drift path is wired end to end and HAS NEVER RUN, so the shape of what `browser.fetchUrl` returns for a real vendor page is READ FROM ITS OWN CODE rather than observed, making the `text ?? data ?? body` fallback a guess at three field names that may need a fourth on the first real run.** **NEXT: M10 and M11 are small, security-relevant and provable — both are a missing `requireLocalToken` on a route where the mechanism already exists. Then M23 (the `SELF_MODIFY` applier registered by a module-scope side effect inside a `try{}catch{}` that a load-order change would lose silently). Then a Tracking panel, so the first unverified item above stops being true.** |
 
+| 172 | Dependency upgrades — 49 advisories to 21, and the one real breaking change | done | Section 146. Master: *"check possibilty of upgrades to packages, if yes then check for compability and security risks. if none then start upgrading accordingly."* **MEASURED BEFORE: 49 advisories (10 moderate, 35 high, 4 critical). AFTER: 21 (2 low, 4 moderate, 14 high, 1 critical). Every remaining one traces to the Electron toolchain or `sharp`.** **19 PACKAGES UPGRADED: `simple-git` 3.27.0 → 4.0.2 (CRITICAL — command execution via git config includes, and an unsafe-operations bypass via long-option abbreviation), `express` 4.21.2 → 4.22.3 (HIGH, STAYED ON v4 because 5.x is a major and the advisory is fixed inside v4), `axios` 1.7.9 → 1.20.0, `vite` 6.3.5 → 6.4.4 (HIGH, `server.fs.deny` bypass on Windows alternate paths; STAYED ON v6, 8.x is two majors), `playwright` 1.48.2 → 1.64.0, `react-router-dom` 7.6.0 → 7.18.4, `systeminformation` 5.23.5 → 5.33.15, `electron-updater` 6.3.9 → 6.8.9, `chokidar` 3.6.0 → 5.0.0, `vectra` 0.9.0 → 0.15.0, `uuid` 10.0.0 → 14.0.3, `monaco-editor` 0.56.0 → 0.57.0, plus `helmet`, `cors`, `react`/`react-dom` 19.3.0, `zustand`, and the two Babel packages. Two `npm audit fix` passes closed the critical `proxy-addr` (IP spoofing via IPv4-mapped IPv6) and `shell-quote` (command injection) advisories. EVERY INSTALL USED `--save-exact --ignore-scripts` — exact because the suites assert no `^`/`~` anywhere in `package.json`, and `--ignore-scripts` because a changed tree can re-run native install scripts and this machine has no C++ compiler; `argon2` was re-checked after every step.** **THE ONE REAL BREAKING CHANGE, FOUND BY RUNNING IT RATHER THAN READING ABOUT IT: `simple-git` 4 REMOVED THE CALLABLE MODULE EXPORT. v3 had `module.exports = simpleGit`; v4 exposes only the named export, and the old call produced `TypeError: simpleGit is not a function`. ALL 18 METHODS the codebase uses would have broken across SEVEN CALL SITES IN SIX FILES. A web search for v4 migration notes returned nothing but noise about unrelated projects, which is its own finding — the release is too new for documentation to help. So it was PROBED AGAINST A REAL THROWAWAY REPOSITORY: init, config, status, add, commit, log, branch, branchLocal, revparse, checkoutLocalBranch, checkout, diff, addAnnotatedTag, tags and getRemotes exercised for real, and the five network methods asserted PRESENT AND CALLABLE RATHER THAN SUCCESSFUL, because a probe needing a reachable remote would fail offline and say nothing about the API. 21 of 21 with the destructured form. Migration applied to all seven sites including `timeline.cjs`'s lazy try/catch, which became `({ simpleGit } = require('simple-git'))`. A second v4 change surfaced while writing the probe: DEEP IMPORTS ARE GONE — `require('simple-git/package.json')` now throws `ERR_PACKAGE_PATH_NOT_EXPORTED`.** **COMPATIBILITY CHECKED BEFORE UPGRADING, NOT AFTER: `chokidar` v4 removed glob strings and the single call site passes `ignored` as a REGEXP, with every other option surviving; `uuid` has one real use already inside a try/catch and most of the codebase uses the platform's own `crypto.randomUUID()`; `vectra` uses only `LocalIndex`, already behind a keyword-search fallback; and `monaco-editor` was the riskiest small bump because SECTION 140'S CHUNK RULE DEPENDS ON MONACO'S EXACT INTERNAL LAYOUT — re-measured after upgrading as still 81 language directories, ZERO IRREGULAR, each holding exactly `register.js` and `<lang>.js`, with `_.contribution.js` present and `basic-languages/` still only the barrel, and `verifyBundleGraph` 21/0.** **AN HONEST ODDITY: the audit now suggests `monaco-editor@0.56.0` as a fix, because 0.57.0 pulls a `dompurify` with a LOW advisory — the recommendation is a DOWNGRADE. Not taken, and recorded rather than hidden.** **HELD BACK, DELIBERATELY: `electron` at 31.7.7 (13 majors to 44; Chromium and Node both jump, `BrowserWindow`/`webPreferences` defaults change, and IT CANNOT BE VERIFIED HERE since the app has never been launched this session), `electron-builder` at 24.13.3 (major to 26, carries the critical `tar` advisory, and the installer pipeline cannot be exercised here), `electron-rebuild` (only meaningful once there is a compiler), and `sharp` at 0.33.5 — a major that needs PLATFORM BINARIES FETCHED BY AN INSTALL SCRIPT, the one thing `--ignore-scripts` suppresses, so upgrading it under the only safe install mode would leave it broken. `mongodb` and `recharts` have ZERO IMPORTS (measured), so upgrading them is work for code nobody runs.** **THE NATIVE-MODULE BLOCKER IS NOT WHAT THE NOTE SAID, AND `_nativeRebuildNote` IS CORRECTED IN PLACE. It claimed argon2 and node-pty both "require() successfully with zero .node files built" and concluded the gyp step was ceremony. Measured: argon2 IS genuinely fine — `node-addon-api` + `node-gyp-build` means a NODE-API BINARY, ABI-STABLE across Node and Electron versions, so it would survive an Electron upgrade untouched. node-pty IS NOT — `require()` succeeds but SPAWNING FAILS with `Cannot find module '../build/Release/conpty.node'` and there are ZERO `.node` files in the package, SO THE TERMINAL FEATURE CANNOT WORK ON THIS MACHINE AT ALL, and that was already true before any upgrade. THE UPSHOT IS THE OPPOSITE OF WHAT THE NOTE IMPLIED: native modules are NOT the blocker for Electron — argon2 is ABI-stable and node-pty is already non-functional, so there is nothing there for an upgrade to break. The blocker is that a 13-major jump in the shell cannot be verified without launching the app.** **ONE GUARD BROKE, AND THE FIX MADE IT LESS BRITTLE: `verifyRepairContract.cjs` threw `ContractPreconditionError` after the `cors` bump, because its live transform targeted `cors@2.8.6` against a `package.json` pinning 2.8.5 and the precondition requires the on-disk value to DIFFER — A SECURITY UPGRADE BROKE A GUARD THAT HAD NOTHING TO DO WITH SECURITY. The target is now DERIVED FROM DISK, the pinned version with its last digit rolled forward, which is the only form that satisfies the neighbouring same-length-one-character-different rows BY CONSTRUCTION and can never collide however often `cors` is upgraded. 263/0.** **VERIFIED: chain 4,986 across 42 entries 0 failures exit 0, run after EACH tranche rather than once at the end so a failure could be attributed; build exit 0 with `verifyBundleGraph` 21/0; `verify:render` 85/0 with 18 of 18 routes reachable and zero page errors on React 19.3 + react-router 7.18 + Vite 6.4.4; `simple-git` probe 21/21; `argon2` loads; no `^` or `~` anywhere in `package.json`. Startup payload grew 323.77 → 358.88 kB (React 19.3 is larger), still well under the 600 kB ceiling; `vendor-monaco` grew 4,083 → 4,301 kB and stays off the startup path.** **NOT VERIFIED: THE ELECTRON APP HAS NOT BEEN LAUNCHED. Everything above is the renderer, the suites, the build, and main-process modules under `node --check` plus targeted probes. `electron-updater`, `systeminformation` and especially the seven `simple-git` call sites only run in a real session, so whether `npm start` still opens a window is unproven here — that is the one thing worth trying before trusting this.** **NEXT: master's decisions — the Electron family upgrade (and whether to install the C++ workload, which would also fix the Terminal), and `sharp`, which needs one install WITH scripts to fetch its binaries.** |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -18748,3 +18750,157 @@ silently).
 **NEXT:** M10 and M11 are small, security-relevant and provable — both are a missing
 `requireLocalToken` on a route that already has the mechanism available. Then M23. Then a Tracking
 panel, so §145.4's first unverified item stops being true.
+
+---
+
+## SECTION 146 — Dependency upgrades: 49 advisories down to 21, and what is deliberately held back
+
+**STATUS: 19 PACKAGES UPGRADED AND VERIFIED. THE ELECTRON FAMILY IS HELD BACK AS A DECISION FOR
+MASTER.** Master: *"check possibilty of upgrades to packages, if yes then check for compability and
+security risks. if none then start upgrading accordingly."*
+
+Measured before: **49 advisories — 10 moderate, 35 high, 4 critical.** After: **21 — 2 low, 4
+moderate, 14 high, 1 critical.** Every remaining one traces to the Electron toolchain or `sharp`.
+
+### 146.1 What was upgraded
+
+| package | from | to | why |
+| --- | --- | --- | --- |
+| `simple-git` | 3.27.0 | **4.0.2** | CRITICAL: command execution via git config includes; unsafe-operations bypass via long-option abbreviation |
+| `express` | 4.21.2 | 4.22.3 | HIGH. **Stayed on v4** — 5.x is a major and the advisory is fixed in 4.22.3 |
+| `axios` | 1.7.9 | 1.20.0 | HIGH |
+| `vite` | 6.3.5 | 6.4.4 | HIGH: `server.fs.deny` bypass on Windows alternate paths. **Stayed on v6** — 8.x is two majors |
+| `playwright` | 1.48.2 | 1.64.0 | HIGH |
+| `react-router-dom` | 7.6.0 | 7.18.4 | HIGH |
+| `systeminformation` | 5.23.5 | 5.33.15 | HIGH |
+| `electron-updater` | 6.3.9 | 6.8.9 | HIGH |
+| `chokidar` | 3.6.0 | **5.0.0** | HIGH (`braces`) |
+| `vectra` | 0.9.0 | **0.15.0** | HIGH, and it carried the old `axios` |
+| `uuid` | 10.0.0 | **14.0.3** | MODERATE |
+| `monaco-editor` | 0.56.0 | 0.57.0 | MODERATE |
+| `sharp` | — | held | see 146.4 |
+| `helmet` | 8.1.0 | 8.3.0 | maintenance |
+| `cors` | 2.8.5 | 2.8.6 | maintenance |
+| `react`, `react-dom` | 19.2.0 | 19.3.0 | maintenance |
+| `zustand` | 5.0.5 | 5.0.15 | maintenance |
+| `@babel/parser` | 7.29.7 | 7.29.9 | maintenance |
+| `@babel/traverse` | 7.29.7 | 7.29.10 | maintenance |
+
+Plus two `npm audit fix` passes for non-major transitive fixes, which closed the critical
+`proxy-addr` (IP spoofing via IPv4-mapped IPv6) and `shell-quote` (command injection) advisories.
+
+**EVERY INSTALL USED `--save-exact --ignore-scripts`.** Exact because the project pins and the suites
+assert no `^`/`~` anywhere in `package.json`; `--ignore-scripts` because a changed tree can re-run
+native install scripts, and this machine has no C++ compiler. `argon2` was re-checked after every
+step and loads throughout.
+
+### 146.2 The one real breaking change, found by running it rather than reading about it
+
+**`simple-git` 4 removed the callable module export.** v3 had `module.exports = simpleGit`, so
+`const simpleGit = require('simple-git')` gave a function. v4 exposes **only the named export**, and
+the measured result of the old call was:
+
+```
+TypeError: simpleGit is not a function
+```
+
+**All 18 methods the codebase uses would have broken** — `add`, `addAnnotatedTag`, `branch`,
+`branchLocal`, `checkout`, `checkoutLocalBranch`, `clone`, `commit`, `diff`, `fetch`, `getRemotes`,
+`log`, `pull`, `push`, `pushTags`, `revparse`, `status`, `tags` — across **seven call sites in six
+files**. A web search for v4 migration notes returned nothing but noise about unrelated projects' v4
+releases, which is its own finding: the release is too new for documentation to help.
+
+So it was **probed against a real throwaway repository**: init, config, status, add, commit, log,
+branch, branchLocal, revparse, checkoutLocalBranch, checkout, diff, addAnnotatedTag, tags,
+getRemotes all exercised for real, and the five network methods asserted **present and callable
+rather than successful** — a probe that needed a reachable remote would fail on an offline machine and
+say nothing about the API. **21 of 21 with the destructured form.** The migration is
+`require('simple-git')` → `{ simpleGit } = require('simple-git')`, applied to all seven sites,
+including `timeline.cjs`'s lazy `try`/`catch` assignment which became
+`({ simpleGit } = require('simple-git'))`.
+
+A second, smaller v4 change surfaced while writing the probe: **deep imports are gone.**
+`require('simple-git/package.json')` now throws `ERR_PACKAGE_PATH_NOT_EXPORTED`. Nothing in the
+codebase does that; the probe did.
+
+### 146.3 Compatibility checked BEFORE upgrading, not after
+
+- **`chokidar` 3 → 5.** v4 removed glob-string support. The single call site passes `ignored` as a
+  **RegExp**, not a glob, and `persistent`/`ignoreInitial`/`depth`/`awaitWriteFinish` all survive. Read
+  before upgrading, and the module loads with `watch` intact after.
+- **`uuid` 10 → 14.** One real use, `const { v4: uuidv4 } = require('uuid')`, already inside a
+  `try`/`catch` fallback — and most of the codebase uses the platform's own `crypto.randomUUID()`
+  anyway. `require('uuid').v4` verified still a function.
+- **`vectra` 0.9 → 0.15.** `LocalIndex` is the only thing used, already behind a `try`/`catch` with a
+  keyword-search fallback. Verified still a function.
+- **`monaco-editor` 0.56 → 0.57.** The riskiest small bump, because Section 140's chunk rule depends
+  on monaco's **exact internal layout**. Re-measured after upgrading: still **81 language directories,
+  zero irregular**, each holding exactly `register.js` and `<lang>.js`, `_.contribution.js` still
+  present, `basic-languages/` still holding only the barrel. `verifyBundleGraph` 21/0, so the rule
+  still produces a cycle-free graph with the grammars dynamic-only.
+
+**AN HONEST ODDITY: the audit now suggests `monaco-editor@0.56.0` as a fix.** 0.57.0 pulls a
+`dompurify` version with a **LOW** advisory, so the recommendation is a *downgrade*. Not taken — a low
+in a lazily-loaded editor is not worth reverting a moderate fix for — and recorded rather than hidden.
+
+### 146.4 What is deliberately held back, and why
+
+| held | at | reason |
+| --- | --- | --- |
+| `electron` | 31.7.7 | **13 majors to 44.** Chromium and Node both jump, `BrowserWindow`/`webPreferences` defaults change, and **it cannot be verified here** — the app has never been launched in this session and there is no way to prove the main process still starts. |
+| `electron-builder` | 24.13.3 | major to 26; carries the **critical `tar`** advisory. Packaging config is validated strictly and the installer pipeline cannot be exercised on this machine. |
+| `electron-rebuild` | 3.2.9 | major; only meaningful once there is a compiler. |
+| `sharp` | 0.33.5 | major to 0.35, and it needs **platform binaries fetched by an install script** — the one thing `--ignore-scripts` suppresses. Upgrading it under the only install mode that is safe here would leave it broken. devDep, icon generation only, already guarded by a `try`/`catch`. |
+| `express` | **4**.22.3 | 5.x is a major and unnecessary: the advisory is fixed inside v4. |
+| `express-rate-limit`, `concurrently`, `wait-on`, `png-to-ico`, `@vitejs/plugin-react`, `mongodb`, `recharts` | — | majors with no advisory against them. **`mongodb` and `recharts` have ZERO imports** (measured), so upgrading them is work for code nobody runs; their removal is a separate decision already raised in Section 143. |
+
+**THE NATIVE-MODULE BLOCKER IS NOT WHAT THE NOTE SAID.** `package.json`'s `_nativeRebuildNote`
+claimed argon2 and node-pty both *"require() successfully with zero .node files built"* and concluded
+the gyp step was ceremony. Measured:
+
+- **`argon2` is genuinely fine** — `node-addon-api` + `node-gyp-build`, so it is a **Node-API binary
+  and ABI-stable** across Node and Electron versions. It would survive an Electron upgrade untouched.
+- **`node-pty` is NOT fine.** `require()` succeeds, but **spawning fails**:
+  `Cannot find module '../build/Release/conpty.node'`. There are **zero `.node` files** in the package.
+  **So the Terminal feature cannot work on this machine at all**, and that is not a consequence of any
+  upgrade — it was already true.
+
+The note has been corrected in place. **The upshot for Electron is the opposite of what the note
+implied: native modules are not the blocker.** argon2 is ABI-stable and node-pty is already
+non-functional, so there is nothing for an Electron upgrade to break there. **The blocker is that a
+13-major jump in the shell cannot be verified without launching the app**, which is master's call.
+
+### 146.5 One guard broke, and the fix made it less brittle
+
+`verifyRepairContract.cjs` threw `ContractPreconditionError` after the `cors` bump. Its live transform
+targeted `cors@2.8.6` against a `package.json` pinning 2.8.5, and the contract's precondition requires
+the on-disk value to **differ** from the target — so upgrading `cors` to 2.8.6 left nothing to derive.
+**A security upgrade broke a guard that had nothing to do with security.**
+
+The target is now **derived from disk**: the pinned version with its last digit rolled forward. The
+suite's neighbouring rows require the result to be the **same length with exactly one character
+different** — which is what proves derivation-by-index rather than regeneration — so a derived target
+is not merely convenient, it is the only form that satisfies them **by construction** and can never
+collide however often `cors` is upgraded. 263/0.
+
+### 146.6 Verified
+
+Chain **4,986 assertions across 42 entries, 0 failures**, exit 0 — run after *each* tranche, not once
+at the end, so a failure could be attributed. `npm run build` exit 0 with `verifyBundleGraph` **21/0**.
+`npm run verify:render` **85/0, 18 of 18 routes reachable, zero page errors** on React 19.3 +
+react-router 7.18 + Vite 6.4.4. `simple-git` probe **21/21**. `argon2` loads. No `^` or `~` anywhere
+in `package.json`.
+
+**The startup payload grew 323.77 → 358.88 kB** (React 19.3 is larger), still well under the 600 kB
+ceiling, and `vendor-monaco` grew 4,083 → 4,301 kB — lazily loaded, so off the startup path.
+
+**NOT VERIFIED: the Electron app has not been launched.** Everything above is the renderer, the
+suites, the build and the main-process modules under `node --check` and targeted probes. Whether
+`npm start` still opens a window on these versions is unproven here — `electron-updater`,
+`systeminformation` and the `simple-git` migration all live in the main process, and the
+`simple-git` change in particular touched seven call sites that only run in a real session.
+**That is the one thing worth trying before trusting this.**
+
+**NEXT:** master's decisions — the Electron family upgrade (and whether to install the C++ workload,
+which would also fix the Terminal), and `sharp`, which needs one install *with* scripts to fetch its
+binaries.

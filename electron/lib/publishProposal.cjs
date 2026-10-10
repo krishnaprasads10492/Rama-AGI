@@ -50,7 +50,7 @@
 
 const fs   = require('fs');
 const path = require('path');
-const simpleGit = require('simple-git');
+const { simpleGit } = require('simple-git');
 
 // NOT under data/ — that whole directory is gitignored (encrypted stores,
 // per-machine key material). Release notes must actually be committed, so

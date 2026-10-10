@@ -756,7 +756,33 @@ async function main() {
       devDependencies: { vite: '5.0.0' },
     }, null, 2);
     fs.writeFileSync(path.join(tmpRoot, 'package.json'), FIXTURE, 'utf8');
-    const PARAMS = Object.freeze({ name: 'cors', version: '2.8.6' });
+    /**
+     * THE TRANSFORM TARGET IS DERIVED FROM DISK, NOT WRITTEN AS A LITERAL (Section 146).
+     *
+     * This was `version: '2.8.6'` against a `package.json` that pinned `cors` at `2.8.5`. The
+     * precondition in `repairContract.transform()` requires the on-disk value to DIFFER from the
+     * target — otherwise there is no edit to derive — so the moment `cors` was legitimately upgraded
+     * to 2.8.6 the whole suite threw `ContractPreconditionError`. A security upgrade broke a guard
+     * that had nothing to do with security.
+     *
+     * The rows below also require the result to be the SAME LENGTH as the input with EXACTLY ONE
+     * character different, which is what proves derivation-by-index rather than regeneration. So the
+     * target cannot be an arbitrary string: it is the on-disk version with its last digit rolled
+     * forward, which is same-length and one-character-different BY CONSTRUCTION, and can never
+     * collide with the pinned value however often `cors` is upgraded.
+     *
+     * Nothing is written to the real `package.json` — `transform()` is pure and returns a string.
+     */
+    const corsPinned = JSON.parse(
+      fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).dependencies.cors;
+    if (!/\d$/.test(String(corsPinned))) {
+      throw new Error(`the cors pin "${corsPinned}" does not end in a digit, so a same-length `
+        + 'one-character target cannot be derived from it');
+    }
+    const PARAMS = Object.freeze({
+      name: 'cors',
+      version: String(corsPinned).replace(/\d$/, (d) => String((Number(d) + 1) % 10)),
+    });
 
     try {
       // ── The exported surface, and the load boundary ────────────────────────

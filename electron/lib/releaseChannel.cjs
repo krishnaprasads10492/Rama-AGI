@@ -39,7 +39,7 @@
 
 const fs   = require('fs');
 const path = require('path');
-const simpleGit = require('simple-git');
+const { simpleGit } = require('simple-git');
 
 const CHANGELOG_NAME = 'CHANGELOG.md';
 const WORKFLOW_PATH  = path.join('.github', 'workflows', 'release.yml');

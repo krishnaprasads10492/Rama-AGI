@@ -18,7 +18,7 @@ const path = require('path');
 
 let simpleGit = null;
 try {
-  simpleGit = require('simple-git');
+  ({ simpleGit } = require('simple-git'));
 } catch {
   console.warn('[timeline] simple-git not installed — timeline flashbacks disabled');
 }

@@ -35,7 +35,7 @@
  *      see the outcome before the app relaunches out from under them.
  */
 
-const simpleGit = require('simple-git');
+const { simpleGit } = require('simple-git');
 const { spawn } = require('child_process');
 const path = require('path');
 
