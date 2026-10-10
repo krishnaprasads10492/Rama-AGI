@@ -248,37 +248,93 @@ export default function Models() {
   const [pulling,     setPulling]     = useState(false);
   const [vaultLocked, setVaultLocked] = useState(true);
   const [password,    setPassword]    = useState('');
+  // Why the last unlock failed, and whether one is in flight. Both exist because
+  // the button previously had no failure path at all (Section 141).
+  const [vaultError,  setVaultError]  = useState(null);
+  const [unlocking,   setUnlocking]   = useState(false);
+  // `exists` + `unreadable` from vault:status, so the banner can tell "nothing
+  // stored yet" from "stored but undecryptable" instead of calling both locked.
+  const [vaultState,  setVaultState]  = useState({ exists: false, unreadable: false });
   const [tab,         setTab]         = useState('cloud');
   const [customProviders,   setCustomProviders]   = useState([]);
   const [showAddCustom,     setShowAddCustom]     = useState(false);
   const [customError,       setCustomError]       = useState(null);
   const [cloudStatus,       setCloudStatus]       = useState(null);
 
+  /**
+   * `allSettled`, NOT `all` — and that is a behaviour fix, not tidying.
+   *
+   * With `Promise.all`, one rejected channel threw out of `load()` before any
+   * `set*` ran, so the whole page kept its INITIAL state: `vaultLocked` starts
+   * as `true`, which means a single unrelated IPC failure renders a permanent
+   * "Vault locked" banner that no correct password can clear, because the
+   * unlock's own `load()` throws again on the same channel. Six independent
+   * reads now fail independently, and each one that fails says so.
+   */
   const load = useCallback(async () => {
     if (!isElectron) return;
-    const [mRes, pRes, vRes, cpRes, csRes] = await Promise.all([
+    const settled = await Promise.allSettled([
       window.rama.models.list(),
       window.rama.models.getPrimary(),
       window.rama.vault.status(),
       window.rama.models.listCustomProviders({ user: currentUser }),
       window.rama.models.cloudStatus(),
+      window.rama.models.checkCredentials(),
     ]);
-    if (mRes.ok) { setModels(mRes.data); setOllamaModels(mRes.ollama || []); }
-    if (pRes.ok) setPrimary(pRes.model);
-    if (vRes.ok) setVaultLocked(!vRes.unlocked);
-    if (cpRes.ok) setCustomProviders(cpRes.data);
-    if (csRes?.ok) setCloudStatus(csRes);
+    const value = (i) => (settled[i].status === 'fulfilled' ? settled[i].value : null);
+    const [mRes, pRes, vRes, cpRes, csRes, cRes] = [0, 1, 2, 3, 4, 5].map(value);
 
-    const cRes = await window.rama.models.checkCredentials();
-    if (cRes.ok) setCredentials(cRes.data);
+    if (mRes?.ok) { setModels(mRes.data); setOllamaModels(mRes.ollama || []); }
+    if (pRes?.ok) setPrimary(pRes.model);
+    if (vRes?.ok) {
+      setVaultLocked(!vRes.unlocked);
+      setVaultState({ exists: !!vRes.exists, unreadable: !!vRes.unreadable });
+    }
+    if (cpRes?.ok) setCustomProviders(cpRes.data);
+    if (csRes?.ok) setCloudStatus(csRes);
+    if (cRes?.ok) setCredentials(cRes.data);
+
+    // A channel that REJECTED is a different fact from one that returned
+    // `ok:false`, and the vault's is the one that strands this page, so it is
+    // named rather than left as a blank banner.
+    if (settled[2].status === 'rejected') {
+      setVaultError('The vault status channel did not answer: '
+        + `${settled[2].reason?.message || String(settled[2].reason)}`);
+    }
   }, [currentUser]);
 
   useEffect(() => { load(); }, [load]);
 
+  /**
+   * A FAILED UNLOCK USED TO DO NOTHING AT ALL. The result was checked with
+   * `if (res.ok)` and the else branch did not exist, so a wrong password, a
+   * denied capability and an unreadable vault all looked identical to a dead
+   * button — which is exactly what master reported (Section 141). The error the
+   * main process already returns is now shown.
+   */
   const unlockVault = async () => {
     if (!isElectron || !password) return;
-    const res = await window.rama.vault.unlock(currentUser, password);
-    if (res.ok) { setVaultLocked(false); setPassword(''); load(); }
+    setVaultError(null);
+    setUnlocking(true);
+    try {
+      const res = await window.rama.vault.unlock(currentUser, password);
+      if (res?.ok) {
+        setVaultLocked(false);
+        setPassword('');
+        setVaultError(null);
+        load();
+      } else {
+        // The password is NOT cleared on failure: retyping a long passphrase
+        // because the app threw it away is its own small insult.
+        setVaultError(res?.error || 'The vault did not unlock, and gave no reason.');
+      }
+    } catch (err) {
+      // A rejected invoke means the channel is missing or the main process threw.
+      // Saying so beats a button that appears broken.
+      setVaultError(`The vault could not be reached: ${err?.message || String(err)}`);
+    } finally {
+      setUnlocking(false);
+    }
   };
 
   const saveKey = async (credKey, value) => {
@@ -349,15 +405,53 @@ export default function Models() {
         <button className="btn btn-sm" onClick={load}>↺ Refresh</button>
       </div>
 
-      {/* Vault unlock prompt */}
+      {/* ── Vault unlock prompt ────────────────────────────────────────────────
+             THE BANNER SAYS WHICH OF THREE THINGS IS TRUE, and says why an
+             attempt failed. It previously said "Vault locked" in every case and
+             reported nothing at all when Unlock did not work (Section 141).
+
+             IT ALSO SAYS WHY IT IS ASKING. The credential vault is a SECOND
+             encrypted store with its own key: `cryptoCore.cjs` opens
+             `data/system` with the passcode at startup, this opens
+             `rama_vault.enc`, and nothing connects the two. Master typed a
+             password at launch and was asked again here with no explanation,
+             which reads as a bug even though it is the design. Whether it SHOULD
+             be one secret is master's call and is raised in Section 141 — until
+             he decides, the screen at least stops being silent about it. */}
       {vaultLocked && (
         <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)',
-          background: 'rgba(255,170,0,0.05)', display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
-          <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--amber)' }}>🔒 Vault locked — unlock to use API keys</span>
-          <input className="input" type="password" placeholder="Master password" value={password}
-            onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && unlockVault()}
-            style={{ width: '200px', fontSize: FS.chrome, lineHeight: LH.chrome }} />
-          <button className="btn btn-sm btn-primary" onClick={unlockVault}>Unlock</button>
+          background: 'rgba(255,170,0,0.05)', display: 'flex', alignItems: 'flex-start',
+          gap: '10px', flexShrink: 0, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--amber)' }}>
+              {vaultState.unreadable
+                ? '🔒 Vault present but not decrypted — the password did not open it'
+                : vaultState.exists
+                  ? '🔒 Vault locked — unlock to use the stored API keys'
+                  : '🔒 No vault yet — set a master password to start one'}
+            </span>
+            <input className="input" type="password" placeholder="Vault master password" value={password}
+              onChange={e => { setPassword(e.target.value); setVaultError(null); }}
+              onKeyDown={e => e.key === 'Enter' && unlockVault()}
+              aria-label="Vault master password"
+              aria-invalid={!!vaultError}
+              style={{ width: '220px', fontSize: FS.chrome, lineHeight: LH.chrome }} />
+            <button className="btn btn-sm btn-primary" onClick={unlockVault}
+              disabled={unlocking || !password}>
+              {unlocking ? 'Unlocking…' : 'Unlock'}
+            </button>
+          </div>
+          {/* No `lineHeight`: there is no `LH.micro` role, and asking for one makes
+              `roleMap` warn and return undefined. The other two `FS.micro` sites
+              omit it for the same reason and inherit, which is the intended fallback. */}
+          <div style={{ flexBasis: '100%', fontSize: FS.micro }}>
+            {vaultError
+              ? <span role="alert" style={{ color: 'var(--red)' }}>{vaultError}</span>
+              : <span style={{ color: 'var(--muted)' }}>
+                  This is the credential vault, a separate encrypted file from the store your
+                  startup passcode opens — so it has its own password, even if you chose the same one.
+                </span>}
+          </div>
         </div>
       )}
 

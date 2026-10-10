@@ -1828,6 +1828,8 @@ authenticated **Master session**, not merely an open store.
 
 | 165 | The build was green and the app could not start | done | Section 140. Master: *"seeing warning bridge ready-55 namespaces exposed. and error: uncaught reference --cannot access 'xse' before initialisation. check the entire app for a thorough check."* **THE WARNING IS NOT A FAULT: `[preload] Bridge ready — 55 namespaces exposed` is a deliberate positive signal written with `console.warn` because this project forbids `console.log` in shipped code. It proves the bridge is live and names how much of it the renderer can reach; `tracking` is in the list, which is Section 138's namespace. Nothing to fix — the healthy case announcing itself.** **THE CRASH WAS THIS PROJECT'S OWN BUNDLE CONFIG, AND `xse` WAS FOUND RATHER THAN GUESSED: three occurrences, `vendor-monaco` only, de-minifying to `const languageDefinitions = {}` in monaco's `definitions/_.contribution.js`. So something called `registerLanguage` before the module declaring that const had evaluated — a const in the temporal dead zone, across a chunk boundary.** **CAUSE: ROW 160'S RULE MATCHED THE WHOLE `definitions/<lang>/` FOLDER. Measured on disk: `basic-languages/` holds exactly one file (the barrel) and each of the 81 language folders holds exactly two modules, zero irregular — `register.js`, which imports `registerLanguage` and CALLS IT AT TOP LEVEL, and `<lang>.js`, the grammar reached only through `loader: () => import('./<lang>.js')`. The folder match pulled `register.js` out into `lang-<lang>` while `_.contribution.js` stayed in the core, so `vendor-monaco` statically imported all 81 `lang-*` chunks AND every `lang-*` statically imported `vendor-monaco` back. ESM hoists imports, so `lang-abap` ran its registration before the core declared the registry. A cycle plus a top-level side effect IS how a cross-chunk TDZ is built. It also silently undid the laziness the rule existed for: 81 static imports, 0 dynamic, with each grammar sitting in a chunk already eagerly loaded. FIX: match the grammar alone by basename equal to its folder name, so `register.js` and `_.contribution.js` both fall through to the core.** **PROVEN, NOT ASSERTED: `build/` was served locally and the monaco chunk evaluated in real Edge through Playwright's installed channel. Row 160's rule → `Cannot access 'xse' before initialization`, master's error VERBATIM. Grammar-only rule → evaluates clean, 0 page errors. Same commit otherwise, same machine. A fix for a crash nobody reproduced is a guess.** **A SECOND DEFECT, FOUND BY THE NEW GUARD AND UNRELATED TO THE CRASH: the entry chunk statically imported `vendor-monaco` to reach `_`, used 19 times as `N(()=>import("./Chat-*.js"), __vite__mapDeps([...]), import.meta.url)` — Vite's `__vitePreload`. It is a VIRTUAL module, so it never matched `node_modules`, fell through to "let Rollup decide", and Rollup parked it inside `vendor-monaco`. 4,083 kB of editor sat on the startup path to supply one ~1 kB function, and every lazy page's preload went through it. MEASURED startup closure, same machine: pre-row-160 324.09 kB raw / 101.93 kB gzip; ROW 160 AS SHIPPED 4,405.67 kB / 1,169.46 kB; helper pinned 323.77 kB / 101.57 kB. ROW 160 MADE THE BYTES BEFORE FIRST PAINT 13.6× WORSE WHILE REPORTING A 61% WIN — both numbers honestly obtained, but the reported one measured the ENTRY CHUNK and the browser downloads the entry's TRANSITIVE STATIC CLOSURE. Fixed with one line before the `node_modules` guard: `if (id.includes('vite/preload-helper')) return 'vite-preload';`** **ROW 160'S REAL GAIN IS NOT WITHDRAWN: vendors are still pinned by resolved path, so editing IDE code no longer invalidates 4.2 MB of editor and `vendor-react` is a genuine 189 kB rather than the array form's 0.00 kB. The startup CLAIM was wrong; the cacheability work was not. Row 160's two false sentences are struck through in place rather than deleted.** **WHY NOTHING CAUGHT EITHER — the part worth keeping. On the broken build: `npm run build` exited 0 (a chunk cycle is legal output); `npm run verify` was 4,778/0 across 38 suites, all of which read SOURCE, and the source was never wrong; `auditRenderer` was clean for the same reason; and `verify:render` reported 18/18 routes reachable INCLUDING `/ide` at 85/0 — because it drives the VITE DEV SERVER, which does no chunking at all and so cannot observe a `manualChunks` defect by construction, and because its page errors are printed under the heading "(not assertions)" and never judged. The one gate positioned to see it was aimed at a different artifact, and the one that collected the evidence declined to judge it.** **`verifyBundleGraph.cjs`, 21 assertions over the EMITTED graph: no static cycle (the general form — a cross-chunk TDZ requires one, so one row covers the class); no non-grammar chunk statically imports a grammar and every grammar is dynamic-only; registry and registration in ONE chunk and it is the core; monaco and grammars off the entry's static closure; THE STARTUP PAYLOAD UNDER A STATED 600 kB CEILING WITH THE FIGURE PRINTED — the measurement whose absence let the inversion ship; the startup set pinned BY NAME; the preload helper in a small chunk of its own; `vendor-react` non-empty and really holding react-dom; sourcemaps only under `RAMA_BUNDLE_AUDIT=1`. IT REFUSES RATHER THAN SKIPS — no `build/` means exit 2 with a reason, because a guard that prints green when it could not look is how this reached master. WIRED INTO `npm run build`, NOT the chain, since the chain must pass on a clean checkout with no build; `build:win`/`mac`/`linux`/`all` now call `npm run build`, narrowing the documented escape hatch by one sub-second check.** **BOTH REGRESSIONS WERE RE-INTRODUCED TO CONFIRM THE GUARD REDDENS: the folder rule reddened the cycle row naming `lang-abap -> vendor-monaco -> lang-abap` plus two laziness rows; removing the helper rule reddened four, including `startup payload stays under 600 kB - 4405.67 kB`. A guard that cannot go red is theatre.** **TWO OF MY OWN ROWS WERE WRONG AND WERE REPLACED RATHER THAN LOOSENED: one asked whether any `vendor-*` chunk the entry imports "looks like" it only supplies a helper and flagged `vendor-react` and `vendor-router`, which are eager for good reasons — a row that can only pass by coincidence is worse than none, so the startup set is pinned by name; the other called `lang-javascript -> lang-typescript` a defect when it is correct, monaco deriving the JS Monarch definition from the TS one.** **THE WHOLE-APP SWEEP: import cycles in `src/` 0 (84 files, 174 static edges); load-time `require` cycles in `electron/`, `server/`, `scripts/` 0 (126 files, 116 top-level requires), checked separately because a CJS cycle does not throw but hands back a partial `exports`, so the symptom is `undefined is not a function` at call time; `node start.cjs --diagnose` 0 blocking / 0 warning / 0 degraded; chain 4,778/0 across 38 entries unchanged, correctly, since no source behaviour changed.** **NOT VERIFIED: the editor has not been opened and typed into. The probe proves the chunk EVALUATES; that a file opens, highlights and saves is a claim about the running app on master's machine.** **RAISED FOR MASTER, NOT CHANGED: `verify:render` should ASSERT its page errors rather than print them. Not "zero page errors" — the bridge is deliberately absent there, so some are expected — but zero of the kinds an absent bridge cannot explain: `ReferenceError`, `before initialization`, failed chunk loads; and route reachability asserted rather than listed. It is a working gate and tightening its contract is a decision, not a fix. NEXT: master's call on that, and on whether to drive the BUILT app through real routes in a browser — `verify:render` tests the dev server and `verifyBundleGraph` tests the build, and neither does that.** |
 
+| 166 | The credential vault was deleting its own salt | done | Section 141. Master: *"why the master password to be entered again? vault not unlocked after entering master password and enter/click on unlock."* **BOTH HALVES WERE RIGHT AND HAVE DIFFERENT ANSWERS. The first is the design: TWO independent encrypted stores with two independent KDFs and nothing connecting them — `cryptoCore` opens `data/system` with `rama.salt` and PBKDF2-SHA512 600k from the Gate 1 passcode, `credentialVault` opens `userData/rama_vault.enc` with Argon2id (scrypt fallback) from a password typed on the Models page. Grepped to confirm: `cryptoCore.cjs` names neither `credentialVault` nor `rama_vault`, and the only callers of `vault:unlock` are the preload and the Models page. Defensible — one compromised secret does not open both — but never SAID, and `Models.jsx` carried a comment promising the opposite: "the other needs a password Rāma will not ask for twice". THE CODE AND ITS OWN COMMENT DISAGREED, AND THE COMMENT WAS THE FLATTERING ONE.** **THE SECOND HALF WAS A DATA-DESTROYING BUG, FOUND BY RUNNING THE MODULE RATHER THAN READING IT — every part of it is a property of a SEQUENCE, not of a function. Exercised against a throwaway home dir (`credentialVault.cjs` falls back to `os.homedir()/.rama-agi` when Electron's `app` is absent, which is what makes it testable); master's real vault untouched. Measured on the shipped code: after one `vault:set` the file held `enc, hmac` and `SALT STILL ON DISK? : false`; the next unlock printed `Vault HMAC verification failed` and returned `{"ok":true}` with `entries:0` and the stored key gone.** **FOUR DEFECTS: (1) the salt was a FIELD INSIDE `rama_vault.enc` and `saveVault()` wrote that file as `{enc, hmac}`, so the first credential saved deleted it; (2) the next unlock MINTED A FRESH SALT, derived a different key, failed the integrity check, `loadVault()` SWALLOWED the error and returned `{}`, then wrote the new salt back — making the loss permanent rather than merely inconvenient; (3) NOTHING VERIFIED THE PASSWORD — `vaultUnlocked = true` was unconditional, so ANY password unlocked an empty vault and the next write persisted it over master's real ciphertext, meaning a TYPO was enough to destroy the vault; (4) the renderer's `if (res.ok)` had no `else`, so a wrong password, a denied capability and a dead channel were indistinguishable from a broken button — exactly what master reported. THE CAPABILITY GATE WAS NOT AT FAULT and is now asserted to stay shut: tier 3, unauthenticated, and a user whose `tier` is the STRING `'0'` are all refused.** **FIXES: the salt lives in its OWN file `rama_vault.salt` mode 0600 — removing the class rather than the instance, and not a new idea here, since `cryptoCore.cjs` has always kept `rama.salt` separately and HAS NEVER HAD THIS BUG. A new salt is only ever minted when there is NO CIPHERTEXT TO LOSE; a vault with `enc` and no salt REFUSES, says the keys cannot be recovered, leaves the file byte-for-byte untouched and mints nothing. MIGRATION for the one still-recoverable case — a vault whose salt is still inside the blob is opened, recovered and its salt copied out. `loadVault()` returns THREE outcomes (`empty`/`ok`/`unreadable`), because conflating "no vault yet" with "wrong password" is how a failure came to report success. `saveVault()` REFUSES TO WRITE OVER CIPHERTEXT IT COULD NOT READ, and every write path rolls the in-memory store back on refusal and PROPAGATES it, since `customProviders.add()` can only roll its own record back if told.** **AN HONEST NOTE ON THE VERIFIER: the REDBY test went red on the MESSAGE, not the refusal — the HMAC check was already capable of rejecting a wrong key. So `verifier` earns an accurate error ("wrong master password" rather than "may have been tampered with") and skips a pointless decrypt; it does not deserve credit for the refusal.** **`Promise.all` → `Promise.allSettled` IS A BEHAVIOUR FIX, NOT TIDYING: one rejected channel threw out of `load()` before any `set*` ran, and `vaultLocked` STARTS AS `true` — so a single unrelated IPC failure rendered a permanent "Vault locked" banner that no correct password could clear, because the unlock's own `load()` threw again on the same channel. A SECOND INDEPENDENT ROUTE TO MASTER'S EXACT SYMPTOM, fixed whether or not it is the one he hit.** **The banner now tells three states apart via new `exists`/`unreadable` on `vault:status` (asserted to expose no values and no service names), keeps the typed password on failure, disables while in flight, and catches a rejected `invoke` separately.** **VERIFIED: `verifyCredentialVault.cjs` 72/0 — a LIFECYCLE, not a source read — chain 4,778 → 4,850 across 38 → 39 entries 0 failures, `auditRenderer` clean, build exit 0 with `verifyBundleGraph` 21/0, `verify:render` 85/0 with `/models` reachable at both widths. BOTH FIXES REVERTED TO CONFIRM THE SUITE REDDENS.** **NOT VERIFIED: nothing has been unlocked in the running app. IF MASTER'S VAULT WAS WRITTEN BY THE OLD CODE IT IS ALREADY UNRECOVERABLE — the salt was deleted the first time he saved a key. The new code says so plainly and will not make it worse; the provider keys need re-entering once.** **RAISED FOR MASTER, NOT DECIDED: (a) one secret or two — derive the vault key from the Gate 1 passcode, keep two and let him reuse the string, or offer an explicit opt-in; this is a security-model decision and I did not take it. (b) `server/brain/credentialVault.cjs` is a SECOND, separate vault implementation in the Express process with its own state — two credential vaults in one product deserves a decision, and I have not established which callers depend on it, so removing a credential path blind is exactly how data is lost.** |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -17981,3 +17983,162 @@ not changed here:** it is a working gate and tightening its contract is a decisi
 
 **`verify:render` tests the dev server, and `verifyBundleGraph` tests the build.** Neither drives the
 built app through real routes in a browser. That gap is now named rather than assumed closed.
+
+---
+
+## SECTION 141 — The credential vault was deleting its own salt
+
+**STATUS: FOUR DEFECTS FIXED AND GUARDED BY A BEHAVIOURAL SUITE. ONE DESIGN QUESTION RAISED FOR
+MASTER, NOT DECIDED.** Master: *"Go through the Models module and check; why the master password to be
+entered again? vault not unlocked after entering master password and enter/click on unlock."*
+
+Both halves of that report were right, and they have different answers. The first is the design. The
+second was a data-destroying bug.
+
+### 141.1 Why the password is asked a second time
+
+There are **two independent encrypted stores with two independent key derivations**, and nothing
+connects them:
+
+| store | file | KDF | unlocked by |
+| --- | --- | --- | --- |
+| main store | `data/system` + `rama.salt` | `cryptoCore.deriveKeys`, PBKDF2-SHA512 600k | the passcode at Gate 1, `App.jsx` |
+| credential vault | `userData/rama_vault.enc` | `credentialVault.deriveKey`, Argon2id (scrypt fallback) | a password typed on the Models page |
+
+Grepped to confirm rather than assumed: `cryptoCore.cjs` contains no reference to `credentialVault` or
+`rama_vault`, and the only callers of `vault:unlock` are the preload bridge and the Models page. So
+**unlocking Rāma does not unlock the credential vault, and never did.**
+
+That is defensible — one compromised secret does not open both stores — but it was never *said*.
+Master typed a password at launch and was asked again with no explanation, which reads as a bug.
+Worse, `Models.jsx` carried a comment promising the opposite: *"the other needs a password Rāma will
+not ask for twice."* **The code and its own comment disagreed, and the comment was the flattering one.**
+
+**RAISED FOR MASTER, NOT CHANGED.** The options are (a) derive the vault key from the Gate 1 passcode
+so there is one secret, trading isolation for convenience; (b) keep two secrets and let master choose
+the same string for both, which is what happens today; or (c) keep two and offer an explicit
+"unlock the vault with my passcode" opt-in. **This is a security-model decision and I am not taking
+it.** What changed is only that the banner now explains *why* it is asking.
+
+### 141.2 The bug: the first credential saved destroyed the salt
+
+Reading the source made the unlock handler look correct — derive a key, load the vault, return
+`{ ok: true }`. **Running it is what exposed the defect**, because every part of it is a property of a
+*sequence* rather than of a function. The vault was exercised against a throwaway home directory
+(`credentialVault.cjs` falls back to `os.homedir()/.rama-agi` when Electron's `app` is absent, which
+is what makes it testable at all), and master's real vault was never touched.
+
+Measured on the shipped code:
+
+```
+--- 2. store a credential ---
+  set     : {"ok":true}
+  file keys after set : enc, hmac
+  SALT STILL ON DISK? : false          <-- the salt was a field in that same file
+--- 3. lock, then unlock again with the SAME password ---
+[vault] Load error: Vault HMAC verification failed — file may be tampered
+  unlock  : {"ok":true}                <-- reported SUCCESS
+  status  : {"ok":true,"unlocked":true,"entries":0}
+  get     : {"ok":false,"error":"Not found"}   <-- master's key, gone
+```
+
+The chain of four defects:
+
+1. **The salt was stored inside `rama_vault.enc`, and `saveVault()` wrote that file as
+   `JSON.stringify({ enc, hmac })`.** So the first `vault:set` deleted it.
+2. **The next unlock minted a fresh random salt**, derived a different key, failed the integrity
+   check, and `loadVault()` **swallowed the error and returned `{}`** — then wrote the new salt back
+   over the file, making the loss permanent rather than merely inconvenient.
+3. **Nothing verified the password.** `vaultUnlocked = true` was assigned unconditionally, so *any*
+   password "unlocked" the vault into an empty state — and the next write persisted that empty state
+   over master's real ciphertext. A typo was enough to destroy the vault.
+4. **The renderer had no failure path.** `if (res.ok) { ... }` with no `else`, so a wrong password, a
+   denied capability and a dead channel were indistinguishable from a broken button — exactly what
+   master reported.
+
+**The capability gate was NOT at fault** and is asserted to stay shut: tier 3, an unauthenticated
+caller, and a user whose `tier` is the string `'0'` are all refused.
+
+### 141.3 The fixes
+
+**THE SALT LIVES IN ITS OWN FILE,** `rama_vault.salt`, mode 0600. This removes the whole class rather
+than patching the instance: no future writer of the vault blob can drop it. It is also not a new
+idea here — `cryptoCore.cjs` has always kept `rama.salt` separately and **has never had this bug**, so
+this adopts the pattern already proven in this codebase.
+
+**A NEW SALT IS ONLY EVER MINTED WHEN THERE IS NO CIPHERTEXT TO LOSE.** If a vault has `enc` but no
+salt anywhere, no password can derive its key — so unlock **refuses and says the keys cannot be
+recovered**, leaves the file byte-for-byte untouched, and mints nothing. That is the honest handling
+of a vault the old code already destroyed.
+
+**MIGRATION, BECAUSE ONE CASE IS STILL RECOVERABLE.** A vault whose salt is still inside the blob — one
+written but never saved to — is opened, recovered, and its salt copied out. Asserted, not assumed.
+
+**THE PASSWORD IS VERIFIED.** A `verifier` field, `HMAC-SHA512(vaultKey, 'rama-vault-verifier-v1')`,
+is checked before anything is decrypted. **The honest note on this: the HMAC check was already
+capable of refusing a wrong key — the REDBY test proved it, going red on the *message* and not on the
+refusal.** So the verifier's real contributions are an accurate error (*"wrong master password"*
+rather than *"may have been tampered with"*) and skipping a pointless decrypt. The refusal itself
+comes from the integrity check. Stated rather than letting the verifier take credit for both.
+
+**`loadVault()` RETURNS THREE OUTCOMES, NEVER TWO** — `empty`, `ok`, `unreadable` — because conflating
+"no vault yet" with "wrong password" is precisely how a failure came to report success.
+
+**`saveVault()` REFUSES TO WRITE OVER CIPHERTEXT IT COULD NOT READ.** Losing the key to a vault is
+recoverable in principle; overwriting the vault is not. Every write path — `vault:set`,
+`vault:delete`, `setCredentialDirect`, `deleteCredentialDirect` — now **rolls the in-memory store back
+on a refused write**, so the process never holds a credential it did not persist, and the refusal is
+**propagated** rather than swallowed (`customProviders.add()` rolls its own record back on a failed
+vault write, which it can only do if it is told).
+
+**THE RENDERER REPORTS FAILURE,** keeps the typed password (retyping a long passphrase because the app
+threw it away is its own small insult), disables the button while in flight, and catches a rejected
+`invoke` separately — a missing channel and a wrong password are different facts.
+
+**`Promise.all` BECAME `Promise.allSettled`, AND THAT IS A BEHAVIOUR FIX.** With `all`, one rejected
+channel threw out of `load()` before any `set*` ran, so the page kept its initial state — and
+`vaultLocked` **starts as `true`**. A single unrelated IPC failure therefore rendered a permanent
+"Vault locked" banner that no correct password could clear, because the unlock's own `load()` threw
+again on the same channel. **This is a second, independent route to exactly the symptom master
+reported**, and it is fixed whether or not it was the one he hit.
+
+**THE BANNER TELLS THREE STATES APART** — no vault yet, locked but present, present but undecryptable —
+using new `exists` and `unreadable` fields on `vault:status`. Neither is a secret: no values, no
+service names, which is asserted.
+
+### 141.4 Verified
+
+`verifyCredentialVault.cjs` — **72 assertions, 0 failures**, wired into the chain before the covenant
+tail. Chain **4,778 → 4,850 across 38 → 39 entries, 0 failures**, exit 0. `auditRenderer` clean at 84
+files / 141 bridge calls / 372 channels. `npm run build` exit 0 with `verifyBundleGraph` 21/0.
+`verify:render` 85/0 with `/models` reachable at both widths.
+
+The suite is a **lifecycle**, not a source read: unlock → write → lock → unlock, then a wrong
+password, then a legacy vault, then a destroyed one. It asserts the salt file survives a write, that
+the salt is **not** in the blob, that the plaintext secret appears nowhere in the file, that a refused
+unlock creates no state, and that a refused write leaves the file identical.
+
+**BOTH FIXES WERE REVERTED TO CONFIRM THE SUITE REDDENS:**
+
+| reintroduced | what went red |
+| --- | --- |
+| salt written back into the blob | *"the salt is not inside the blob, where a rewrite could drop it — got true, want false"* |
+| verifier check removed | *"and says so rather than returning silence"* — the refusal held, the message degraded |
+
+**NOT VERIFIED: nothing has been unlocked in the running app.** The lifecycle is proven against the
+real module in a real filesystem, but master's own vault on his machine has not been opened. **If his
+vault was written by the old code, it is already unrecoverable** — the salt was deleted the first time
+he saved a key. The new code will say so plainly and will not make it worse. The provider keys would
+need re-entering once.
+
+### 141.5 A second vault exists in the server, and it is not this one
+
+`server/brain/credentialVault.cjs` is a **separate implementation** with its own state and its own
+`isUnlocked()`, living in the Express process on port 4097. Nothing in this section touched it.
+**Two independent credential vaults in one product is a duplication worth a decision** — whether the
+server path is still used, and if so whether it should delegate to the Electron vault rather than
+hold its own. **RAISED, not resolved:** I have not established which callers depend on it, and
+removing a credential path without that knowledge is exactly the kind of change that loses data.
+
+**NEXT:** master's decision on 141.1 (one secret or two) and on 141.5 (the server's second vault).
+Neither is a defect; both are forks in the design that should not be taken quietly.
