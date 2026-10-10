@@ -1665,9 +1665,11 @@ ipcMain.handle('shell:open-external', async (_e, url) => {
 
 // ─── IPC: Auto-start on login ─────────────────────────────────────────────────
 ipcMain.handle('app:set-login-item', (_e, enabled) => {
+  // `openAsHidden` IS REMOVED IN ELECTRON 44 and was macOS-12-and-below only, so on Windows it has
+  // always been a no-op (Section 147). Dropping it loses nothing here: `args: ['--hidden']` is what
+  // actually carries the intent on this platform, and the app's own argv handling reads it.
   app.setLoginItemSettings({
     openAtLogin: enabled,
-    openAsHidden: true,
     name: 'Rama AGI',
     args: ['--hidden'],
   });

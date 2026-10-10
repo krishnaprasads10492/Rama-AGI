@@ -70,10 +70,11 @@
     "guide": "node scripts/buildUserGuide.mjs",
     "verify:reachability": "node scripts/verifyReachability.cjs",
     "verify:ghost": "node scripts/verifyGhostMode.mjs",
+    "verify:cjs": "node scripts/verifyCjsLoadable.cjs",
     "verify:sensitivity": "node scripts/verifyTurnSensitivity.mjs",
     "verify:covenant": "node scripts/verifyInvariants.cjs && node scripts/verifyLoyaltyTripwire.cjs",
     "verify:tripwire": "node scripts/verifyLoyaltyTripwire.cjs",
-    "verify": "node scripts/verifyAudit.cjs && node scripts/verifyUpdateEngine.cjs && node scripts/verifySelfBuild.cjs && node scripts/verifyUpdateChannel.cjs && node scripts/simulateUpdateChannel.cjs && node scripts/verifyWorkspace.cjs && node scripts/verifySelfModel.cjs && node scripts/verifyOllamaCatalog.cjs && node scripts/verifyOllamaLibrary.cjs && node scripts/verifyOllamaCloud.cjs && node scripts/verifyWebResearch.cjs && node scripts/verifyRefresh.cjs && node scripts/verifyEngineDiagnosis.cjs && node scripts/verifyTimeframes.mjs && node scripts/verifyIndicators.mjs && node scripts/verifySymbols.mjs && node scripts/verifyPositionMath.mjs && node scripts/verifyGlossary.mjs && node scripts/verifyPopoutGrant.cjs && node scripts/verifyClaimGate.cjs && node scripts/verifyModelRoles.cjs && node scripts/verifyConversation.cjs && node scripts/verifyChartTime.mjs && node scripts/verifyChartDrawings.mjs && node scripts/verifyChartSessions.mjs && node scripts/verifyChartEmptyState.mjs && node scripts/verifyChartProjection.mjs && node scripts/verifyMarketClock.mjs && node scripts/verifyBadgeLabel.cjs && node scripts/verifyAutonomyStop.cjs && node scripts/verifyUpgradeApplier.cjs && node scripts/verifyTypeScale.mjs && node scripts/verifyRepairContract.cjs && node scripts/verifyCommentCensus.cjs && node scripts/verifyFunctionTracking.cjs && node scripts/verifyBrokerConnectors.cjs && node scripts/verifyCredentialVault.cjs && node scripts/verifyGhostMode.mjs && node scripts/verifyTurnSensitivity.mjs && node scripts/verifyReachability.cjs && node scripts/auditRenderer.cjs && node scripts/verifyInvariants.cjs && node scripts/verifyLoyaltyTripwire.cjs",
+    "verify": "node scripts/verifyAudit.cjs && node scripts/verifyUpdateEngine.cjs && node scripts/verifySelfBuild.cjs && node scripts/verifyUpdateChannel.cjs && node scripts/simulateUpdateChannel.cjs && node scripts/verifyWorkspace.cjs && node scripts/verifySelfModel.cjs && node scripts/verifyOllamaCatalog.cjs && node scripts/verifyOllamaLibrary.cjs && node scripts/verifyOllamaCloud.cjs && node scripts/verifyWebResearch.cjs && node scripts/verifyRefresh.cjs && node scripts/verifyEngineDiagnosis.cjs && node scripts/verifyTimeframes.mjs && node scripts/verifyIndicators.mjs && node scripts/verifySymbols.mjs && node scripts/verifyPositionMath.mjs && node scripts/verifyGlossary.mjs && node scripts/verifyPopoutGrant.cjs && node scripts/verifyClaimGate.cjs && node scripts/verifyModelRoles.cjs && node scripts/verifyConversation.cjs && node scripts/verifyChartTime.mjs && node scripts/verifyChartDrawings.mjs && node scripts/verifyChartSessions.mjs && node scripts/verifyChartEmptyState.mjs && node scripts/verifyChartProjection.mjs && node scripts/verifyMarketClock.mjs && node scripts/verifyBadgeLabel.cjs && node scripts/verifyAutonomyStop.cjs && node scripts/verifyUpgradeApplier.cjs && node scripts/verifyTypeScale.mjs && node scripts/verifyRepairContract.cjs && node scripts/verifyCommentCensus.cjs && node scripts/verifyFunctionTracking.cjs && node scripts/verifyBrokerConnectors.cjs && node scripts/verifyCredentialVault.cjs && node scripts/verifyGhostMode.mjs && node scripts/verifyTurnSensitivity.mjs && node scripts/verifyCjsLoadable.cjs && node scripts/verifyReachability.cjs && node scripts/auditRenderer.cjs && node scripts/verifyInvariants.cjs && node scripts/verifyLoyaltyTripwire.cjs",
     "rebuild": "electron-rebuild",
     "start": "electron .",
     "preview": "vite preview"
@@ -81,7 +82,7 @@
   "dependencies": {
     "argon2": "0.43.0",
     "axios": "1.20.0",
-    "chokidar": "5.0.0",
+    "chokidar": "4.0.3",
     "concurrently": "9.1.2",
     "cors": "2.8.6",
     "electron-updater": "6.8.9",
@@ -99,8 +100,8 @@
     "recharts": "2.15.3",
     "simple-git": "4.0.2",
     "systeminformation": "5.33.15",
-    "uuid": "14.0.3",
-    "vectra": "0.15.0",
+    "uuid": "11.1.0",
+    "vectra": "0.9.0",
     "wait-on": "8.0.1",
     "zustand": "5.0.15"
   },
@@ -108,12 +109,12 @@
     "@babel/parser": "7.29.9",
     "@babel/traverse": "7.29.10",
     "@vitejs/plugin-react": "4.3.4",
-    "electron": "31.7.7",
-    "electron-builder": "24.13.3",
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3",
     "electron-rebuild": "3.2.9",
     "png-to-ico": "2.1.8",
     "png2icons": "2.0.1",
-    "sharp": "0.33.5",
+    "sharp": "0.35.5",
     "vite": "6.4.4"
   },
   "build": {
