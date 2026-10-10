@@ -73,9 +73,26 @@ app.post('/api/ghost/wipe', requireLocalToken, (req, res) => {
   if (!ip.includes('127.0.0.1') && !ip.includes('::1') && !ip.includes('localhost')) {
     return res.status(403).json({ ok: false, error: 'Ghost mode only available locally' });
   }
-  // Signal main process to wipe encrypted data
-  console.warn('[GhostMode] ⚠ Server wipe requested — this will delete all encrypted data files');
-  return res.json({ ok: true, message: 'Server wipe acknowledged — restart app to reinitialise' });
+  // IT RETURNED ok:true AND DELETED NOTHING. The line below used to be a `console.warn` followed by
+  // `{ ok: true, message: 'Server wipe acknowledged' }`, under a comment that said "Signal main
+  // process to wipe encrypted data" — a signal that was never sent. So the one call master would make
+  // when handing over a compromised device was answered with a success he had no reason to doubt.
+  //
+  // 501 WITH THE HONEST WORDING, not a fabricated signal. This Express process cannot open the
+  // AES-256-GCM store the encrypted files belong to — that is the same reason `routes/auth.cjs`
+  // closes `/api/auth/*` rather than approximating it, and inventing a channel here would be the
+  // worse of the two mistakes. Returning 501 means a caller can DETECT that the server half did not
+  // happen, which `ok: true` made impossible. See spec Section 143.
+  console.warn('[GhostMode] server wipe requested and REFUSED: this process cannot decrypt the '
+    + 'store, so it has nothing it is able to delete. The renderer-side wipe is unaffected.');
+  return res.status(501).json({
+    ok: false,
+    implemented: false,
+    error: 'The server process cannot wipe encrypted data: it holds no key to the store those files '
+      + 'belong to. Nothing was deleted here. The local browser-side wipe is separate and unaffected.',
+    remedy: 'Encrypted data is removed by deleting the store from the app\'s user data directory '
+      + 'while Rāma is closed, or by a main-process action that holds the key.',
+  });
 });
 
 // ─── Threat shield status ─────────────────────────────────────────────────────

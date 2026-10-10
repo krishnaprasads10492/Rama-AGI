@@ -16,26 +16,72 @@
 import { apiFetch } from './apiClient.js';
 
 // ── Local wipe helpers ─────────────────────────────────────────────────────
+/**
+ * THE PREFIXES THIS APP ACTUALLY WRITES — and the list used to be wrong, which meant Ghost Mode
+ * wiped NOTHING (spec Section 143).
+ *
+ * It matched `rama_` and `sm_`. Every key this application writes is `rama.`-DOTTED, measured across
+ * `src/`: `rama.paletteOpen`, `rama.micMode`, `rama.micMuted`, `rama.speechMuted`, `rama.ramaSpeaks`,
+ * `rama.stockmind.chart`, `rama.stockmind.drawings*`, `rama.stockmind.workspace`. Eight of eight
+ * survived a "zero-trace wipe" — master's chart drawings, workspace layout and voice settings all
+ * still on the device he was handing over, with the function reporting nothing at all.
+ *
+ * `rama_` and `sm_` are KEPT rather than replaced: `sm_` is the StockMind heritage prefix this was
+ * ported from, and a key written by an older build must still be removed. Widening a wipe is additive;
+ * narrowing it would be the defect again in the other direction.
+ *
+ * `verifyReachability.cjs` asserts every storage key literal in `src/` is covered by one of these,
+ * so a new dotted namespace cannot slip past the list again.
+ */
+const WIPE_PREFIXES = Object.freeze(['rama.', 'rama_', 'sm_']);
+
+/**
+ * @returns {{ok: boolean, removed: string[], failed: string[], error: string|null}}
+ *   The key NAMES are returned, never their values: a caller may want to tell master what was
+ *   cleared, and nothing here should put a stored value back on screen.
+ */
 function clearLocalStorage() {
   try {
-    const keysToRemove = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && (key.startsWith('rama_') || key.startsWith('sm_'))) {
-        keysToRemove.push(key);
-      }
+    if (typeof localStorage === 'undefined') {
+      return { ok: true, removed: [], failed: [], error: 'no localStorage in this context' };
     }
-    keysToRemove.forEach(k => localStorage.removeItem(k));
-  } catch { /* ignore */ }
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key && WIPE_PREFIXES.some(p => key.startsWith(p))) keysToRemove.push(key);
+    }
+    const removed = [];
+    const failed = [];
+    for (const k of keysToRemove) {
+      try {
+        localStorage.removeItem(k);
+        // VERIFIED, NOT ASSUMED. A removal that silently did nothing is the whole class of bug this
+        // function just had; re-reading the key is one line and turns a hope into a fact.
+        if (localStorage.getItem(k) === null) removed.push(k);
+        else failed.push(k);
+      } catch { failed.push(k); }
+    }
+    return { ok: failed.length === 0, removed, failed, error: null };
+  } catch (err) {
+    return { ok: false, removed: [], failed: [], error: err?.message || String(err) };
+  }
 }
 
 function clearSessionStorageAll() {
-  try { sessionStorage.clear(); } catch { /* ignore */ }
+  try {
+    if (typeof sessionStorage === 'undefined') {
+      return { ok: true, error: 'no sessionStorage in this context' };
+    }
+    sessionStorage.clear();
+    return { ok: sessionStorage.length === 0, error: null };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
 }
 
 async function clearIndexedDB() {
   try {
-    if (!window.indexedDB) return;
+    if (!window.indexedDB) return { ok: true, error: null };
     const dbs = await window.indexedDB.databases?.() ?? [];
     await Promise.allSettled(
       dbs.map(db => new Promise((resolve, reject) => {
@@ -46,23 +92,26 @@ async function clearIndexedDB() {
         req.onblocked = resolve;
       }))
     );
-  } catch { /* ignore */ }
+    return { ok: true, error: null };
+  } catch (err) { return { ok: false, error: err?.message || String(err) }; }
 }
 
 async function unregisterServiceWorkers() {
   try {
-    if (!navigator.serviceWorker) return;
+    if (!navigator.serviceWorker) return { ok: true, error: null };
     const registrations = await navigator.serviceWorker.getRegistrations();
     await Promise.allSettled(registrations.map(r => r.unregister()));
-  } catch { /* ignore */ }
+    return { ok: true, error: null };
+  } catch (err) { return { ok: false, error: err?.message || String(err) }; }
 }
 
 async function clearCacheAPI() {
   try {
-    if (!window.caches) return;
+    if (!window.caches) return { ok: true, error: null };
     const keys = await caches.keys();
     await Promise.allSettled(keys.map(k => caches.delete(k)));
-  } catch { /* ignore */ }
+    return { ok: true, error: null };
+  } catch (err) { return { ok: false, error: err?.message || String(err) }; }
 }
 
 function clearCookies() {
@@ -74,14 +123,16 @@ function clearCookies() {
       document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
       document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=${window.location.hostname}`;
     }
-  } catch { /* ignore */ }
+    return { ok: true, error: null };
+  } catch (err) { return { ok: false, error: err?.message || String(err) }; }
 }
 
 function replaceHistoryState() {
   try {
     window.history.replaceState(null, '', window.location.href);
     window.history.pushState(null, '', 'about:blank');
-  } catch { /* ignore */ }
+    return { ok: true, error: null };
+  } catch (err) { return { ok: false, error: err?.message || String(err) }; }
 }
 
 function overwriteDOM() {
@@ -98,25 +149,54 @@ function overwriteDOM() {
  * After this call, page navigates to about:blank.
  * No trace of Rāma remains in the browser.
  */
-export async function activateGhostMode() {
-  clearLocalStorage();
-  clearSessionStorageAll();
-  clearCookies();
+/**
+ * @param {{navigate?: boolean}} [opts] `navigate: false` performs the wipe and SKIPS the jump to
+ *   about:blank — which is the only way a caller, or a test, can read the report. The default stays
+ *   `true` so the shipped behaviour is unchanged.
+ * @returns {Promise<{ok: boolean, steps: object, failed: string[]}>}
+ *
+ * IT RETURNED `undefined`. A function whose entire purpose is to leave no trace reported neither
+ * success nor failure, so "Ghost Mode ran" and "Ghost Mode wiped nothing" were the same observation —
+ * and for the local-storage step they were the same FACT for as long as the prefix list was wrong.
+ * Each step is now reported by name.
+ */
+export async function activateGhostMode(opts = {}) {
+  const navigate = opts.navigate !== false;
+  const steps = {};
 
-  await Promise.allSettled([
+  steps.localStorage = clearLocalStorage();
+  steps.sessionStorage = clearSessionStorageAll();
+  steps.cookies = clearCookies();
+
+  const [idb, sw, caches_] = await Promise.allSettled([
     clearIndexedDB(),
     unregisterServiceWorkers(),
     clearCacheAPI(),
   ]);
+  const settled = (r, name) => (r.status === 'fulfilled'
+    ? (r.value ?? { ok: true, error: null })
+    : { ok: false, error: `${name} threw: ${r.reason?.message || String(r.reason)}` });
+  steps.indexedDB = settled(idb, 'indexedDB');
+  steps.serviceWorkers = settled(sw, 'serviceWorkers');
+  steps.caches = settled(caches_, 'caches');
 
-  replaceHistoryState();
-  overwriteDOM();
+  steps.history = replaceHistoryState();
 
-  try {
-    window.location.replace('about:blank');
-  } catch {
-    window.location.href = 'about:blank';
+  const failed = Object.entries(steps).filter(([, s]) => s && s.ok === false).map(([k]) => k);
+
+  // THE DOM GOES LAST, and only when navigating. Blanking the document before the caller can read
+  // the report would make the report unreachable by construction — which is the same mistake in a
+  // new shape.
+  if (navigate) {
+    overwriteDOM();
+    try {
+      window.location.replace('about:blank');
+    } catch {
+      window.location.href = 'about:blank';
+    }
   }
+
+  return { ok: failed.length === 0, steps, failed };
 }
 
 /**

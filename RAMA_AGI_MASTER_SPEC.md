@@ -1831,7 +1831,9 @@ authenticated **Master session**, not merely an open store.
 | 166 | The credential vault was deleting its own salt | done | Section 141. Master: *"why the master password to be entered again? vault not unlocked after entering master password and enter/click on unlock."* **BOTH HALVES WERE RIGHT AND HAVE DIFFERENT ANSWERS. The first is the design: TWO independent encrypted stores with two independent KDFs and nothing connecting them — `cryptoCore` opens `data/system` with `rama.salt` and PBKDF2-SHA512 600k from the Gate 1 passcode, `credentialVault` opens `userData/rama_vault.enc` with Argon2id (scrypt fallback) from a password typed on the Models page. Grepped to confirm: `cryptoCore.cjs` names neither `credentialVault` nor `rama_vault`, and the only callers of `vault:unlock` are the preload and the Models page. Defensible — one compromised secret does not open both — but never SAID, and `Models.jsx` carried a comment promising the opposite: "the other needs a password Rāma will not ask for twice". THE CODE AND ITS OWN COMMENT DISAGREED, AND THE COMMENT WAS THE FLATTERING ONE.** **THE SECOND HALF WAS A DATA-DESTROYING BUG, FOUND BY RUNNING THE MODULE RATHER THAN READING IT — every part of it is a property of a SEQUENCE, not of a function. Exercised against a throwaway home dir (`credentialVault.cjs` falls back to `os.homedir()/.rama-agi` when Electron's `app` is absent, which is what makes it testable); master's real vault untouched. Measured on the shipped code: after one `vault:set` the file held `enc, hmac` and `SALT STILL ON DISK? : false`; the next unlock printed `Vault HMAC verification failed` and returned `{"ok":true}` with `entries:0` and the stored key gone.** **FOUR DEFECTS: (1) the salt was a FIELD INSIDE `rama_vault.enc` and `saveVault()` wrote that file as `{enc, hmac}`, so the first credential saved deleted it; (2) the next unlock MINTED A FRESH SALT, derived a different key, failed the integrity check, `loadVault()` SWALLOWED the error and returned `{}`, then wrote the new salt back — making the loss permanent rather than merely inconvenient; (3) NOTHING VERIFIED THE PASSWORD — `vaultUnlocked = true` was unconditional, so ANY password unlocked an empty vault and the next write persisted it over master's real ciphertext, meaning a TYPO was enough to destroy the vault; (4) the renderer's `if (res.ok)` had no `else`, so a wrong password, a denied capability and a dead channel were indistinguishable from a broken button — exactly what master reported. THE CAPABILITY GATE WAS NOT AT FAULT and is now asserted to stay shut: tier 3, unauthenticated, and a user whose `tier` is the STRING `'0'` are all refused.** **FIXES: the salt lives in its OWN file `rama_vault.salt` mode 0600 — removing the class rather than the instance, and not a new idea here, since `cryptoCore.cjs` has always kept `rama.salt` separately and HAS NEVER HAD THIS BUG. A new salt is only ever minted when there is NO CIPHERTEXT TO LOSE; a vault with `enc` and no salt REFUSES, says the keys cannot be recovered, leaves the file byte-for-byte untouched and mints nothing. MIGRATION for the one still-recoverable case — a vault whose salt is still inside the blob is opened, recovered and its salt copied out. `loadVault()` returns THREE outcomes (`empty`/`ok`/`unreadable`), because conflating "no vault yet" with "wrong password" is how a failure came to report success. `saveVault()` REFUSES TO WRITE OVER CIPHERTEXT IT COULD NOT READ, and every write path rolls the in-memory store back on refusal and PROPAGATES it, since `customProviders.add()` can only roll its own record back if told.** **AN HONEST NOTE ON THE VERIFIER: the REDBY test went red on the MESSAGE, not the refusal — the HMAC check was already capable of rejecting a wrong key. So `verifier` earns an accurate error ("wrong master password" rather than "may have been tampered with") and skips a pointless decrypt; it does not deserve credit for the refusal.** **`Promise.all` → `Promise.allSettled` IS A BEHAVIOUR FIX, NOT TIDYING: one rejected channel threw out of `load()` before any `set*` ran, and `vaultLocked` STARTS AS `true` — so a single unrelated IPC failure rendered a permanent "Vault locked" banner that no correct password could clear, because the unlock's own `load()` threw again on the same channel. A SECOND INDEPENDENT ROUTE TO MASTER'S EXACT SYMPTOM, fixed whether or not it is the one he hit.** **The banner now tells three states apart via new `exists`/`unreadable` on `vault:status` (asserted to expose no values and no service names), keeps the typed password on failure, disables while in flight, and catches a rejected `invoke` separately.** **VERIFIED: `verifyCredentialVault.cjs` 72/0 — a LIFECYCLE, not a source read — chain 4,778 → 4,850 across 38 → 39 entries 0 failures, `auditRenderer` clean, build exit 0 with `verifyBundleGraph` 21/0, `verify:render` 85/0 with `/models` reachable at both widths. BOTH FIXES REVERTED TO CONFIRM THE SUITE REDDENS.** **NOT VERIFIED: nothing has been unlocked in the running app. IF MASTER'S VAULT WAS WRITTEN BY THE OLD CODE IT IS ALREADY UNRECOVERABLE — the salt was deleted the first time he saved a key. The new code says so plainly and will not make it worse; the provider keys need re-entering once.** **RAISED FOR MASTER, NOT DECIDED: (a) one secret or two — derive the vault key from the Gate 1 passcode, keep two and let him reuse the string, or offer an explicit opt-in; this is a security-model decision and I did not take it. (b) `server/brain/credentialVault.cjs` is a SECOND, separate vault implementation in the Express process with its own state — two credential vaults in one product deserves a decision, and I have not established which callers depend on it, so removing a credential path blind is exactly how data is lost.** |
 
 | 167 | The reply protocol was on the path master never uses | done | Section 142. Master: *"the talk/speech recognition and communication protocol — it's not working as expected. reply should be concise, to the point and if asked do the same with more info — continuation like conversation."* and *"always seeing 'transcribing...' after talking to rama. but where it is being transcribed?"* **THE PROTOCOL ALREADY EXISTED, ON THE DESTINATION HE NEVER USES. `conversationRole.cjs`'s `CLOUD_SAFE_LINES` carried "short sentences, no filler, no preamble" and "answer first and explain second" — but the variant is chosen BY DESTINATION AND NOTHING ELSE: cloud gets those lines, local gets `revealedPrompt`, which is the nucleus template, which says only "You speak directly, without filler" and NOTHING about length, expansion or continuity. ROW 150 MADE THIS OLLAMA-ONLY, SO MASTER'S CONVERSATIONS GO LOCAL — the protocol was present on the one path he never takes and absent from the one he does, which is the literal cause of what he reported.** **A SECOND MECHANISM THAT WAS NEVER WIRED: `nucleusSealer.cjs:112` declares `behavioral: { tone, formality, verbosity: 'concise', alwaysExplain, ... }` and grepping `electron/`, `src/` and `shared/` returns TWO HITS — the declaration and a comment about it. Nothing reads it, so the stated preference had no mechanism at all: the same declared-but-unconsumed class as Section 139's `warn` strings. LEFT IN PLACE, NOT DELETED — it is sealed state and removing it is master's call.** **FIX: ONE LIST FOR BOTH DESTINATIONS. `REPLY_PROTOCOL_LINES` frozen; identity split into `CLOUD_SAFE_IDENTITY_LINES`; `CLOUD_SAFE_LINES` composed from the two so it keeps its name for the egress boundary and the suite while the protocol has exactly one definition; the local path runs `revealedPrompt` through `withReplyProtocol()`. APPENDED RATHER THAN MERGED INTO THE NUCLEUS DELIBERATELY — the nucleus is sealed and encrypted, so editing the template would only affect a FUTURE seal and do nothing for the install master is running now. `withReplyProtocol` is IDEMPOTENT so a later template update cannot state the lines twice. EVERY PROTOCOL LINE IS IDENTITY-FREE, asserted — no name, account, email, location, form of address or interpolation — which is what makes one shared list SAFE rather than merely convenient. New obligations beyond the two existing lines: a short default answer; expansion of the SAME answer when more is asked for, without starting over; and one continuing conversation, carrying what is established rather than re-introducing it — plus the line master implied rather than stated, that a question about something Rāma said earlier is a request for detail and not a signal it was wrong.** **WHERE IT IS BEING TRANSCRIBED: NOWHERE, ON THIS MACHINE. `voiceEngine.cjs` runs a two-rung ladder — level 2 a local Whisper binary (`whisper-cli`/`whisper`/`faster-whisper`/`whisper-cpp` on PATH or `RAMA_WHISPER_BIN`), level 3 `api.openai.com/v1/audio/transcriptions` model `whisper-1` keyed by `OPENAI_API_KEY` FROM THE CREDENTIAL VAULT. PROBED: none of the four binaries installed, both env vars unset. And the two rungs COMPOUND — the cloud rung needs a vault key, and Section 141 established the vault deleted its keys on first save, so even a key master had added was gone. `transcribe()` returned `{ok:false, error:'No transcription backend is available on this machine', hint}` and WAS HONEST THE WHOLE TIME. `verifyConversation.cjs` already carried the held-by-hand note that Ollama serves no STT model, so listening was always going to need a separate local runtime; Rāma can SPEAK out of the box because synthesis uses the OS voices and needs no model.** **WHY "TRANSCRIBING…" NEVER WENT AWAY: `endTalk` set the label, awaited the engine and DISCARDED THE RESULT. The only writer that cleared the label was `onTranscript`, which fires on success alone — so the error showed for six seconds, vanished, and left a label implying work in progress on a machine that could not transcribe. THE MAIN PROCESS RETURNED AN ACCURATE ERROR AND THE RENDERER THREW IT AWAY: the same shape as Section 141's silent unlock button, in a different component. The failure branch now clears the label and NAMES the missing transcriber using the ladder's own `nextStep`, which already existed and was ONLY EVER A TOOLTIP ON A SMALL CHIP — the same mistake as a `warn` string nothing renders. A rejected `invoke` is caught separately, because a missing channel and an absent backend are different facts.** **USER GUIDE GENERATED, NOT WRITTEN: `docs/UserGuide.pdf`, 17 pages, `npm run guide`. Everything factual is read out of the source that implements it — 18 pages/descriptions/voice phrases/tiers from `registry.js`, 6 tiers and 77 capabilities from `capabilities.json`, 141 glossary terms from `glossary.js`, shortcuts and 10 chart types from `CommandPalette.jsx` and `PriceChart.jsx`, the ladder and its 4 candidates from `voiceEngine.cjs`. `registry.js` imports React and an alias so it cannot be imported from a script; its page table is PARSED AS TEXT and THE PARSE ASSERTS ITS OWN COUNT (18 against 18, exits non-zero on mismatch) because a regex that silently matched nothing would produce a guide with no features. Printed by Chromium through Playwright's installed `msedge` channel, so no browser is downloaded, and the output is asserted above 20 kB since a blank print succeeds silently. IT DOCUMENTS THE LIMITS AS WELL AS THE FEATURES in their own section — the engine has never run, voice needs a transcriber, HA bodies are averaged prices and never levels, the four price-indexed charts withhold five layers, and Rāma never places an order: a guide that only lists what works teaches master to trust the parts that do not.** **VERIFIED: `verifyConversation.cjs` +24 assertions including the row that would have caught it — the assembled LOCAL body's system message carries the protocol — plus six over `CommandPalette.jsx`. Chain 4,850 → 4,874 across 39 entries 0 failures exit 0, `auditRenderer` clean, build exit 0 with `verifyBundleGraph` 21/0. ONE OF MY OWN ROWS WENT RED AND WAS REPLACED: a `[\s\S]{0,400}` span between `if (!text)` and `setVoiceTranscript` failed because my own explanatory comment sat between them — and a span wide enough to cross it is wide enough to match almost anything, so it now pins the failure path's own timer.** **NOT VERIFIED: no reply has been read and nothing has been spoken into. The protocol is proven to REACH the local system message; whether a given Ollama model OBEYS it is a property of the model, not of this repository. What to try: ask something, then ask for more detail — the second answer should extend the first rather than restart it.** **MASTER'S DECISIONS OWED: whether to install a Whisper binary for level 2 (private, free, and the Ollama-aligned answer), and whether the unconsumed `behavioral` block should be wired, removed, or left as documentation.** |
-| 168 | Module-by-module audit | in-progress | Master: *"Go through all modules and do an audit for functionality and optimization of code and functionality and speed. Start working on them after report is done."* Launched as a read-only `bundled://investigate` run (`wf_063d608f64d76374`) writing `.agents/tasks/module-audit/MODULE_AUDIT.md`. The brief requires a mechanical module enumeration with a count so coverage is provable, then per module: functionality defects with file:line, DECLARED-BUT-UNCONSUMED surfaces (the highest-value category — this project has shipped `nucleusSealer`'s `behavioral` block, `CHART_TYPES`' `warn` strings and the ladder's `nextStep` all unconsumed or unrendered), performance, and code quality. Plus five named sweeps: silent failures (`catch {}` bodies — three defects in two days came from exactly this), gates without producers (the sensitivity gate, `functionTracking.record()`, `brokerConnectors.driftReport()`), the unused direction of the IPC surface, startup cost before first paint, and a prioritised fix list with severity, evidence and whether a suite can prove the fix. **NEXT: read the report when it lands, then implement HIGH items first, each with a behavioural test where the logic is security- or data-critical.** |
+| 168 | Module-by-module audit — and the one finding behind most of it | done | Master: *"Go through all modules and do an audit for functionality and optimization of code and functionality and speed. Start working on them after report is done."* Launched as a read-only `bundled://investigate` run (`wf_063d608f64d76374`) writing `.agents/tasks/module-audit/MODULE_AUDIT.md`. The brief requires a mechanical module enumeration with a count so coverage is provable, then per module: functionality defects with file:line, DECLARED-BUT-UNCONSUMED surfaces (the highest-value category — this project has shipped `nucleusSealer`'s `behavioral` block, `CHART_TYPES`' `warn` strings and the ladder's `nextStep` all unconsumed or unrendered), performance, and code quality. Plus five named sweeps: silent failures (`catch {}` bodies — three defects in two days came from exactly this), gates without producers (the sensitivity gate, `functionTracking.record()`, `brokerConnectors.driftReport()`), the unused direction of the IPC surface, startup cost before first paint, and a prioritised fix list with severity, evidence and whether a suite can prove the fix. **NEXT: read the report when it lands, then implement HIGH items first, each with a behavioural test where the logic is security- or data-critical.** |
+
+| 169 | Reachability, and a zero-trace wipe that wiped nothing | done | Section 143. First tranche off the audit (row 168). **THE AUDIT'S ONE FINDING: the 41 suites prove what exists is CORRECT and NOTHING proved it is REACHABLE. Every suite here answers "given that this is called, does it behave" — none asked "is it called at all", and that gap had already been paid for five times, each passing every suite on the day it shipped: `nucleusSealer`'s `behavioral` block, `CHART_TYPES`' `warn` strings, the voice ladder's `nextStep`, `functionTracking.record()` (61 assertions, no caller) and `brokerConnectors.driftReport()` (81 assertions, no fetcher). A CONTRACT WITH NO PRODUCER IS INDISTINGUISHABLE FROM A WORKING FEATURE WHEN THE ONLY THING TESTED IS THE CONTRACT.** **`verifyReachability.cjs` — 16 assertions, measured 377 channels / 49 namespaces / 426 leaf members / 111 reached. A FLAT RULE WOULD HAVE ARRIVED RED WITH 315 ROWS AND BEEN DELETED RATHER THAN READ, so the known gaps are a DEBT REGISTER and the suite asserts BOTH directions: no NEW orphan (fails the day one is written) and no STALE entry (a fixed gap must be REMOVED from the register or the suite fails). The second rule is what makes it a ratchet rather than a suppression file — the register can only shrink, and it prints in full every run. Two named orphan channels with written reasons (`models:roles`, `models:role-research` = H6); 315 bridge members seeded into `scripts/reachability-baseline.json`. AN ORPHAN IS NOT AUTOMATICALLY A DEFECT and the suite says so — a bridge member with no page is a capability waiting; the defect was that nobody could tell which was which.** **FOUR OF MY OWN ROWS WERE WRONG AND WERE CORRECTED RATHER THAN LOOSENED — writing a guard against false confidence is an easy place to produce some: (1) knowing only `ipcMain.handle('literal')` reported 46 missing handlers when `marketIntel.cjs:595` registers 38 by iterating an object whose KEYS are the channels and others use `ipcMain.on` for `send`; (2) an unrestricted table-key pattern reported 13 unreachable channels that were OLLAMA MODEL TAGS — `gemma4:31b`, `qwen3-coder:480b` — because a model catalogue is also an object keyed by colon-separated strings, now calibrated on namespaces the codebase already registers; (3) reading ONE preload made `badge:clicked` look unreachable when `electron/badgePreload.cjs` is the badge window's bridge, so preloads are now collected by filename; (4) scraping `startsWith('…')` for the wipe prefixes reported "none" after they were lifted into a named frozen array — A GUARD THAT RECOGNISES ONLY ONE SPELLING OF THE THING IT GUARDS IS A GUARD AGAINST REFACTORING.** **GHOST MODE WIPED NOTHING AND THE SERVER TOLD MASTER IT HAD — the most serious finding because of WHEN it is used: before handing over a device he no longer trusts. H1: `clearLocalStorage()` matched `rama_` and `sm_` while EVERY key this app writes is `rama.`-DOTTED — eight of eight measured survivors (`rama.paletteOpen`, `rama.micMode`, `rama.micMuted`, `rama.speechMuted`, `rama.ramaSpeaks`, `rama.stockmind.chart`, `rama.stockmind.drawings`, `rama.stockmind.workspace`) — chart drawings, workspace layout and voice settings all still on the device. AND THE FUNCTION RETURNED `undefined`, so "Ghost Mode ran" and "Ghost Mode wiped nothing" were the same observation, which is precisely why it survived. Fixed: `WIPE_PREFIXES` a named frozen list with `rama.` added and the heritage prefixes KEPT not replaced (a key from an older build must still go — widening a wipe is additive, narrowing it is the same defect reversed); every removal VERIFIED by re-reading the key; every step returns `{ok, error}`; a `navigate: false` option exists because blanking the document before the caller reads the report would make the report unreachable BY CONSTRUCTION, the same mistake in a new shape.** **H2: `/api/ghost/wipe` ran a `console.warn` and returned `{ok:true,'Server wipe acknowledged'}` under a comment saying it signalled the main process. NO SIGNAL WAS EVER SENT. Now 501 with honest wording, because this Express process cannot open the AES-256-GCM store those files belong to — the same reason `routes/auth.cjs` closes `/api/auth/*` rather than approximating it. 501 means a caller can DETECT the server half did not happen, which `ok:true` made impossible.** **H3 NOT FIXED, DELIBERATELY: neither entry point has a caller, and exposing it needs a master-only action plus handing the renderer the per-boot `RAMA_SERVER_TOKEN`, which widens the attack surface. THAT IS A SECURITY DECISION AND IT IS MASTER'S. The suite states it in its held-by-hand notes rather than leaving it to be found.** **`verifyGhostMode.mjs` — 30 BEHAVIOURAL assertions against stubbed browser globals, because the audit found this by RUNNING it where reading looked fine. Asserts the dotted and heritage keys are gone, THAT AN UNRELATED APP'S KEY IS LEFT ALONE (a wipe that clears everything would pass every other row and be a different defect), that the report carries key NAMES and no values, and — the row that matters most — that a `removeItem` which silently does nothing is REPORTED AS FAILED, since a removal that quietly did not remove was the original failure mode. ONE MORE OF MY ROWS WENT RED AGAINST MY OWN COMMENT: `!/ok:\\s*true/` matched the comment DESCRIBING the old behaviour — the THIRD time this project has hit a pattern matching prose rather than code, and the lesson is identical each time: assert on the construct, not on a substring.** **VERIFIED: chain 4,874 → 4,920 across 39 → 41 entries 0 failures exit 0, `auditRenderer` clean, build exit 0 with `verifyBundleGraph` 21/0. NOT VERIFIED: Ghost Mode has not run in a browser — the APIs are stubs, so that IndexedDB, caches, service workers and cookies really clear is not asserted and cannot be here; what is asserted is that each step is attempted and its outcome reported.** **NEXT, IN ORDER: H9 (`selfModify.js` passes a file path where `user` is expected seven times, `capability.cjs:28` denies a string, and `:174` returns `ok:true` regardless — self-modification reporting success on a denied write is the worst remaining item), then H10 (`ipcEncryption.wrapHandle()` wraps NO channel while `ipc-enc:status` reports the set size — a security control that reports itself active), then H5, H4, H6, H7, H8. Each with a behavioural test; both of the first two currently report success for work that does not happen.** |
 
 ### Resume checklist for a cold session
 
@@ -18296,3 +18298,157 @@ be tried until a Whisper binary is installed.
 `.agents/tasks/module-audit/MODULE_AUDIT.md`. Master's decisions owed: whether to install a Whisper
 binary for level 2 (private, free, and the Ollama-aligned answer) and whether `nucleusSealer`'s
 unconsumed `behavioral` block should be wired, removed, or left as documentation.
+
+---
+
+## SECTION 143 — The audit's one finding, and the first three fixes
+
+**STATUS: AUDIT DELIVERED. THE REACHABILITY GUARD AND GHOST MODE ARE FIXED AND GUARDED. SEVEN HIGH
+ITEMS REMAIN QUEUED.** Master: *"Go through all modules and do an audit for functionality and
+optimization of code and functionality and speed. Start working on them after report is done."*
+
+The report is at **`docs/MODULE_AUDIT.md`** — 943 lines, 285 modules enumerated, **10 HIGH / 28
+MEDIUM / 15 LOW plus 5 owner-flags.** It modified no source file. It was written to
+`.agents/tasks/module-audit/`, which is gitignored, so it is committed under `docs/` as well: a cold
+session on a fresh clone would otherwise find a spec citing a report that is not there.
+
+### 143.1 The one finding behind most of the others
+
+**The 41 suites prove that what exists is CORRECT. Nothing proved it is REACHABLE.**
+
+Every suite in this repository answers the same shape of question: *given that this is called, does it
+behave?* None asked *is it called at all?* That gap had already been paid for five times, each one
+passing every suite on the day it shipped:
+
+| surface | built and tested | consumed by |
+| --- | --- | --- |
+| `nucleusSealer`'s `behavioral` block | declared | nothing (Section 142) |
+| `CHART_TYPES`' `warn` strings | declared | nothing (Section 139) |
+| the voice ladder's `nextStep` | computed | a tooltip only (Section 142) |
+| `functionTracking.record()` | 61 assertions | nothing (Section 138) |
+| `brokerConnectors.driftReport()` | 81 assertions | nothing (Section 141) |
+
+**A contract with no producer is indistinguishable from a working feature when the only thing tested
+is the contract.** The audit's own highest-leverage recommendation (M26) was one new rule covering six
+of the ten HIGH items, and that is what was built first.
+
+### 143.2 `verifyReachability.cjs`, and the ratchet that makes it survivable
+
+16 assertions over the whole IPC and bridge surface. Measured: **377 channels registered, 49 preload
+namespaces, 426 leaf members, 111 of them reached.**
+
+A flat rule — *every exposed member must have a caller* — would have arrived red with 315 rows, and a
+suite that is red on arrival gets deleted rather than read. So the known gaps live in a **debt
+register**, and the suite asserts **both directions**:
+
+1. **no NEW orphan** — a member or channel that becomes unreachable fails on the day it is written
+2. **no STALE entry** — a gap that gets fixed must be *removed* from the register, or the suite fails
+
+The second rule is what makes it a ratchet rather than a suppression file. The register can only
+shrink, and it is printed in full on every run so the size of the debt is never out of sight. Two
+channels are named orphans with written reasons (`models:roles`, `models:role-research` — the audit's
+H6); the 315 unreached bridge members are seeded into
+`scripts/reachability-baseline.json`.
+
+**AN ORPHAN IS NOT AUTOMATICALLY A DEFECT**, and the suite says so: a bridge member with no page yet
+is a capability waiting. The defect was that **nobody could tell which was which.**
+
+**FOUR OF MY OWN ROWS WERE WRONG AND WERE CORRECTED, not loosened.** Writing a guard against
+false confidence is an easy place to produce some:
+
+| my error | what it claimed | the truth |
+| --- | --- | --- |
+| only knew `ipcMain.handle('literal')` | 46 missing handlers | `marketIntel.cjs:595` registers 38 by iterating an object whose KEYS are the channels; others use `ipcMain.on` for `send` |
+| table-key pattern unrestricted | 13 unreachable channels | they were **Ollama model tags** — `gemma4:31b`, `qwen3-coder:480b`. A model catalogue is also an object keyed by colon-separated strings |
+| read one preload | `badge:clicked` unreachable | there are **two preloads**; `electron/badgePreload.cjs` is the badge window's bridge |
+| scraped `startsWith('…')` for the wipe prefixes | "prefixes: none" | the prefixes had been lifted into a named frozen array — **a guard that recognises only one spelling of the thing it guards is a guard against refactoring** |
+
+The table-key rule is now **calibrated on namespaces the codebase already registers**, so it cannot
+invent a channel out of unrelated data, and preloads are collected by filename so a third window's
+bridge is picked up automatically.
+
+### 143.3 Ghost Mode wiped nothing, and the server told master it had
+
+The audit's H1/H2/H3, and the most serious single finding because of **when** it is used: master
+activates a "zero-trace wipe" before handing over a device he no longer trusts.
+
+**H1 — the prefix list was wrong.** `clearLocalStorage()` matched `rama_` and `sm_`. Every key this
+application writes is `rama.`-**dotted**, measured across `src/`: `rama.paletteOpen`, `rama.micMode`,
+`rama.micMuted`, `rama.speechMuted`, `rama.ramaSpeaks`, `rama.stockmind.chart`,
+`rama.stockmind.drawings`, `rama.stockmind.workspace`. **Eight of eight survived the wipe** — chart
+drawings, workspace layout and voice settings all still on the device.
+
+**And the function returned `undefined`.** So *"Ghost Mode ran"* and *"Ghost Mode wiped nothing"* were
+the same observation — which is precisely why this survived.
+
+Fixed: `WIPE_PREFIXES` is a named frozen list with `rama.` added and the heritage prefixes **kept, not
+replaced** (a key written by an older build must still go — widening a wipe is additive, narrowing it
+would be the same defect in the other direction). Every removal is **verified by re-reading the key**
+rather than assumed. Every step returns `{ok, error}` and `activateGhostMode` returns a per-step
+report. A `navigate: false` option exists because **blanking the document before the caller can read
+the report would make the report unreachable by construction** — the same mistake in a new shape.
+
+**H2 — the server endpoint claimed success for a no-op.** `/api/ghost/wipe` ran a `console.warn` and
+returned `{ ok: true, 'Server wipe acknowledged — restart app to reinitialise' }`, under a comment
+saying it signalled the main process. **No signal was ever sent.** It now returns **501 with the
+honest wording**, because this Express process cannot open the AES-256-GCM store those files belong to
+— the same reason `routes/auth.cjs` closes `/api/auth/*` rather than approximating it. Fabricating a
+channel here would have been the worse of the two mistakes; **501 means a caller can DETECT that the
+server half did not happen, which `ok: true` made impossible.**
+
+**H3 — NOT FIXED, AND DELIBERATELY.** Neither `activateGhostMode` nor `wipeServerData` has a caller.
+Exposing it needs a master-only action and, for the server half, **handing the renderer the per-boot
+`RAMA_SERVER_TOKEN`** — which widens the attack surface. **That is a security decision and it is
+master's, not mine.** The suite says so in its held-by-hand notes rather than leaving it to be found.
+
+`verifyGhostMode.mjs` — **30 assertions, behavioural**, against stubbed browser globals, because the
+audit found this by *running* it where reading it looked fine. It asserts the dotted keys are gone,
+the heritage keys too, **that an unrelated application's key is left alone** (a wipe that clears
+everything would pass every other row and be a different defect), that the report carries key *names*
+and no stored values, and — the row that matters most — **that a `removeItem` which silently does
+nothing is reported as failed**, since a removal that quietly did not remove was the original failure
+mode.
+
+**ONE MORE OF MY OWN ROWS WENT RED AGAINST MY OWN COMMENT.** `!/ok:\s*true/` over the route block
+matched the comment *describing* the old behaviour. It now tests the return expression. **Third time
+this project has hit a pattern matching prose rather than code** (after the `/projected/` regex and
+the near-match connector sentence), and the lesson is the same each time: assert on the construct, not
+on a substring.
+
+### 143.4 Verified
+
+Chain **4,874 → 4,920 assertions across 39 → 41 entries, 0 failures**, exit 0. `auditRenderer` clean.
+`npm run build` exit 0 with `verifyBundleGraph` 21/0.
+
+**NOT VERIFIED: Ghost Mode has not been run in a browser.** The browser APIs are stubs — that
+IndexedDB, the Cache API, service workers and cookies are really cleared by a real browser is not
+asserted and cannot be here. What *is* asserted is that each step is attempted and its outcome
+reported.
+
+### 143.5 The seven HIGH items still open, in the order they should be taken
+
+| # | what | why this order |
+| --- | --- | --- |
+| H9 | `selfModify.js` passes a file path where `user` is expected, 7 times; `capability.cjs:28` denies a string, and `:174` returns `ok:true` regardless | **security + a false success.** Self-modification reporting success on a denied write is the worst remaining item |
+| H10 | `ipcEncryption.wrapHandle()` wraps no channel, while `ipc-enc:status` reports the set size | **a security control that reports itself as active.** Either wrap, or report `wrapped: 0` |
+| H5 | `Chat.jsx:277` never passes `sensitive`, so the cloud refusal can never fire | the privacy gate with no producer, already flagged for several sections |
+| H4 | `functionTracking.record()` — the audit measured 4 call sites, up from 0 | partly closed already; finish the named producers |
+| H6 | `models:roles` / `models:role-research` have no preload or page | the two named orphan channels; closing them empties the channel register |
+| H7 | `brokerConnectors` has no channel, no namespace, no page | data-only by construction, so lowest risk of the group |
+| H8 | `Knowledge.jsx` ships two fake entries and a no-op button | **do not remove the page**; render an honest empty state |
+
+**NEXT:** H9 then H10, each with a behavioural test — both are security-critical, and both are
+currently reporting success for work that does not happen, which is the pattern this whole stretch has
+been about.
+
+**MEDIUM/LOW remain in the report** rather than being copied here. The ones worth naming: **M27**
+(`ai_backend`'s 20 test suites, 8,585 lines, have never executed — a `verify:engine` that runs only
+when a venv exists and *skips with a stated reason* otherwise), **M10** (an unauthenticated
+`/api/ai/history/:id` that in browser dev mode holds the revealed nucleus prompt), and **M23** (the
+`SELF_MODIFY` applier registered by a module-scope side effect inside a `try{}catch{}`, which a
+load-order change would lose silently).
+
+**FLAGGED FOR MASTER, NOT CHANGED:** `start.js` at the repo root (276 lines, a stale ESM duplicate of
+`start.cjs` with no referrer), `server/brain/credentialVault.cjs` (the second, weaker, unreachable
+vault — Section 141.5 raised it and it is still open), and `ramaStore.js`'s `apiKey`/`setApiKey`, a
+plaintext credential slot nothing uses that **reads as a credential path which does not exist.**
