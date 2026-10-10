@@ -275,9 +275,6 @@
     "session.unlock",
     "store.exportBackup",
     "store.find",
-    "store.get",
-    "store.push",
-    "store.remove",
     "store.save",
     "store.set",
     "store.status",
@@ -317,5 +314,19 @@
     "voice.rescan",
     "voice.transcribe",
     "workspace.detect"
+  ],
+  "closedSince": [
+    {
+      "member": "store.get",
+      "by": "Knowledge.jsx backed by the knowledge store domain (Section 144, audit H8)"
+    },
+    {
+      "member": "store.push",
+      "by": "Knowledge.jsx backed by the knowledge store domain (Section 144, audit H8)"
+    },
+    {
+      "member": "store.remove",
+      "by": "Knowledge.jsx backed by the knowledge store domain (Section 144, audit H8)"
+    }
   ]
 }

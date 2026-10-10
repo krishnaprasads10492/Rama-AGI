@@ -628,8 +628,14 @@ export default function CommandPalette({ extraPages = [] }) {
     if (result.ok) {
       clearPendingMod();
       // Vite HMR handles reload for UI changes
+    } else {
+      // A FAILED SELF-MODIFICATION USED TO LEAVE THE DIALOG OPEN AND SAY NOTHING (Section 144). It
+      // could not do otherwise: `applyModification` returned `{ ok: true }` unconditionally, so this
+      // branch was unreachable. Now that the result is real, the reason is shown — and the pending
+      // modification is DELIBERATELY NOT CLEARED, so master can retry rather than losing it.
+      setVoiceError(result.error || 'The modification was not applied, and gave no reason.');
     }
-  }, [pendingModification, clearPendingMod]);
+  }, [pendingModification, clearPendingMod, currentUser]);
 
   const activePage = allPages.find(p =>
     p.route === location.pathname ||

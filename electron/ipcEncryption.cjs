@@ -190,12 +190,24 @@ function decryptFromState(packed) {
 }
 
 // ─── IPC wrapper — wraps ipcMain.handle for sensitive channels ────────────────
+/**
+ * WHICH CHANNELS ARE ACTUALLY WRAPPED. Not a cache and not an optimisation: it exists because
+ * `ipc-enc:status` used to report `sensitiveChannels: SENSITIVE_CHANNELS.size` and nothing else,
+ * which reads as "this many channels are protected" — while `wrapHandle` had ZERO call sites, so the
+ * real answer was none of them (audit H10, Section 144).
+ *
+ * A security control that reports its own intended scope as though it were its achieved scope is
+ * worse than an absent one: it answers the question nobody then asks again.
+ */
+const _wrapped = new Set();
+
 function wrapHandle(ipcMain, channel, handler) {
   if (!SENSITIVE_CHANNELS.has(channel)) {
     // Not sensitive — pass through
     ipcMain.handle(channel, handler);
     return;
   }
+  _wrapped.add(channel);
 
   ipcMain.handle(channel, async (event, ...args) => {
     // For critical channels, verify session is active
@@ -235,8 +247,23 @@ function register(ipcMain) {
     ok:           true,
     hasSessionKey: !!_sessionKey,
     messageCount:  _messageCounter,
+    // DECLARED SCOPE, kept — this is how many channels the policy NAMES.
     sensitiveChannels: SENSITIVE_CHANNELS.size,
     criticalChannels:  CRITICAL_CHANNELS.size,
+    // ACHIEVED SCOPE, added — how many are actually routed through `wrapHandle`. These two numbers
+    // were the same claim before, and they are not the same fact: nothing calls `wrapHandle`, so
+    // this reports 0 while the two above report 20-odd. The gap is the point (Section 144).
+    wrappedChannels: _wrapped.size,
+    wrapped: [..._wrapped].sort(),
+    unprotectedChannels: [...SENSITIVE_CHANNELS].filter((c) => !_wrapped.has(c)).sort(),
+    // Said in words as well as numbers, because a reader who sees three counts should not have to
+    // subtract them to learn that the control is inert.
+    enforcement: _wrapped.size === 0
+      ? 'NOT ENFORCED: wrapHandle has no call site, so no sensitive channel is session-checked or '
+        + 'signed. The channel lists above are the POLICY, not the state. See spec Section 144 — '
+        + 'wiring this needs a decision, because main.cjs\'s ipcRec recorder is documented as not '
+        + 'being a policy layer.'
+      : `enforced on ${_wrapped.size} of ${SENSITIVE_CHANNELS.size} sensitive channels`,
   }));
 
   // Verify a signed message from renderer

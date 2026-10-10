@@ -3,6 +3,7 @@ import { useRamaStore } from '@store/ramaStore.js';
 import { useUIStore }   from '@store/uiStore.js';
 import { ramaChat }     from '@services/ramaClient.js';
 import { resolveReflex } from '@services/cognition.js';
+import { classifyTurn } from '@services/turnSensitivity.js';
 import { useNavigate }  from 'react-router-dom';
 import { useUserStore } from '@store/userStore.js';
 import { getSystemPromptAsync, shouldRevealIdentity, getIdentityDisclosure, recordInteraction } from '@services/consciousness.js';
@@ -273,8 +274,15 @@ export default function Chat() {
       const turnId = `turn-${userMsg.id}`;
       setStreamText('');
       try {
+        // THE PRIVACY FLAG NOW HAS A PRODUCER (Section 144). `conversationRole.assembleTurn()` has
+        // refused sensitive turns on the cloud destination for several sections, and this call site
+        // never passed the flag — so the refusal could never fire. `classifyTurn` is layer one,
+        // deterministic and fail-closed: unreadable input, an empty turn or a broken rule all come
+        // back sensitive. `conversationRole` refuses a NON-boolean outright, so `!!` is not cosmetic.
+        const classified = classifyTurn(text);
         const res = await converse(
-          { text, turns: retained, revealedPrompt: systemPrompt, user: currentUser, turnId },
+          { text, turns: retained, revealedPrompt: systemPrompt, user: currentUser, turnId,
+            sensitive: !!classified.sensitive },
           (chunk) => {
             if (chunk?.turnId && chunk.turnId !== turnId) return;
             if (chunk?.delta) setStreamText(prev => prev + chunk.delta);

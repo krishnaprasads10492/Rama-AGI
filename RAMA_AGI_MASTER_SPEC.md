@@ -1835,6 +1835,8 @@ authenticated **Master session**, not merely an open store.
 
 | 169 | Reachability, and a zero-trace wipe that wiped nothing | done | Section 143. First tranche off the audit (row 168). **THE AUDIT'S ONE FINDING: the 41 suites prove what exists is CORRECT and NOTHING proved it is REACHABLE. Every suite here answers "given that this is called, does it behave" — none asked "is it called at all", and that gap had already been paid for five times, each passing every suite on the day it shipped: `nucleusSealer`'s `behavioral` block, `CHART_TYPES`' `warn` strings, the voice ladder's `nextStep`, `functionTracking.record()` (61 assertions, no caller) and `brokerConnectors.driftReport()` (81 assertions, no fetcher). A CONTRACT WITH NO PRODUCER IS INDISTINGUISHABLE FROM A WORKING FEATURE WHEN THE ONLY THING TESTED IS THE CONTRACT.** **`verifyReachability.cjs` — 16 assertions, measured 377 channels / 49 namespaces / 426 leaf members / 111 reached. A FLAT RULE WOULD HAVE ARRIVED RED WITH 315 ROWS AND BEEN DELETED RATHER THAN READ, so the known gaps are a DEBT REGISTER and the suite asserts BOTH directions: no NEW orphan (fails the day one is written) and no STALE entry (a fixed gap must be REMOVED from the register or the suite fails). The second rule is what makes it a ratchet rather than a suppression file — the register can only shrink, and it prints in full every run. Two named orphan channels with written reasons (`models:roles`, `models:role-research` = H6); 315 bridge members seeded into `scripts/reachability-baseline.json`. AN ORPHAN IS NOT AUTOMATICALLY A DEFECT and the suite says so — a bridge member with no page is a capability waiting; the defect was that nobody could tell which was which.** **FOUR OF MY OWN ROWS WERE WRONG AND WERE CORRECTED RATHER THAN LOOSENED — writing a guard against false confidence is an easy place to produce some: (1) knowing only `ipcMain.handle('literal')` reported 46 missing handlers when `marketIntel.cjs:595` registers 38 by iterating an object whose KEYS are the channels and others use `ipcMain.on` for `send`; (2) an unrestricted table-key pattern reported 13 unreachable channels that were OLLAMA MODEL TAGS — `gemma4:31b`, `qwen3-coder:480b` — because a model catalogue is also an object keyed by colon-separated strings, now calibrated on namespaces the codebase already registers; (3) reading ONE preload made `badge:clicked` look unreachable when `electron/badgePreload.cjs` is the badge window's bridge, so preloads are now collected by filename; (4) scraping `startsWith('…')` for the wipe prefixes reported "none" after they were lifted into a named frozen array — A GUARD THAT RECOGNISES ONLY ONE SPELLING OF THE THING IT GUARDS IS A GUARD AGAINST REFACTORING.** **GHOST MODE WIPED NOTHING AND THE SERVER TOLD MASTER IT HAD — the most serious finding because of WHEN it is used: before handing over a device he no longer trusts. H1: `clearLocalStorage()` matched `rama_` and `sm_` while EVERY key this app writes is `rama.`-DOTTED — eight of eight measured survivors (`rama.paletteOpen`, `rama.micMode`, `rama.micMuted`, `rama.speechMuted`, `rama.ramaSpeaks`, `rama.stockmind.chart`, `rama.stockmind.drawings`, `rama.stockmind.workspace`) — chart drawings, workspace layout and voice settings all still on the device. AND THE FUNCTION RETURNED `undefined`, so "Ghost Mode ran" and "Ghost Mode wiped nothing" were the same observation, which is precisely why it survived. Fixed: `WIPE_PREFIXES` a named frozen list with `rama.` added and the heritage prefixes KEPT not replaced (a key from an older build must still go — widening a wipe is additive, narrowing it is the same defect reversed); every removal VERIFIED by re-reading the key; every step returns `{ok, error}`; a `navigate: false` option exists because blanking the document before the caller reads the report would make the report unreachable BY CONSTRUCTION, the same mistake in a new shape.** **H2: `/api/ghost/wipe` ran a `console.warn` and returned `{ok:true,'Server wipe acknowledged'}` under a comment saying it signalled the main process. NO SIGNAL WAS EVER SENT. Now 501 with honest wording, because this Express process cannot open the AES-256-GCM store those files belong to — the same reason `routes/auth.cjs` closes `/api/auth/*` rather than approximating it. 501 means a caller can DETECT the server half did not happen, which `ok:true` made impossible.** **H3 NOT FIXED, DELIBERATELY: neither entry point has a caller, and exposing it needs a master-only action plus handing the renderer the per-boot `RAMA_SERVER_TOKEN`, which widens the attack surface. THAT IS A SECURITY DECISION AND IT IS MASTER'S. The suite states it in its held-by-hand notes rather than leaving it to be found.** **`verifyGhostMode.mjs` — 30 BEHAVIOURAL assertions against stubbed browser globals, because the audit found this by RUNNING it where reading looked fine. Asserts the dotted and heritage keys are gone, THAT AN UNRELATED APP'S KEY IS LEFT ALONE (a wipe that clears everything would pass every other row and be a different defect), that the report carries key NAMES and no values, and — the row that matters most — that a `removeItem` which silently does nothing is REPORTED AS FAILED, since a removal that quietly did not remove was the original failure mode. ONE MORE OF MY ROWS WENT RED AGAINST MY OWN COMMENT: `!/ok:\\s*true/` matched the comment DESCRIBING the old behaviour — the THIRD time this project has hit a pattern matching prose rather than code, and the lesson is identical each time: assert on the construct, not on a substring.** **VERIFIED: chain 4,874 → 4,920 across 39 → 41 entries 0 failures exit 0, `auditRenderer` clean, build exit 0 with `verifyBundleGraph` 21/0. NOT VERIFIED: Ghost Mode has not run in a browser — the APIs are stubs, so that IndexedDB, caches, service workers and cookies really clear is not asserted and cannot be here; what is asserted is that each step is attempted and its outcome reported.** **NEXT, IN ORDER: H9 (`selfModify.js` passes a file path where `user` is expected seven times, `capability.cjs:28` denies a string, and `:174` returns `ok:true` regardless — self-modification reporting success on a denied write is the worst remaining item), then H10 (`ipcEncryption.wrapHandle()` wraps NO channel while `ipc-enc:status` reports the set size — a security control that reports itself active), then H5, H4, H6, H7, H8. Each with a behavioural test; both of the first two currently report success for work that does not happen.** |
 
+| 170 | Four more off the audit queue, and a count I had overstated | done | Section 144. Master: *"are the que items implemented"* — the honest answer was NO, two of nine, and this row is the next four. **A CORRECTION TO MY OWN ROW 169 FIRST: I reported `functionTracking.record()` at 4 production call sites. WRONG — my own reachability suite counted the bare string `record(` and matched `crashGuard.record(` in `main.cjs`, an unrelated function with the same name. The real number is 0. A GUARD THAT OVERSTATES PROGRESS IS WORSE THAN ONE THAT UNDERSTATES IT: IT RETIRES AN OPEN ITEM. `callSitesOf()` now matches `<binding>.<fn>(` only in files that require the defining module, and prints the sites rather than a count.** **H9 — SELF-MODIFICATION DENIED EVERY WRITE AND REPORTED SUCCESS, two bugs in one line where the second hid the first. The bridge is `fs.writeFile(user, filePath, content)`; the call was `writeFile(file.path, file.content)`, so the path arrived as `user`, the content as `filePath`, `content` was undefined — and `capability.can()` requires `typeof user.tier === 'number'`, so EVERY WRITE WAS DENIED. Then `return { ok: true, results }` regardless. Seven call sites had it (`writeFile`, `deleteFile`, `git.stage/commit/push`, `readFile`, `searchFiles`), all now thread `user`, and the summary is DERIVED from the results. An unrecognised action is REFUSED rather than skipped — skipping left `res` undefined, spreading into the row with no `ok` at all, neither success nor failure. TWO MORE FOUND WHILE FIXING IT: `git.stage`'s result was discarded, and a denied stage followed by a commit is a commit of nothing reported as a commit; and the push result was dropped, so "committed and pushed" and "committed, push failed" were the same return value. `CommandPalette`'s approve handler had `if (result.ok)` with NO ELSE — it could not have had one, the branch was unreachable — and now shows the reason and DELIBERATELY DOES NOT CLEAR the pending modification so master can retry.** **H5 — THE PRIVACY GATE FINALLY HAS A PRODUCER. `assembleTurn()` has refused sensitive cloud turns for several sections and `Chat.jsx` never passed the flag, so the gate could never fire: the sixth no-producer contract the audit found. `src/services/turnSensitivity.js` is LAYER ONE ONLY — deterministic patterns; the three-layer design with an injectable model layer is NOT built, because Ollama is on another machine and asking a third party whether a turn is private requires sending them the turn. IT ERRS TOWARD PRIVATE ALWAYS AND THE ASYMMETRY IS THE DESIGN: a false "sensitive" costs a cloud round trip row 150 already made local (zero cost today); a false "public" puts master's holdings in someone else's log. Non-string, empty turn, malformed rule and a rule that throws ALL return sensitive. THE FIRST VERSION SKIPPED a non-RegExp rule — the wrong direction, since a rule list damaged by a bad edit would then classify EVERY turn as public. Ten named patterns; A MATCH REPORTS PATTERN IDS, NEVER THE MATCHED TEXT, because returning the substring would put the secret into whatever logs the classification. `verifyTurnSensitivity.mjs` 66 assertions: 31 must-be-private fixtures, 10 must-stay-public (A CLASSIFIER THAT CALLS EVERYTHING PRIVATE HAS STOPPED CLASSIFYING and would make the cloud destination permanently unreachable), every pattern asserted to be exercised, no `/g` or `/y` allowed (lastIndex would make a second identical turn answer differently), and three rows proving it is WIRED INTO `Chat.jsx` — asserting the classifier works while nothing calls it would recreate the defect one layer up. MY OWN FIXTURES TRIPPED I-SECRETS: `verifyInvariants.cjs` went red on `sk-…` test strings, correctly, because THE GUARD CANNOT TELL A FIXTURE FROM A LEAK AND SHOULD NOT TRY; they are composed at runtime now.** **H10 — A SECURITY CONTROL THAT REPORTED ITS INTENTIONS AS ACHIEVEMENTS. `ipc-enc:status` returned `sensitiveChannels: SENSITIVE_CHANNELS.size`, which reads as "this many are protected", while `wrapHandle` has ZERO call sites so nothing is session-checked or signed. MADE HONEST, NOT QUIETLY WIRED: status now reports declared scope and ACHIEVED scope as separate facts — `wrappedChannels`, the `wrapped` list, `unprotectedChannels`, and an `enforcement` string saying in words that the control is inert, because a reader who sees three counts should not have to subtract them to learn that. THE WIRING IS RAISED, NOT TAKEN: the natural seam is `main.cjs`'s `ipcRec`, whose own comment says "it is not a policy layer and must not become one" — a recorded decision I will not override silently — and wrapping would make `CRITICAL_CHANNELS` REFUSE WITHOUT A SESSION KEY, a real behaviour change on security paths I cannot verify by running the app here. MASTER'S DECISION: make `ipcRec` a policy layer, wrap at each module's registration, or leave it declared-but-inert with the status now saying so.** **H8 — A MEMORY PAGE THAT INVENTED ITS OWN MEMORIES. Two hardcoded entries nobody wrote, that could not be deleted and survived a restart BECAUSE THEY WERE NEVER PERSISTED, beside a `+ Add Entry` button with no `onClick` at all and an empty state promising MongoDB, which this app does not use and has no dependency on. A MEMORY PAGE THAT INVENTS ITS OWN MEMORIES IS WORSE THAN AN EMPTY ONE: IT TEACHES MASTER THAT WHAT HE READS THERE IS REAL. The `knowledge` domain has existed at `dataStore.cjs:159` the whole time — encrypted, autosaved, re-keyed under I14 — loaded and saved and never written to; this page is now its producer, with `store.push` stamping `_id` so no id is invented in the renderer. Three empty states instead of one because they are three different facts (loading, nothing stored, search matched nothing), a locked store REPORTED rather than rendered as emptiness, and `key={entry._id ?? entry.id}` because `id` was the INVENTED rows' field and would have been undefined for every real row.** **THE RATCHET EARNED ITSELF IN ONE COMMIT: wiring Knowledge made `store.get/push/remove` reachable and `verifyReachability.cjs` WENT RED demanding they leave the debt register — the "no stale entry" rule doing exactly what it was built for on its first real test. Register 315 → 312, closures recorded with the reason.** **VERIFIED: chain 4,920 → 4,986 across 41 → 42 entries 0 failures exit 0, `auditRenderer` clean at 85 files / 144 bridge calls / 372 channels, build exit 0 with `verifyBundleGraph` 21/0, guide regenerated.** **NOT VERIFIED: none of this has been exercised in the running app — no modification approved through the UI, no knowledge entry stored on master's machine, no turn classified in a live conversation. The classifier's fixtures are THE AUTHOR'S, NOT A CORPUS: they prove the rules behave as written, not that they match master's real phrasing. "How much did I make on that one" carries no pattern and reads as public to layer one, which is precisely why the other layers were specified.** **STILL OPEN: H4 (`record()` at 0 producers — the engine path needs CPython 3.12 but `modelRouter` calls and `dataStore` save durations do not), H6 (the two named orphan channels), H7 (`brokerConnectors` has no channel, namespace or page), and H10's wiring decision. NEXT: H4's engine-free producers, then H6, then H7 — each closes a named gap, so progress shows as the register shrinking rather than as a claim.** |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -18452,3 +18454,166 @@ load-order change would lose silently).
 `start.cjs` with no referrer), `server/brain/credentialVault.cjs` (the second, weaker, unreachable
 vault — Section 141.5 raised it and it is still open), and `ramaStore.js`'s `apiKey`/`setApiKey`, a
 plaintext credential slot nothing uses that **reads as a credential path which does not exist.**
+
+---
+
+## SECTION 144 — Four more off the queue, and a count I had overstated
+
+**STATUS: H9, H5 AND H8 FIXED AND GUARDED. H10 MADE HONEST, ITS WIRING RAISED AS A DECISION. H4, H6
+AND H7 STILL OPEN.** Master: *"are the que items implemented"* — the honest answer when asked was
+**no, two of nine**, and this section is the next four.
+
+### 144.0 A correction to my own report first
+
+In Section 143 I reported `functionTracking.record()` as having **4 production call sites**. That was
+wrong. My own reachability suite counted the bare string `record(` and matched
+**`crashGuard.record(`** in `main.cjs` — an unrelated function with the same name. The real number
+is **0**: `functionTracking` is required only by `ipc/tracking.cjs`, the read channel, and nothing
+calls `record()`.
+
+**A guard that overstates progress is worse than one that understates it: it retires an open item.**
+`callSitesOf()` now matches `<binding>.<fn>(` and only in files that require the defining module, and
+it prints the call sites rather than a bare count, so the number can be checked rather than believed.
+
+### 144.1 H9 — self-modification denied every write and reported success
+
+The worst item in the queue, and it was two bugs in one line where **the second hid the first.**
+
+The bridge is `fs.writeFile(user, filePath, content)`. The call was:
+
+```js
+res = await window.rama.fs.writeFile(file.path, file.content);
+```
+
+So the path arrived as `user`, the content arrived as `filePath`, and `content` was `undefined`.
+`capability.can()` requires `typeof user.tier === 'number'` and a string has no `.tier`, so **every
+write was denied.** Then:
+
+```js
+return { ok: true, results };     // regardless
+```
+
+**Seven call sites had the same defect** — `writeFile`, `deleteFile`, `git.stage`, `git.commit`,
+`git.push`, `readFile`, `searchFiles`. All seven now thread `user`. The summary is **derived from the
+results** rather than asserted, so a caller cannot be told a modification applied when the main
+process refused it. An unrecognised action is **refused rather than skipped** — skipping left `res`
+undefined, which spread into the row with no `ok` at all, neither success nor failure.
+
+Two more in the same file, found while fixing it: **`git.stage`'s result was discarded**, and a denied
+stage followed by a commit is a commit of nothing reported as a commit; and the **push result was
+dropped**, so "committed and pushed" and "committed, push failed" were the same return value.
+
+`CommandPalette.jsx`'s approve handler had an `if (result.ok)` with **no else** — it could not have
+had one, because the branch was unreachable. It now shows the reason and **deliberately does not clear
+the pending modification**, so master can retry instead of losing it.
+
+### 144.2 H5 — the privacy gate finally has a producer
+
+`conversationRole.assembleTurn()` refuses a sensitive turn on the cloud destination, and
+`verifyConversation.cjs` has asserted that refusal for several sections. **`Chat.jsx` never passed the
+flag**, so the gate could never fire. The sixth no-producer contract the audit found.
+
+`src/services/turnSensitivity.js` is that producer. **It is layer one only** — deterministic pattern
+matching. The planned three-layer design with an injectable model layer is **not built**: Ollama lives
+on another machine, and asking a third party whether a turn is private requires sending them the turn,
+which is self-defeating. Layer one alone is worth shipping because **a gate with a conservative
+producer is strictly better than a gate with none.**
+
+**IT ERRS TOWARD PRIVATE, ALWAYS, and the asymmetry is the whole design.** A false "sensitive" costs a
+cloud round trip that row 150 already made local anyway — currently zero cost. A false "public" puts
+master's holdings in someone else's log. The two errors are not comparable, so the tie never goes to
+public: a non-string, an empty turn, a malformed rule and a rule that throws **all return sensitive**.
+
+The first version *skipped* a rule that was not a RegExp. That is the wrong direction: a rule list
+damaged by a bad edit or a half-applied patch would then **classify every turn as public**. A
+malformed rule is now an unknown answer, not an absent one.
+
+Ten named patterns — holdings, the position book, currency amounts, broker accounts, credentials by
+name, key-shaped strings, government ids, contact details, self-identity, and Rāma's own interior
+(nucleus, loyalty core, vault). **A match reports pattern IDS, never the matched text**: returning the
+substring would put the secret into whatever logs or renders the classification, which is the opposite
+of the point.
+
+`verifyTurnSensitivity.mjs` — **66 assertions.** 31 fixtures that must be private, 10 ordinary ones
+that must stay public (**a classifier that calls everything private has stopped classifying**, and
+would make the cloud destination permanently unreachable), every declared pattern asserted to be
+exercised by a fixture, no pattern allowed to be `/g` or `/y` (lastIndex would make a second identical
+turn answer differently), and three rows proving the producer is actually wired into `Chat.jsx` —
+because asserting the classifier works while nothing calls it would recreate the exact defect one
+layer up.
+
+**MY OWN FIXTURES TRIPPED I-SECRETS.** `verifyInvariants.cjs` scans every tree for credential-shaped
+literals and went red on `sk-…` test strings. Correctly: **the guard cannot tell a fixture from a leak
+and should not try.** They are composed at runtime now.
+
+### 144.3 H10 — a security control that reported its own intentions as achievements
+
+`ipc-enc:status` returned `sensitiveChannels: SENSITIVE_CHANNELS.size` and
+`criticalChannels: CRITICAL_CHANNELS.size`, which reads as *"this many channels are protected."*
+**`wrapHandle` has zero call sites**, so the real answer was none of them: nothing is session-checked,
+nothing is signed.
+
+**MADE HONEST, NOT QUIETLY WIRED.** Status now reports the **declared** scope and the **achieved**
+scope as separate facts — `wrappedChannels`, the `wrapped` list, the `unprotectedChannels` list, and
+an `enforcement` string that says in words that the control is inert and why. **A reader who sees
+three counts should not have to subtract them to learn that.**
+
+**THE WIRING IS RAISED, NOT TAKEN.** The natural seam is `main.cjs`'s `ipcRec`, and its own comment
+says: *"it is not a policy layer and must not become one."* That is a recorded decision and I am not
+overriding it silently. Wrapping would also make `CRITICAL_CHANNELS` **refuse without a session key** —
+a real behaviour change on security-critical paths that I cannot verify by running the app here.
+**Master's decision: turn `ipcRec` into a policy layer, wrap at each module's registration instead, or
+leave the control declared-but-inert with the status now saying so.**
+
+### 144.4 H8 — a memory page that invented its own memories
+
+`Knowledge.jsx` held two hardcoded entries — *"System Architecture"* and *"StockMind Integration"* —
+plausible rows nobody wrote, that could not be deleted, and that survived a restart **because they
+were never persisted in the first place.** Beside a `+ Add Entry` button with **no `onClick` at all**,
+and an empty state promising MongoDB, which this application does not use and has no dependency on.
+
+**A memory page that invents its own memories is worse than an empty one: it teaches master that what
+he reads there is real.**
+
+The `knowledge` domain has existed at `dataStore.cjs:159` the whole time — `{ entries: [], index: {} }`,
+encrypted, autosaved and **re-keyed with every other domain under I14.** It was loaded, saved and
+re-keyed and never written to. **This page is now its producer**: load, add, remove, with `store.push`
+stamping `_id` so no id is invented in the renderer.
+
+Three empty states instead of one, because they are three different facts: still loading, nothing
+stored, or a search that matched nothing. A locked store is **reported** rather than rendered as
+emptiness. And `key={entry._id ?? entry.id}` — `id` was the *invented* rows' field and does not exist
+on a stored entry, so the old key would have been `undefined` for every real row.
+
+### 144.5 The ratchet earned itself in one commit
+
+Wiring Knowledge made `store.get`, `store.push` and `store.remove` reachable, and
+`verifyReachability.cjs` **went red demanding they be removed from the debt register** — the
+"no stale entry" rule, doing exactly what it was built for on its first real test. The register is
+**315 → 312**, and the three closures are recorded in it with the reason.
+
+### 144.6 Verified
+
+Chain **4,920 → 4,986 assertions across 41 → 42 entries, 0 failures**, exit 0. `auditRenderer` clean
+at 85 files / 144 bridge calls / 372 channels. `npm run build` exit 0 with `verifyBundleGraph` 21/0.
+`npm run guide` regenerated.
+
+**NOT VERIFIED: none of this has been exercised in the running app.** Self-modification has not been
+approved through the UI, no knowledge entry has been stored on master's machine, and no turn has been
+classified in a live conversation. The classifier's fixtures are **the author's, not a corpus** —
+they prove the rules behave as written, they do not measure accuracy against master's real phrasing.
+A phrasing that carries no pattern, *"how much did I make on that one"*, reads as public to layer one,
+and that limit is precisely why the other layers were specified.
+
+### 144.7 Still open
+
+| # | what | note |
+| --- | --- | --- |
+| H4 | `functionTracking.record()` — **0 producers**, corrected from my own wrong 4 | the engine path needs CPython 3.12; `modelRouter` and `dataStore` save durations do not |
+| H6 | `models:roles` / `models:role-research` — the two named orphan channels | closing them empties the channel register |
+| H7 | `brokerConnectors` — no channel, no namespace, no page | data-only by construction, lowest risk of the three |
+| H10 wiring | whether `ipcRec` becomes a policy layer | **master's decision**, §144.3 |
+
+**NEXT:** H4's engine-free producers (`modelRouter` calls and `dataStore` save durations), then H6,
+then H7. Each closes a named gap in the reachability register, so progress is visible as the register
+shrinking rather than as a claim.

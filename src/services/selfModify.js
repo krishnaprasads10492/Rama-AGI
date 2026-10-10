@@ -158,44 +158,92 @@ export async function applyModification(mod, user = null) {
     return window.rama.proposals.apply(mod.proposalId, { user });
   }
 
+  // EVERY CALL BELOW USED TO PASS THE PATH WHERE `user` BELONGS (audit H9, Section 144).
+  //
+  // The bridge is `fs.writeFile(user, filePath, content)`. The call was
+  // `fs.writeFile(file.path, file.content)` — so the path arrived as `user`, the content arrived as
+  // `filePath`, and `content` was undefined. `capability.can()` requires `typeof user.tier ===
+  // 'number'`, and a string has no `.tier`, so **every write was DENIED**. Then the function
+  // returned `{ ok: true, results }` regardless, which is how self-modification came to report
+  // success for work the main process had refused outright.
+  //
+  // Two bugs in one line, and the second hid the first.
   const results = [];
   for (const file of mod.files) {
     let res;
     if (file.action === 'create' || file.action === 'update') {
-      res = await window.rama.fs.writeFile(file.path, file.content);
+      res = await window.rama.fs.writeFile(user, file.path, file.content);
     } else if (file.action === 'delete') {
-      res = await window.rama.fs.deleteFile(file.path);
+      res = await window.rama.fs.deleteFile(user, file.path);
+    } else {
+      // An unrecognised action is REFUSED, not skipped. Skipping it left `res` undefined, which
+      // spread into `{ path }` with no `ok` at all — neither success nor failure, and the summary
+      // below counted it as neither.
+      res = { ok: false, error: `unknown action "${file.action}" — expected create, update or delete` };
     }
-    results.push({ path: file.path, ...res });
+    results.push({ path: file.path, action: file.action, ...res });
   }
 
-  return { ok: true, results };
+  // THE SUMMARY IS DERIVED, NOT ASSERTED. REDBY: return `{ ok: true, results }`. A caller that
+  // trusts `ok` would then apply a modification, report it applied, and leave the file untouched.
+  const failed = results.filter((r) => r.ok !== true);
+  return {
+    ok: failed.length === 0,
+    results,
+    failed,
+    error: failed.length === 0 ? null
+      : `${failed.length} of ${results.length} file operations failed: `
+        + failed.map((f) => `${f.path} (${f.error || 'no reason given'})`).join('; '),
+  };
 }
 
 // ─── Commit modification to git ───────────────────────────────────────────────
-export async function commitModification(mod, repoPath) {
+/**
+ * @param {object} mod
+ * @param {string} repoPath
+ * @param {object|null} user the signed-in user — `git.stage/commit/push` all take it FIRST.
+ *
+ * The three git calls had the same defect as the writes above: `repoPath` arrived as `user`, so each
+ * was denied, and `stage` was not even checked. A denied stage followed by a commit is a commit of
+ * nothing, reported as a commit.
+ */
+export async function commitModification(mod, repoPath, user = null) {
   if (!isElectron) return { ok: false, error: 'Not in Electron' };
 
   const files = mod.files.map(f => f.path);
-  await window.rama.git.stage(repoPath, files);
+  const staged = await window.rama.git.stage(user, repoPath, files);
+  // CHECKED NOW. A failed stage used to be discarded, and the commit below would then either fail
+  // confusingly or commit a different set of files than the caller asked for.
+  if (staged && staged.ok === false) {
+    return { ok: false, error: `nothing was committed: staging failed — ${staged.error}`, staged };
+  }
   const commitMsg = `${mod.type === 'create-page' ? 'feat' : 'refactor'}(self-modify): ${mod.description}`;
-  const result = await window.rama.git.commit(repoPath, commitMsg);
-  if (result.ok) await window.rama.git.push(repoPath, 'dev');
-  return result;
+  const result = await window.rama.git.commit(user, repoPath, commitMsg);
+  if (!result?.ok) return result;
+
+  // THE PUSH RESULT IS CARRIED RATHER THAN DROPPED. A commit that succeeded and a push that failed
+  // is a different state from both succeeding, and master needs to know which he is in.
+  const pushed = await window.rama.git.push(user, repoPath, 'dev');
+  return {
+    ...result,
+    pushed: pushed?.ok === true,
+    pushError: pushed?.ok === true ? null : (pushed?.error || 'push gave no reason'),
+  };
 }
 
 // ─── Read current file for AI to modify ───────────────────────────────────────
-export async function readSourceFile(filePath) {
+/** `user` is required: `fs.readFile(user, filePath)` denies a string in the first position. */
+export async function readSourceFile(filePath, user = null) {
   if (!isElectron) return null;
-  const res = await window.rama.fs.readFile(filePath);
-  return res.ok ? res.content : null;
+  const res = await window.rama.fs.readFile(user, filePath);
+  return res?.ok ? res.content : null;
 }
 
 // ─── List all source files ────────────────────────────────────────────────────
-export async function listSourceFiles(basePath = 'src') {
+export async function listSourceFiles(basePath = 'src', user = null) {
   if (!isElectron) return [];
-  const res = await window.rama.fs.searchFiles(basePath, '');
-  return res.ok ? res.data : [];
+  const res = await window.rama.fs.searchFiles(user, basePath, '');
+  return res?.ok ? res.data : [];
 }
 
 // ─── Default page template ────────────────────────────────────────────────────

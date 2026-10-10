@@ -310,26 +310,45 @@ check('every member in the debt register is still unreached, so the register can
 // progress rather than disappearing into a count.
 console.log('\n  the named gaps from the audit, so closing one is visible');
 
-function callSites(needle, files) {
-  let n = 0;
+/**
+ * Count call sites of `<module>.<fn>(` where the module is one that actually REQUIRES the file that
+ * defines it. A bare `fn(` match is not good enough and that is not a hypothetical: the first version
+ * of this counted `record(` and reported **4 production call sites for
+ * `functionTracking.record()` when the real number is 0** — it was matching `crashGuard.record(` in
+ * `main.cjs`, an unrelated function with the same name.
+ *
+ * A guard that OVERSTATES progress is worse than one that understates it: it retires an open item.
+ */
+function callSitesOf(defFile, fnName, files) {
+  const base = path.basename(defFile);
+  const sites = [];
   for (const f of files) {
+    if (path.basename(f) === base) continue;
+    if (f.includes(`${path.sep}scripts${path.sep}`)) continue;
     const src = fs.readFileSync(f, 'utf8');
-    if (f.endsWith('functionTracking.cjs') || f.includes(`${path.sep}scripts${path.sep}`)) continue;
-    n += (src.match(new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+    // Only files that require the defining module can be calling it.
+    if (!src.includes(base.replace(/\.cjs$/, ''))) continue;
+    // `x.fn(` where x is a local binding — the import name is not assumed, only that it is a member
+    // access rather than a bare call, which is what excludes a same-named function elsewhere.
+    const re = new RegExp(`\\b[A-Za-z_$][\\w$]*\\.${fnName}\\s*\\(`, 'g');
+    const n = (src.match(re) || []).length;
+    if (n > 0) sites.push(`${path.relative(ROOT, f)}×${n}`);
   }
-  return n;
+  return sites;
 }
 
-const trackingCalls = callSites('record(', electronFiles);
-console.log(`        functionTracking.record() production call sites: ${trackingCalls}`);
-const driftCalls = callSites('driftReport(', electronFiles.filter((f) => !f.endsWith('brokerConnectors.cjs')));
-console.log(`        brokerConnectors.driftReport() call sites: ${driftCalls}`);
+const trackingSites = callSitesOf('functionTracking.cjs', 'record', electronFiles);
+console.log(`        functionTracking.record() production call sites: ${trackingSites.length}`
+  + `${trackingSites.length ? ` (${trackingSites.join(', ')})` : ' — still no producer'}`);
+const driftSites = callSitesOf('brokerConnectors.cjs', 'driftReport', electronFiles);
+console.log(`        brokerConnectors.driftReport() call sites: ${driftSites.length}`
+  + `${driftSites.length ? ` (${driftSites.join(', ')})` : ' — still no producer'}`);
 
 // These are REPORTED, not asserted to be zero: asserting zero would make FIXING them fail the suite,
 // which is the exact inversion that makes a guard an obstacle. The register above is what holds the
 // line; this is here so the number is in front of whoever runs it.
-check('the named gaps are reported with a count rather than hidden',
-  Number.isFinite(trackingCalls) && Number.isFinite(driftCalls));
+check('the named gaps are reported with their call sites rather than a bare count',
+  Array.isArray(trackingSites) && Array.isArray(driftSites));
 
 // ═══ (5) Ghost Mode — the audit's H1/H3, asserted because it is a PRIVACY claim ═══
 console.log('\n  Ghost Mode actually covers the keys this app writes');
