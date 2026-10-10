@@ -167,10 +167,70 @@ check('this ran inside Electron rather than the system Node',
   ranInElectron,
   'the fallback above is a weaker guarantee and says so');
 
+// ═══ node-pty must SPAWN, not merely load ══════════════════════════════════
+//
+// THIS ROW REPLACES A HELD-BY-HAND NOTE, and the note is why it exists. node-pty 1.0.0 `require()`d
+// cleanly and could not spawn: `Cannot find module '../build/Release/conpty.node'`, because the
+// binary was never built and this machine has no compiler. **Loadability passed; the Terminal was
+// dead.** `package.json`'s own note had concluded from that clean `require()` that the gyp step was
+// "ceremony", which was true for argon2 and wrong for this.
+//
+// So loadability is the floor, and for the one dependency whose whole purpose is to start a process,
+// the floor is not enough. node-pty 1.1.0 is Node-API (`node-addon-api`) and ships its prebuilds
+// inside the npm tarball — `prebuilds/win32-x64/{pty,conpty}.node` plus `conpty.dll` and
+// `OpenConsole.exe` — so no compiler is involved and the ABI is stable across Electron versions.
+//
+// REDBY: downgrade to node-pty 1.0.0, or delete the `prebuilds/` directory.
+if (names.includes('node-pty')) {
+  console.log('\n  node-pty must start a process, not just load');
+  const ptyPrebuild = path.join(ROOT, 'node_modules', 'node-pty', 'prebuilds',
+    `${process.platform}-${process.arch}`);
+  check('a prebuilt binary for this platform ships with the package',
+    fs.existsSync(ptyPrebuild), ptyPrebuild);
+  check('and it includes a pty binary', fs.existsSync(path.join(ptyPrebuild, 'pty.node')));
+
+  if (bin) {
+    const spawnProbe = [
+      'try {',
+      "  const pty = require('node-pty');",
+      "  const p = pty.spawn(process.env.COMSPEC || '/bin/sh', [], { cols: 80, rows: 24 });",
+      "  let got = '';",
+      '  p.onData((d) => { got += d; });',
+      '  setTimeout(() => {',
+      "    process.stdout.write('RAMAPTY' + JSON.stringify({ ok: true, pid: p.pid,",
+      '      bytesRead: got.length, node: process.versions.node }));',
+      '    try { p.kill(); } catch (e) { /* already gone */ }',
+      '    process.exit(0);',
+      '  }, 2500);',
+      '} catch (e) {',
+      "  process.stdout.write('RAMAPTY' + JSON.stringify({ ok: false,",
+      "    error: String(e && e.message || e).split('\\n')[0] }));",
+      '  process.exit(0);',
+      '}',
+    ].join('\n');
+    const pr = spawnSync(bin, ['-e', spawnProbe], {
+      cwd: ROOT, encoding: 'utf8', timeout: 90000, windowsHide: true,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    });
+    const pt = `${pr.stdout || ''}${pr.stderr || ''}`;
+    const pi = pt.indexOf('RAMAPTY');
+    let res = null;
+    if (pi >= 0) { try { res = JSON.parse(pt.slice(pi + 'RAMAPTY'.length)); } catch { res = null; } }
+    check('node-pty spawns a real shell inside Electron\'s Node',
+      !!res && res.ok === true, res ? (res.error || JSON.stringify(res)) : 'probe produced no result');
+    check('and the shell wrote something back, so the pty is genuinely connected',
+      !!res && res.ok === true && res.bytesRead > 0,
+      res ? `bytesRead=${res.bytesRead}` : 'no result');
+  } else {
+    check('node-pty spawn could not be probed — no Electron binary', false,
+      'this is reported as a failure rather than skipped: the Terminal was dead for an unknown '
+      + 'length of time precisely because nothing asserted it could start');
+  }
+}
+
 console.log('\n  held by hand, listed rather than implied:');
-console.log('    - a dependency that loads is not a dependency that WORKS. node-pty require()s');
-console.log('      cleanly and cannot spawn, because its native binary was never built. Loadability');
-console.log('      is the floor this suite enforces, not a functional claim');
+console.log('    - loadability is a floor, not a functional claim. The node-pty rows above are the');
+console.log('      one place it is taken further, because that module exists to start a process');
 console.log('    - lazy `require()` inside a function body is found by the same scan, but a require');
 console.log('      built from a computed name would not be');
 

@@ -1843,6 +1843,8 @@ authenticated **Master session**, not merely an open store.
 
 | 173 | Electron 31 → 44, sharp without a compiler, and three upgrades that broke the app while every suite stayed green | done | Section 147. Master: *"for electron family upgrade — check for compability and performance issues before upgrade. no to C++, find a work around for scripts and sharp. I see a microsoft c++ redistributable installed as part of windows update. is it the same?"* **THE REDISTRIBUTABLE IS NOT THE COMPILER — they are different halves. Measured: six VC++ Redistributables installed (2015–2022, x86 and x64) and `vcruntime140.dll`/`msvcp140.dll` both present in System32; `cl.exe` and `link.exe` both NOT FOUND. A Redistributable lets an ALREADY-COMPILED binary run; the Build Tools C++ workload provides the compiler that node-gyp needs to PRODUCE a `.node`. THE USEFUL COROLLARY, and it is what made everything below possible: because the runtime IS installed, PREBUILT native binaries work perfectly — which is why argon2 loads. So the workaround for every native dependency is the same: never compile, always obtain a prebuilt binary.** **SHARP NEEDED NO WORKAROUND AND MY SECTION 146 REASON WAS WRONG: I held it back claiming its binary is "fetched by an install script" that `--ignore-scripts` suppresses. Measured: sharp resolves its binary through `optionalDependencies` — `@img/sharp-win32-x64` is an ordinary npm package, already present — and `install: node install/check` only VERIFIES, it does not build or download. `sharp@0.35.5` installed cleanly under `--ignore-scripts` and WORKS: libvips 8.18.7, encoded a real 95-byte PNG. One HIGH closed.** **ELECTRON COMPATIBILITY CHECKED AGAINST SOURCE AND IT CAME OUT CLEAN. The surface is narrow and modern — 13 modules, and all three `webPreferences` blocks declare `contextIsolation: true` with `nodeIntegration: false`. ZERO HITS probing every API removed between 31 and 44 (remote module, `enableRemoteModule`, `webSecurity:false`, `new-window`, `new BrowserView`, `registerFileProtocol`, `registerBufferProtocol`, `nativeWindowOpen`, `isDarkMode`, `allowRendererProcessReuse`, `desktopCapturer.getSources`, `getPrinters`, `moveItemToTrash`, `getCrashesDirectory`). Then the three changes Electron's own breaking-changes document raises: `clipboard` REMOVED FROM THE RENDERER in 44 — the renderer uses `navigator.clipboard`, the WEB api, in five places and Electron's module nowhere, so UNAFFECTED; `nativeImage.toBitmap()` colour-space normalisation in 43 — only `createFromPath` and `createEmpty` are used, UNAFFECTED; and `openAsHidden` removed from `setLoginItemSettings` in 44 — ONE HIT at `main.cjs:1668`, macOS-12-and-below only so always a no-op on Windows, removed, with `args: ['--hidden']` carrying the intent here. `net.request` appears throughout but it is the project's own `lib/http.cjs`, not Electron's `net`, so 44's Sec-Fetch enforcement does not apply. ONE EDIT FOR THIRTEEN MAJOR VERSIONS.** **INSTALLED: Electron 44.7.0 — Node 24.21.0, Chromium 152.0.7977.130, V8 15.2 (from 31.7.7 / Node 20.18 / Chromium 126), with `electron-builder` 26.15.3 because 24.13.3 cannot package Electron 44 and carried the critical `tar` advisory. IT LAUNCHES, AND THAT IS THE CLAIM SECTION 146 COULD NOT MAKE: `[doctor] startup healthy` with NO capabilities on fallbacks, 354 IPC channels registered, vector index ready, renderer loaded, nothing on stderr but ordinary logs.** **ON PERFORMANCE, HONESTLY: I CANNOT GIVE A COMPARISON. 44 measured 718.8 MB across 5 processes at 28 seconds; the Electron 31 baseline sampled 241.9 MB across 2 — but a separate 31 run showed 5 processes, so the two samples caught different numbers of children and ARE NOT COMPARABLE. Chromium 152 does use more memory than 126 and ~700 MB over 5 processes is unremarkable, but I am not turning two uneven samples into a regression or a win. A real comparison needs both versions sampled the same way at the same point in startup.** **THE SERIOUS FINDING — THREE OF MY OWN SECTION 146 UPGRADES BROKE THE APP SILENTLY, and launching it is what exposed them: `chokidar@5.0.0`, `uuid@14.0.3` and `vectra@0.15.0` (via `uuid@13`) are ALL `"type": "module"` — ESM-only — and a CommonJS main process cannot `require()` them. On Electron 31 the log read "Version control did not load (require() of ES Module chokidar/index.js ... not supported) — continuing without it", "1 capability(ies) on fallbacks", and "vectra unavailable — keyword fallback active". THE ENTIRE GIT SUBSYSTEM WAS DOWN AND VECTOR MEMORY HAD DEGRADED. THEY ALL PASSED MY CHECKS AND THE REASON IS THE LESSON: I verified each with `node -e "require('x')"` and SYSTEM NODE 22 PERMITS `require()` OF AN ES MODULE, while Electron 31 bundles Node 20, WHICH DOES NOT — I measured the wrong interpreter, the same class of error as testing the dev server instead of the build in Section 140. AND ALL 42 SUITES WERE GREEN THROUGHOUT, because `safeRequire` degrades gracefully and `vectorMemory` has a keyword fallback: GRACEFUL DEGRADATION IS CORRECT BEHAVIOUR AND IT IS ALSO EXACTLY WHAT HID THIS — a whole capability can vanish while every gate passes. Reverted to the newest COMMONJS-LOADABLE versions rather than the oldest safe ones: `chokidar@4.0.3`, WHICH IS STILL COMMONJS AND STILL FIXES THE `braces` ADVISORY so no security ground was given up, plus `uuid@11.1.0` (dual-published with a CJS entry) and `vectra@0.9.0`. Re-launched: startup healthy with NO fallbacks — observed, not inferred.** **`verifyCjsLoadable.cjs` — 5 assertions, and the one that matters runs the probe INSIDE ELECTRON via `ELECTRON_RUN_AS_NODE=1`, so the answer comes from the Node that will actually execute the code; confirmed on Node 20.18.0 inside Electron 31 and then Node 24.21.0 inside Electron 44. It derives the list FROM SOURCE — 9 production dependencies required from `electron/` — with comments stripped first, because a package NAMED IN PROSE is not a package REQUIRED IN CODE and this project has paid five times for patterns that could not tell the difference. IT DEGRADES HONESTLY: with no Electron binary it falls back to the system Node and SAYS that is a weaker check, naming the exact failure mode that produced this defect rather than printing a green line that means less than it appears to. REDBY CONFIRMED: reinstalling `chokidar@5.0.0` reddens two rows, one static and one from the live probe quoting the real error; restoring 4.0.3 returns it to 5/5.** **VERIFIED: chain 4,991 across 43 entries 0 failures exit 0 ON ELECTRON 44; build exit 0 with `verifyBundleGraph` 21/0; `verify:render` 85/0 with 18 of 18 routes; `package:check` validates on builder 26 and reports what it always has here — no usable 7-Zip, so a portable zip only. Advisories 21 → 13.** **NOT VERIFIED: no window was interacted with (nobody typed a passcode, opened the IDE or ran a git operation through the UI on 44); nothing was packaged, since `package:check` is a dry run and builder 26 has never produced an artifact here; and the memory comparison is not sound.** **STILL OPEN: `electron-rebuild` (pointless without a compiler), and NODE-PTY STILL CANNOT SPAWN — `conpty.node` was never built. Master declined the C++ workload, so the only route to a working Terminal is a PREBUILT node-pty distribution, which is a dependency SUBSTITUTION and therefore master's decision rather than a fix I will make unilaterally. The same "never compile, always prebuilt" principle that solved sharp applies, but it means changing which package provides the terminal.** |
 
+| 174 | The Terminal works, and no fork was needed | done | Section 148. Master said yes to investigating a prebuilt node-pty. **THE DECISION MASTER WAS ASKED FOR TURNED OUT NOT TO BE NEEDED. Section 147 raised this as a DEPENDENCY SUBSTITUTION — swapping the official package for a community fork — and said that was master's call rather than mine. The investigation made the question moot: the official package fixed it.** **FOUR CANDIDATES CHECKED ON NPM RATHER THAN ASSUMED: `node-pty@1.1.0` (MIT, official, `node-addon-api`) CHOSEN; `@lydell/node-pty@1.2.0-beta.15` rejected because a beta is not a foundation for a terminal; `@homebridge/node-pty-prebuilt-multiarch@0.14.1` (MIT, actively maintained, `node-addon-api` 8 + `prebuild-install`) kept as the viable fallback; and `node-pty-prebuilt-multiarch`/`@cdktf/...` at 0.10.x REJECTED as NAN-BASED AND ABANDONED (2022 and 2025) — NAN binds the binary to a specific ABI, so every Electron upgrade would need a matching prebuild.** **TWO THINGS CHANGED BETWEEN node-pty 1.0.0 AND 1.1.0 AND BOTH MATTER: it moved from `nan` to `node-addon-api`, so it is NODE-API NOW AND ABI-STABLE across Node and Electron versions exactly like argon2 — an Electron upgrade can no longer break it; and its install script became `node scripts/prebuild.js || node-gyp rebuild`, prebuilt first and compile only as a fallback. BETTER THAN THAT: THE PREBUILDS SHIP INSIDE THE NPM TARBALL — `prebuilds/win32-x64/` arrives with `pty.node`, `conpty.node`, `conpty_console_list.node`, `conpty.dll`, `OpenConsole.exe`, `winpty.dll` and `winpty-agent.exe`. The install script only CHECKS them (it printed "> Checking prebuilds..." and exited 0), SO `--ignore-scripts` DOES NOT BREAK IT, which is what made this work under the only install mode that is safe on this machine. So the answer is an UPGRADE, NOT A SWAP: official package, MIT, no fork, nothing for master to decide.** **VERIFIED IN THE RUNTIME, NOT THE CONVENIENT ONE. Section 147's lesson was that the system Node is the wrong interpreter to ask, so the spawn was probed INSIDE ELECTRON via `ELECTRON_RUN_AS_NODE=1`: `{ok:true, node:"24.21.0", electron:"44.7.0", pid:37616, bytesRead:218}`. A REAL SHELL STARTED AND WROTE 218 BYTES BACK — and `bytesRead > 0` is the part that matters, because a pty that spawns but is not connected would report a pid and never speak.** **A HELD-BY-HAND NOTE BECAME AN ASSERTION: `verifyCjsLoadable.cjs` carried "a dependency that loads is not a dependency that WORKS — node-pty require()s cleanly and cannot spawn". That note is now FOUR ASSERTIONS — the prebuild directory for this platform exists, it contains a pty binary, node-pty spawns inside Electron's Node, and the shell writes something back. BECAUSE "IT LOADS" PASSING WHILE "IT SPAWNS" FAILED IS PRECISELY WHAT HID A DEAD TERMINAL, and `package.json`'s own note had reasoned from that clean `require()` to the conclusion that the gyp step was "ceremony" — true for argon2, wrong for node-pty. That note is corrected again and now states what is actually true of both modules. WHEN THERE IS NO ELECTRON BINARY THE SPAWN ROW FAILS RATHER THAN SKIPPING, and says why: the Terminal was dead for an unknown length of time precisely because nothing asserted it could start.** **VERIFIED: `verifyCjsLoadable.cjs` 5 → 9 assertions; chain 4,988 across 43 entries 0 failures exit 0; build exit 0 with `verifyBundleGraph` 21/0; app launches with startup healthy, 354 IPC channels, vector index ready, renderer loaded. Advisories 19 — the count moved from 13 because node-pty 1.1.0 and the sharp/Electron trees pull different transitive sets; THE ONE CRITICAL IS STILL `tar`, reachable only through `electron-rebuild`.** **NOT VERIFIED: NO TERMINAL HAS BEEN TYPED INTO THROUGH THE UI. The pty spawns, connects and reads back under Electron's Node — that is the hard part and it is proven. Whether `/terminal` renders a working shell, resizes correctly and survives a close is a renderer claim that needs master at the keyboard.** **STILL OPEN: `electron-rebuild` carries the last critical advisory and exists only to compile native modules — which this machine cannot do and, as of now, DOES NOT NEED TO, since both native dependencies are Node-API with shipped prebuilds. Removing it is a capability removal in name only, but it is still a removal, so it is master's decision; dropping it would close the last critical.** |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -19059,3 +19061,89 @@ working Terminal is a **prebuilt** node-pty distribution; that is a dependency s
 therefore master's decision, not a fix I will make unilaterally. The same "never compile, always
 prebuilt" principle that solved sharp applies, but it means changing which package provides the
 terminal.
+
+---
+
+## SECTION 148 — The Terminal works, and no fork was needed
+
+**STATUS: node-pty 1.1.0 SPAWNS A REAL SHELL INSIDE ELECTRON 44. NO DEPENDENCY SUBSTITUTION, NO
+COMPILER.** Master said yes to investigating a prebuilt node-pty.
+
+### 148.1 The decision master was asked for turned out not to be needed
+
+Section 147 raised this as a **dependency substitution** — swapping the official package for a
+community fork — and said that was master's call rather than mine. **The investigation made the
+question moot.** The official package fixed it.
+
+Four candidates were checked on npm rather than assumed:
+
+| package | version | state |
+| --- | --- | --- |
+| **`node-pty`** | **1.1.0** | MIT, official, `node-addon-api` — **chosen** |
+| `@lydell/node-pty` | 1.2.0-beta.15 | beta, and a beta is not a foundation for a terminal |
+| `@homebridge/node-pty-prebuilt-multiarch` | 0.14.1 | MIT, actively maintained, `node-addon-api` 8 + `prebuild-install` — the viable fallback |
+| `node-pty-prebuilt-multiarch` / `@cdktf/...` | 0.10.x | **NAN-based and abandoned** (2022 and 2025). NAN means the binary is bound to a specific ABI, so every Electron upgrade would need a matching prebuild. Rejected. |
+
+**Two things changed in node-pty between 1.0.0 and 1.1.0, and both matter:**
+
+1. **It moved from `nan` to `node-addon-api`** — so it is **Node-API now, ABI-stable across Node and
+   Electron versions**, exactly like argon2. An Electron upgrade can no longer break it.
+2. Its install script became `node scripts/prebuild.js || node-gyp rebuild` — **prebuilt first,
+   compile only as a fallback.**
+
+And better than that: **the prebuilds ship inside the npm tarball.** `prebuilds/win32-x64/` arrives
+with `pty.node`, `conpty.node`, `conpty_console_list.node`, `conpty.dll`, `OpenConsole.exe`,
+`winpty.dll` and `winpty-agent.exe`. The install script only **checks** them — it printed
+`> Checking prebuilds...` and exited 0 — so **`--ignore-scripts` does not break it**, which is what
+made this work under the only install mode that is safe on this machine.
+
+**So the answer is an upgrade, not a swap.** Official package, MIT, no fork, nothing for master to
+decide.
+
+### 148.2 Verified in the runtime, not the convenient one
+
+Section 147's lesson was that the system Node is the wrong interpreter to ask. So the spawn was
+probed **inside Electron via `ELECTRON_RUN_AS_NODE=1`**:
+
+```json
+{ "ok": true, "node": "24.21.0", "electron": "44.7.0", "pid": 37616, "bytesRead": 218 }
+```
+
+**A real shell started and wrote 218 bytes back.** `bytesRead > 0` is the part that matters: a pty
+that spawns but is not connected would report a pid and never speak.
+
+### 148.3 A held-by-hand note became an assertion
+
+`verifyCjsLoadable.cjs` carried this note: *"a dependency that loads is not a dependency that WORKS.
+node-pty require()s cleanly and cannot spawn."* **That note is now four assertions** — the prebuild
+directory for this platform exists, it contains a pty binary, node-pty spawns inside Electron's Node,
+and the shell writes something back.
+
+**Because "it loads" passing while "it spawns" failed is precisely what hid a dead Terminal**, and
+`package.json`'s own note had reasoned from that clean `require()` to the conclusion that the gyp step
+was "ceremony" — true for argon2, wrong for node-pty. The note in `package.json` is corrected again,
+and now says what is actually true of both modules.
+
+**When there is no Electron binary the spawn row FAILS rather than skipping**, and says why: the
+Terminal was dead for an unknown length of time precisely because nothing asserted it could start.
+
+### 148.4 Verified
+
+`verifyCjsLoadable.cjs` **5 → 9 assertions.** Chain **4,988 across 43 entries, 0 failures**, exit 0.
+`npm run build` exit 0 with `verifyBundleGraph` 21/0. App launches: `[doctor] startup healthy`, **354
+IPC channels**, vector index ready, renderer loaded.
+
+Advisories **19** — the count moved from 13 because node-pty 1.1.0 and the sharp/Electron trees pull
+different transitive sets; the **one critical is still `tar`, reachable only through
+`electron-rebuild`**, which is useless without a compiler and is the next thing to drop or replace.
+
+**NOT VERIFIED: no terminal has been typed into through the UI.** The pty spawns, connects and reads
+back under Electron's Node — that is the hard part and it is proven. Whether `/terminal` renders a
+working shell, resizes correctly and survives a close is a renderer claim that needs master at the
+keyboard. **That is the thing to try.**
+
+**STILL OPEN:** `electron-rebuild` carries the last critical advisory and exists only to compile
+native modules — which this machine cannot do and, as of now, **does not need to**: both native
+dependencies are Node-API with shipped prebuilds. **Removing it is therefore a capability removal in
+name only, but it is still a removal, so it is master's decision** (Section 143's standing rule).
+Dropping it would close the last critical.
