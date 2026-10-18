@@ -87,11 +87,13 @@ async def fetch_ohlcv_yahoo(symbol: str, exchange: str = "NSE", bars: int = 250)
         result = data.get("chart", {}).get("result", [{}])[0]
         timestamps = result.get("timestamp", [])
         q = result.get("indicators", {}).get("quote", [{}])[0]
-        adj_close = result.get("indicators", {}).get("adjclose", [{}])[0].get("adjclose", q.get("close", []))
+        # Raw close, the same basis as open/high/low (Section 154): an adjusted close beside raw highs and lows
+        # puts the close outside its own bar.
+        raw_close = q.get("close", [])
 
         rows = []
         for i, ts in enumerate(timestamps):
-            close = adj_close[i] if i < len(adj_close) and adj_close[i] else (q.get("close", [])[i] if i < len(q.get("close", [])) else None)
+            close = raw_close[i] if i < len(raw_close) else None
             if close is None:
                 continue
             rows.append({

@@ -81,7 +81,7 @@
     "verify:evolve": "node scripts/verifyEvolve.mjs",
     "verify:datasets": "node scripts/verifyDatasets.cjs",
     "verify:datasets-ui": "node scripts/verifyDatasetsUi.mjs",
-    "verify:datasets-py": "cd ai_backend && python -m tests.test_datasets && python -m tests.test_store_persist",
+    "verify:datasets-py": "cd ai_backend && python -m tests.test_datasets && python -m tests.test_store_persist && python -m tests.test_ohlc_integrity",
     "verify:broker-accounts": "node scripts/verifyBrokerAccounts.cjs",
     "verify:broker-accounts-ui": "node scripts/verifyBrokerAccountsUi.mjs",
     "verify:covenant": "node scripts/verifyInvariants.cjs && node scripts/verifyLoyaltyTripwire.cjs",

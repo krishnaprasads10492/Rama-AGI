@@ -230,7 +230,10 @@ def union_frames(existing: Optional[pd.DataFrame], incoming: Optional[pd.DataFra
     before = 0 if existing is None else len(existing)
 
     combined = inc if existing is None else pd.concat([existing, inc], ignore_index=True)
-    combined = combined.dropna(subset=required).sort_values("date")
+    # STABLE, because the next steps keep the LAST row per date and that is only the newer one if equal dates
+    # stay in arrival order. The default sort is not stable, so a re-fetch could silently lose to the stored row
+    # (found in Section 154: a rebuilt series kept 207 of its old impossible bars).
+    combined = combined.dropna(subset=required).sort_values("date", kind="stable")
 
     if combine:
         # FIELD-LEVEL merge: the newest NON-NULL value wins per column.
@@ -466,6 +469,29 @@ def clear_view_cache() -> None:
         _view_cache.clear()
 
 
+REPAIR_SHARE = 0.005          # a stored series with more than this share of impossible bars is rebuilt
+
+
+def ohlc_violations(df: Optional[pd.DataFrame]) -> int:
+    """
+    How many bars are impossible: the high below the open or close, the low above them, or a non-positive
+    price. A bar like that is not a quirk of the market, it is two price bases mixed in one row (Section 154).
+    """
+    if df is None or len(df) == 0:
+        return 0
+    o, h, l, c = (pd.to_numeric(df[k], errors="coerce") for k in ("open", "high", "low", "close"))
+    tol = 1e-6
+    top = pd.concat([o, c], axis=1).max(axis=1)
+    bottom = pd.concat([o, c], axis=1).min(axis=1)
+    bad = (h < top * (1 - tol)) | (l > bottom * (1 + tol)) | (h < l) | (c <= 0) | (o <= 0) | (h <= 0) | (l <= 0)
+    return int(bad.fillna(False).sum())
+
+
+def needs_repair(df: Optional[pd.DataFrame]) -> bool:
+    """Is enough of a stored series impossible that topping it up cannot fix it?"""
+    return df is not None and len(df) > 0 and ohlc_violations(df) / len(df) > REPAIR_SHARE
+
+
 def sync(symbol: str, exchange: str = "NSE", interval: str = "1d",
          years: int = None, force: bool = False,
          persist: bool = True) -> tuple[Optional[pd.DataFrame], dict]:
@@ -495,12 +521,16 @@ def sync(symbol: str, exchange: str = "NSE", interval: str = "1d",
         "persisted": bool(persist), "unsaved": False,
     }
 
-    need = force or stored is None or is_stale(symbol, exchange, interval)
+    # A series written while close was dividend-adjusted and the rest was not (Section 154) is rebuilt in full, not
+    # topped up: the fresh fetch overwrites every overlapping date, so one pass restores a consistent basis.
+    repair = needs_repair(stored)
+    info["repaired"] = bool(repair)
+    need = force or repair or stored is None or is_stale(symbol, exchange, interval)
     if not need:
         info["reason"] = "store is current"
         return stored, info
 
-    want_years = years or (30 if stored is None else 1)
+    want_years = years or (30 if (stored is None or repair) else 1)
 
     if not persist:
         return _sync_view(symbol, exchange, interval, want_years, force, stored, info, providers)

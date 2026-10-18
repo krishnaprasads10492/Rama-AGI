@@ -386,22 +386,36 @@ def _fetch_yahoo(symbol, exchange, years, _key, interval="1d"):
     if not stamps:
         return None
 
-    quote = ((result.get("indicators") or {}).get("quote") or [{}])[0] or {}
-    adj   = (((result.get("indicators") or {}).get("adjclose") or [{}])[0] or {}).get("adjclose") or []
+    rows = chart_rows(result, intraday=iv in INTRADAY_RANGE)
+    return pd.DataFrame(rows) if rows else None
+
+
+def chart_rows(result: dict, intraday: bool) -> list:
+    """
+    Bars from one Yahoo chart result, with open, high, low and close ALL ON THE SAME BASIS (Section 154).
+
+    This used `adjclose or close` for the close while open, high and low stayed raw. Adjusted for
+    dividends, the close then fell OUTSIDE its own bar's range on 93% of RELIANCE's history, and a
+    strategy judged on those bars changed its verdict. The raw (split-adjusted) quote is used for all four.
+    The cost is that dividends are not reflected, which understates a buy-and-hold return: the
+    conservative direction. It also means a later dividend never rewrites old rows, so a top-up that only
+    refetches the last year cannot leave a seam against what is stored.
+    """
+    stamps = (result or {}).get("timestamp") or []
+    quote = (((result or {}).get("indicators") or {}).get("quote") or [{}])[0] or {}
 
     def at(seq, i):
         return seq[i] if i < len(seq) else None
 
     rows = []
     for i, ts in enumerate(stamps):
-        close = at(adj, i) or at(quote.get("close") or [], i)
+        close = at(quote.get("close") or [], i)
         if close is None:
             continue
         rows.append({
             # `.date()` on an intraday bar throws away the time and every bar in a session
             # collapses to one timestamp — the same destruction Section 73 fixed in the store.
-            "date":   (_dt.datetime.utcfromtimestamp(int(ts))
-                       if iv in INTRADAY_RANGE
+            "date":   (_dt.datetime.utcfromtimestamp(int(ts)) if intraday
                        else _dt.datetime.utcfromtimestamp(int(ts)).date()),
             "open":   at(quote.get("open")   or [], i),
             "high":   at(quote.get("high")   or [], i),
@@ -409,7 +423,7 @@ def _fetch_yahoo(symbol, exchange, years, _key, interval="1d"):
             "close":  close,
             "volume": at(quote.get("volume") or [], i) or 0,
         })
-    return pd.DataFrame(rows) if rows else None
+    return rows
 
 
 # ── FREE: NSE Bhavcopy archive (authentic, includes derivatives) ──────────────
