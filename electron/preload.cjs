@@ -816,6 +816,13 @@ const RAMA_API = {
   // that could turn a documentation page into a credential pointed somewhere new.
   // Broker accounts and their whitelisted IPs (Section 152). No `user` is sent: main uses the account behind
   // the window. The secret goes in through `save` and is never returned by any member.
+  // Make the StockMind engine runnable on this machine (Section 154). No `user` is sent: main uses the account
+  // behind the window. `run` and `installPython` only start the work; `status` reports it.
+  engineSetup: {
+    status:        () => ipcRenderer.invoke('engineSetup:status'),
+    run:           () => ipcRenderer.invoke('engineSetup:run'),
+    installPython: () => ipcRenderer.invoke('engineSetup:install-python'),
+  },
   brokerAccounts: {
     list:               ()     => ipcRenderer.invoke('brokerAccounts:list'),
     save:               (acct) => ipcRenderer.invoke('brokerAccounts:save', acct),

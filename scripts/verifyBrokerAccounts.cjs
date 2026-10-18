@@ -27,6 +27,9 @@ function check(label, ok, detail) {
   if (ok) { pass += 1; console.warn(`  PASS  ${label}`); } else { fail += 1; console.warn(`  FAIL  ${label}${detail ? ` - ${detail}` : ''}`); }
 }
 const section = (t) => console.warn(`\n--- ${t} ---`);
+let finished = false;
+// A promise that never settles lets Node exit with code 0 and no summary, which a chain would read as a pass.
+process.on('exit', () => { if (!finished) { console.warn('  FAIL  the suite did not reach its summary (something never settled)'); process.exitCode = 1; } });
 
 const ba = require(path.join(ROOT, 'electron/lib/brokerAccounts.cjs'));
 const egress = require(path.join(ROOT, 'electron/lib/egressIp.cjs'));
@@ -316,5 +319,6 @@ const leaks = (v, s = SECRET) => JSON.stringify(v).includes(s) || JSON.stringify
   principalBinding.useAuth(null);
   principalBinding.reset();
   console.warn(`\n  ${pass} passed, ${fail} failed`);
+  finished = true;
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -52,6 +52,7 @@ const browserIPC   = safeRequire('./ipc/browserEngine.cjs',     'Browser engine'
 const vaultIPC     = safeRequire('./ipc/credentialVault.cjs',   'Credential vault');
 const brokersIPC   = safeRequire('./ipc/brokers.cjs',           'Broker connectors');
 const brokerAccountsIPC = safeRequire('./ipc/brokerAccounts.cjs', 'Broker accounts');
+const engineSetupIPC = safeRequire('./ipc/engineSetup.cjs', 'Engine setup');
 const modelIPC     = safeRequire('./ipc/modelRouter.cjs',       'Model router');
 const agentIPC         = safeRequire('./ipc/agentOrchestrator.cjs',    'Agent orchestrator');
 const intelligenceIPC  = safeRequire('./ipc/intelligenceEngine.cjs',   'Intelligence engine');
@@ -1837,6 +1838,7 @@ app.whenReady().then(async () => {
     // declarations — registering them earlier would work, but the order says what depends on what.
     ['Broker connectors',     () => brokersIPC.register(ipcRec)],
   ['Broker accounts',       () => brokerAccountsIPC.register(ipcRec)],
+  ['Engine setup',          () => engineSetupIPC.register(ipcRec)],
     ['Model router',          () => modelIPC.register(ipcRec)],
     ['Agent orchestrator',    () => agentIPC.register(ipcRec)],
     ['Intelligence engine',   () => intelligenceIPC.register(ipcRec)],

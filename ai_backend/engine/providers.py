@@ -80,11 +80,22 @@ for _rama, _yahoo in YAHOO_SYMBOLS.items():
     YAHOO_TO_RAMA.setdefault(_yahoo, _rama)
 
 
+# A hyphen is part of a Yahoo ticker for a CURRENCY PAIR (BTC-USD), and part of the NAME for some NSE stocks
+# (BAJAJ-AUTO, MAHINDRA-CIE). Treating every hyphen as "already a Yahoo ticker" sent BAJAJ-AUTO to Yahoo without
+# its .NS suffix, which is a 404 (Section 154). Only a hyphen followed by a currency code is a pair.
+_PAIR_QUOTES = {"USD", "USDT", "USDC", "EUR", "GBP", "JPY", "INR", "AUD", "CAD", "CHF", "BTC", "ETH"}
+
+
+def _is_pair(s: str) -> bool:
+    base, _, quote = s.rpartition("-")
+    return bool(base) and quote in _PAIR_QUOTES
+
+
 def to_yahoo_symbol(symbol: str, exchange: str = "NSE") -> str:
     s = (symbol or "").upper().strip()
     if s in YAHOO_SYMBOLS:
         return YAHOO_SYMBOLS[s]
-    if s.startswith("^") or "=" in s or "-" in s:
+    if s.startswith("^") or "=" in s or _is_pair(s):
         return s                                    # already a Yahoo ticker
     # An already-suffixed foreign ticker passes through. Without this branch a search result from
     # any market other than India or the US became unfetchable.

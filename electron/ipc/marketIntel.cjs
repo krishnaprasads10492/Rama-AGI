@@ -57,12 +57,18 @@ async function ensureBackendRunning() {
 
   // Poll /health — covers both "just spawned" and "already running but not
   // yet answering" (e.g. still importing the ensemble models).
-  const deadline = Date.now() + 8000;
+  // 30 s, not 8: a warm start measured 4.5-5 s and the first import after an install 14 s, because the engine
+  // imports scikit-learn, lightgbm and xgboost before it can answer (Section 154). The wait ends early once the
+  // process is gone, since polling a port that nothing will ever listen on only delays the real diagnosis.
+  const startedAt = Date.now();
+  const deadline = startedAt + 30000;
   let lastError = 'Backend did not respond to /health';
   while (Date.now() < deadline) {
     const res = await net.getJson(`${BASE_URL}/health`, { timeout: 1500, retries: 0 });
     if (!res.error) return { ok: true };
     lastError = res.error;
+    const live = await aiProcess.getRunningStatus?.();
+    if (live && live.python && live.python.running === false && Date.now() - startedAt > 1500) break;
     await net.delay(400);
   }
   /**

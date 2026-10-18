@@ -470,6 +470,39 @@ function diagnose() {
     }
   }
 
+  // ── The StockMind engine's Python (Section 154) ─────────────────────────────
+  // Nothing here used to look at Python at all, so a machine whose only interpreter was 3.14 (for which the
+  // pinned numpy and pandas publish no wheels) diagnosed clean and then failed every chart load.
+  try {
+    const eb = require('./electron/lib/engineBootstrap.cjs');
+    const appData = process.env.APPDATA || '';
+    const exe = (d) => (process.platform === 'win32' ? path.join(d, 'Scripts', 'python.exe') : path.join(d, 'bin', 'python'));
+    const venv = [process.env.RAMA_PYTHON, ...(appData ? [path.join(appData, 'rama-agi', 'python-env'), path.join(appData, 'Rama AGI', 'python-env')] : []), path.join(ROOT, '.venv-stockmind')]
+      .filter(Boolean).map((p) => (/python(\.exe)?$/i.test(p) ? p : exe(p))).find((p) => fs.existsSync(p));
+    if (venv) {
+      const probe = tryRun(`"${venv}" ${eb.probeArgs().map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')}`);
+      add('StockMind engine', probe.ok, probe.ok ? 'environment imports every package' : 'environment found, a package does not import');
+      if (!probe.ok) defects.push({ id: 'engine-env-broken', severity: 'warn', detail: `the engine environment at ${venv} cannot import its packages`, fix: 'In the app: StockMind > ENGINE > Set up the engine' });
+    } else {
+      const seen = [];
+      let usable = null;
+      for (const c of eb.candidatesFor(process.platform, process.env)) {
+        if (c.isPath && !fs.existsSync(c.command)) continue;
+        const r = tryRun(`${/\s/.test(c.command) ? `"${c.command}"` : c.command} ${c.args.join(' ')} --version`);
+        const v = r.ok ? eb.parseVersion(r.out) : null;
+        if (!v) continue;
+        seen.push(`${c.label} ${v[0]}.${v[1]}`);
+        if (eb.isSupported(v)) { usable = `${v[0]}.${v[1]}`; break; }
+      }
+      add('StockMind engine', false, usable ? `Python ${usable} found, engine environment not built yet` : (seen.length ? `no Python 3.10 to 3.12 (found ${seen.join(', ')})` : 'no Python found'));
+      defects.push({
+        id: 'engine-env-missing', severity: 'warn',
+        detail: usable ? 'the StockMind engine environment has not been built' : 'StockMind cannot run: no Python 3.10 to 3.12 on this machine',
+        fix: usable ? 'In the app: StockMind > ENGINE > Set up the engine' : 'In the app: StockMind > ENGINE (it can install Python 3.12 on Windows), or install Python 3.12 yourself',
+      });
+    }
+  } catch { /* the doctor must never fail because of this check */ }
+
   // ── Ports ───────────────────────────────────────────────────────────────────
   const ports = isDev ? [SERVER_PORT, VITE_PORT] : [SERVER_PORT];
   for (const p of ports) {

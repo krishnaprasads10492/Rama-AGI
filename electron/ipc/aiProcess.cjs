@@ -141,10 +141,15 @@ async function startPythonBackend() {
   resolvedInterpreter = python;
   resolvedBackendDir = backendPath;
 
+  const engineEnv = require('../lib/engineEnv.cjs');
+  let userDataDir = null;
+  try { userDataDir = app.getPath('userData'); } catch { /* before ready */ }
+  const prepared = engineEnv.build(process.env, { isPackaged: app.isPackaged, userData: userDataDir });
+  if (prepared.relocated) engineEnv.migrate(backendPath, prepared);
   const child = spawn(python, ['-u', mainScript], {
     cwd:   backendPath,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env:   { ...process.env },
+    env:   prepared.env,
   });
 
   // WHY THIS EXISTS: `spawn` does not throw synchronously when the interpreter is
@@ -160,9 +165,9 @@ async function startPythonBackend() {
     const hint = /ENOENT/.test(err.message)
       ? (configured
         ? `RAMA_PYTHON is set to "${configured}" but that interpreter could not be started.`
-        : 'No Python found (tried "' + python + '"). Run Rama.bat option 3, which creates the '
-          + 'engine environment and installs its packages. To do it by hand: install Python 3.10 '
-          + 'to 3.12, then python -m pip install -r ai_backend/requirements.txt.')
+        : 'No Python found (tried "' + python + '"). Open StockMind > ENGINE > Set up the engine, which '
+          + 'finds Python 3.10 to 3.12, builds the engine environment and installs its packages. On a '
+          + 'source checkout, Rama.bat option 3 does the same.')
       : err.message;
     console.error(`[ai_backend] could not start: ${hint}`);
     try {
@@ -286,7 +291,7 @@ function diagnoseFailure({ stderr = [], exit = null, running = false, interprete
   if (missing) {
     return {
       reason: `the engine's Python packages are not installed — "${missing[1]}" is missing`,
-      remedy: 'Run Rama.bat option 3, which creates the engine environment and installs them. '
+      remedy: 'Open StockMind > ENGINE > Set up the engine (on a source checkout, Rama.bat option 3), which creates the engine environment and installs them. '
         + 'By hand: python -m pip install -r ai_backend/requirements.txt',
     };
   }
@@ -416,7 +421,7 @@ async function startPythonBackendPublic() {
 }
 
 module.exports = {
-  register, stopAll, getRunningStatus,
+  register, stopAll, getRunningStatus, resolveBackendPath,
   startPythonBackendPublic, stopPythonBackendPublic,
   // Exported so the Section 99 diagnosis is tested rather than asserted in a comment.
   diagnoseFailure,

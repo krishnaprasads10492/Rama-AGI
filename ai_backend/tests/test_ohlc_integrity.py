@@ -170,5 +170,16 @@ try:
 finally:
     providers.fetch_history = real_fetch
 
+print("\n--- symbols: a hyphen is a currency pair only when a currency follows it (Section 154) ---")
+t = providers.to_yahoo_symbol
+check("BAJAJ-AUTO is an NSE stock and gets its suffix", t("BAJAJ-AUTO", "NSE") == "BAJAJ-AUTO.NS")
+check("and on BSE", t("BAJAJ-AUTO", "BSE") == "BAJAJ-AUTO.BO")
+check("MAHINDRA-CIE likewise", t("MAHINDRA-CIE") == "MAHINDRA-CIE.NS")
+check("BTC-USD and ETH-USD still pass through", t("BTC-USD") == "BTC-USD" and t("ETH-USD") == "ETH-USD")
+check("a currency future still passes through", t("EURINR=X") == "EURINR=X")
+check("an index is unchanged", t("NIFTY50") == "^NSEI")
+check("the round trip holds for a hyphenated stock", providers.to_yahoo_symbol(*providers.from_yahoo_symbol("BAJAJ-AUTO.NS")) == "BAJAJ-AUTO.NS")
+check("a bare hyphen or empty base is not a pair", providers._is_pair("-USD") is False and providers._is_pair("USD") is False and providers._is_pair("") is False)
+
 print(f"\n  {_pass} passed, {_fail} failed")
 sys.exit(1 if _fail else 0)

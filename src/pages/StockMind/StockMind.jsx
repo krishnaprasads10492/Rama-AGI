@@ -7,6 +7,7 @@ import PanelBoard from '@components/PanelBoard.jsx';
 import SymbolSearch from './SymbolSearch.jsx';
 import StrategyBuilder from './StrategyBuilder.jsx';
 import EvolvePanel from './EvolvePanel.jsx';
+import EngineSetup from './EngineSetup.jsx';
 import DatasetPanel, { SnapshotBanner } from './DatasetPanel.jsx';
 import { createSequence, isUnsaved, unsavedBadge, LABELS, TIPS } from './datasetModel.js';
 import HelpPanel from './HelpPanel.jsx';
@@ -1482,6 +1483,8 @@ override where an unlisted ticker should be looked up.">
         )}
 
         {/* Engine state. Says plainly whether any model has earned the right to advise. */}
+        {tab === 'engine' && <EngineSetup canConfig={canConfig} />}
+
         {tab === 'engine' && (
           <div className="hud-card" style={{ padding: '16px' }}>
             <div className="section-label" style={{ marginBottom: '10px' }}>ENGINE</div>
