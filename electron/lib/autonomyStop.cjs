@@ -12,13 +12,12 @@
  *
  *   isStopped()  governs NEW autonomous action. FAIL-SAFE: absence of configuration means STOPPED.
  *                It has a real consumer: `autonomyGate.fileProposal`, the one chokepoint in this slice.
- *   isHalted()   is the predicate the PRE-EXISTING dispatchers WILL consult. **NOTHING CALLS IT YET** —
- *                grepped across `electron/`, `src/` and `scripts/`, every reference is in this file or
- *                in the two suites. It is true only on an EXPLICIT engage (or the env variable), and
- *                absence means "exactly the build master already has". `PRE_EXISTING[]` records it as
- *                `governedByWhenBuilt` for that reason: an intention, declared, not a mechanism in
- *                place. Tearing those timers down is deferred for the reason spelled out below, and
- *                `engage().teardown.performed === false` and `statusText()` both say so in words.
+ *   isHalted()   is the predicate the PRE-EXISTING dispatchers consult (Section 150.2). It is true only
+ *                on an EXPLICIT engage (or the env variable), and absence means "exactly the build
+ *                master already has". Each of the four named in `PRE_EXISTING[]` returns early from its
+ *                SCHEDULED tick while it is true. `PRE_EXISTING[].haltedByEngage` is `true` for each,
+ *                and the suite asserts that a halted tick does no work and that every one of them
+ *                resumes when the halt is lifted.
  *
  * For autonomy that does not exist yet the safe default is *off*, and absence must mean *off* —
  * nothing is lost because nothing was there. For work that ALREADY RUNS on master's machine the safe
@@ -56,14 +55,9 @@
  * because `proposals.cjs` is protected. `scripts/verifyAutonomyStop.cjs` prints that residual on every
  * run. See the build note's "for master" list.
  *
- * DEFERRED IN THIS SLICE, NAMED SO THE COUNT CANNOT LIE
- *
- * `engage()` records the halt and performs NO teardown of the pre-existing timers. Reason: the resume
- * path is `lift()`, `lift()` requires `system.suspend-autonomy`, and that capability is not in
- * `shared/capabilities.json` (a protected file this slice does not touch) — so `capability.can()`
- * returns false for every tier including master. Tearing down master's shipped timers with no working
- * in-app resume would leave them dead until a restart. `PRE_EXISTING[].haltedByEngage` is therefore
- * `false`, declared per entry, and `statusText()` says so in words.
+ * HOW THE PRE-EXISTING TIMERS ARE HALTED (Section 150.2): not torn down. They keep firing and each returns
+ * early while `isHalted()`, so resuming needs no re-arm and no restart. On-demand IPC handlers are
+ * untouched: a stop on what Rāma does by itself is not a stop on what master asks for.
  */
 
 const fs   = require('fs');
@@ -193,39 +187,35 @@ const MASTER_DRIVEN_ENTRIES = Object.freeze([
 ]);
 
 /**
- * The four PRE-EXISTING dispatchers. They ship and they run today, so `isStopped()` must never govern
- * them — `isHalted()` is the predicate they will consult WHEN THE TEARDOWN IS BUILT, and nothing in
- * this slice tears them down or calls that predicate. Measured citations, kept true
- * by the suite: the symbol must still exist in the file (RED if it does not); a drifted line number is
- * printed as a residual rather than failing, because an unrelated edit elsewhere in those files is not
- * a loyalty defect.
+ * The four PRE-EXISTING dispatchers. They ship and run today, so `isStopped()` must never govern them;
+ * each consults `isHalted()` in its scheduled tick (Section 150.2). Citations are measured: the suite
+ * asserts the symbol still exists (RED if not); a drifted line number is a residual, not a failure.
  */
 const PRE_EXISTING = Object.freeze([
   Object.freeze({
-    module: 'electron/lib/refreshScheduler.cjs', fn: 'runNow', citedLine: 125,
+    module: 'electron/lib/refreshScheduler.cjs', fn: 'schedule', citedLine: 205,
     work: 'ollama-catalog, dependency-review and every other registered refresh task',
-    governedByWhenBuilt: 'isHalted', haltedByEngage: false,
-    why: 'one dispatcher covers every registered task; engage() does not call stop() in this slice '
-       + 'because lift() cannot succeed until master adds system.suspend-autonomy',
+    governedByWhenBuilt: 'isHalted', haltedByEngage: true,
+    why: 'the check is in the scheduled timer callback, NOT in runNow, so master\'s own refresh:run still '
+       + 'works while autonomy is halted; the next run is rescheduled as normal, so lifting needs no re-arm',
   }),
   Object.freeze({
     module: 'electron/ipc/metaCognition.cjs', fn: 'auditTimer', citedLine: 332,
     work: 'the 10-minute metacognition audit',
-    governedByWhenBuilt: 'isHalted', haltedByEngage: false,
-    why: 'the interval is armed inside register() and there is no exported re-arm, so a halt with no '
-       + 'working lift could not be undone without a restart',
+    governedByWhenBuilt: 'isHalted', haltedByEngage: true,
+    why: 'the interval keeps firing and returns early while halted, so no exported re-arm is needed',
   }),
   Object.freeze({
-    module: 'electron/ipc/selfCare.cjs', fn: 'runHealthSweep', citedLine: 200,
+    module: 'electron/ipc/selfCare.cjs', fn: 'runHealthSweep', citedLine: 203,
     work: 'the 120-second health sweep, including checkInstanceFailover',
-    governedByWhenBuilt: 'isHalted', haltedByEngage: false,
-    why: 'armed at TWO sites (345 and 396); replacing one would leave a live timer that an '
-       + 'interval-clearing assertion still passes — a green row over running work',
+    governedByWhenBuilt: 'isHalted', haltedByEngage: true,
+    why: 'armed at TWO sites, and both go through the same guarded wrapper; the on-demand selfcare:sweep '
+       + 'calls the sweep directly and is deliberately not halted',
   }),
   Object.freeze({
     module: 'electron/ipc/marketIntel.cjs', fn: 'tickResolveOutcomes', citedLine: 731,
     work: 'outcome resolution and news sync (tickSyncNews at 748; timers at 784-785)',
-    governedByWhenBuilt: 'isHalted', haltedByEngage: false,
+    governedByWhenBuilt: 'isHalted', haltedByEngage: true,
     why: 'master\'s on-demand StockMind calls arrive through IPC handlers and must stay untouched',
   }),
 ]);
@@ -253,20 +243,32 @@ const STOP_EXEMPT = Object.freeze([
 
 // Engaging
 
+/** What "halted" means for the pre-existing work, in one sentence, so every report says the same thing. */
+const HALT_HOW = 'the four background dispatchers skip their scheduled work while halted; nothing is '
+  + 'torn down, so lifting the halt resumes them without a restart. Your own requests still work.';
+
 /**
- * Engage the halt. No capability check and no `user`: a stop that can be refused is not a stop, and
- * gating it would make the one control an operator reaches for during an incident depend on the
- * subsystem being investigated.
- *
- * IT RECORDS BEFORE IT DESTROYS. The record is written FIRST, so a crash between the two steps leaves
- * a recorded reason and a still-present allow-file — inconsistent in the RECOVERABLE direction —
- * rather than a deleted file and no explanation of why.
- *
- * @param {string} reason  why — for a fatal revert this is the most important datum in the system
+ * Engage the halt. No capability check and no `user`: a stop that can be refused is not a stop. It records
+ * BEFORE it destroys, so a crash leaves a reason and a still-present allow-file (recoverable).
+ * @param {string} reason  why
  * @param {string} by      who or what engaged it
  */
 function engage(reason, by = 'unknown') {
   const why = String(reason || '').trim() || 'no reason given';
+
+  // Already halted: a second write would replace `priorAllow` (the only record of who allowed autonomy)
+  // with null. A stop any window can reach must not erase that by being pressed twice.
+  try {
+    const existing = JSON.parse(fs.readFileSync(stoppedRecordPath(), 'utf8'));
+    if (existing && typeof existing === 'object') {
+      return {
+        ok: true, recorded: false, alreadyHalted: true, revoked: false,
+        record: existing,
+        teardown: { performed: true, how: HALT_HOW },
+      };
+    }
+  } catch { /* no record yet: this is the first engage */ }
+
   let priorAllow = null;
   try { priorAllow = JSON.parse(fs.readFileSync(allowPath(), 'utf8')); } catch { priorAllow = null; }
 
@@ -286,70 +288,52 @@ function engage(reason, by = 'unknown') {
   return {
     ok: true, recorded: true, revoked,
     record,
-    teardown: { performed: false, reason: 'see PRE_EXISTING[].haltedByEngage — no working in-app lift yet' },
+    teardown: { performed: true, how: HALT_HOW },
   };
 }
 
 // Lifting — the only gated direction, and it degrades honestly
 
 /**
- * The ONLY writer of `allowed: true` (spec Section 132).
+ * The ONLY writer of `allowed: true` (spec Section 132): the explicit grant of NEW autonomous action.
+ * Refuses, in order: a string `user`, a `user` with no numeric tier, a user without
+ * `system.suspend-autonomy` (master only, Section 150.2), an empty note. Nothing calls it: undoing a stop
+ * is `resume()`, which grants nothing.
  *
- * Refuses, in order: a string `user` (a name is not an identity — `proposals.authorise`'s own words);
- * a `user` with no numeric tier; a user without `system.suspend-autonomy`; an empty note.
- *
- * `system.suspend-autonomy` is NOT in `shared/capabilities.json` — a protected file this slice does not
- * touch — and `capability.can()` returns false for an unknown capability for EVERY tier including
- * master. So until master adds the key this function cannot succeed for anyone, and the stop can only
- * be lifted by master writing the allow-file himself. That is the correct failure direction, it needs
- * no special-casing, and the refusal says exactly which key is missing rather than rendering a dead
- * button.
- *
- * ORDERING: the allow-file is written FIRST, the stopped-record removed SECOND, so a crash between
- * them leaves "allowed but still halted" — the recoverable direction.
- *
- * WHY THE CAPABILITY MODULE IS INJECTABLE, AND WHY THAT IS NOT A WEAKENING
- *
- * `system.suspend-autonomy` is absent from the matrix, so with the real module this function CANNOT
- * SUCCEED FOR ANYONE — which meant its success path, the only act in the system that writes
- * `allowed: true`, had no behavioural coverage at all: the note refusal, the contents of the file it
- * writes, the write-then-unlink ordering and the halt clearing were asserted by regex over this
- * function's own source text, and the first real execution would have been in production on the day
- * master added the key. So `{capability}` is injectable, in the same shape `upgradeApplier` uses for
- * `io`, and the suite runs the real thing.
- *
- * That adds no reach for anything. `isStopped()` reads a plain JSON file with no signature, so any
- * in-process caller that could pass a fake capability here could already write `allowed: true` to
- * `allowPath()` directly and skip this function entirely. The capability check is the gate on the
- * in-app control, not a containment boundary against code already running inside the main process —
- * what holds that line is the asserted ABSENCE of in-process callers, and the suite asserts no module
- * passes an override either.
+ * ORDERING: allow-file written FIRST, stopped-record removed SECOND, so a crash leaves "allowed but still
+ * halted", the recoverable direction. `{capability}` is injectable so the suite runs the real success
+ * path; that adds no reach, since `isStopped()` reads a plain file anything in-process could write.
  */
-function lift(user, note, { capability: injectedCapability = null } = {}) {
+function authoriseLift(user, note, injectedCapability) {
   if (typeof user === 'string') {
-    return { ok: false, error: `Lifting the stop requires an authenticated user — "${user}" is a label, not an identity` };
+    return { refusal: { ok: false, error: `Lifting the stop requires an authenticated user — "${user}" is a label, not an identity` } };
   }
   if (!user || typeof user.tier !== 'number') {
-    return { ok: false, error: 'Lifting the stop requires an authenticated user' };
+    return { refusal: { ok: false, error: 'Lifting the stop requires an authenticated user' } };
   }
   let capability = injectedCapability;
   if (!capability) {
     try { capability = require('./capability.cjs'); }
-    catch { return { ok: false, error: 'Lifting the stop requires the capability matrix, which could not be loaded' }; }
+    catch { return { refusal: { ok: false, error: 'Lifting the stop requires the capability matrix, which could not be loaded' } }; }
   }
 
   const denied = capability.deny(user, 'system.suspend-autonomy');
   if (denied) {
-    return {
+    return { refusal: {
       ok: false,
-      error: `${denied.error} — "system.suspend-autonomy" is not in shared/capabilities.json, so the `
-           + 'stop cannot be lifted in-app by anyone. Master lifts it by writing '
-           + `${allowPath()} himself. See docs/research/self-upgrade-build.md.`,
+      error: `${denied.error} — lifting the stop needs "system.suspend-autonomy", which only master holds.`,
       missingCapability: 'system.suspend-autonomy',
-    };
+    } };
   }
   const text = String(note || '').trim();
-  if (!text) return { ok: false, error: 'Lifting the stop requires a note saying why' };
+  if (!text) return { refusal: { ok: false, error: 'Lifting the stop requires a note saying why' } };
+  return { text };
+}
+
+function lift(user, note, { capability: injectedCapability = null } = {}) {
+  const gate = authoriseLift(user, note, injectedCapability);
+  if (gate.refusal) return gate.refusal;
+  const text = gate.text;
 
   const allow = {
     allowed: true,
@@ -367,6 +351,49 @@ function lift(user, note, { capability: injectedCapability = null } = {}) {
   try { fs.unlinkSync(stoppedRecordPath()); haltCleared = true; } catch { haltCleared = false; }
 
   return { ok: true, allow, haltCleared };
+}
+
+/**
+ * End a halt WITHOUT granting anything new (Section 150.2). `lift()` writes `allowed: true`, so using it
+ * to undo a stop on a default install would move Rāma from "new autonomy stopped" to "allowed". This
+ * clears the halt and restores the allow-file ONLY from `priorAllow` (saved by `engage()`), author and
+ * note intact; with none, it writes none. Same gate as `lift()` (`authoriseLift`). Restore first, remove
+ * the record second, so a crash leaves "allowed but still halted".
+ */
+function resume(user, note, { capability: injectedCapability = null } = {}) {
+  const gate = authoriseLift(user, note, injectedCapability);
+  if (gate.refusal) return gate.refusal;
+
+  let record = null;
+  try { record = JSON.parse(fs.readFileSync(stoppedRecordPath(), 'utf8')); } catch { record = null; }
+  if (!record) {
+    return { ok: false, error: 'Autonomy is not halted, so there is nothing to resume',
+      notHalted: true, env: envStop() ? `${ENV_KEY}=stop` : null };
+  }
+
+  let restored = null;
+  const prior = record.priorAllow;
+  if (prior && typeof prior === 'object' && prior.allowed === true) {
+    restored = {
+      ...prior,
+      resumedAfterHalt: { by: `${user.name || user.id || 'user'} (tier ${user.tier})`, at: new Date().toISOString(), note: gate.text },
+    };
+    try {
+      fs.mkdirSync(stateDir(), { recursive: true });
+      fs.writeFileSync(allowPath(), JSON.stringify(restored, null, 2), 'utf8');
+    } catch (err) {
+      return { ok: false, error: `could not restore the allow-file: ${err.message}` };
+    }
+  }
+
+  let haltCleared = false;
+  try { fs.unlinkSync(stoppedRecordPath()); haltCleared = true; } catch { haltCleared = false; }
+
+  return {
+    ok: true, haltCleared, restoredAllow: restored !== null, allow: restored,
+    // The environment variable is outside this module's reach: if it is set the halt is still in force.
+    stillHalted: isHalted(), env: envStop() ? `${ENV_KEY}=stop` : null,
+  };
 }
 
 // Reporting
@@ -455,12 +482,11 @@ function statusText() {
   const names = PRE_EXISTING.map(d => d.work).join('; ');
   const second = s.halted
     ? `Halted by an explicit stop${s.stoppedRecord.reason ? ` — ${s.stoppedRecord.reason}` : ''}. `
-      + `Still ARMED, because this build does not tear them down: ${names}. `
-      + `Undo the halt by deleting ${s.stoppedRecord.path}.`
+      + `These skip their scheduled work while it lasts: ${names}. ${HALT_HOW}`
     : `Still running on their own schedule, exactly as before: ${names}.`;
 
-  const third = 'Lifting the stop in-app needs the "system.suspend-autonomy" capability, which is not '
-    + 'in shared/capabilities.json, so only master writing the allow-file by hand can allow autonomy.';
+  const third = 'Resuming is master only: it needs the "system.suspend-autonomy" capability and a written '
+    + 'note, from a signed-in session.';
 
   const fourth = s.createFence.loaded
     ? `The create fence on proposals:create is in place (${s.createFence.module}).`
@@ -481,7 +507,7 @@ module.exports = {
   // declared coverage
   CHOKEPOINTS, DEFERRED_CHOKEPOINTS, MASTER_DRIVEN_ENTRIES, PRE_EXISTING, FUTURE_ENTRIES, STOP_EXEMPT,
   // acts
-  engage, lift,
+  engage, lift, resume,
   // reporting
   gateLoaded, status, statusText,
 };

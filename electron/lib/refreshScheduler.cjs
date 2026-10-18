@@ -202,9 +202,22 @@ function start({ setTimer = setTimeout, now = Date.now, random = Math.random } =
   return { ok: true, tasks: enabled.length, due: dueCount };
 }
 
+
+/**
+ * Is autonomy explicitly halted? Consulted at the top of a SCHEDULED tick (Section 150.2).
+ * If the stop module cannot be read the answer is "no": this is pre-existing work, and a stop that
+ * cannot load must not silently disable it (Section 132's posture for the work that already ships).
+ */
+function autonomyHalted() {
+  try { return require('./autonomyStop.cjs').isHalted() === true; } catch { return false; }
+}
+
 function schedule(name, delay, deps) {
   const handle = deps.setTimer(async () => {
-    await runNow(name, { now: deps.now() });
+    // HALTED: do nothing this time, and fall through to reschedule as usual, so lifting the halt needs no
+    // re-arm. The check is HERE and not in runNow: `refresh:run` is master asking, and a stop on what
+    // Rāma does by itself is not a stop on what he requests (Section 150.2).
+    if (!autonomyHalted()) await runNow(name, { now: deps.now() });
     const task = tasks.get(name);
     if (!task || !task.enabled || !running) return;
     const state = readState();

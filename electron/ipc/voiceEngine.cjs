@@ -137,18 +137,56 @@ function detectLocal() {
 function rescanLocal() { _localCache = undefined; return detectLocal(); }
 
 // ─── Cloud availability ───────────────────────────────────────────────────────
+//
+// AUDIO STAYS ON THIS MACHINE UNLESS MASTER SAYS OTHERWISE (Section 150.3, D8). A key in the vault used to
+// be enough: adding OPENAI_API_KEY for some other purpose silently made every voice clip go to
+// api.openai.com. Cloud transcription now needs ALL of
+//   1. an OPENAI_API_KEY in the vault,
+//   2. master's explicit opt-in, stored in the encrypted `config` domain (so it is inside the I14 re-key),
+//      default OFF, changeable only by master, and
+//   3. a signed-in session holding `chat.send` (checked in the IPC handler).
+// Audio cannot be classified before it is transcribed, so there is no content gate to apply: the decision
+// is about the whole path, which is why it is explicit and off by default.
+const OPT_IN_DOMAIN = 'config';
+const OPT_IN_KEY = 'voiceCloudSttOptIn';
+
+/** Has master opted in? Strictly `true`: anything else, including a locked store, means no. */
+function cloudOptIn() {
+  try { return require('../dataStore.cjs').get(OPT_IN_DOMAIN, OPT_IN_KEY) === true; }
+  catch { return false; }
+}
+
+/** Record the opt-in. Saved at once: a consent that lives only in memory is a consent that can vanish. */
+function setCloudOptIn(enabled) {
+  const ds = require('../dataStore.cjs');
+  ds.set(OPT_IN_DOMAIN, OPT_IN_KEY, enabled === true);
+  if (typeof ds.saveDomain === 'function') ds.saveDomain(OPT_IN_DOMAIN);
+  return enabled === true;
+}
+
 function detectCloud() {
+  const optedIn = cloudOptIn();
   try {
     const { getCredential } = require('./credentialVault.cjs');
     const key = getCredential('OPENAI_API_KEY');
-    if (key) return { available: true, provider: 'openai', model: 'whisper-1' };
+    if (key && optedIn) {
+      return { available: true, provider: 'openai', model: 'whisper-1', keyPresent: true, optedIn: true,
+               leavesMachine: true };
+    }
+    if (key) {
+      return {
+        available: false, keyPresent: true, optedIn: false,
+        reason: 'Cloud transcription is possible (a key is in the vault) but master has not opted in, so audio stays on this machine',
+        hint: 'To allow it, master opts in under Settings, Security, Cloud speech-to-text. Local Whisper needs no opt-in',
+      };
+    }
     return {
-      available: false,
+      available: false, keyPresent: false, optedIn,
       reason: 'No OpenAI key in the credential vault',
-      hint: 'Add OPENAI_API_KEY on the Models page to enable cloud transcription',
+      hint: 'Cloud transcription needs OPENAI_API_KEY on the Models page AND master\'s opt-in under Settings, Security',
     };
   } catch (err) {
-    return { available: false, reason: `Vault unavailable: ${err.message}` };
+    return { available: false, keyPresent: false, optedIn, reason: `Vault unavailable: ${err.message}` };
   }
 }
 
@@ -318,8 +356,9 @@ async function transcribe(clip = {}) {
     const cloud = detectCloud();
     if (cloud.available) {
       const res = await transcribeCloud(clipPath, mimeType, language);
-      if (res.ok) return res;
-      return res;
+      // REPORTED WHETHER OR NOT IT SUCCEEDED: the clip left the machine the moment the request was made.
+      // A failure that read as "nothing was sent" would be a lie about master's voice.
+      return { ...res, leftMachine: true, provider: 'openai' };
     }
 
     return {
@@ -337,14 +376,45 @@ async function transcribe(clip = {}) {
 
 // ─── IPC ──────────────────────────────────────────────────────────────────────
 function register(ipcMain) {
+  const principalBinding = require('../lib/principalBinding.cjs');
+  const capability = require('../lib/capability.cjs');
+
   ipcMain.handle('voice:capabilities', async () => ({ ok: true, data: capabilities() }));
+
+  // Whether cloud transcription is allowed, and why or why not. Any signed-in session may ask.
+  ipcMain.handle('voice:cloud-optin', async (e) => {
+    if (!principalBinding.getPrincipal(e)) return { ok: false, error: 'Sign in first' };
+    const c = detectCloud();
+    return { ok: true, data: { optedIn: cloudOptIn(), keyPresent: c.keyPresent === true, available: c.available === true } };
+  });
+
+  // MASTER ONLY, from the account main validated for this window, never from a user the caller sent.
+  ipcMain.handle('voice:set-cloud-optin', async (e, opts) => {
+    const principal = principalBinding.getPrincipal(e);
+    if (!capability.isMaster(principal)) {
+      return { ok: false, error: 'Only master can allow audio to leave this machine' };
+    }
+    try {
+      const optedIn = setCloudOptIn(opts && opts.enabled === true);
+      rescanLocal();
+      const c = detectCloud();
+      return { ok: true, data: { optedIn, keyPresent: c.keyPresent === true, available: c.available === true } };
+    } catch (err) {
+      return { ok: false, error: `could not record the choice: ${err.message}` };
+    }
+  });
 
   ipcMain.handle('voice:rescan', async () => {
     rescanLocal();
     return { ok: true, data: capabilities() };
   });
 
-  ipcMain.handle('voice:transcribe', async (_e, clip) => {
+  ipcMain.handle('voice:transcribe', async (e, clip) => {
+    // A SESSION IS REQUIRED for any transcription, local or cloud (Section 150.3). This channel had no
+    // check at all. `chat.send` is the weakest declared chat capability: what is being gated is "may this
+    // account talk to Rāma", and voice is another way of doing that.
+    const denied = capability.deny(principalBinding.getPrincipal(e), 'chat.send');
+    if (denied) return denied;
     const res = await transcribe(clip || {});
 
     // Feed the experiential dataset so Rāma learns which backend serves it best
@@ -363,5 +433,5 @@ function register(ipcMain) {
 
 module.exports = {
   register, capabilities, transcribe,
-  detectLocal, detectCloud, rescanLocal,
+  detectLocal, detectCloud, rescanLocal, cloudOptIn, setCloudOptIn,
 };

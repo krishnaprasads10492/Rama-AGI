@@ -200,7 +200,7 @@ async function postPath(path, body, { timeout = 120000 } = {}) {
 const sym = (s) => encodeURIComponent(String(s || '').trim().toUpperCase());
 
 async function ohlcv({ symbol, exchange = 'NSE', interval = '1d', limit = 240, sync = false,
-  fromDate = null, toDate = null } = {}) {
+  fromDate = null, toDate = null, persist = true } = {}) {
   // Dates are optional and validated by shape here rather than trusted: they are interpolated into a
   // query string, and a malformed value should reach the engine as nothing rather than as garbage
   // (Section 105).
@@ -212,7 +212,11 @@ async function ohlcv({ symbol, exchange = 'NSE', interval = '1d', limit = 240, s
     + (f ? `&fromDate=${f}` : '')
     + (t ? `&toDate=${t}` : '')
     // A sync reaches out to the provider chain, so it needs a longer budget than a read.
-    + `&sync=${sync ? 'true' : 'false'}`, { timeout: sync ? 90000 : 20000 });
+    + `&sync=${sync ? 'true' : 'false'}`
+    // Only the boolean false asks for a view-only fetch (Section 153). Anything else, "false" the
+    // string included, leaves the parameter off so the engine keeps its default and every existing
+    // caller behaves as before.
+    + (persist === false ? '&persist=false' : ''), { timeout: sync ? 90000 : 20000 });
 }
 
 async function inventory() {
@@ -267,6 +271,68 @@ async function strategyTemplate({ id, symbol, exchange = 'NSE', interval = '1d',
   return getPath(`/strategy/library/${encodeURIComponent(id)}?${q}`);
 }
 
+// ─── The strategy book (Section 151) ─────────────────────────────────────────────
+//
+// Evolve, keep, refresh, retire, restore and remove change CPU time or stored state, so they sit on
+// `stockmind.request`. Listing the book and reading what each stored rule says now are reads on
+// `stockmind.view`. Nothing here places an order, and nothing runs on a timer: the renderer calls these
+// when master opens the tab or presses a button (Section 151.5).
+//
+// Only the fields the backend route declares are forwarded. A request that carries anything else is not
+// passed through, so the channel cannot be used to reach a route parameter it was never meant to set.
+
+const EVOLVE_FIELDS = ['symbol', 'exchange', 'interval', 'capital', 'riskPct', 'instrument', 'lotSize',
+  'side', 'horizon', 'explore', 'templates', 'folds'];
+
+function pickFields(src, fields) {
+  const out = {};
+  for (const k of fields) {
+    if (src && src[k] !== undefined && src[k] !== null && src[k] !== '') out[k] = src[k];
+  }
+  return out;
+}
+
+async function strategyEvolve(body = {}) {
+  const b = pickFields(body, EVOLVE_FIELDS);
+  if (!b.symbol) return { ok: false, reason: 'a symbol is required to evolve strategies for' };
+  // Judging nine templates over a deep series, each across several folds, is minutes of work.
+  return postPath('/strategy/evolve', b, { timeout: 1800000 });
+}
+
+async function bookKeep(body = {}) {
+  if (!body.runId) return { ok: false, reason: 'a run id is required: keep rows of an evolve run' };
+  return postPath('/strategy/book/keep', {
+    runId: String(body.runId),
+    ...(Array.isArray(body.ids) ? { ids: body.ids.map(String) } : {}),
+    demonstrated: body.demonstrated === true,
+  }, { timeout: 30000 });
+}
+
+async function bookList({ includeRetired = false } = {}) {
+  return getPath(`/strategy/book?includeRetired=${includeRetired === true ? 'true' : 'false'}`);
+}
+
+async function bookRefresh(body = {}) {
+  return postPath('/strategy/book/refresh', {
+    ...(Array.isArray(body.ids) ? { ids: body.ids.map(String) } : {}),
+    onlyStale: body.onlyStale !== false,
+  }, { timeout: 600000 });
+}
+
+async function bookSignals() {
+  return getPath('/strategy/book/signals', { timeout: 120000 });
+}
+
+function bookAct(path) {
+  return async (body = {}) => {
+    if (!body.id) return { ok: false, reason: 'a strategy id is required' };
+    return postPath(path, { id: String(body.id), reason: String(body.reason || '').slice(0, 300) }, { timeout: 30000 });
+  };
+}
+const bookRetire = bookAct('/strategy/book/retire');
+const bookRestore = bookAct('/strategy/book/restore');
+const bookRemove = bookAct('/strategy/book/remove');
+
 async function costsRegistry() {
   return getPath('/costs/registry');
 }
@@ -290,6 +356,52 @@ async function costsWatch({ items = null, query = undefined, fetch = false } = {
 async function costsQuote({ instrument, entryPrice, exitPrice = null, quantity,
                             side = 'long', trades = 1 } = {}) {
   return postPath('/costs/quote', { instrument, entryPrice, exitPrice, quantity, side, trades });
+}
+
+// Named candle snapshots (Section 153). Listing and loading are reads on `stockmind.view`; saving and
+// deleting change stored state, so they sit on `stockmind.request`. The window never sends bars: the
+// engine rebuilds the snapshot from the same data the chart shows, so only parameters travel here.
+// The name grammar is checked in this process as well as in the engine, so a malformed name is refused
+// before it is placed in a URL path or a request body.
+const DATASET_NAME = /^[A-Z0-9_-]{1,20}\.[A-Z0-9_-]{1,12}\.[a-z0-9_-]{1,8}\.[0-9]{8}\.[A-Za-z0-9_-]{1,40}$/;
+const DATASET_LABEL = /^[A-Za-z0-9_-]{1,40}$/;
+const DATASET_SAVE_FIELDS = ['symbol', 'exchange', 'interval', 'label', 'name', 'fromDate', 'toDate', 'limit', 'note'];
+
+async function datasetList() {
+  return getPath('/dataset/list');
+}
+
+async function datasetLoad({ name } = {}) {
+  if (typeof name !== 'string' || !DATASET_NAME.test(name)) return { ok: false, reason: 'that is not a dataset name' };
+  return getPath(`/dataset/${encodeURIComponent(name)}`, { timeout: 30000 });
+}
+
+async function datasetSave(body = {}) {
+  const b = pickFields(body, DATASET_SAVE_FIELDS);
+  if (!b.symbol) return { ok: false, reason: 'a symbol is required to save a dataset' };
+  if (b.name !== undefined && (typeof b.name !== 'string' || !DATASET_NAME.test(b.name))) {
+    return { ok: false, reason: 'that is not a dataset name' };
+  }
+  if (b.name === undefined && (typeof b.label !== 'string' || !DATASET_LABEL.test(b.label))) {
+    return { ok: false, reason: 'a label is 1-40 letters, digits, - or _' };
+  }
+  const ymd = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : undefined);
+  const out = { ...b, fromDate: ymd(b.fromDate), toDate: ymd(b.toDate) };
+  if (out.fromDate === undefined) delete out.fromDate;
+  if (out.toDate === undefined) delete out.toDate;
+  if (out.note !== undefined) out.note = String(out.note).slice(0, 300);
+  if (out.limit !== undefined) out.limit = Math.min(20000, Math.max(10, Number(out.limit) || 20000));
+  // Booleans are true only for the boolean true, so a string from a form can never overwrite a dataset.
+  out.overwrite = body.overwrite === true;
+  out.sync = body.sync === true;
+  if (Number.isInteger(body.expectBars) && body.expectBars >= 0) out.expectBars = body.expectBars;
+  // A view-only re-read can reach the provider chain, so it gets the same budget as a fetch.
+  return postPath('/dataset/save', out, { timeout: out.sync ? 120000 : 60000 });
+}
+
+async function datasetDelete({ name } = {}) {
+  if (typeof name !== 'string' || !DATASET_NAME.test(name)) return { ok: false, reason: 'that is not a dataset name' };
+  return postPath('/dataset/delete', { name }, { timeout: 30000 });
 }
 
 // Macro transmission (Section 114). `registry` and `measure` are reads on `stockmind.view`; `sync`
@@ -536,6 +648,41 @@ function register(ipcMain) {
     catch (err) { return { ok: false, error: err.message }; }
   });
 
+  // The strategy book (Section 151). Each of these spends engine time or changes stored state, so each is a
+  // request. Retiring and removing are master's acts: nothing in the backend calls them on its own.
+  const bookWrites = {
+    'market:strategy-evolve': strategyEvolve,
+    'market:book-keep':       bookKeep,
+    'market:book-refresh':    bookRefresh,
+    'market:book-retire':     bookRetire,
+    'market:book-restore':    bookRestore,
+    'market:book-remove':     bookRemove,
+  };
+  for (const [channel, fn] of Object.entries(bookWrites)) {
+    ipcMain.handle(channel, async (_e, { user, ...body } = {}) => {
+      const denied = denyUnless(user, 'stockmind.request');
+      if (denied) return denied;
+      try { return await fn(body); }
+      catch (err) { return { ok: false, error: err.message }; }
+    });
+  }
+
+  // Saving or deleting a named snapshot changes stored state, so each is a request (Section 153). The
+  // snapshot never feeds the engine: loading one only draws it.
+  ipcMain.handle('market:dataset-save', async (_e, { user, ...body } = {}) => {
+    const denied = denyUnless(user, 'stockmind.request');
+    if (denied) return denied;
+    try { return await datasetSave(body); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+
+  ipcMain.handle('market:dataset-delete', async (_e, { user, ...body } = {}) => {
+    const denied = denyUnless(user, 'stockmind.request');
+    if (denied) return denied;
+    try { return await datasetDelete(body); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+
   ipcMain.handle('market:strategy-code', async (_e, { user, ...body } = {}) => {
     const denied = denyUnless(user, 'stockmind.request');
     if (denied) return denied;
@@ -569,6 +716,10 @@ function register(ipcMain) {
     'market:strategy-instruments': strategyInstruments,
     'market:strategy-library': strategyLibrary,
     'market:strategy-template': strategyTemplate,
+    'market:book-list':       bookList,
+    'market:book-signals':    bookSignals,
+    'market:dataset-list':    datasetList,
+    'market:dataset-load':    datasetLoad,
     'market:costs-registry':  costsRegistry,
     'market:costs-rates':     costsRates,
     'market:costs-quote':     costsQuote,
@@ -728,7 +879,17 @@ async function backendAlreadyUp() {
   return !res.error;
 }
 
+/**
+ * Is autonomy explicitly halted? Consulted at the top of a SCHEDULED tick (Section 150.2).
+ * If the stop module cannot be read the answer is "no": this is pre-existing work, and a stop that
+ * cannot load must not silently disable it (Section 132's posture for the work that already ships).
+ */
+function autonomyHalted() {
+  try { return require('../lib/autonomyStop.cjs').isHalted() === true; } catch { return false; }
+}
+
 async function tickResolveOutcomes() {
+  if (autonomyHalted()) return { skipped: 'autonomy halted' };
   if (!await backendAlreadyUp()) return { skipped: 'backend not running' };
   const res = await net.postJson(`${BASE_URL}/outcomes/resolve`,
     { learn: true }, { timeout: 120000 });
@@ -746,6 +907,7 @@ async function tickResolveOutcomes() {
 }
 
 async function tickSyncNews() {
+  if (autonomyHalted()) return { skipped: 'autonomy halted' };
   if (!await backendAlreadyUp()) return { skipped: 'backend not running' };
   const out = [];
   for (const symbol of SCHEDULE.newsSymbols) {
@@ -812,6 +974,8 @@ module.exports = {
   register, predict, backtest, backtestPresets, strategyScore, health,
   ohlcv, inventory, symbolSearch, news, newsCoverage, newsBackfill, derivatives, optionChain,
   strategyBlocks, strategyValidate, strategyBacktest, strategyCode,
+  strategyEvolve, bookKeep, bookList, bookRefresh, bookSignals, bookRetire, bookRestore, bookRemove,
+  datasetList, datasetLoad, datasetSave, datasetDelete,
   outcomeStats, modelsStatus, horizonsList, predictMulti, trainHorizons,
   startScheduler, stopScheduler, schedulerStatus,
   tickResolveOutcomes, tickSyncNews,

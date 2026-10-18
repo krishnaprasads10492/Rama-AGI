@@ -22,6 +22,7 @@
  */
 
 import { matchVoiceToRoute } from '@config/registry.js';
+import { parseMuteIntent, muteActionName, parseStopIntent } from './commandIntents.js';
 
 // "hey buddy" is a casual nickname alias master asked for — treated as a
 // second wake phrase, not a separate command, since a bare "buddy" address
@@ -34,16 +35,10 @@ const VOICE_ACTIONS = [
   { patterns: ['close palette', 'close menu', 'dismiss', 'cancel'],    action: 'close-palette' },
   { patterns: ['open menu', 'open palette', 'show commands'],          action: 'open-palette'  },
   { patterns: ['identify yourself', 'who are you', 'reveal identity'], action: 'identify'      },
-  // Speech mute: Rāma stops talking but keeps listening. Casual synonyms
-  // ("shut up", "no convo") sit alongside the formal phrasing rather than
-  // as a separate action, since they mean the same thing.
-  { patterns: ['stop talking', 'be quiet', 'silence', 'mute yourself', 'shut up', 'no convo', 'stop the conversation'],
-    action: 'mute-speech' },
-  { patterns: ['you can talk', 'speak again', 'unmute yourself', 'convo yes', 'lets talk', "let's talk"],
-    action: 'unmute-speech' },
-  // Mic mute. Unmuting by voice is impossible once muted — the device is
-  // released and nothing is listening — so only muting is offered here.
-  { patterns: ['mute the mic', 'mute microphone', 'stop listening'],    action: 'mute-mic'      },
+  // Mute and unmute - speech and microphone - are NOT in this table. They are parsed by
+  // `commandIntents.parseMuteIntent`, which the typed reflex reads as well. Listed here, 'mute yourself'
+  // sat ahead of 'unmute yourself' and `"unmute yourself".includes('mute yourself')` is true, so
+  // telling Rāma to speak again silenced it (Section 149.3, D3).
 
   // ── Status badge (spec: always-on-top presence indicator) ────────────────
   // Enable = clickable, opens the full app on click. Disable = click-through,
@@ -199,8 +194,10 @@ export async function resolveVoiceCapability() {
 
 // ─── VoiceEngine ──────────────────────────────────────────────────────────────
 export class VoiceEngine {
-  constructor({ onCommand, onWake, onTranscript, onError, onReady, onLevel, onState } = {}) {
+  constructor({ onCommand, onWake, onTranscript, onError, onNotice, onReady, onLevel, onState } = {}) {
     this.onCommand    = onCommand;
+    // A message that is not an error: something master should KNOW happened (audio left the machine).
+    this.onNotice     = onNotice;
     this.onWake       = onWake;
     this.onTranscript = onTranscript;
     this.onError      = onError;
@@ -660,12 +657,17 @@ export class VoiceEngine {
     const res = await api.transcribe({ data: base64, mimeType: blob.type, language: 'en' });
 
     if (!res?.ok) {
+      if (res?.leftMachine) this.onNotice?.(`Audio was sent to ${res.provider || 'a cloud service'} and transcription failed`);
       this.onError?.(res?.hint ? `${res.error} — ${res.hint}` : (res?.error ?? 'Transcription failed'));
       // Re-resolve: the reason may be a level change worth showing
       this.capability = await resolveVoiceCapability();
       this.onLevel?.(this.capability);
       return null;
     }
+
+    // THE CLIP LEFT THE MACHINE: say so, every time (Section 150.3). Cloud transcription is opt-in and
+    // master chose it, but a thing that happens to his voice should never happen silently.
+    if (res.leftMachine) this.onNotice?.(`Audio was sent to ${res.provider || 'a cloud service'} to be transcribed`);
 
     this.onTranscript?.(res.text, true);
     this._process(res.text, { requireWake });
@@ -788,6 +790,14 @@ export function speak(text, opts = {}) {
 export function matchVoiceCommand(command) {
   const lower = String(command || '').toLowerCase();
 
+  // The autonomy stop comes first of all: it is the one command that must never lose to another reading.
+  // Stop only. There is deliberately no spoken way to resume (Section 150.2).
+  if (parseStopIntent(lower)) return { route: null, action: 'autonomy-stop' };
+
+  // Mute / unmute first and from the shared parser: the same words mean the same thing typed or spoken.
+  const mute = parseMuteIntent(lower);
+  if (mute) return { route: null, action: muteActionName(mute) };
+
   // UI actions win over navigation — "cancel" must never open a page
   for (const entry of VOICE_ACTIONS) {
     if (entry.patterns.some(p => lower.includes(p))) {
@@ -799,11 +809,17 @@ export function matchVoiceCommand(command) {
   const nav = matchVoiceToRoute(lower);
   if (nav) return { route: nav.route, action: null, page: nav.page };
 
-  const search = lower.match(/(?:search for|look up|find|research)\s+(.+)/);
-  if (search) return { route: '/', action: 'inject-message', message: `Search: ${search[1]}` };
-
+  // BEFORE the search test, because "spawn a research agent" contains "research ..." and was being
+  // answered as a web search. Spawning an agent by voice could not have worked since both existed
+  // (Section 149.3, found by the routing suite).
   const agent = lower.match(/spawn\s+(?:a\s+)?(\w+)\s+agent/);
   if (agent) return { route: '/agents', action: 'spawn-agent', agentType: agent[1] };
+
+  const search = lower.match(/(?:search for|look up|find|research)\s+(.+)/);
+  // A spoken search is an ordinary request. Rāma's own words go to Chat unchanged - the old `Search:`
+  // prefix told the model nothing the sentence did not, and the route it carried sent the whole thing
+  // to Home instead (Section 149.3, D1). `resolveVoiceDispatch` is what delivers it.
+  if (search) return { route: '/', action: 'inject-message', message: lower };
 
   return null;
 }

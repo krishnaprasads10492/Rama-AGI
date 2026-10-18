@@ -31,6 +31,8 @@ daily series is about 7,500 rows.
 import os
 import json
 import logging
+import threading
+import time
 import datetime as _dt
 from typing import Optional
 
@@ -61,15 +63,24 @@ def _column_spec(columns: Optional[list] = None) -> tuple[list, list]:
     return cols, ["date"]
 
 
+def _root_path() -> str:
+    """Where bars live, without creating it. Reads use this: looking must not write (Section 153)."""
+    root = os.environ.get("STOCKMIND_DATA_DIR")
+    if not root:
+        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "history")
+    return root
+
+
 def store_root() -> str:
     """
     Where bars live. `STOCKMIND_DATA_DIR` overrides, which is how the Electron side
     points this at `userData` so a packaged app writes somewhere writable rather than
     next to a read-only executable.
+
+    Still creates the directory: the book, ledger and dataset modules are handed this path and
+    write beneath it. Only the bar READ paths below avoid the mkdir.
     """
-    root = os.environ.get("STOCKMIND_DATA_DIR")
-    if not root:
-        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "history")
+    root = _root_path()
     os.makedirs(root, exist_ok=True)
     return root
 
@@ -78,11 +89,48 @@ def _safe(name: str) -> str:
     return "".join(ch if (ch.isalnum() or ch in "-_") else "_" for ch in (name or "unknown").upper())
 
 
-def paths(symbol: str, exchange: str = "NSE", interval: str = "1d"):
-    base = os.path.join(store_root(), _safe(exchange))
-    os.makedirs(base, exist_ok=True)
+def paths(symbol: str, exchange: str = "NSE", interval: str = "1d", create: bool = False):
+    """
+    The csv and meta paths for a series.
+
+    `create` is False for reads. This used to makedirs on every call, so merely asking whether a
+    series existed created an empty exchange directory, and a view-only fetch (Section 153) could
+    not honestly claim to write nothing. Only the write path passes `create=True`.
+    """
+    base = os.path.join(_root_path(), _safe(exchange))
+    if create:
+        os.makedirs(base, exist_ok=True)
     stem = f"{_safe(symbol)}__{_safe(interval)}"
     return os.path.join(base, stem + ".csv"), os.path.join(base, stem + ".meta.json")
+
+
+# One lock per series, so two requests merging into the same file cannot interleave their
+# load -> union -> write (a lost update, or two writers on one temp name). A series is keyed by
+# its csv path; different series never contend. In-process only: the engine is one process.
+_locks: dict = {}
+_locks_guard = threading.Lock()
+
+
+def _lock_for(csv_path: str) -> threading.Lock:
+    key = os.path.normcase(os.path.abspath(csv_path))
+    with _locks_guard:
+        lk = _locks.get(key)
+        if lk is None:
+            lk = _locks[key] = threading.Lock()
+        return lk
+
+
+def _replace_with_retry(tmp: str, dest: str) -> None:
+    """os.replace, retried briefly: on Windows a scanner or reader can hold the target for a moment."""
+    last = None
+    for i in range(10):
+        try:
+            os.replace(tmp, dest)
+            return
+        except PermissionError as exc:
+            last = exc
+            time.sleep(0.05 * (i + 1))
+    raise last if last else OSError(f"could not replace {dest}")
 
 
 # ── Read ──────────────────────────────────────────────────────────────────────
@@ -94,7 +142,16 @@ def load(symbol: str, exchange: str = "NSE", interval: str = "1d",
     if not os.path.exists(csv_path):
         return None
     try:
-        df = pd.read_csv(csv_path, parse_dates=["date"])
+        for attempt in range(3):
+            try:
+                df = pd.read_csv(csv_path, parse_dates=["date"])
+                break
+            except PermissionError:
+                # A writer's os.replace can hold the file for an instant on Windows; reading it
+                # as "no data" would make a concurrent view of a series flicker empty.
+                if attempt == 2:
+                    raise
+                time.sleep(0.03 * (attempt + 1))
         if df is None or len(df) == 0:
             return None
         # Only project onto the requested columns when they are all present. A stored
@@ -141,20 +198,7 @@ def _last_valid(series):
     return s.iloc[-1] if len(s) else float("nan")
 
 
-def merge(symbol: str, incoming: pd.DataFrame, exchange: str = "NSE",
-          interval: str = "1d", source: str = "unknown",
-          columns: Optional[list] = None, combine: bool = False) -> Optional[pd.DataFrame]:
-    """
-    Merge `incoming` into whatever is stored and persist the union.
-
-    Union, never replace. A provider that answers with 6 months when 20 years are
-    already on disk must not shrink the store — that loss would be silent and
-    permanent, and it is exactly what a "refresh" button would cause on a bad day.
-    """
-    cols, required = _column_spec(columns)
-    if incoming is None or len(incoming) == 0:
-        return load(symbol, exchange, interval, columns)
-
+def _prepare_incoming(incoming: pd.DataFrame, cols: list, columns: Optional[list]) -> pd.DataFrame:
     inc = incoming.copy()
     inc["date"] = pd.to_datetime(inc["date"], errors="coerce")
     inc = inc.dropna(subset=["date"])
@@ -164,10 +208,26 @@ def merge(symbol: str, incoming: pd.DataFrame, exchange: str = "NSE",
             # is a value a model would learn from. Bars keep the old 0.0 fill because a
             # provider omitting volume genuinely means none was reported.
             inc[col] = 0.0 if not columns else float("nan")
-    inc = inc[cols]
+    return inc[cols]
 
-    existing = load(symbol, exchange, interval, columns)
-    before   = 0 if existing is None else len(existing)
+
+def union_frames(existing: Optional[pd.DataFrame], incoming: Optional[pd.DataFrame],
+                 columns: Optional[list] = None, combine: bool = False) -> Optional[pd.DataFrame]:
+    """
+    The pure half of `merge`: the union of what is held and what arrived, with nothing written.
+
+    It exists so a view-only fetch (Section 153) applies EXACTLY the rules a persisting merge
+    does, from one implementation: de-duplicate on the date key with the newer row winning, never
+    return fewer rows than `existing` held, and keep the time component (the frame carries
+    Timestamps, so an intraday stamp survives until a caller serialises it). Two copies of these
+    rules would drift, and then "what you viewed" and "what was kept" would quietly differ.
+    """
+    cols, required = _column_spec(columns)
+    if incoming is None or len(incoming) == 0:
+        return existing
+
+    inc = _prepare_incoming(incoming, cols, columns)
+    before = 0 if existing is None else len(existing)
 
     combined = inc if existing is None else pd.concat([existing, inc], ignore_index=True)
     combined = combined.dropna(subset=required).sort_values("date")
@@ -189,11 +249,19 @@ def merge(symbol: str, incoming: pd.DataFrame, exchange: str = "NSE",
     combined = combined.sort_values("date").reset_index(drop=True)
 
     if existing is not None and len(combined) < before:
-        logger.error(f"[store] refusing to shrink {symbol} from {before} to {len(combined)} rows")
+        logger.error(f"[store] refusing to shrink a series from {before} to {len(combined)} rows")
         return existing
+    return combined
 
-    csv_path, meta_path = paths(symbol, exchange, interval)
-    tmp = csv_path + ".tmp"
+
+def _write_series(combined: pd.DataFrame, symbol: str, exchange: str, interval: str,
+                  source: str, before: int, columns: Optional[list]) -> None:
+    """The write half of `merge`: csv then provenance, each replaced atomically."""
+    csv_path, meta_path = paths(symbol, exchange, interval, create=True)
+    # A unique temp name per writer: a fixed `.tmp` let two concurrent merges truncate each
+    # other's half-written file. pid + thread id is unique across processes and threads.
+    suffix = f".{os.getpid()}.{threading.get_ident()}.tmp"
+    tmp = csv_path + suffix
     # INTRADAY SERIES MUST KEEP THEIR TIME COMPONENT (spec Section 73).
     #
     # This wrote `%Y-%m-%d` unconditionally. For an hourly series every bar in a session
@@ -201,8 +269,15 @@ def merge(symbol: str, incoming: pd.DataFrame, exchange: str = "NSE",
     # keeps **one bar per day** — a 3,499-bar hourly series silently reduced to ~500 rows with
     # no error anywhere. Daily and coarser keep the date-only form because it is what the
     # existing files contain and what makes them readable by hand.
-    combined.to_csv(tmp, index=False, date_format=_date_format_for(interval))
-    os.replace(tmp, csv_path)   # atomic — a crash mid-write cannot leave a half file
+    try:
+        combined.to_csv(tmp, index=False, date_format=_date_format_for(interval))
+        _replace_with_retry(tmp, csv_path)   # atomic — a crash mid-write cannot leave a half file
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
     record = {
         "symbol": symbol, "exchange": exchange, "interval": interval,
@@ -214,16 +289,50 @@ def merge(symbol: str, incoming: pd.DataFrame, exchange: str = "NSE",
         "barsAdded": int(len(combined) - before),
         "yearsCovered": round((combined["date"].iloc[-1] - combined["date"].iloc[0]).days / 365.25, 2),
     }
+    meta_tmp = meta_path + suffix
     try:
-        with open(meta_path, "w", encoding="utf-8") as fh:
+        # Atomic like the csv: a crash mid-dump used to leave a truncated meta.json, which
+        # `meta()` reads as {} — and an empty meta made the intraday cooldown forget it had fetched.
+        with open(meta_tmp, "w", encoding="utf-8") as fh:
             json.dump(record, fh, indent=2)
+        _replace_with_retry(meta_tmp, meta_path)
     except Exception as e:
         logger.warning(f"[store] could not write provenance for {symbol}: {e}")
+        try:
+            if os.path.exists(meta_tmp):
+                os.remove(meta_tmp)
+        except OSError:
+            pass
 
     unit = "bars" if not columns else "rows"
     logger.info(f"[store] {symbol} {exchange} {interval}: {len(combined)} {unit} "
                 f"({record['firstBar']} → {record['lastBar']}, +{record['barsAdded']} from {source})")
-    return combined
+
+
+def merge(symbol: str, incoming: pd.DataFrame, exchange: str = "NSE",
+          interval: str = "1d", source: str = "unknown",
+          columns: Optional[list] = None, combine: bool = False) -> Optional[pd.DataFrame]:
+    """
+    Merge `incoming` into whatever is stored and persist the union.
+
+    Union, never replace. A provider that answers with 6 months when 20 years are
+    already on disk must not shrink the store — that loss would be silent and
+    permanent, and it is exactly what a "refresh" button would cause on a bad day.
+
+    The load -> union -> write runs under a per-series lock, so concurrent merges serialise
+    instead of one silently overwriting the other's additions.
+    """
+    csv_path, _ = paths(symbol, exchange, interval)
+    with _lock_for(csv_path):
+        existing = load(symbol, exchange, interval, columns)
+        if incoming is None or len(incoming) == 0:
+            return existing
+        before = 0 if existing is None else len(existing)
+        combined = union_frames(existing, incoming, columns, combine)
+        if combined is None or len(combined) == 0 or combined is existing:
+            return existing                      # refused to shrink (or nothing usable arrived)
+        _write_series(combined, symbol, exchange, interval, source, before, columns)
+        return combined
 
 
 # How many minutes one bar spans, for the intervals finer than a day. Used only for staleness —
@@ -298,16 +407,82 @@ def is_stale(symbol: str, exchange: str = "NSE", interval: str = "1d",
     return business_gap > allowed
 
 
+# ── View-only fetches (spec Section 153) ───────────────────────────────────────
+#
+# A fetch that writes nothing also records nothing: `meta.lastFetchedAt` is what `is_stale` uses
+# as the intraday cooldown, and a view-only fetch must not touch it. Left alone, every click on
+# "Fetch (view only)" for a stale intraday series would go to the provider again, because the
+# series would stay stale forever. So view fetches keep their OWN in-memory record per series:
+# when it was fetched and what came back.
+#
+# It stores the frame, not only a timestamp. Within the cooldown a repeat request is answered
+# from this memory, so the second click shows the same candles as the first rather than falling
+# back to the (shorter) stored series and looking as if data vanished. It is also what lets a
+# "save dataset" request re-read exactly what the chart is showing without a second network call.
+#
+# Bounded (a handful of series) and in-process only: a restart forgets it, which is the safe
+# direction, because the worst case is one extra provider call.
+VIEW_COOLDOWN_DAILY_SECONDS = 300
+_VIEW_CACHE_MAX = 16
+_view_cache: dict = {}
+_view_guard = threading.Lock()
+
+
+def _view_key(symbol: str, exchange: str, interval: str) -> str:
+    csv_path, _ = paths(symbol, exchange, interval)
+    return os.path.normcase(os.path.abspath(csv_path))
+
+
+def _view_cooldown_seconds(interval: str) -> int:
+    iv = str(interval or "1d").strip().lower()
+    if is_intraday(iv):
+        # The same floor `is_stale` uses for its persisted cooldown, so the two paths agree.
+        return int(max(5, INTERVAL_MINUTES.get(iv, 60)) * 60)
+    return VIEW_COOLDOWN_DAILY_SECONDS
+
+
+def _view_get(key: str, cooldown: int):
+    with _view_guard:
+        entry = _view_cache.get(key)
+        if entry is None:
+            return None
+        age = time.monotonic() - entry["at"]
+        if age >= cooldown:
+            _view_cache.pop(key, None)
+            return None
+        return entry["frame"].copy(), entry["source"], age
+
+
+def _view_put(key: str, frame: pd.DataFrame, source: str) -> None:
+    with _view_guard:
+        _view_cache.pop(key, None)
+        _view_cache[key] = {"at": time.monotonic(), "frame": frame.copy(), "source": source}
+        while len(_view_cache) > _VIEW_CACHE_MAX:
+            _view_cache.pop(next(iter(_view_cache)))     # oldest first (dicts keep insertion order)
+
+
+def clear_view_cache() -> None:
+    with _view_guard:
+        _view_cache.clear()
+
+
 def sync(symbol: str, exchange: str = "NSE", interval: str = "1d",
-         years: int = None, force: bool = False) -> tuple[Optional[pd.DataFrame], dict]:
+         years: int = None, force: bool = False,
+         persist: bool = True) -> tuple[Optional[pd.DataFrame], dict]:
     """
     Bring the store up to date and return the full history.
 
     The first call fetches as deep as the chain allows; later calls return from disk
     and only reach out when the newest stored bar has fallen behind.
 
+    `persist=False` is the view-only form (Section 153): it fetches the same way and returns the
+    union with what is stored, but writes nothing — no csv, no meta, no directory — and obeys a
+    per-series in-memory cooldown instead of `lastFetchedAt`. `force` bypasses both the staleness
+    test and that cooldown, and is not exposed by any route.
+
     @returns (df, info) where info records what happened and where it came from —
-             the caller needs that to label the output honestly.
+             the caller needs that to label the output honestly. `info["unsaved"]` is True
+             exactly when the returned frame holds provider data that is not on disk.
     """
     from . import providers
 
@@ -317,6 +492,7 @@ def sync(symbol: str, exchange: str = "NSE", interval: str = "1d",
         "fromStore": stored is not None, "fetched": False,
         "source": (meta(symbol, exchange, interval).get("lastSource") if stored is not None else None),
         "bars": 0 if stored is None else len(stored),
+        "persisted": bool(persist), "unsaved": False,
     }
 
     need = force or stored is None or is_stale(symbol, exchange, interval)
@@ -325,6 +501,10 @@ def sync(symbol: str, exchange: str = "NSE", interval: str = "1d",
         return stored, info
 
     want_years = years or (30 if stored is None else 1)
+
+    if not persist:
+        return _sync_view(symbol, exchange, interval, want_years, force, stored, info, providers)
+
     fetched, source = providers.fetch_history(symbol, exchange, want_years, interval)
 
     if fetched is None:
@@ -341,6 +521,44 @@ def sync(symbol: str, exchange: str = "NSE", interval: str = "1d",
         "reason": "fetched deep history" if not info["fromStore"] else "topped up",
     })
     return merged, info
+
+
+def _sync_view(symbol, exchange, interval, want_years, force, stored, info, providers):
+    """The persist=False branch of `sync`: fetch (or reuse a recent fetch), union in memory, write nothing."""
+    key = _view_key(symbol, exchange, interval)
+    cached = None if force else _view_get(key, _view_cooldown_seconds(interval))
+    reused = cached is not None
+    if reused:
+        fetched, source, age = cached
+    else:
+        fetched, source = providers.fetch_history(symbol, exchange, want_years, interval)
+        age = 0.0
+        if fetched is not None:
+            _view_put(key, fetched, source)
+
+    if fetched is None:
+        # Not remembered: a network blip must be retryable on the next click, and a failed attempt
+        # has no data worth reusing. The persisted path behaves the same way.
+        info["reason"] = "no provider returned data"
+        info["providersTried"] = [p.name for p in providers.active()]
+        return stored, info
+
+    before = 0 if stored is None else len(stored)
+    union = union_frames(stored, fetched)
+    if union is None or len(union) == 0:
+        info["reason"] = "the provider answered with nothing usable"
+        return stored, info
+
+    first, last = union["date"].iloc[0], union["date"].iloc[-1]
+    info.update({
+        "fetched": not reused, "reusedView": reused, "unsaved": True,
+        "source": source, "bars": int(len(union)), "barsAdded": int(len(union) - before),
+        "firstBar": str(first.date()), "lastBar": str(last.date()),
+        "yearsCovered": round((last - first).days / 365.25, 2),
+        "reason": (f"reused a view-only fetch from {int(age)}s ago; nothing written" if reused
+                   else "fetched for viewing; nothing written"),
+    })
+    return union, info
 
 
 def inventory() -> list[dict]:

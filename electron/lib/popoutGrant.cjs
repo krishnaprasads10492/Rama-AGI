@@ -36,7 +36,7 @@ function sweep() {
  * Mint a ticket for one panel.
  * @returns {string|null} the token, or null when there is no user to carry.
  */
-function mint({ user, panel } = {}) {
+function mint({ user, panel, binding } = {}) {
   sweep();
   // A grant with no user would redeem into an unauthenticated session that LOOKS authenticated.
   if (!user || typeof user !== 'object' || !user.id) return null;
@@ -49,6 +49,11 @@ function mint({ user, panel } = {}) {
     // A snapshot, not a reference: the live object must not be mutable through the grant.
     user: JSON.parse(JSON.stringify(user)),
     panel,
+    // The opener's session binding (Section 150.1): { token, fp }. Optional and additive, so a caller
+    // that has none still mints exactly what it did before; the redeeming window is only bound when one
+    // was carried. It lives in main-process memory with the rest of the grant and is never returned to a
+    // renderer: `redeem` hands it to main.cjs, which binds the window and tells the page nothing.
+    binding: binding && binding.token ? { token: String(binding.token), fp: String(binding.fp ?? '') } : null,
     expiresAt: now() + TTL_MS,
     redeemedBy: null,
   });
@@ -73,7 +78,7 @@ function redeem(token, windowId) {
     return { ok: false, reason: 'pop-out grant already used' };
   }
   g.redeemedBy = windowId ?? -1;
-  const out = { ok: true, user: g.user, panel: g.panel };
+  const out = { ok: true, user: g.user, panel: g.panel, binding: g.binding };
   grants.delete(token);
   return out;
 }

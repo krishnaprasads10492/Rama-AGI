@@ -350,7 +350,11 @@ class Verdict:
     gross_sharpe: Optional[float] = None
     net_sharpe: Optional[float] = None
     deflated: Optional[float] = None
-    benchmark_sharpe: Optional[float] = None
+    benchmark_sharpe: Optional[float] = None    # PER-TRADE units, the same as `per_trade_sharpe`
+    # The Sharpe the deflation actually used: mean / sd of net per-trade returns, NOT annualised
+    # (Section 149.2). `net_sharpe` above is annualised for display and must not be compared with
+    # `benchmark_sharpe`.
+    per_trade_sharpe: Optional[float] = None
     win_rate: Optional[float] = None
     expectancy_pct: Optional[float] = None
     max_drawdown: Optional[float] = None
@@ -424,14 +428,27 @@ def evaluate(
     gs = sharpe(gross, periods_per_year)
     ns = sharpe(net, periods_per_year)
     skew, kurt = _moments(net)
-    dsr = deflated_sharpe(ns, n, n_trials, skew, kurt) if ns is not None else None
-    bench = expected_max_sharpe(n_trials)
+
+    # THE DEFLATION RUNS IN PER-TRADE UNITS (Section 149.2). `ns` is annualised by sqrt(periods) for
+    # display, and `deflated_sharpe`'s standard error and `expected_max_sharpe` are per-observation
+    # quantities. Feeding one into the other inflated the z-score about sixteen-fold: measured, a
+    # strategy with ZERO net edge passed this gate 45% of the time at a single trial.
+    #
+    # `trial_sharpe_sd` is the NULL standard error of a Sharpe estimate over `n` observations,
+    # 1/sqrt(n - 1) - the cross-trial spread of pure-noise Sharpes in these units. Left at the
+    # function's default of 1.0 it would be a per-observation benchmark of a fifth of a standard
+    # deviation per trade, which no 30-trade sample can distinguish from nothing.
+    pts = sharpe(net, 1)
+    trial_sd = 1.0 / math.sqrt(n - 1) if n > 1 else 1.0
+    dsr = (deflated_sharpe(pts, n, n_trials, skew, kurt, trial_sharpe_sd=trial_sd)
+           if pts is not None else None)
+    bench = expected_max_sharpe(n_trials, trial_sd)
     dd = max_drawdown(equity)
     drag = costs.round_trip_pct()
 
     base = dict(
         trades=n, n_trials=n_trials, gross_sharpe=gs, net_sharpe=ns, deflated=dsr,
-        benchmark_sharpe=bench, win_rate=win_rate, expectancy_pct=expectancy,
+        benchmark_sharpe=bench, per_trade_sharpe=pts, win_rate=win_rate, expectancy_pct=expectancy,
         max_drawdown=dd, cost_drag_pct=drag, provenance=prov, **shape,
     )
 
@@ -498,9 +515,10 @@ def evaluate(
             reason=f"not distinguishable from the best of {n_trials} random tries",
             confidence=confidence,
             meaning=(
-                f"Net Sharpe {ns:.2f} sounds good, but searching {n_trials} variants would produce "
-                f"about {bench:.2f} from pure noise. Allowing for that, the chance this is a real "
-                f"edge is {dsr * 100:.0f}%, short of the {DSR_THRESHOLD * 100:.0f}% required."
+                f"Per-trade Sharpe {pts:.2f} (annualised {ns:.2f}) sounds good, but searching "
+                f"{n_trials} variants would produce about {bench:.2f} per trade from pure noise. "
+                f"Allowing for that, the chance this is a real edge is {dsr * 100:.0f}%, short of "
+                f"the {DSR_THRESHOLD * 100:.0f}% required."
             ),
             risks=[
                 "This is the shape of result that backtests well and loses money live.",
@@ -515,10 +533,11 @@ def evaluate(
 
     return Verdict(
         passed=True,
-        reason=f"net Sharpe {ns:.2f} clears the {n_trials}-trial noise benchmark {bench:.2f}",
+        reason=f"per-trade Sharpe {pts:.2f} clears the {n_trials}-trial noise benchmark {bench:.2f}",
         confidence=confidence,
         meaning=(
-            f"After {drag:.2f}% round-trip costs, net Sharpe is {ns:.2f} over {n} trades. "
+            f"After {drag:.2f}% round-trip costs, net Sharpe is {ns:.2f} annualised "
+            f"({pts:.2f} per trade) over {n} trades. "
             f"Allowing for {n_trials} variants tried, the chance this is a real edge is "
             f"{dsr * 100:.0f}%."
             + ("" if confidence == "measured"

@@ -412,7 +412,7 @@ sweeps, exit and money, the variant count before running, and the verdict.">
       <rect x={70} y={216} width={106} height={14} rx="7" fill="rgba(239,83,80,0.15)" stroke={C.red} />
       <text x={76} y={226} fontSize="8" fill={C.red} fontFamily="inherit">NOT DEMONSTRATED</text>
       <text x={18} y={240} fontSize="8.5" fill={C.text} fontFamily="inherit">
-        Net Sharpe 0.84 sounds good, but searching 3 variants would produce about 0.56 from pure noise.
+        Per-trade Sharpe 0.12 sounds good, but searching 3 variants would produce about 0.09 per trade from noise.
       </text>
       <text x={18} y={251} fontSize="8.5" fill={C.text} fontFamily="inherit">
         Allowing for that, the chance this is a real edge is 71% — short of the 95% required.

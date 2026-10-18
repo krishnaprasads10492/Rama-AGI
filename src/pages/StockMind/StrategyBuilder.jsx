@@ -513,8 +513,13 @@ export default function StrategyBuilder({ currentUser, canRequest, symbol, excha
             </summary>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))',
               gap: '10px', marginTop: '8px', fontSize: FS.denseLg }}>
-              <Field label="NET SHARPE"><span>{dec(verdict.net_sharpe)}</span></Field>
-              <Field label="NOISE BENCHMARK" hint={`from ${result.trials} tries`}>
+              <Field label="NET SHARPE" hint="annualised"><span>{dec(verdict.net_sharpe)}</span></Field>
+              {/* Compared with the benchmark beside it, in the same unit (Section 149.2a). The annualised
+                  figure above is about sixteen times larger and must not be read against it. */}
+              <Field label="PER-TRADE SHARPE" hint="the one tested">
+                <span>{dec(verdict.per_trade_sharpe)}</span>
+              </Field>
+              <Field label="NOISE BENCHMARK" hint={`from ${result.trials} tries, per trade`}>
                 <span>{dec(verdict.benchmark_sharpe)}</span>
               </Field>
               <Field label="CHANCE IT IS REAL">

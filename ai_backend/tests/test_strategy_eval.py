@@ -429,8 +429,65 @@ def test_win_rate_is_legible():
            "payoff_ratio" in v.to_dict() and "win_rate_caveat" in v.to_dict())
 
 
+def test_gate_is_calibrated() -> None:
+    """
+    THE GATE'S OWN FALSE-POSITIVE RATE, measured (Section 149.2).
+
+    Every earlier assertion planted a strong edge, which passes under any unit. The defect that this
+    section fixes - the annualised Sharpe divided by a per-observation standard error - was invisible to
+    them: a strategy with ZERO net edge passed 45% of the time at one trial. A gate has two properties,
+    and a suite that tests only that it accepts the real thing has tested half of one.
+    """
+    print("\n  calibration (seeded, so reproducible)")
+    cm = CostModel()
+    drag = cm.round_trip_pct()
+
+    def pass_rate(n: int, trials: int, edge: float, runs: int, seed: int) -> float:
+        rng = random.Random(seed)
+        hits = 0
+        for _ in range(runs):
+            gross = [drag + edge + rng.gauss(0.0, 1.5) for _ in range(n)]
+            if evaluate(gross, n_trials=trials, cost_model=cm).passed:
+                hits += 1
+        return hits / runs
+
+    for n in (30, 60, 150):
+        rate = pass_rate(n, 1, 0.0, 600, 11)
+        # 5% nominal. The bound is 9%, not 5%: 600 runs put one standard error near 0.9 points, and
+        # the OLD behaviour sat near 45%, so any honest tolerance separates the two by a factor of five.
+        check(f"zero edge, {n} trades, one trial: pass rate near nominal 5%",
+              rate <= 0.09, f"{rate * 100:.1f}%")
+
+    check("zero edge, 60 trades, 500 trials: searching more never makes noise easier to pass",
+          pass_rate(60, 500, 0.0, 400, 12) <= pass_rate(60, 1, 0.0, 400, 12) + 0.02)
+
+    for n in (60, 150):
+        rate = pass_rate(n, 1, 1.0, 300, 13)
+        check(f"a planted real edge, {n} trades, one trial: still found (the gate is not merely strict)",
+              rate >= 0.90, f"{rate * 100:.1f}%")
+
+    # The unit contract itself, asserted directly so a regression names the cause and not a symptom.
+    rng = random.Random(14)
+    gross = [drag + rng.gauss(0.0, 1.5) for _ in range(80)]
+    v = evaluate(gross, n_trials=1, cost_model=cm)
+    check("the verdict carries the per-trade Sharpe the deflation used", v.per_trade_sharpe is not None)
+    ratio = abs(v.net_sharpe / v.per_trade_sharpe) if v.per_trade_sharpe else 0.0
+    check("net_sharpe is the annualised figure: per-trade times sqrt(252)",
+          abs(ratio - math.sqrt(252)) < 1e-6, f"ratio={ratio}")
+    check("benchmark and per-trade Sharpe are in the same units: one trial has benchmark zero",
+          v.benchmark_sharpe == 0.0)
+    many = evaluate(gross, n_trials=500, cost_model=cm)
+    check("a 500-trial benchmark is a per-trade figure, far below one standard deviation per trade",
+          0.0 < many.benchmark_sharpe < 1.0, f"{many.benchmark_sharpe}")
+    check("and it is derived from the sample size: 4x the trades roughly halves it",
+          evaluate([drag + rng.gauss(0.0, 1.5) for _ in range(320)], n_trials=500,
+                   cost_model=cm).benchmark_sharpe < many.benchmark_sharpe * 0.6)
+    check("the new field serialises", "per_trade_sharpe" in v.to_dict())
+
+
 def main() -> int:
     print("\nstrategy_eval — refusing noise, finding real edges\n")
+    test_gate_is_calibrated()
     test_splits()
     test_noise_benchmark()
     test_metrics()

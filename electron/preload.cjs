@@ -186,6 +186,22 @@ const RAMA_API = {
     strategyValidate: (opts) => ipcRenderer.invoke('market:strategy-validate', opts),
     strategyBacktest: (opts) => ipcRenderer.invoke('market:strategy-backtest', opts),
     strategyCode:     (opts) => ipcRenderer.invoke('market:strategy-code', opts),
+    // The strategy book (Section 151). Evolve and the writes are requests; list and signals are reads.
+    // Nothing here places an order and nothing runs on a timer.
+    strategyEvolve:   (opts) => ipcRenderer.invoke('market:strategy-evolve', opts),
+    bookList:         (opts) => ipcRenderer.invoke('market:book-list', opts),
+    bookSignals:      (opts) => ipcRenderer.invoke('market:book-signals', opts),
+    bookKeep:         (opts) => ipcRenderer.invoke('market:book-keep', opts),
+    bookRefresh:      (opts) => ipcRenderer.invoke('market:book-refresh', opts),
+    bookRetire:       (opts) => ipcRenderer.invoke('market:book-retire', opts),
+    bookRestore:      (opts) => ipcRenderer.invoke('market:book-restore', opts),
+    bookRemove:       (opts) => ipcRenderer.invoke('market:book-remove', opts),
+    // Named candle snapshots (Section 153). List and load are reads; save and delete are requests.
+    // Loading draws a snapshot on the chart and feeds nothing else.
+    datasetList:      (opts) => ipcRenderer.invoke('market:dataset-list', opts),
+    datasetLoad:      (opts) => ipcRenderer.invoke('market:dataset-load', opts),
+    datasetSave:      (opts) => ipcRenderer.invoke('market:dataset-save', opts),
+    datasetDelete:    (opts) => ipcRenderer.invoke('market:dataset-delete', opts),
     // The literature and the charge model (Section 113). Reads: a catalogue, a template completed into
     // a spec, and arithmetic over published rates. A verdict still comes only from strategyBacktest.
     // Instrument types for the per-instrument tabs (Section 115). Carries `backtestable` per type.
@@ -594,6 +610,10 @@ const RAMA_API = {
     capabilities: ()     => ipcRenderer.invoke('voice:capabilities'),
     rescan:       ()     => ipcRenderer.invoke('voice:rescan'),
     transcribe:   (clip) => ipcRenderer.invoke('voice:transcribe', clip),
+    // Whether audio may leave this machine (Section 150.3). Setting it is master's alone; the account is
+    // the one main validated for this window, not anything passed here.
+    cloudOptIn:    ()        => ipcRenderer.invoke('voice:cloud-optin'),
+    setCloudOptIn: (enabled) => ipcRenderer.invoke('voice:set-cloud-optin', { enabled }),
   },
 
   // ── Genome (complete capability blueprint carried by every instance) ───────
@@ -794,6 +814,16 @@ const RAMA_API = {
   // READ ONLY, and gated on `vault.read` in the main process. There is deliberately no "apply"
   // member: `driftReport` proposes and master decides, so an apply channel would be the one thing
   // that could turn a documentation page into a credential pointed somewhere new.
+  // Broker accounts and their whitelisted IPs (Section 152). No `user` is sent: main uses the account behind
+  // the window. The secret goes in through `save` and is never returned by any member.
+  brokerAccounts: {
+    list:               ()     => ipcRenderer.invoke('brokerAccounts:list'),
+    save:               (acct) => ipcRenderer.invoke('brokerAccounts:save', acct),
+    remove:             (id)   => ipcRenderer.invoke('brokerAccounts:remove', { id }),
+    distributableSave:  (d)    => ipcRenderer.invoke('brokerAccounts:distributable-save', d),
+    distributableRemove:(id)   => ipcRenderer.invoke('brokerAccounts:distributable-remove', { id }),
+    detectIp:           ()     => ipcRenderer.invoke('brokerAccounts:detect-ip'),
+  },
   brokers: {
     list:       (user)              => ipcRenderer.invoke('brokers:list', { user }),
     fields:     (user, id)          => ipcRenderer.invoke('brokers:fields', { user, id }),
@@ -904,24 +934,37 @@ const RAMA_API = {
     },
   },
 
+  // ── Autonomy stop (Section 150.2) ─────────────────────────────────────────
+  // `stop` takes no user and needs no capability: a stop that can be refused is not a stop. `resume` takes
+  // only a note; WHO is resuming is the account main validated for this window, never anything sent here.
+  autonomy: {
+    status: ()     => ipcRenderer.invoke('autonomy:status'),
+    stop:   (opts) => ipcRenderer.invoke('autonomy:stop', opts),
+    resume: (opts) => ipcRenderer.invoke('autonomy:resume', opts),
+  },
+
   // ── Browser Engine ────────────────────────────────────────────────────────
   browser: {
     // Which browser Rāma can actually drive, and the remedy when none. Surfaced so "search does not
     // work" is diagnosable rather than guessed at (Section 94).
-    runtime:     ()                  => ipcRenderer.invoke('browser:runtime'),
-    launch:      (opts)              => ipcRenderer.invoke('browser:launch', opts),
-    close:       ()                  => ipcRenderer.invoke('browser:close'),
-    openPage:    (url)               => ipcRenderer.invoke('browser:open-page', url),
-    navigate:    (id, url)           => ipcRenderer.invoke('browser:navigate', id, url),
-    getContent:  (id)                => ipcRenderer.invoke('browser:get-content', id),
-    search:      (query, engine)     => ipcRenderer.invoke('browser:search', query, engine),
-    screenshot:  (id)                => ipcRenderer.invoke('browser:screenshot', id),
-    executeJs:   (id, script)        => ipcRenderer.invoke('browser:execute-js', id, script),
-    download:    (url, dir, name)    => ipcRenderer.invoke('browser:download', url, dir, name),
-    getDownloads:()                  => ipcRenderer.invoke('browser:get-downloads'),
-    closePage:   (id)                => ipcRenderer.invoke('browser:close-page', id),
-    listPages:   ()                  => ipcRenderer.invoke('browser:list-pages'),
-    fetchUrl:    (url)               => ipcRenderer.invoke('browser:fetch-url', url),
+    //
+    // EVERY member takes `user` as its LAST argument (Section 149.3, D7). `browserEngine`'s `handle`
+    // wrapper checks it against `browser.*` in the capability matrix and strips it, so omitting it is a
+    // denial and not a way round the check.
+    runtime:     (user)                       => ipcRenderer.invoke('browser:runtime', user),
+    launch:      (opts, user)                 => ipcRenderer.invoke('browser:launch', opts, user),
+    close:       (user)                       => ipcRenderer.invoke('browser:close', user),
+    openPage:    (url, user)                  => ipcRenderer.invoke('browser:open-page', url, user),
+    navigate:    (id, url, user)              => ipcRenderer.invoke('browser:navigate', id, url, user),
+    getContent:  (id, user)                   => ipcRenderer.invoke('browser:get-content', id, user),
+    search:      (query, engine, user)        => ipcRenderer.invoke('browser:search', query, engine, user),
+    screenshot:  (id, user)                   => ipcRenderer.invoke('browser:screenshot', id, user),
+    executeJs:   (id, script, user)           => ipcRenderer.invoke('browser:execute-js', id, script, user),
+    download:    (url, dir, name, user)       => ipcRenderer.invoke('browser:download', url, dir, name, user),
+    getDownloads:(user)                       => ipcRenderer.invoke('browser:get-downloads', user),
+    closePage:   (id, user)                   => ipcRenderer.invoke('browser:close-page', id, user),
+    listPages:   (user)                       => ipcRenderer.invoke('browser:list-pages', user),
+    fetchUrl:    (url, user)                  => ipcRenderer.invoke('browser:fetch-url', url, user),
     onDownloadProgress: (cb) => {
       const h = (_e, d) => cb(d);
       ipcRenderer.on('browser:download-progress', h);

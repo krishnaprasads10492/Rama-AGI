@@ -37,20 +37,35 @@ export const CAPABILITY_MATRIX = spec.capabilities;
  * @param {string} cap    — capability key from CAPABILITY_MATRIX
  * @returns {boolean}
  */
+/**
+ * The tier of a user, or null when the object does not carry a real one (Section 150.4).
+ *
+ * `user.tier <= required` COERCES. `{ tier: '0' }`, `{ tier: null }` and `{ tier: [] }` all compare as 0,
+ * so each was master here while `electron/lib/capability.cjs` (which requires `typeof tier === 'number'`)
+ * correctly denied them: the two runtimes disagreed about who is allowed, which is exactly what keeping
+ * the matrix in one file (I8) is meant to prevent. A real tier is an integer from MASTER to GUEST.
+ */
+export function tierOf(user) {
+  const t = user?.tier;
+  return Number.isInteger(t) && t >= TIERS.MASTER && t <= TIERS.GUEST ? t : null;
+}
+
 export function can(user, cap) {
-  if (!user) return false;
+  const tier = tierOf(user);
+  if (tier === null) return false;
   const required = CAPABILITY_MATRIX[cap];
   if (required === undefined) return false;   // Unknown capability — deny
-  return user.tier <= required;               // Lower tier = higher privilege
+  return tier <= required;                    // Lower tier = higher privilege
 }
 
 /**
  * Get all capabilities a user has.
  */
 export function getCaps(user) {
-  if (!user) return [];
+  const tier = tierOf(user);
+  if (tier === null) return [];
   return Object.entries(CAPABILITY_MATRIX)
-    .filter(([, required]) => user.tier <= required)
+    .filter(([, required]) => tier <= required)
     .map(([cap]) => cap);
 }
 
@@ -58,9 +73,10 @@ export function getCaps(user) {
  * Get what a user CANNOT do (for UI feedback).
  */
 export function getDenied(user) {
-  if (!user) return Object.keys(CAPABILITY_MATRIX);
+  const tier = tierOf(user);
+  if (tier === null) return Object.keys(CAPABILITY_MATRIX);
   return Object.entries(CAPABILITY_MATRIX)
-    .filter(([, required]) => user.tier > required)
+    .filter(([, required]) => tier > required)
     .map(([cap]) => cap);
 }
 

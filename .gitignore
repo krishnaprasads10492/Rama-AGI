@@ -57,3 +57,7 @@ rama.salt
 rama.verify
 .nucleus.enc
 .nucleus.salt
+
+# StockMind engine virtual environments (machine-specific, built by scripts/buildInstaller.cjs)
+.venv-stockmind/
+python-env/

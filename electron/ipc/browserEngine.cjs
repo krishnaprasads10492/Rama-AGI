@@ -14,6 +14,7 @@ try {
 }
 
 const runtime = require('../lib/browserRuntime.cjs');
+const capability = require('../lib/capability.cjs');
 
 /**
  * Which browser to drive, discovered once and reused (Section 94).
@@ -176,8 +177,26 @@ async function searchWeb(query, engine = 'bing') {
 // ─── Register ────────────────────────────────────────────────────────────────
 function register(ipcMain) {
 
+  // ── THE GATE (Section 149.3, D7) ──────────────────────────────────────────────────────────────────
+  // Fourteen handlers were registered here with no capability check at all, `browser:execute-js` and
+  // `browser:download` among them, although `shared/capabilities.json` has declared `browser.*` tiers
+  // since the matrix was written. Each registration below now names its capability AT THE CALL SITE,
+  // by wrapping the handler in `gate(<capability>, <handler>)`. The plain `ipcMain.handle` spelling is
+  // kept on purpose - the reachability audit, the invariants and the applier suite all find channels by
+  // it, and a wrapper that hid the registration from them would have made 14 live channels look
+  // unhandled.
+  //
+  // The caller passes `user` as the LAST argument. `gate` strips it before the handler runs, so the
+  // handlers' own signatures are unchanged. A call with no user, or a malformed one, is denied: unknown
+  // means denied. Like every gate in this project the tier is supplied by the renderer, so this stops a
+  // lower-tier account and a mis-wired caller; it does not stop code already inside the renderer.
+  const gate = (cap, handler) => (event, ...args) => {
+    const denied = capability.deny(args.length ? args[args.length - 1] : null, cap);
+    return denied || handler(event, ...args.slice(0, -1));
+  };
+
   // ── Launch browser ────────────────────────────────────────────────────────
-  ipcMain.handle('browser:launch', async (_e, opts = {}) => {
+  ipcMain.handle('browser:launch', gate('browser.read', async (_e, opts = {}) => {
     if (!playwright) return { ok: false, error: 'playwright not installed' };
     if (browser) return { ok: true, message: 'already running' };
     try {
@@ -194,16 +213,16 @@ function register(ipcMain) {
     } catch (err) {
       return { ok: false, error: err.message };
     }
-  });
+  }));
 
   // ── Close browser ─────────────────────────────────────────────────────────
-  ipcMain.handle('browser:close', async () => {
+  ipcMain.handle('browser:close', gate('browser.read', async () => {
     await closeBrowser();
     return { ok: true };
-  });
+  }));
 
   // ── Open page ─────────────────────────────────────────────────────────────
-  ipcMain.handle('browser:open-page', async (_e, url) => {
+  ipcMain.handle('browser:open-page', gate('browser.read', async (_e, url) => {
     if (!browserCtx) return { ok: false, error: 'Browser not launched' };
     touchBrowser();
     try {
@@ -216,10 +235,10 @@ function register(ipcMain) {
     } catch (err) {
       return { ok: false, error: err.message };
     }
-  });
+  }));
 
   // ── Navigate existing page ────────────────────────────────────────────────
-  ipcMain.handle('browser:navigate', async (_e, id, url) => {
+  ipcMain.handle('browser:navigate', gate('browser.read', async (_e, id, url) => {
     const page = pages[id];
     if (!page) return { ok: false, error: 'Page not found' };
     try {
@@ -228,10 +247,10 @@ function register(ipcMain) {
     } catch (err) {
       return { ok: false, error: err.message };
     }
-  });
+  }));
 
   // ── Read page content ─────────────────────────────────────────────────────
-  ipcMain.handle('browser:get-content', async (_e, id) => {
+  ipcMain.handle('browser:get-content', gate('browser.read', async (_e, id) => {
     const page = pages[id];
     if (!page) return { ok: false, error: 'Page not found' };
     try {
@@ -248,7 +267,7 @@ function register(ipcMain) {
     } catch (err) {
       return { ok: false, error: err.message };
     }
-  });
+  }));
 
   /**
    * Which browsers Rāma can drive, and which it chose (Section 94).
@@ -256,7 +275,7 @@ function register(ipcMain) {
    * Surfaced so "web search does not work" is a diagnosable statement rather than a guess. Reports
    * every candidate with the evidence that found it, and when none is drivable, the exact remedy.
    */
-  ipcMain.handle('browser:runtime', async () => {
+  ipcMain.handle('browser:runtime', gate('browser.read', async () => {
     const found = browserRuntime();
     return {
       ok: !!found.chosen,
@@ -267,16 +286,16 @@ function register(ipcMain) {
       available: found.available.map(b => ({ id: b.id, label: b.label, how: b.how, path: b.executablePath })),
       reason: found.reason,
     };
-  });
+  }));
 
   // ── Search the web ────────────────────────────────────────────────────────
   // ONE implementation, shared with main-process callers: the body is `searchWeb` above. The
   // playwright-absent return is identical, which is the one behaviour an extraction could
   // plausibly break and is therefore asserted.
-  ipcMain.handle('browser:search', async (_e, query, engine = 'bing') => searchWeb(query, engine));
+  ipcMain.handle('browser:search', gate('browser.search', async (_e, query, engine = 'bing') => searchWeb(query, engine)));
 
   // ── Screenshot ────────────────────────────────────────────────────────────
-  ipcMain.handle('browser:screenshot', async (_e, id) => {
+  ipcMain.handle('browser:screenshot', gate('browser.read', async (_e, id) => {
     const page = pages[id];
     if (!page) return { ok: false, error: 'Page not found' };
     try {
@@ -285,10 +304,10 @@ function register(ipcMain) {
     } catch (err) {
       return { ok: false, error: err.message };
     }
-  });
+  }));
 
   // ── Execute JS in page ────────────────────────────────────────────────────
-  ipcMain.handle('browser:execute-js', async (_e, id, script) => {
+  ipcMain.handle('browser:execute-js', gate('browser.forms', async (_e, id, script) => {
     const page = pages[id];
     if (!page) return { ok: false, error: 'Page not found' };
     try {
@@ -297,10 +316,10 @@ function register(ipcMain) {
     } catch (err) {
       return { ok: false, error: err.message };
     }
-  });
+  }));
 
   // ── Download file ─────────────────────────────────────────────────────────
-  ipcMain.handle('browser:download', async (event, url, destDir, filename) => {
+  ipcMain.handle('browser:download', gate('browser.download', async (event, url, destDir, filename) => {
     if (!playwright) return { ok: false, error: 'playwright not installed' };
     const dlId   = `dl_${Date.now()}`;
     const dlPath = path.join(destDir || getDownloadDir(), filename || path.basename(new URL(url).pathname) || 'download');
@@ -336,25 +355,25 @@ function register(ipcMain) {
     })();
 
     return { ok: true, id: dlId, dest: dlPath };
-  });
+  }));
 
   // ── Get download queue ────────────────────────────────────────────────────
-  ipcMain.handle('browser:get-downloads', async () => {
+  ipcMain.handle('browser:get-downloads', gate('browser.read', async () => {
     return { ok: true, data: downloadQueue };
-  });
+  }));
 
   // ── Close specific page ───────────────────────────────────────────────────
-  ipcMain.handle('browser:close-page', async (_e, id) => {
+  ipcMain.handle('browser:close-page', gate('browser.read', async (_e, id) => {
     const page = pages[id];
     if (page) {
       await page.close().catch(() => {});
       delete pages[id];
     }
     return { ok: true };
-  });
+  }));
 
   // ── List open pages ────────────────────────────────────────────────────────
-  ipcMain.handle('browser:list-pages', async () => {
+  ipcMain.handle('browser:list-pages', gate('browser.read', async () => {
     const list = await Promise.all(
       Object.entries(pages).map(async ([id, page]) => {
         try {
@@ -367,16 +386,16 @@ function register(ipcMain) {
       })
     );
     return { ok: true, data: list };
-  });
+  }));
 
   // ── Fetch & read a URL (lightweight, no full browser) ─────────────────────
-  ipcMain.handle('browser:fetch-url', async (_e, url) => {
+  ipcMain.handle('browser:fetch-url', gate('browser.read', async (_e, url) => {
     // Shared HTTP client: human headers, circuit breaker, 10MB cap.
     // Keeps this path cheap so we never spin up Chromium just to read a page.
     const res = await net.getHuman(url, { timeout: 15000 });
     if (!res.ok) return { ok: false, error: res.error || `HTTP ${res.status}` };
     return { ok: true, data: res.body };
-  });
+  }));
 }
 
 async function closeBrowser() {

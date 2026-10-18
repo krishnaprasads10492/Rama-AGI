@@ -24,6 +24,9 @@
 
 const authCore   = require('../lib/authCore.cjs');
 const capability = require('../lib/capability.cjs');
+// Who a window REALLY is is decided here and nowhere in the renderer (Section 150.1, D6). The binding
+// is written only by the three handlers below, and only after authCore has accepted the token.
+const principalBinding = require('../lib/principalBinding.cjs');
 
 const DOMAIN    = 'instances';    // encrypted domain that also holds instance meta
 const USERS_KEY = 'accounts';
@@ -135,15 +138,26 @@ function register(ipcMain) {
     authCore.loginStep1(username, password)
   ));
 
-  ipcMain.handle('auth:login-step2', withStore(async (_e, { stepToken, key, fingerprint } = {}) =>
-    authCore.loginStep2(stepToken, key, fingerprint)
-  ));
+  ipcMain.handle('auth:login-step2', withStore(async (_e, { stepToken, key, fingerprint } = {}) => {
+    const res = authCore.loginStep2(stepToken, key, fingerprint);
+    // Bound ONLY on success, and by main: the renderer is told the token but does not get to say which
+    // window holds it. Every later call from this window resolves to this account through authCore.
+    if (res.ok) principalBinding.bind(_e.sender, res.token, fingerprint);
+    return res;
+  }));
 
-  ipcMain.handle('auth:logout', withStore(async (_e, token) => authCore.logout(token)));
+  ipcMain.handle('auth:logout', withStore(async (_e, token) => {
+    // Unbind every window that held this token, then end the session itself.
+    principalBinding.unbindToken(token);
+    return authCore.logout(token);
+  }));
 
   ipcMain.handle('auth:me', withStore(async (_e, { token, fingerprint } = {}) => {
     const actor = actorFor(token, fingerprint);
     if (!actor) return { ok: false, error: 'No valid session', reauth: true };
+    // A restored session (a reload, a window that was open before this process looked) is only real once
+    // main has validated it, so this is where that window is bound again.
+    principalBinding.bind(_e.sender, token, fingerprint);
     const user = authCore.findById(actor.userId);
     return { ok: true, user: authCore.publicUser(user), expiresAt: actor.expiresAt };
   }));

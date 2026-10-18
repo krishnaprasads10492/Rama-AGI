@@ -345,6 +345,126 @@ if bt:
           str(bt[0]))
     check("so the return is a loss", bt[0]["grossPct"] < 0, str(bt[0]["grossPct"]))
 
+print("\n--- a stop the market gapped through fills at the OPEN, not at the stop price (Section 149.2b) ---")
+# Nobody can fill at a price the market skipped. A stop at 95 on a bar that opens at 80 fills at 80.
+# Filling at 95 is optimistic for every long and every short, and largest in the volatile sessions where
+# stops matter. A TARGET gapped through is deliberately NOT improved: filling the better price would be
+# the optimistic direction, and exiting at the target is the cautious reading.
+_flat = {"open": 100, "high": 100, "low": 100, "close": 100, "volume": 1}
+def _bar(day, o, h, l, c):
+    return {"date": f"2020-02-{day:02d}", "open": o, "high": h, "low": l, "close": c, "volume": 1}
+
+_gap_long = [
+    {**_flat, "date": "2020-02-01"}, {**_flat, "date": "2020-02-02"},
+    _bar(3, 100, 101, 99, 101),          # breakout: close above the prior two highs
+    _bar(4, 100, 101, 99, 100),          # entry bar - touches neither stop nor target
+    _bar(5, 80, 82, 78, 79),             # gaps from 100 straight through the 95 stop
+    _bar(6, 79, 80, 78, 79),
+]
+_gl = S.simulate(S.validate_spec(both)["spec"], _gap_long)
+check("the gapped long produced a trade", len(_gl) == 1, str(_gl))
+if _gl:
+    check("it is recorded as a stop", _gl[0]["exitReason"] == "stop")
+    check("and it fills at the open (80), not the stop price (95)", _gl[0]["exitPrice"] == 80,
+          str(_gl[0]["exitPrice"]))
+    check("so the loss is the real 20%, not the 5% the stop promised",
+          abs(_gl[0]["grossPct"] - (-20.0)) < 1e-9, str(_gl[0]["grossPct"]))
+
+_short_spec = dict(both)
+_short_spec["side"] = "short"
+_short_spec["entry"] = {"op": "any", "k": 1, "blocks": [{"id": "breakout",
+                                                         "params": {"lookback": 2, "direction": "down"}}]}
+_gap_short = [
+    {**_flat, "date": "2020-02-01"}, {**_flat, "date": "2020-02-02"},
+    _bar(3, 100, 100, 98, 99),           # breakdown: close below the prior two lows
+    _bar(4, 100, 101, 99, 100),          # entry
+    _bar(5, 120, 121, 119, 120),         # gaps up through the 105 short stop
+    _bar(6, 120, 121, 119, 120),
+]
+_gs = S.simulate(S.validate_spec(_short_spec)["spec"], _gap_short)
+check("the gapped short produced a trade", len(_gs) == 1, str(_gs))
+if _gs:
+    check("a short's gapped stop fills at the open (120), not 105", _gs[0]["exitPrice"] == 120,
+          str(_gs[0]["exitPrice"]))
+    check("and the loss is the real 20%", abs(_gs[0]["grossPct"] - (-20.0)) < 1e-9,
+          str(_gs[0]["grossPct"]))
+
+_gap_target = [
+    {**_flat, "date": "2020-02-01"}, {**_flat, "date": "2020-02-02"},
+    _bar(3, 100, 101, 99, 101), _bar(4, 100, 101, 99, 100),
+    _bar(5, 112, 114, 111, 113),         # gaps UP through the 105 target
+    _bar(6, 113, 114, 112, 113),
+]
+_gt = S.simulate(S.validate_spec(both)["spec"], _gap_target)
+check("a gap through a TARGET still exits at the target (the cautious reading)",
+      len(_gt) == 1 and _gt[0]["exitReason"] == "target" and abs(_gt[0]["exitPrice"] - 105) < 1e-9,
+      str(_gt))
+
+_touch = [
+    {**_flat, "date": "2020-02-01"}, {**_flat, "date": "2020-02-02"},
+    _bar(3, 100, 101, 99, 101), _bar(4, 100, 101, 99, 100),
+    _bar(5, 99, 99.5, 94, 96),           # opens ABOVE the stop and trades down through it
+    _bar(6, 96, 97, 95, 96),
+]
+_tt = S.simulate(S.validate_spec(both)["spec"], _touch)
+check("a stop that is merely touched (no gap) still fills at the stop price",
+      len(_tt) == 1 and abs(_tt[0]["exitPrice"] - 95) < 1e-9, str(_tt))
+
+print("\n--- the judge and the simulator actually fit together (Section 151.2) ---")
+# /strategy/backtest handed search_and_judge a callback returning trade DICTS; the judge needs RETURNS.
+# Every call raised a TypeError and the route turned it into {ok: false}. No test crossed the seam because
+# main.py needs pandas. This one does, with stdlib only.
+import importlib.util as _iu
+_se_spec = _iu.spec_from_file_location("strategy_eval_seam", os.path.join(_ROOT, "engine", "strategy_eval.py"))
+_SE = _iu.module_from_spec(_se_spec)
+sys.modules["strategy_eval_seam"] = _SE
+_se_spec.loader.exec_module(_SE)
+
+_seam_spec = S.validate_spec(spec([SMA_UP], sweep={"0.fast": [5, 10], "0.slow": [30, 40]}))["spec"]
+_variants = S.expand_sweep(_seam_spec)
+check("a 4-variant sweep expands", len(_variants) == 4)
+
+_old_ok = True
+try:
+    _SE.search_and_judge(_variants, lambda v, a, b: S.simulate(v, BARS, a, b), n=len(BARS), cost_model=_SE.CostModel())
+except TypeError:
+    _old_ok = False
+check("the callback the route USED TO PASS raises a TypeError (the bug, kept as a regression)", _old_ok is False)
+
+_judged = _SE.search_and_judge(_variants, S.returns_runner(BARS), n=len(BARS), cost_model=_SE.CostModel())
+check("returns_runner makes the judge run end to end", _judged.get("ok") is True or "reason" in _judged, str(_judged)[:120])
+check("the runner returns floats, not dicts",
+      all(isinstance(x, float) for x in S.returns_runner(BARS)(_variants[0], 0, len(BARS))))
+check("and exactly the gross returns simulate() produced",
+      S.returns_runner(BARS)(_variants[0], 0, len(BARS)) == [t["grossPct"] for t in S.simulate(_variants[0], BARS)])
+import inspect as _insp
+check("main.py hands the judge returns_runner, not an inline lambda over simulate",
+      "strategy_spec.returns_runner(bars)" in open(os.path.join(_ROOT, "main.py"), encoding="utf-8").read())
+
+print("\n--- an unclosed trade can be DESCRIBED without being counted (Section 151.4) ---")
+_unclosed = [
+    {"date": "2020-03-01", "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1},
+    {"date": "2020-03-02", "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1},
+    {"date": "2020-03-03", "open": 100, "high": 101, "low": 99, "close": 101, "volume": 1},
+    {"date": "2020-03-04", "open": 100, "high": 103, "low": 99.5, "close": 102, "volume": 1},
+    {"date": "2020-03-05", "open": 102, "high": 104, "low": 101, "close": 103, "volume": 1},
+]
+_us = S.validate_spec(both)["spec"]
+_held = []
+_t = S.simulate(_us, _unclosed, 0, None, _held)
+check("the unclosed trade is still not in the returned trades", _t == [])
+check("but it is described when a list is passed", len(_held) == 1, str(_held))
+if _held:
+    h = _held[0]
+    check("entry is the NEXT bar's open after the signal", h["entryPrice"] == 100 and h["entryIndex"] == 3, str(h))
+    check("it carries its stop and target prices", abs(h["stopPrice"] - 95) < 1e-9 and abs(h["targetPrice"] - 105) < 1e-9, str(h))
+    check("bars held counts the entry bar", h["barsHeld"] == 2, str(h["barsHeld"]))
+    check("unrealised % is marked to the last close", abs(h["unrealisedPct"] - 3.0) < 1e-9, str(h["unrealisedPct"]))
+_held2 = []
+S.simulate(_us, wide, 0, None, _held2)
+check("a trade that CLOSED leaves nothing in the open list", _held2 == [])
+check("the default call is unchanged: no list, same trades", S.simulate(_us, wide) == S.simulate(_us, wide, 0, None, []))
+
 print("\n--- a trade still open at the end of the window is not counted ---")
 _never = [
     {"date": "2020-01-01", "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1},

@@ -174,12 +174,50 @@ export const TERMS = {
     seeAlso: ['fetchProvider'],
   },
   fetchProvider: {
-    term: 'Fetch from provider', group: 'instrument',
-    short: 'Ask the data providers for anything missing and store it.',
+    term: 'Fetch & keep for analysis', group: 'instrument',
+    short: 'Ask the data providers for anything missing and store it, so strategy and training can use it.',
     long: 'Reaches the network and can take a while on a first fetch, because it pulls as deep a '
       + 'history as the provider allows. Everything it retrieves is merged into the local store — it '
-      + 'never replaces or shrinks what is already there.',
-    seeAlso: ['fromDisk', 'providerCap'],
+      + 'never replaces or shrinks what is already there. Strategy, training and outcomes read that '
+      + 'store, so this is the button for instruments you analyse. To only look, use Fetch (view '
+      + 'only), which writes nothing.',
+    seeAlso: ['fromDisk', 'providerCap', 'fetchView'],
+  },
+  fetchView: {
+    term: 'Fetch (view only)', group: 'instrument',
+    short: 'Ask the providers for the latest candles and show them, without writing anything to disk.',
+    long: 'The candles are drawn on the chart and marked NOT SAVED. Nothing is added to the local '
+      + 'store, so strategy and training do not see them and closing the app forgets them. A repeat '
+      + 'click within a few minutes reuses the last answer instead of asking the provider again. '
+      + 'If you want to keep what you see, save it as a dataset, or use Fetch & keep for analysis.',
+    seeAlso: ['notSaved', 'fetchProvider', 'savedDataset'],
+  },
+  notSaved: {
+    term: 'Not saved', group: 'instrument',
+    short: 'These candles were fetched for viewing and are not on disk.',
+    long: 'The badge shows while the chart holds provider data that was never written to the local '
+      + 'store. Changing the instrument or interval, or reading from disk, replaces them. Nothing '
+      + 'analysed by strategy or training comes from them. Save them as a dataset to keep exactly '
+      + 'this view.',
+    seeAlso: ['fetchView', 'savedDataset'],
+  },
+  savedDataset: {
+    term: 'Saved dataset', group: 'instrument',
+    short: 'A named copy of the candles you chose to keep, shown read-only.',
+    long: 'A snapshot of exactly the candles that were on screen, with where they came from and when '
+      + 'you saved them. It never changes afterwards: a different snapshot gets a different name, or '
+      + 'you choose to overwrite. Loading one draws it on the chart under a banner; it does not '
+      + 'feed strategy or training, and deleting it leaves the local store untouched.',
+    seeAlso: ['datasetName', 'storedLocally'],
+  },
+  datasetName: {
+    term: 'Dataset name', group: 'instrument',
+    short: 'SYMBOL.EXCHANGE.INTERVAL.YYYYMMDD.label, so a name says what is inside.',
+    long: 'Four parts come from the data and the day you saved it; the label is yours, 1 to 40 '
+      + 'letters, digits, - or _. For example NIFTY50.NSE.1d.20261004.pre-budget. A name must start '
+      + 'with the instrument and interval of the candles it holds, and a name that already exists '
+      + 'is refused unless you tick overwrite.',
+    seeAlso: ['savedDataset'],
   },
 
   // ── The chart ─────────────────────────────────────────────────────────────
@@ -948,8 +986,19 @@ export const TERMS = {
     short: 'Return per unit of risk, after costs. Higher is better.',
     long: 'Net, always — a strategy profitable only before costs is not a strategy. It is the headline '
       + 'risk-adjusted measure, and on its own it is not enough, because it says nothing about how many '
-      + 'variants were tried to find it.',
-    seeAlso: ['grossSharpe', 'noiseBenchmark'],
+      + 'variants were tried to find it. It is annualised, so it reads larger than the per-trade figure '
+      + 'the noise benchmark is compared with. Do not set the two side by side.',
+    seeAlso: ['grossSharpe', 'perTradeSharpe', 'noiseBenchmark'],
+  },
+  perTradeSharpe: {
+    term: 'Per-trade Sharpe', group: 'judgement',
+    short: 'Average net return per trade divided by its spread. Not annualised.',
+    long: 'This is the figure Rāma actually tests against the noise benchmark, because both are in the '
+      + 'same unit: one trade. The annualised Net Sharpe is this multiplied by about sixteen, which is '
+      + 'a convention for comparing strategies and not a measure of how likely the result is to be '
+      + 'real. Comparing the annualised figure with the benchmark made noise look like an edge, which '
+      + 'is the defect this field exists to prevent.',
+    seeAlso: ['netSharpe', 'noiseBenchmark'],
   },
   grossSharpe: {
     term: 'Gross Sharpe', group: 'judgement',
@@ -963,8 +1012,9 @@ export const TERMS = {
     short: 'The Sharpe a search of this many variants would produce from pure luck.',
     long: 'With 1,000 zero-edge variants, the best observed Sharpe is not 0 — it is roughly this. Your '
       + 'result has to beat this number, not zero, to mean anything. It rises as you search wider, '
-      + 'which is the mathematical reason a wider search is weaker evidence.',
-    seeAlso: ['trials', 'deflated'],
+      + 'which is the mathematical reason a wider search is weaker evidence. It is a per-trade figure, '
+      + 'so it is read beside the per-trade Sharpe and not the annualised one.',
+    seeAlso: ['trials', 'deflated', 'perTradeSharpe'],
   },
   deflated: {
     term: 'Chance it is real', group: 'judgement',
@@ -1143,6 +1193,114 @@ export const TERMS = {
       + 'than quietly mixing it into a result is the difference between a limitation you know about '
       + 'and a number you cannot trust.',
     seeAlso: ['notBacktestable'],
+  },
+
+  // ── The strategy book (Section 151) ───────────────────────────────────────
+  evolve: {
+    term: 'Evolve', group: 'strategy',
+    short: 'Try the published strategies on this instrument and rank what survives an honest test.',
+    long: 'You choose the instrument, interval, capital and risk. Rāma runs every strategy in its library '
+      + 'over the stored history, tunes each only on the past and scores it only on the stretch after, '
+      + 'then ranks what pays after costs. Nothing is saved until you keep it. Most runs on most '
+      + 'instruments will keep very little, and that is the honest answer rather than a failure.',
+    seeAlso: ['walkForward', 'demonstrated', 'keepStrategy', 'historyNeeded'],
+  },
+  exploreWider: {
+    term: 'Search wider', group: 'strategy',
+    short: 'Also try tighter and looser stops and targets. Every extra try raises the bar a result must clear.',
+    long: 'The library already tries each strategy with its own published settings. Searching wider adds '
+      + 'two more stop and target scalings, which triples the variants. More tries find more apparent '
+      + 'winners by luck alone, so Rāma counts every one and demands a stronger result in proportion. '
+      + 'Leave it off unless you have a reason; it rarely turns a weak result into a real one.',
+    seeAlso: ['trials', 'evolve'],
+  },
+  walkForward: {
+    term: 'Walk-forward', group: 'judgement',
+    short: 'Tune on the past, trade the next stretch, repeat. The score is the trades that came after the tuning.',
+    long: 'The history is cut into consecutive stretches. For each one the settings are chosen using only '
+      + 'trades that had already closed before it began, then used on that stretch untouched. The pooled '
+      + 'trades from every stretch are the result. It measures the whole routine of tuning and trading, '
+      + 'which is what a kept strategy will actually do, and it cannot flatter itself with future data.',
+    seeAlso: ['holdout', 'evolve'],
+  },
+  demonstrated: {
+    term: 'Demonstrated', group: 'judgement',
+    short: 'Passed the deflated test and beat what picking the luckiest of many candidates would give.',
+    long: 'Two checks, both required. The result must clear the deflated-Sharpe test for the number of '
+      + 'variants tried, and its hit rate must exceed the ceiling that the best of this many pure-noise '
+      + 'candidates would reach. Even then it describes the past. A demonstrated strategy has earned a '
+      + 'forward test, not your trust.',
+    seeAlso: ['notDemonstrated', 'selectionNoise', 'deflated', 'forwardTest'],
+  },
+  notDemonstrated: {
+    term: 'Not demonstrated', group: 'judgement',
+    short: 'Profitable after costs so far, but not distinguishable from luck. Listed, never recommended.',
+    long: 'It made money out of sample, which is why it appears. But on random prices some strategies '
+      + 'also make money by chance, and this one has not cleared the bar that separates the two. '
+      + 'Rāma measured that: on pure noise, many candidates land here and almost none reach '
+      + 'demonstrated. Keep one only if you want to watch it, and read it as a hypothesis.',
+    seeAlso: ['demonstrated', 'selectionNoise', 'forwardTest'],
+  },
+  selectionNoise: {
+    term: 'Selection noise', group: 'judgement',
+    short: 'The hit rate the luckiest of this many candidates would show on random prices.',
+    long: 'Rank enough candidates and the top one looks good whether or not any is. This is the hit '
+      + 'rate you would expect from the best of that many with no edge at all. A candidate must beat '
+      + 'it, not merely beat 50%, before it can be called demonstrated. More candidates raise it.',
+    seeAlso: ['demonstrated', 'trials'],
+  },
+  historyNeeded: {
+    term: 'History needed', group: 'judgement',
+    short: 'Roughly how many bars this strategy needs before it can make enough trades to be judged.',
+    long: 'Some strategies trade rarely. Judging one on thirty trades or fewer says almost nothing, so '
+      + 'Rāma refuses to rank it and tells you how many bars it estimates it would need at its present '
+      + 'trading rate. It will not lower the bar to produce an answer. Fetch more history, or choose '
+      + 'a shorter interval where the instrument has one.',
+    seeAlso: ['evolve', 'edge'],
+  },
+  keepStrategy: {
+    term: 'Keep', group: 'book',
+    short: 'Save a result to your strategy book with its settings frozen. Your decision, never automatic.',
+    long: 'Keeping stores the exact settings, what the source claimed, and what Rāma measured the day '
+      + 'you kept it, as separate things. Keeping a demonstrated result is one click. A result that is '
+      + 'not demonstrated is kept one at a time and carries that label for as long as it is stored.',
+    seeAlso: ['strategyBook', 'notDemonstrated'],
+  },
+  strategyBook: {
+    term: 'Strategy book', group: 'book',
+    short: 'Your kept strategies: each with its claim, its first measurement, and how it is doing since.',
+    long: 'Three columns, never merged. The CLAIM is what the published source said. The BASELINE is '
+      + 'what Rāma measured when you kept it. The CURRENT column is the forward test on bars that '
+      + 'arrived afterwards. Rāma refreshes it when you open the tab or press the button, never on a '
+      + 'timer, and it never retires or deletes anything itself.',
+    seeAlso: ['forwardTest', 'bookStatus', 'signalState'],
+  },
+  forwardTest: {
+    term: 'Forward test', group: 'judgement',
+    short: 'The frozen strategy run over bars that came after you kept it. The only truly fresh evidence.',
+    long: 'Its settings were fixed before these bars existed, so it cannot have been tuned to them. That '
+      + 'makes it the one honest test, and it is judged as a single try. It needs at least ten trades '
+      + 'before it says anything, which can take months for a slow strategy. Until then the answer is '
+      + 'watch, whatever the sign.',
+    seeAlso: ['bookStatus', 'strategyBook'],
+  },
+  bookStatus: {
+    term: 'Book status', group: 'book',
+    short: 'Watch, holding, decaying or retired. Rāma proposes a change; only you retire.',
+    long: 'WATCH: too few forward trades, or profitable so far but not distinguishable from luck. '
+      + 'HOLDING: ten or more forward trades, positive after costs, and unlikely to be chance. DECAYING: '
+      + 'ten or more forward trades that do not pay; Rāma proposes retiring it and waits for you. '
+      + 'RETIRED: your decision, kept in the history and hidden from the list.',
+    seeAlso: ['forwardTest', 'strategyBook'],
+  },
+  signalState: {
+    term: 'Rule state', group: 'book',
+    short: 'What the kept rule says on the last stored bar: flat, conditions met, or in a trade.',
+    long: 'FLAT: the entry conditions do not hold. CONDITIONS MET: they hold on the last close, and a '
+      + 'fill would be at the next bar open, so the stop and target shown are indicative. IN A TRADE: '
+      + 'the rule would currently be holding a position entered earlier. It describes the rule, not '
+      + 'what to do, and it is only as fresh as the last stored bar, whose age is shown beside it.',
+    seeAlso: ['strategyBook', 'noOrders'],
   },
 };
 

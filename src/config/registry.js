@@ -13,7 +13,7 @@
  */
 
 import React from 'react';
-import { TIERS } from '@services/accessControl.js';
+import { TIERS, tierOf } from '@services/accessControl.js';
 
 /**
  * @typedef  {Object} PageDef
@@ -200,7 +200,9 @@ export const PAGES = [
 
 /** Pages visible to a given user tier. */
 export function visiblePages(user) {
-  const tier = user?.tier ?? TIERS.GUEST;
+  // `tierOf` and not `user?.tier ?? GUEST`: a tier of '0' or null coerced to master and saw every page
+  // (Section 150.4). Anything that is not a real tier is a Guest.
+  const tier = tierOf(user) ?? TIERS.GUEST;
   return PAGES.filter(p => tier <= p.minTier);
 }
 
@@ -225,15 +227,34 @@ export function searchPages(query, userOrPages) {
   return list.filter(p => pageMatches(p, query));
 }
 
-/** Voice command → route resolution. Replaces voiceEngine.VOICE_ROUTES. */
-export function matchVoiceToRoute(transcript) {
-  const t = transcript.toLowerCase().trim();
-  for (const page of PAGES) {
+/**
+ * Voice command → route resolution. Replaces voiceEngine.VOICE_ROUTES.
+ *
+ * With no `user` it searches every page, exactly as it always did, so existing callers are unchanged.
+ * With a `user` it searches only the pages THAT ACCOUNT can see (Section 150.4, D10): the reflex used to
+ * say "Opening System." to a Guest and the router then declined to render it, so master's guest was told
+ * something that did not happen.
+ */
+export function matchVoiceToRoute(transcript, user) {
+  const t = String(transcript ?? '').toLowerCase().trim();
+  const pool = user === undefined ? PAGES : visiblePages(user);
+  for (const page of pool) {
     if (page.voice.some(phrase => t.includes(phrase))) {
       return { route: page.route, page };
     }
   }
   return null;
+}
+
+/**
+ * Like `matchVoiceToRoute`, but says whether the page EXISTS for this phrase even when the account cannot
+ * see it: `{ route, page, allowed }`. A hidden page must be reported as unavailable, not as "nothing
+ * matched" (which would hand the request to a model) and not as "opening" (which would be false).
+ */
+export function resolveVoiceRoute(transcript, user) {
+  const hit = matchVoiceToRoute(transcript);
+  if (!hit) return null;
+  return { ...hit, allowed: visiblePages(user).some(p => p.route === hit.route) };
 }
 
 /** Find a page by route. */

@@ -29,11 +29,20 @@ Endpoints:
   POST /news/sync             — record today's RSS reading
   POST /news/backfill         — pull historical tone/volume from GDELT (2017 onward)
   GET  /news/coverage/{sym}   — days collected, and whether that is enough to train on
-  GET  /ohlcv/{symbol}        — stored bars, for the chart
+  GET  /ohlcv/{symbol}        — bars for the chart; persist=false fetches without writing
+  POST /dataset/save          — keep what the chart shows under a name (SYMBOL.EXCHANGE.INTERVAL.YYYYMMDD.label)
+  GET  /dataset/list          — saved datasets;  GET /dataset/{name} loads one read-only
+  POST /dataset/delete        — master's act
   GET  /store/inventory       — every symbol held locally, with its depth
   GET  /horizons              — intraday/swing/positional, and display-only intervals
   GET  /predict/multi/{sym}   — one read per horizon, plus what their agreement means
   POST /train/horizons        — fit a model set per horizon, each on its own interval
+  POST /strategy/evolve       — try the library, walk-forward judge, rank; stores nothing
+  POST /strategy/book/keep    — keep rows of a cached evolve run (master's act)
+  GET  /strategy/book         — kept strategies, with staleness
+  POST /strategy/book/refresh — forward-test the stale (or named) ones on newer bars
+  POST /strategy/book/{retire,restore,remove} — master's acts only
+  GET  /strategy/book/signals — what each kept rule says on its last stored bar
 
 Started by electron/ipc/aiProcess.cjs (spawn python -u main.py), reached from
 the renderer through electron/ipc/marketIntel.cjs — this process itself has
@@ -574,10 +583,74 @@ def news_coverage(symbol: str, exchange: str = "NSE"):
 
 # ── Bars, for the chart (spec Section 71) ─────────────────────────────────────
 
+def _chart_frame(store, sym: str, exchange: str, interval: str, sync: bool, persist: bool = True):
+    """
+    The frame the chart draws, and what happened getting it. One place, because the dataset snapshot must
+    be built from EXACTLY what /ohlcv shows (Section 153): two copies of this would let "what I saved"
+    drift from "what I saw".
+    """
+    if sync:
+        return store.sync(sym, exchange, interval, persist=persist)
+    return store.load(sym, exchange, interval), {"fromStore": True}
+
+
+def _chart_window(df, fromDate: Optional[str], toDate: Optional[str]):
+    """
+    A DATE RANGE, NOT ONLY A TAIL (spec Section 105).
+
+    Master removed the bar-count field: a count is a consequence of interval and window, not an
+    independent choice, so the window is expressed as the dates it covers. `limit` stays as a CEILING on
+    the payload (every bar crosses an IPC boundary and then becomes a canvas point) but no longer
+    defines the window. An unparseable date is ignored rather than emptying the chart.
+    """
+    window = df.copy()
+    window["date"] = pd.to_datetime(window["date"], errors="coerce")
+    window = window.dropna(subset=["date"])
+    if fromDate:
+        try:
+            window = window[window["date"] >= pd.Timestamp(fromDate)]
+        except (ValueError, TypeError):
+            pass
+    if toDate:
+        try:
+            # Inclusive of the whole closing day: a `toDate` of 2026-03-31 must include that session's
+            # bars, and an intraday stamp of 2026-03-31 09:15 is NOT <= midnight.
+            window = window[window["date"] <= pd.Timestamp(toDate) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)]
+        except (ValueError, TypeError):
+            pass
+    return window
+
+
+def _chart_bars(store, tail, interval: str) -> list:
+    """
+    INTRADAY BARS KEEP THEIR TIME (spec Section 105).
+
+    `str(r.date.date())` serialises 2026-03-31 09:15 as "2026-03-31", so every bar in a session arrived at
+    the renderer with the same stamp, and `PriceChart.toChartTime` treats a 10-character string as a whole
+    day, collapsing a session's bars onto one point. The store was fixed for this in Section 73; the ROUTE
+    was not, so every intraday chart was one candle per day whatever interval master picked.
+    """
+    intraday = store.is_intraday(interval)
+    stamp = ((lambda d: d.strftime("%Y-%m-%d %H:%M:%S")) if intraday
+             else (lambda d: str(d.date())))
+    return [{
+        "date":   stamp(r.date),
+        "open":   round(float(r.open), 4),
+        "high":   round(float(r.high), 4),
+        "low":    round(float(r.low), 4),
+        "close":  round(float(r.close), 4),
+        "volume": float(r.volume or 0),
+    } for r in tail.itertuples(index=False)]
+
+
+def _chart_limit(limit: int) -> int:
+    return max(10, min(limit, 20000))
+
+
 @app.get("/ohlcv/{symbol}")
 def ohlcv(symbol: str, exchange: str = "NSE", interval: str = "1d",
           fromDate: Optional[str] = None, toDate: Optional[str] = None,
-          limit: int = 240, sync: bool = False):
+          limit: int = 240, sync: bool = False, persist: bool = True):
     """
     Stored bars, newest last, for drawing.
 
@@ -587,88 +660,44 @@ def ohlcv(symbol: str, exchange: str = "NSE", interval: str = "1d",
 
     `sync=true` tops the store up first. Off by default so opening a chart does not fire a
     network fetch on every render.
+
+    `persist=false` (with sync) fetches and returns the union with what is stored but WRITES NOTHING
+    (Section 153): displaying candles is not a reason to change the working store. Default true keeps
+    every existing caller's behaviour. `persisted` in the reply is False exactly when the bars returned
+    include provider data that is not on disk.
     """
     try:
         from engine import store
         sym = symbol.upper()
-        if sync:
-            df, info = store.sync(sym, exchange, interval)
-        else:
-            df, info = store.load(sym, exchange, interval), {"fromStore": True}
+        df, info = _chart_frame(store, sym, exchange, interval, sync, persist)
+        persisted = not info.get("unsaved", False)
 
         if df is None or len(df) == 0:
             return {"symbol": sym, "exchange": exchange, "interval": interval,
-                    "bars": [], "count": 0, "stored": 0,
+                    "bars": [], "count": 0, "stored": 0, "persisted": persisted,
                     "note": ("Nothing stored for this symbol. Call again with sync=true to "
                              "fetch it, which reaches back as far as the provider chain allows."),
                     "syncInfo": info}
 
         stored = int(len(df))
-        window = df.copy()
-        window["date"] = pd.to_datetime(window["date"], errors="coerce")
-        window = window.dropna(subset=["date"])
-
-        # ── A DATE RANGE, NOT ONLY A TAIL (spec Section 105) ──────────────────
-        #
-        # Master removed the bar-count field: a count is a consequence of interval and window, not an
-        # independent choice, so the window is now expressed as the dates it actually covers. `limit`
-        # stays as a CEILING on the payload — every bar crosses an IPC boundary and then becomes a
-        # canvas point — but it no longer defines the window.
-        clipped = False
-        if fromDate:
-            try:
-                start = pd.Timestamp(fromDate)
-                before = len(window)
-                window = window[window["date"] >= start]
-                clipped = clipped or len(window) != before
-            except (ValueError, TypeError):
-                pass          # an unparseable date is ignored rather than emptying the chart
-        if toDate:
-            try:
-                # Inclusive of the whole closing day: a `toDate` of 2026-03-31 must include that
-                # session's bars, and an intraday stamp of 2026-03-31 09:15 is NOT <= midnight.
-                end = pd.Timestamp(toDate) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-                before = len(window)
-                window = window[window["date"] <= end]
-                clipped = clipped or len(window) != before
-            except (ValueError, TypeError):
-                pass
+        window = _chart_window(df, fromDate, toDate)
 
         matched = int(len(window))
         if matched == 0:
             return {"symbol": sym, "exchange": exchange, "interval": interval,
-                    "bars": [], "count": 0, "stored": stored,
+                    "bars": [], "count": 0, "stored": stored, "persisted": persisted,
                     "storedFirstBar": str(pd.Timestamp(df["date"].iloc[0]).date()),
                     "note": (f"{stored} {interval} bars are stored, but none fall between "
                              f"{fromDate or 'the start'} and {toDate or 'now'}. Widen the dates, or "
                              f"fetch more history."),
                     "meta": store.meta(sym, exchange, interval), "syncInfo": info}
 
-        tail = window.tail(max(10, min(limit, 20000)))
-
-        # ── INTRADAY BARS KEPT THEIR TIME (spec Section 105) ──────────────────
-        #
-        # THIS ROUTE WAS THROWING THE CLOCK AWAY. `str(r.date.date())` serialises 2026-03-31 09:15 as
-        # "2026-03-31", so every bar in a session arrived at the renderer with the same stamp — and
-        # `PriceChart.toChartTime` treats a 10-character string as a whole day, collapsing a session's
-        # bars onto one point. The store was fixed for exactly this in Section 73; the ROUTE was not,
-        # so every intraday chart was silently one candle per day whatever interval master picked.
-        intraday = store.is_intraday(interval)
-        stamp = ((lambda d: d.strftime("%Y-%m-%d %H:%M:%S")) if intraday
-                 else (lambda d: str(d.date())))
-        bars = [{
-            "date":   stamp(r.date),
-            "open":   round(float(r.open), 4),
-            "high":   round(float(r.high), 4),
-            "low":    round(float(r.low), 4),
-            "close":  round(float(r.close), 4),
-            "volume": float(r.volume or 0),
-        } for r in tail.itertuples(index=False)]
+        bars = _chart_bars(store, window.tail(_chart_limit(limit)), interval)
 
         return {
             "symbol": sym, "exchange": exchange, "interval": interval,
             "bars": bars, "count": len(bars), "stored": stored,
-            "matched": matched,
+            "matched": matched, "persisted": persisted,
             "requestedFrom": fromDate, "requestedTo": toDate,
             "truncated": len(bars) < matched,
             "firstBar": bars[0]["date"], "lastBar": bars[-1]["date"],
@@ -683,6 +712,109 @@ def ohlcv(symbol: str, exchange: str = "NSE", interval: str = "1d",
     except Exception as e:
         logger.error(f"OHLCV error for {symbol}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Named candle snapshots (spec Section 153) ──────────────────────────────────
+#
+# Thin adapters over `engine/datasets.py`. The snapshot is built HERE from the same frame, window and
+# bar shaping /ohlcv uses, never from bars posted by the window: the renderer is not trusted to say what
+# the data was, and 20,000 bars should not cross IPC twice. Saving never writes the working store.
+
+def _datasets():
+    from engine import datasets
+    return datasets
+
+
+class DatasetSaveRequest(BaseModel):
+    symbol:    str  = Field(..., min_length=1, max_length=20)
+    exchange:  str  = Field(default="NSE", max_length=12)
+    interval:  str  = Field(default="1d", max_length=8)
+    label:     Optional[str] = Field(default=None, max_length=60)
+    name:      Optional[str] = Field(default=None, max_length=120)
+    overwrite: bool = False
+    fromDate:  Optional[str] = Field(default=None, max_length=10)
+    toDate:    Optional[str] = Field(default=None, max_length=10)
+    limit:     int  = Field(default=20000, ge=10, le=20000)
+    sync:      bool = False
+    note:      str  = Field(default="", max_length=300)
+    expectBars: Optional[int] = Field(default=None, ge=0, le=1000000)
+
+
+@app.post("/dataset/save")
+def dataset_save(req: DatasetSaveRequest):
+    """Snapshot what the chart shows for these parameters under a name. `sync` re-reads a view-only fetch."""
+    try:
+        import datetime as _dt
+        from engine import store
+        ds = _datasets()
+        sym = req.symbol.strip().upper()
+        name = req.name
+        if not name:
+            lab = ds.validate_label(req.label)
+            if not lab["ok"]:
+                return lab
+            name = ds.suggest_name(sym, req.exchange, req.interval, req.label, _dt.date.today())
+
+        df, info = _chart_frame(store, sym, req.exchange, req.interval, req.sync, persist=False)
+        if df is None or len(df) == 0:
+            return {"ok": False, "code": "empty", "reason": "there are no bars for these parameters to save"}
+        window = _chart_window(df, req.fromDate, req.toDate)
+        if len(window) == 0:
+            return {"ok": False, "code": "empty", "reason": "no bars fall between those dates"}
+        bars = _chart_bars(store, window.tail(_chart_limit(req.limit)), req.interval)
+
+        source = str(info.get("source") or store.meta(sym, req.exchange, req.interval).get("lastSource") or "")
+        res = ds.save(_book_root(), name=name, symbol=sym, exchange=req.exchange, interval=req.interval,
+                      bars=bars, source=source, note=req.note,
+                      window_from=req.fromDate, window_to=req.toDate, overwrite=req.overwrite)
+        if res.get("ok") and req.expectBars is not None and req.expectBars != res["bars"]:
+            res["note"] = (f"The chart showed {req.expectBars} bars but the data has moved on: "
+                           f"{res['bars']} were saved.")
+        return res
+    except Exception as e:
+        logger.error(f"Dataset save failed: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e)}
+
+
+@app.get("/dataset/list")
+def dataset_list():
+    try:
+        return _datasets().list_datasets(_book_root())
+    except Exception as e:
+        logger.error(f"Dataset list failed: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e)}
+
+
+class DatasetNameRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+
+
+@app.post("/dataset/delete")
+def dataset_delete(req: DatasetNameRequest):
+    """Master's act, confirmed in the window. Removes the snapshot and its bars; the working store is untouched."""
+    try:
+        return _datasets().delete(_book_root(), req.name)
+    except Exception as e:
+        logger.error(f"Dataset delete failed: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e)}
+
+
+@app.get("/dataset/{name}")
+def dataset_load(name: str):
+    """A saved snapshot, shaped like /ohlcv so the chart draws it unchanged. Read-only by construction."""
+    try:
+        res = _datasets().load(_book_root(), name)
+        if not res.get("ok"):
+            return res
+        meta, bars = res["meta"], res["bars"]
+        return {"ok": True, "readOnly": True, "dataset": meta, "name": meta["name"],
+                "symbol": meta["symbol"], "exchange": meta["exchange"], "interval": meta["interval"],
+                "bars": bars, "count": len(bars), "stored": len(bars), "matched": len(bars),
+                "persisted": True, "truncated": False,
+                "firstBar": bars[0]["date"], "lastBar": bars[-1]["date"]}
+    except Exception as e:
+        logger.error(f"Dataset load failed: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e)}
 
 
 @app.get("/store/inventory")
@@ -742,7 +874,7 @@ def strategy_backtest(req: StrategyBacktestRequest):
     `[0, search_end)` and exactly one variant is ever run against the holdout.
     """
     try:
-        from engine import store, strategy_spec, strategy_eval
+        from engine import store, strategy_spec, strategy_eval, strategy_service
 
         v = strategy_spec.validate_spec(req.spec)
         if not v["ok"]:
@@ -768,67 +900,17 @@ def strategy_backtest(req: StrategyBacktestRequest):
                 "trials": v["trials"], "storedBars": have,
             }
 
-        bars = [
-            {"date": str(r["date"]), "open": float(r["open"]), "high": float(r["high"]),
-             "low": float(r["low"]), "close": float(r["close"]),
-             "volume": float(r["volume"]) if r.get("volume") is not None else 0.0}
-            for _, r in df.iterrows()
-        ]
+        bars = strategy_service.bars_from_frame(df)
 
-        c = clean["costs"]
-
-        # ── The verdict is judged against REAL charges where they can be computed (Section 115) ──
-        #
-        # `CostModel` speaks only in percentages, so the bridge needs a representative notional: the
-        # quantity this strategy would actually take at the last stored price. Without one, a flat ₹20
-        # brokerage cannot be expressed at all, and the flat default flatters small trades by the exact
-        # amount that kills them.
-        #
-        # DECOMPOSITION, stated rather than blended: `costs.py` covers brokerage and every statutory
-        # charge, so it replaces the COMMISSION term. Slippage and spread are NOT broker charges and
-        # `costs.py` does not model them, so master's own estimates for those stand untouched.
-        cost_basis = {"source": "flat", "why": "no instrument on the spec, so the flat percentages stand"}
-        commission = c["commissionPct"]
-        try:
-            from engine import costs as costs_mod
-            instrument = clean.get("instrument")
-            rep_price = float(bars[-1]["close"])
-            raw_qty = strategy_spec.position_size(clean, rep_price)
-            lot = max(1, int(clean.get("lotSize") or 1))
-            rep_qty = (raw_qty // lot) * lot
-            if instrument and instrument != "options" and rep_qty > 0:
-                eff = costs_mod.effective_round_trip_pct(instrument, rep_price, rep_qty)
-                if eff.get("ok"):
-                    commission = eff["pct"] / 2.0     # round_trip = 2*(comm + slip) + spread
-                    cost_basis = {
-                        "source": "measured", "instrument": instrument,
-                        "roundTripPct": eff["pct"],
-                        "assumedPrice": eff["assumedPrice"], "assumedQuantity": eff["assumedQuantity"],
-                        "assumedNotional": eff["assumedNotional"],
-                        "why": ("brokerage and statutory charges computed for this instrument at the "
-                                "quantity the strategy would take; slippage and spread remain master's "
-                                "own estimates because they are not broker charges"),
-                        "provenance": eff["provenance"],
-                    }
-            elif instrument == "options":
-                cost_basis = {"source": "flat", "instrument": instrument,
-                              "why": "options are priced on premium and there is no premium history"}
-            elif instrument and rep_qty <= 0:
-                cost_basis = {"source": "flat", "instrument": instrument,
-                              "why": (f"the risk budget sizes below one lot of {lot} units at "
-                                      f"{rep_price:g}, so there is no quantity to price charges on")}
-        except Exception as e:                       # a charge model fault must not lose the backtest
-            logger.warning(f"Real charge basis unavailable: {e}")
-            cost_basis = {"source": "flat", "why": f"charge model unavailable: {e}"}
-
-        costs = strategy_eval.CostModel(
-            commission_pct=commission, slippage_pct=c["slippagePct"],
-            spread_pct=c["spreadPct"],
-        )
+        # ONE definition of what a trade costs, shared with evolve and refresh (Section 151.4): the
+        # real-charge basis where it can be computed, master's flat percentages where it cannot.
+        costs, cost_basis = strategy_service.cost_for(clean, bars)
         variants = strategy_spec.expand_sweep(clean)
         result = strategy_eval.search_and_judge(
             variants,
-            lambda variant, a, b: strategy_spec.simulate(variant, bars, a, b),
+            # Trade RETURNS, not trade dicts. The lambda that stood here returned `simulate`'s dicts and
+            # raised a TypeError on every call (Section 151.2).
+            strategy_spec.returns_runner(bars),
             n=len(bars),
             holdout_frac=req.holdoutFrac,
             cost_model=costs,
@@ -865,6 +947,129 @@ def strategy_backtest(req: StrategyBacktestRequest):
         }
     except Exception as e:
         logger.error(f"Strategy backtest failed: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e)}
+
+
+# ── The strategy book: evolve, keep, refresh, read out (spec Section 151) ───────
+#
+# Thin adapters. Every decision is in `engine/strategy_service.py` and the modules under it, and the bar
+# loader is injected there, so those run in tests without pandas. Nothing here places an order or runs on
+# a timer: each call is master's act (Section 151.5).
+
+def _load_bars(symbol: str, exchange: str, interval: str):
+    from engine import store, strategy_service
+    df = store.load(symbol, exchange, interval)
+    return None if df is None or len(df) == 0 else strategy_service.bars_from_frame(df)
+
+
+def _book_root() -> str:
+    from engine import store
+    return store.store_root()
+
+
+class StrategyEvolveRequest(BaseModel):
+    symbol:     str   = Field(..., min_length=1, max_length=20)
+    exchange:   str   = Field(default="NSE", max_length=12)
+    interval:   str   = Field(default="1d", max_length=8)
+    capital:    float = Field(default=100000.0, gt=0)
+    riskPct:    float = Field(default=1.0, gt=0, le=10)
+    instrument: Optional[str] = Field(default=None, max_length=20)
+    lotSize:    Optional[int] = Field(default=None, ge=1)
+    side:       Literal["long", "short", "both"] = "both"
+    horizon:    Optional[str] = Field(default=None, max_length=20)
+    explore:    Literal["library", "wider"] = "library"
+    templates:  Optional[list[str]] = None
+    folds:      int   = Field(default=5, ge=2, le=10)
+
+
+@app.post("/strategy/evolve")
+def strategy_evolve(req: StrategyEvolveRequest):
+    """Generate, walk-forward judge and rank. Stores nothing: master keeps rows afterwards."""
+    try:
+        from engine import strategy_service
+        return strategy_service.run_evolve(
+            _load_bars, symbol=req.symbol, exchange=req.exchange, interval=req.interval, capital=req.capital,
+            risk_pct=req.riskPct, instrument=req.instrument, lot_size=req.lotSize, side=req.side,
+            horizon=req.horizon, explore=req.explore, templates=req.templates, folds=req.folds)
+    except Exception as e:
+        logger.error(f"Strategy evolve failed: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e)}
+
+
+class StrategyKeepRequest(BaseModel):
+    runId:        str = Field(..., min_length=1, max_length=40)
+    ids:          Optional[list[str]] = None
+    demonstrated: bool = False
+
+
+@app.post("/strategy/book/keep")
+def strategy_book_keep(req: StrategyKeepRequest):
+    """Store named rows (or every demonstrated row) of a cached run. Rows come from the cache, not the request."""
+    try:
+        from engine import strategy_service
+        return strategy_service.keep(_book_root(), req.runId, ids=req.ids, demonstrated=req.demonstrated)
+    except Exception as e:
+        logger.error(f"Strategy keep failed: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e)}
+
+
+@app.get("/strategy/book")
+def strategy_book_list(includeRetired: bool = False):
+    try:
+        from engine import strategy_service
+        return strategy_service.book_view(_book_root(), include_retired=includeRetired)
+    except Exception as e:
+        logger.error(f"Strategy book read failed: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e)}
+
+
+class StrategyRefreshRequest(BaseModel):
+    ids:       Optional[list[str]] = None
+    onlyStale: bool = True
+
+
+@app.post("/strategy/book/refresh")
+def strategy_book_refresh(req: StrategyRefreshRequest):
+    """Forward-test the stale (or named) strategies on bars after the ones they were stored on."""
+    try:
+        from engine import strategy_service
+        return strategy_service.refresh(_book_root(), _load_bars, ids=req.ids, only_stale=req.onlyStale)
+    except Exception as e:
+        logger.error(f"Strategy refresh failed: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e)}
+
+
+class StrategyBookIdRequest(BaseModel):
+    id:     str = Field(..., min_length=1, max_length=64)
+    reason: str = Field(default="", max_length=300)
+
+
+@app.post("/strategy/book/retire")
+def strategy_book_retire(req: StrategyBookIdRequest):
+    from engine import strategy_service
+    return strategy_service.retire(_book_root(), req.id, req.reason)
+
+
+@app.post("/strategy/book/restore")
+def strategy_book_restore(req: StrategyBookIdRequest):
+    from engine import strategy_service
+    return strategy_service.restore(_book_root(), req.id)
+
+
+@app.post("/strategy/book/remove")
+def strategy_book_remove(req: StrategyBookIdRequest):
+    from engine import strategy_service
+    return strategy_service.remove(_book_root(), req.id)
+
+
+@app.get("/strategy/book/signals")
+def strategy_book_signals():
+    """What each stored rule says on its last stored bar, and how old that bar is."""
+    try:
+        from engine import strategy_service
+        return strategy_service.signals(_book_root(), _load_bars)
+    except Exception as e:
+        logger.error(f"Strategy signals failed: {e}", exc_info=True)
         return {"ok": False, "reason": str(e)}
 
 

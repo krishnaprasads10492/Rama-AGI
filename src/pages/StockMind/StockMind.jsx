@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useUserStore } from '@store/userStore.js';
 import PriceChart from './PriceChart.jsx';
 import BookPanel from './BookPanel.jsx';
@@ -6,6 +6,9 @@ import WhyPanel from './WhyPanel.jsx';
 import PanelBoard from '@components/PanelBoard.jsx';
 import SymbolSearch from './SymbolSearch.jsx';
 import StrategyBuilder from './StrategyBuilder.jsx';
+import EvolvePanel from './EvolvePanel.jsx';
+import DatasetPanel, { SnapshotBanner } from './DatasetPanel.jsx';
+import { createSequence, isUnsaved, unsavedBadge, LABELS, TIPS } from './datasetModel.js';
 import HelpPanel from './HelpPanel.jsx';
 import InfoTip from './InfoTip.jsx';
 import {
@@ -215,8 +218,24 @@ export default function StockMind() {
   const [horizonBars, setHorizonBars] = useState(null);
   // WHEN THE LAST REPLY LANDED, so the chart can say it rather than imply freshness. Null until a
   // reply arrives, and the chart reads that as "not recorded this session" — not as "never fetched".
-  const [barsFetchedAt, setBarsFetchedAt] = useState(null);
+  const [liveFetchedAt, setBarsFetchedAt] = useState(null);
   const [held, setHeld] = useState(null);   // the tracked position in this symbol, if any
+
+  // VIEW IS NOT KEEP (Section 153). `barsUnsaved` is true while the candles on screen include provider
+  // data that was never written to disk. `viewDataset` holds a saved snapshot being shown read-only
+  // instead of the live bars; `dsMode` is which dataset panel is open.
+  const [barsUnsaved, setBarsUnsaved] = useState(false);
+  const [viewDataset, setViewDataset] = useState(null);
+  const [dsMode, setDsMode] = useState(null);
+  // A saved snapshot has no fetch time of its own that the freshness clock should read.
+  const barsFetchedAt = viewDataset ? null : liveFetchedAt;
+  // Only the newest request may update the screen. A slow earlier reply used to land after a faster
+  // later one and put the old instrument's candles under the new name.
+  const barsSeq = useRef(null);
+  if (!barsSeq.current) barsSeq.current = createSequence();
+  // The series a view-only fetch last covered, so changing only the dates keeps the fetched candles
+  // on screen (the engine answers from its short-lived copy) instead of snapping back to disk.
+  const viewKeyRef = useRef(null);
 
   const canRequest = canDo ? canDo('stockmind.request') : false;
   const canView    = canDo ? canDo('stockmind.view') : false;
@@ -235,14 +254,17 @@ export default function StockMind() {
   // `stored` travels with it because it is the fact that separates "nothing is stored" from "nothing is
   // stored IN THIS WINDOW" — and `storedLastBar` is deliberately allowed to be null, because the route
   // omits it in precisely that second case.
-  const coverage = useMemo(() => (barsMeta ? {
+  const coverage = useMemo(() => (barsMeta && !viewDataset ? {
     first: barsMeta.storedFirstBar || null,
     last: barsMeta.storedLastBar || null,
     stored: Number.isFinite(barsMeta.stored) ? barsMeta.stored : 0,
-  } : null), [barsMeta]);
+  } : null), [barsMeta, viewDataset]);
 
-  const loadBars = useCallback(async (doSync = false) => {
+  // `persist=false` is the view-only fetch (Section 153): the engine asks the providers and returns the
+  // candles but writes nothing. Only an explicit "keep for analysis" passes `persist=true` with a sync.
+  const loadBars = useCallback(async (doSync = false, persist = true) => {
     if (!inElectron || !sym) return;
+    const mine = barsSeq.current.next();
     setBarsBusy(true);
     setBarsNote(null);
     setBarsFail(null);
@@ -253,9 +275,12 @@ export default function StockMind() {
     const limit = limitForDates(barInterval, fromDate, toDate);
     const res = await window.rama.marketIntel.ohlcv({
       user: currentUser, symbol: sym, exchange,
-      interval: barInterval, limit, sync: doSync,
+      interval: barInterval, limit, sync: doSync, persist,
       fromDate: fromDate || null, toDate: toDate || null,
     });
+    // A reply to a request that has since been superseded is dropped whole, busy flag included: the
+    // newer request clears it when it lands.
+    if (!barsSeq.current.isCurrent(mine)) return;
     setBarsBusy(false);
     if (res?.ok === false) {
       // The bars path is where master met this, and it was the ONE surface that showed only the raw
@@ -278,6 +303,9 @@ export default function StockMind() {
     // A reply that ARRIVED is a fetch that completed, even if it carried no bars — the bar age speaks
     // for the data, and this speaks only for the round trip. Not set on a failure, which did not land.
     if (res?.ok) setBarsFetchedAt(Date.now());
+    const unsaved = isUnsaved(res.data);
+    setBarsUnsaved(unsaved);
+    viewKeyRef.current = unsaved ? `${sym}|${exchange}|${barInterval}` : null;
     setBars(res.data?.bars || []);
     setBarsMeta(res.data || null);
     if (res.data?.note) setBarsNote(res.data.note);
@@ -319,6 +347,17 @@ export default function StockMind() {
     setToDate(nextTo);
     setBarRange(rangeForDates(barInterval, nextFrom || null, nextTo || null));
   }, [barInterval]);
+
+  // Touching a chart control while a saved snapshot is shown leaves the snapshot, even when the value
+  // chosen would not change a request parameter (picking the interval that is already selected).
+  const pickIntervalLive = useCallback((id) => { setViewDataset(null); pickInterval(id); }, [pickInterval]);
+  const pickRangeLive = useCallback((id) => { setViewDataset(null); pickRange(id); }, [pickRange]);
+  const setDatesLive = useCallback((a, b) => { setViewDataset(null); setDates(a, b); }, [setDates]);
+
+  // NOT SAVED shows only for live candles from a view-only fetch; a loaded snapshot has its own banner.
+  const badge = unsavedBadge(barsUnsaved && !viewDataset);
+  const snap = viewDataset;
+  const chartBars = snap ? snap.bars : bars;
 
   // What Rāma already holds, so the symbol picker can mark the choices that need no network.
   const loadInventory = useCallback(async () => {
@@ -423,7 +462,15 @@ export default function StockMind() {
   // left the PREVIOUS instrument's candles on screen under the new symbol's name until master pressed
   // a button — which is not a stale chart, it is a chart showing one instrument labelled as another.
   useEffect(() => {
-    if (inElectron && canView) loadBars(false);
+    // Any parameter change leaves a saved snapshot: it is a copy of one moment, and the controls now
+    // describe something else.
+    setViewDataset(null);
+    if (inElectron && canView) {
+      // Only the dates moved on a view-only fetch: stay on the fetched candles. The engine answers from
+      // its short-lived copy, so this is a re-window, not another provider call.
+      if (viewKeyRef.current === `${sym}|${exchange}|${barInterval}`) loadBars(true, false);
+      else loadBars(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sym, exchange, barInterval, fromDate, toDate]);
 
@@ -432,6 +479,7 @@ export default function StockMind() {
   useEffect(() => {
     setBars([]);
     setBarsMeta(null);
+    setBarsUnsaved(false);
     setResult(null);
     setSelected(null);
     // A new instrument starts unfiltered — beginning to today — because a window chosen for the last
@@ -735,15 +783,40 @@ override where an unlisted ticker should be looked up.">
                 "Fetch & store" differ only in whether the network is touched, and only one of them
                 said so — a distinction only the author understood. They now read as "from disk" and
                 "from the internet", which is the actual difference. */}
+            {/* VIEWING AND KEEPING ARE SEPARATE ACTS (Section 153). Master: "for normal display why the
+                fetch and store, just change the display." So the plain fetch only shows; the old
+                behaviour is kept under a name that says what it is for, because strategy, training
+                and outcomes read that store and removing it would leave backtests with no bars. */}
             <button className="btn" disabled={barsBusy || !canView} onClick={() => loadBars(false)}
-                    title="Read bars already stored on this machine. No network.">
-              {barsBusy ? 'Loading…' : '↺ From disk'}
+                    title={TIPS.fromDisk}>
+              {barsBusy ? 'Loading…' : LABELS.fromDisk}
             </button>
-            <button className="btn" disabled={barsBusy || !canView} onClick={() => loadBars(true)}
-                    title="Ask the provider chain for anything missing and store it. Reaches back as
-far as the provider allows, which for intraday is a few days to two years.">
-              ⇩ Fetch from provider
+            <button className="btn" disabled={barsBusy || !canView} onClick={() => loadBars(true, false)}
+                    title={TIPS.fetchView}>
+              {LABELS.fetchView}
             </button>
+            <InfoTip id="fetchView" />
+            <button className="btn" disabled={barsBusy || !canView} onClick={() => loadBars(true, true)}
+                    title={TIPS.fetchKeep}>
+              {LABELS.fetchKeep}
+            </button>
+            <InfoTip id="fetchProvider" />
+            <button className="btn" disabled={!canView || !bars.length || !!viewDataset}
+                    onClick={() => setDsMode(dsMode === 'save' ? null : 'save')}
+                    title={viewDataset ? 'This is already a saved dataset.' : TIPS.save}>
+              {LABELS.save}
+            </button>
+            <button className="btn" disabled={!canView}
+                    onClick={() => setDsMode(dsMode === 'list' ? null : 'list')}
+                    title={TIPS.saved}>
+              {LABELS.saved}
+            </button>
+            {badge.show && (
+              <span className="badge badge-amber" title={badge.tip}
+                    style={{ display: 'inline-flex', alignItems: 'center' }}>
+                {badge.label}<InfoTip id="notSaved" />
+              </span>
+            )}
             <button className="btn" disabled={newsBusy || !canView} onClick={loadNews}
                     title="Pull recent headlines for this instrument and score their tone.">
               {newsBusy ? 'Reading…' : '📰 Read news'}
@@ -766,6 +839,19 @@ far as the provider allows, which for intraday is a few days to two years.">
               {status === 'requesting' ? 'Requesting…' : '⚡ Generate Signals'}
             </button>
           </div>
+          {dsMode && (
+            <DatasetPanel
+              currentUser={currentUser} canView={canView} canRequest={canRequest}
+              mode={dsMode} onMode={setDsMode}
+              symbol={sym} exchange={exchange} interval={barInterval}
+              fromDate={fromDate} toDate={toDate}
+              limit={limitForDates(barInterval, fromDate, toDate)}
+              bars={bars} unsaved={barsUnsaved}
+              viewingName={snap ? snap.meta.name : null}
+              onView={(d) => { setViewDataset(d); setTab('chart'); }}
+              onBack={() => setViewDataset(null)}
+            />
+          )}
 
           {/* ── ADVANCED, collapsed (Section 104) ────────────────────────────────────────────────
               Progressive disclosure: the direction filter and the exact bar count serve a minority of
@@ -902,29 +988,35 @@ far as the provider allows, which for intraday is a few days to two years.">
                   // The panel gets the SAME timeframe control as the tab, because it is the same
                   // component — a board where the chart cannot change interval would send master
                   // back to the tabs for the one thing he changes most.
-                  render: () => <PriceChart bars={bars} signal={selected} symbol={sym}
-                                            interval={barInterval} rangeId={barRange}
-                                            onInterval={pickInterval} onRange={pickRange}
-                                            fromDate={fromDate} toDate={toDate} onDates={setDates}
+                  render: () => (<>
+                    <SnapshotBanner meta={snap ? snap.meta : null} onBack={() => setViewDataset(null)} />
+                    <PriceChart bars={chartBars} signal={snap ? null : selected}
+                                            symbol={snap ? snap.meta.symbol : sym}
+                                            interval={snap ? snap.meta.interval : barInterval}
+                                            rangeId={snap ? null : barRange}
+                                            onInterval={pickIntervalLive} onRange={pickRangeLive}
+                                            fromDate={snap ? '' : fromDate} toDate={snap ? '' : toDate}
+                                            onDates={setDatesLive}
                                             chartId="sm-ws-chart"
                                             // The same three facts the chart tab gets. Without them
                                             // this panel's pickers had no bounds and its empty state
                                             // could only ever say "nothing stored" (Section 129).
                                             coverage={coverage}
-                                            replyNote={barsMeta?.note || null}
-                                            failure={barsFail}
+                                            replyNote={snap ? null : (barsMeta?.note || null)}
+                                            failure={snap ? null : barsFail}
                                             fetchedAt={barsFetchedAt}
-                                            busy={barsBusy} onFetch={() => loadBars(true)}
-                                            basePrice={held?.avgCost ?? null}
+                                            busy={barsBusy} onFetch={snap ? null : () => loadBars(true, false)}
+                                            basePrice={snap ? null : (held?.avgCost ?? null)}
                                             // FILLS THE PANEL instead of a hard 260px (Section 121).
                                             // The panel is resizable and maximisable; a fixed height
                                             // meant widening it worked and heightening it did nothing.
                                             fillHeight
                                             height={260}
-                                            cone={coneOn ? cone : null}
-                                            projectionMeta={coneOn ? coneMeta : null}
+                                            cone={coneOn && !snap ? cone : null}
+                                            projectionMeta={coneOn && !snap ? coneMeta : null}
                                             horizonBars={horizonBars}
-                                            onHorizonBars={setHorizonBars} />,
+                                            onHorizonBars={setHorizonBars} />
+                  </>),
                 },
                 {
                   id: 'signals',
@@ -968,10 +1060,13 @@ far as the provider allows, which for intraday is a few days to two years.">
         {tab === 'chart' && (
           <div className="hud-card" style={{ padding: '14px 16px 4px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
-              {barsMeta?.stored != null && (
+              {barsMeta?.stored != null && !snap && (
                 <span style={{ fontSize: FS.dense, color: 'var(--muted)' }}>
                   {barsMeta.stored} stored from {barsMeta.storedFirstBar}
                 </span>
+              )}
+              {badge.show && (
+                <span className="badge badge-amber" title={badge.tip}>{badge.label}</span>
               )}
               <div style={{ flex: 1 }} />
               {held && (
@@ -997,30 +1092,31 @@ far as the provider allows, which for intraday is a few days to two years.">
                 </button>
               )}
             </div>
+            <SnapshotBanner meta={snap ? snap.meta : null} onBack={() => setViewDataset(null)} />
             <PriceChart
-              bars={bars}
-              signal={selected}
-              symbol={sym}
-              interval={barInterval}
-              rangeId={barRange}
-              onInterval={pickInterval}
-              onRange={pickRange}
-              fromDate={fromDate}
-              toDate={toDate}
-              onDates={setDates}
+              bars={chartBars}
+              signal={snap ? null : selected}
+              symbol={snap ? snap.meta.symbol : sym}
+              interval={snap ? snap.meta.interval : barInterval}
+              rangeId={snap ? null : barRange}
+              onInterval={pickIntervalLive}
+              onRange={pickRangeLive}
+              fromDate={snap ? '' : fromDate}
+              toDate={snap ? '' : toDate}
+              onDates={setDatesLive}
               coverage={coverage}
-              replyNote={barsMeta?.note || null}
-              failure={barsFail}
+              replyNote={snap ? null : (barsMeta?.note || null)}
+              failure={snap ? null : barsFail}
               fetchedAt={barsFetchedAt}
               chartId="sm-chart"
               busy={barsBusy}
-              onFetch={() => loadBars(true)}
-              basePrice={held?.avgCost ?? null}
+              onFetch={snap ? null : () => loadBars(true, false)}
+              basePrice={snap ? null : (held?.avgCost ?? null)}
               height={400}
-              fills={held?.fills || []}
-              thesis={held?.thesis || null}
-              cone={cone}
-              projectionMeta={coneMeta}
+              fills={snap ? [] : (held?.fills || [])}
+              thesis={snap ? null : (held?.thesis || null)}
+              cone={snap ? null : cone}
+              projectionMeta={snap ? null : coneMeta}
               horizonBars={horizonBars}
               onHorizonBars={setHorizonBars}
             />
@@ -1053,6 +1149,7 @@ far as the provider allows, which for intraday is a few days to two years.">
             {[
               ['now', 'NOW', 'What a reading of this instrument says at this moment'],
               ['build', 'BUILD & TEST', 'A rule, judged over history the search never saw'],
+              ['evolve', 'EVOLVE', 'Rāma tries the published strategies on this instrument, judges them honestly, and keeps the ones you choose'],
               ['projection', 'PROJECTION', 'The range this instrument\'s own volatility calls ordinary'],
               ['why', 'WHY', 'The evidence under all three'],
             ].map(([id, label, hint]) => (
@@ -1083,6 +1180,12 @@ far as the provider allows, which for intraday is a few days to two years.">
           <StrategyBuilder currentUser={currentUser} canRequest={canRequest}
                            symbol={sym} exchange={exchange} interval={barInterval}
                            capital={capital} riskPct={riskPct} />
+        )}
+
+        {tab === 'strategise' && strat === 'evolve' && (
+          <EvolvePanel currentUser={currentUser} canRequest={canRequest}
+                       symbol={sym} exchange={exchange} interval={barInterval}
+                       capital={capital} riskPct={riskPct} />
         )}
 
         {tab === 'strategise' && strat === 'why' && (

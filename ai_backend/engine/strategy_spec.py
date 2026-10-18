@@ -1100,7 +1100,7 @@ def entry_signals(spec: dict, bars: list) -> list:
     return out
 
 
-def simulate(spec: dict, bars: list, start: int = 0, end: Optional[int] = None) -> list:
+def simulate(spec: dict, bars: list, start: int = 0, end: Optional[int] = None, _open: Optional[list] = None) -> list:
     """
     Walk the bars and return one dict per completed round trip.
 
@@ -1149,7 +1149,16 @@ def simulate(spec: dict, bars: list, start: int = 0, end: Optional[int] = None) 
             hit_target = (target_price is not None
                           and (hi >= target_price if long_side else lo <= target_price))
             if hit_stop:
-                exit_idx, exit_price, why = j, stop_price, "stop"
+                # A STOP THE MARKET GAPPED THROUGH FILLS AT THE OPEN. If the bar opened beyond the stop
+                # there was no trade at the stop price to be had, and the first price anyone could get
+                # is the open. Filling at the stop price is optimistic for longs and shorts alike, and
+                # largest in the volatile sessions where stops matter (Section 149.2b). A TARGET gapped
+                # through is deliberately left at the target price: the better fill would be the
+                # optimistic reading. The entry bar cannot gap through its own stop (the stop sits
+                # strictly behind the entry open), so `j == i` is unaffected.
+                bar_open = float(bars[j]["open"])
+                gapped = bar_open <= stop_price if long_side else bar_open >= stop_price
+                exit_idx, exit_price, why = j, (bar_open if gapped else stop_price), "stop"
                 break
             if hit_target:
                 exit_idx, exit_price, why = j, target_price, "target"
@@ -1161,7 +1170,17 @@ def simulate(spec: dict, bars: list, start: int = 0, end: Optional[int] = None) 
         if exit_idx is None:
             # Still open at the end of the window. NOT counted: an unclosed trade has no realised
             # return, and marking it to the last close would let the final open position decide the
-            # verdict.
+            # verdict. `_open`, when a list is passed, receives it as a description of the position so a
+            # caller can SHOW it (Section 151); the returned trades are unchanged either way.
+            if _open is not None:
+                last_close = float(bars[end - 1]["close"])
+                _open.append({
+                    "entryIndex": i, "entryDate": str(bars[i].get("date") or ""),
+                    "entryPrice": entry_price, "stopPrice": stop_price, "targetPrice": target_price,
+                    "barsHeld": end - i, "lastClose": last_close,
+                    "unrealisedPct": ((last_close - entry_price) / entry_price * 100.0 if long_side
+                                      else (entry_price - last_close) / entry_price * 100.0),
+                })
             break
 
         gross = ((exit_price - entry_price) / entry_price * 100.0 if long_side
@@ -1393,3 +1412,19 @@ def run_spec(spec: dict, bars: list, *, start: int = 0, end: Optional[int] = Non
         "returns": [t["grossPct"] for t in trades],
         "spec": v["spec"], "specHash": v["specHash"],
     }
+
+
+def returns_runner(bars: list):
+    """
+    The callback `strategy_eval.search_and_judge` needs: `(variant, start, end) -> gross trade returns`.
+
+    `/strategy/backtest` used to pass `lambda v, a, b: simulate(v, bars, a, b)`. `simulate` returns trade
+    DICTS, the judge subtracts costs from each element, and the first call raised
+    `TypeError: unsupported operand type(s) for -: 'dict' and 'float'`. The route caught it and answered
+    `{ok: false}`, so BUILD & TEST never produced a verdict (Section 151.2). The 220 spec tests ran
+    `simulate` and `search_and_judge` separately and so never crossed the seam; this is the one function
+    that crosses it, and `test_strategy_spec` runs the judge through it.
+    """
+    def run(variant: dict, start: int, end: int) -> list:
+        return [t["grossPct"] for t in simulate(variant, bars, start, end)]
+    return run

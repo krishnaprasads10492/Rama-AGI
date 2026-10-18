@@ -46,7 +46,15 @@ let autoSaveTimer = null;
 // island left unreadable after a passcode change. Adding a domain is therefore the cheap, safe way
 // to add a store, and `verifyInvariants.cjs` asserts markAllDirty/loadAll are driven by this array
 // rather than a literal, so the next domain inherits the re-key too.
-const DOMAINS = ['users', 'conversations', 'knowledge', 'memory', 'worldmodel', 'agents', 'config', 'instances', 'proposals', 'tracking'];
+const DOMAINS = ['users', 'conversations', 'knowledge', 'memory', 'worldmodel', 'agents', 'config', 'instances', 'proposals', 'tracking', 'brokerAccounts'];
+
+// THE DOMAINS A WINDOW MAY ADDRESS THROUGH THE GENERIC store:* CHANNELS (Section 152.3).
+// Those channels took any domain name with no capability check, so a signed-in guest could read `users` and
+// `brokerAccounts`, or overwrite `users.accounts` with a tier-0 account. Only Knowledge uses them, and only
+// for `knowledge`. Every other domain is reached by main-process modules that gate their own channels.
+const RENDERER_DOMAINS = Object.freeze(['knowledge']);
+const windowMay = (domain) => RENDERER_DOMAINS.includes(domain);
+const REFUSED = { ok: false, error: 'That part of the store is not available to the window.' };
 
 // ─── Load all domains on unlock ───────────────────────────────────────────────
 function loadAll() {
@@ -192,6 +200,11 @@ function getDefaultData(domain) {
     tracking: {
       calls: [],      // { module, fn, outcome, ms?, detail?, window?, sample?, _id, _ts }
     },
+    brokerAccounts: {
+      accounts: [],        // secrets live here, encrypted, and are never returned by any channel
+      distributables: [],
+      settings: {},
+    },
     users: {
       accounts: [],   // User objects (passwords hashed by auth.cjs)
       settings: {},
@@ -262,12 +275,14 @@ function register(ipcMain) {
 
   // ── Get a domain or key ───────────────────────────────────────────────────
   ipcMain.handle('store:get', async (_e, domain, key) => {
+    if (!windowMay(domain)) return REFUSED;
     if (!cryptoCore.isUnlocked()) return { ok: false, error: 'Store locked' };
     return { ok: true, data: get(domain, key) };
   });
 
   // ── Set a key ─────────────────────────────────────────────────────────────
   ipcMain.handle('store:set', async (_e, domain, key, value) => {
+    if (!windowMay(domain)) return REFUSED;
     if (!cryptoCore.isUnlocked()) return { ok: false, error: 'Store locked' };
     set(domain, key, value);
     return { ok: true };
@@ -275,6 +290,7 @@ function register(ipcMain) {
 
   // ── Push to array ─────────────────────────────────────────────────────────
   ipcMain.handle('store:push', async (_e, domain, arrayKey, item) => {
+    if (!windowMay(domain)) return REFUSED;
     if (!cryptoCore.isUnlocked()) return { ok: false, error: 'Store locked' };
     const saved = push(domain, arrayKey, item);
     return { ok: true, data: saved };
@@ -282,6 +298,7 @@ function register(ipcMain) {
 
   // ── Update array item ─────────────────────────────────────────────────────
   ipcMain.handle('store:update', async (_e, domain, arrayKey, id, changes) => {
+    if (!windowMay(domain)) return REFUSED;
     if (!cryptoCore.isUnlocked()) return { ok: false, error: 'Store locked' };
     const ok = update(domain, arrayKey, id, changes);
     return { ok };
@@ -289,6 +306,7 @@ function register(ipcMain) {
 
   // ── Remove array item ─────────────────────────────────────────────────────
   ipcMain.handle('store:remove', async (_e, domain, arrayKey, id) => {
+    if (!windowMay(domain)) return REFUSED;
     if (!cryptoCore.isUnlocked()) return { ok: false, error: 'Store locked' };
     remove(domain, arrayKey, id);
     return { ok: true };
@@ -296,6 +314,7 @@ function register(ipcMain) {
 
   // ── Query array ───────────────────────────────────────────────────────────
   ipcMain.handle('store:find', async (_e, domain, arrayKey, filter) => {
+    if (!windowMay(domain)) return REFUSED;
     if (!cryptoCore.isUnlocked()) return { ok: false, error: 'Store locked' };
     // filter is a plain object — do key-value matching
     const results = find(domain, arrayKey, (item) =>

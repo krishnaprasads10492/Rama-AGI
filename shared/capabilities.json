@@ -79,6 +79,10 @@
     "resources.propose-enable": 1,
 
     "system.self-update": 0,
+    "system.suspend-autonomy": 0,
+
+    "brokers.accounts.view": 1,
+    "brokers.accounts.write": 1,
 
     "vault.read": 0,
     "vault.write": 0,

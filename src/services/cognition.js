@@ -17,7 +17,11 @@
  * that answered. That record is what tier 3 consumes.
  */
 
-import { matchVoiceToRoute, visiblePages, allCapabilities } from '@config/registry.js';
+import { matchVoiceToRoute, resolveVoiceRoute, visiblePages, allCapabilities } from '@config/registry.js';
+import { can, TIER_LABELS, CAPABILITY_MATRIX } from '@services/accessControl.js';
+import {
+  parseMuteIntent, muteActionName, muteReply, isBareHelp, hasWord, parseStopIntent, stopReply,
+} from './commandIntents.js';
 
 export const TIERS = { REFLEX: 0, LOCAL: 1, CLOUD: 2, LEARN: 3 };
 export const TIER_NAMES = ['REFLEX', 'LOCAL', 'CLOUD', 'LEARN'];
@@ -53,12 +57,32 @@ const hasUiSubject = (t) => UI_SUBJECT.some(s => new RegExp(`\\b${s}\\b`).test(t
  * @property {string}   id
  * @property {string}   domain      appearance | navigation | voice | system | self | meta
  * @property {string}   describe    what a user can ask for
+ * @property {string}  [cap]        the capability the SKILL needs (Section 150.4, D9). Declared beside the
+ *                                  skill, enforced once in `resolveReflex`, so a new skill cannot forget it.
+ *                                  Omitted for skills that only act on this window.
  * @property {(t:string)=>boolean} match
  * @property {(ctx:object, t:string)=>Promise<{say:string, action?:object}>} run
  */
 
 /** @type {Skill[]} */
 export const SKILLS = [
+  // ── The autonomy stop (Section 150.2) ──────────────────────────────────────
+  // FIRST, because it is the one command that must never lose to another reading. It carries no `cap`:
+  // a stop that can be refused is not a stop. There is NO resume skill and there must not be one -
+  // resuming is master-only, from a signed-in session, with a note (`autonomy:lift`).
+  {
+    id: 'autonomy.stop',
+    domain: 'self',
+    describe: 'stop all of Rāma\'s background activity ("stop everything")',
+    match: (t) => parseStopIntent(t),
+    run: async () => {
+      const api = ipc()?.autonomy;
+      if (!api) return { say: 'Stopping needs the desktop app.' };
+      const res = await api.stop({ reason: 'stop command typed in chat', via: 'chat' });
+      return { say: stopReply(res) };
+    },
+  },
+
   // ── Appearance: Rāma acting on its own legibility ──────────────────────────
   {
     id: 'appearance.bigger',
@@ -120,9 +144,15 @@ export const SKILLS = [
     id: 'navigation.open',
     domain: 'navigation',
     describe: 'open a page by name',
+    // Matches a page that EXISTS for this phrase even when this account cannot see it, so the answer is
+    // "that is not available to you" and not a model's guess (Section 150.4, D10).
     match: (t) => !!matchVoiceToRoute(t),
     run: async (ctx, t) => {
-      const hit = matchVoiceToRoute(t);
+      const hit = resolveVoiceRoute(t, ctx?.user);
+      if (!hit) return { say: 'I could not find that page.' };
+      if (!hit.allowed) {
+        return { say: `${hit.page.label} is not available to this account, so I have not opened it.` };
+      }
       return {
         say: `Opening ${hit.page.label}.`,
         action: { type: 'navigate', route: hit.route },
@@ -134,14 +164,13 @@ export const SKILLS = [
   {
     id: 'voice.mute',
     domain: 'voice',
-    describe: 'mute or unmute the microphone / stop Rāma speaking',
-    match: (t) => any(t, 'mute', 'stop listening', 'stop talking', 'be quiet'),
+    describe: 'mute or unmute the microphone / stop or resume Rāma speaking',
+    // The SAME parser the spoken path uses (`commandIntents`). The old `any(t, 'mute', ...)` was a
+    // substring test, so "unmute the microphone" muted it, and "help me commute" would have too.
+    match: (t) => parseMuteIntent(t) !== null,
     run: async (_ctx, t) => {
-      const speech = any(t, 'talking', 'quiet', 'speaking', 'voice output');
-      return {
-        say: speech ? 'I will stay silent.' : 'Microphone muted.',
-        action: { type: speech ? 'mute-speech' : 'mute-mic' },
-      };
+      const intent = parseMuteIntent(t);
+      return { say: muteReply(intent), action: { type: muteActionName(intent) } };
     },
   },
 
@@ -149,8 +178,12 @@ export const SKILLS = [
   {
     id: 'system.status',
     domain: 'system',
+    cap: 'os.metrics-read',
     describe: 'CPU, memory and uptime',
-    match: (t) => any(t, 'cpu', 'memory', 'ram', 'how much memory', 'system load', 'uptime', 'how are you running'),
+    // Word-bounded: `ram` is inside "program", "telegram" and "framework", and a misfire here replaces
+    // what master actually asked with a CPU reading (the class `hasUiSubject` was written to stop).
+    match: (t) => hasWord(t, 'cpu') || hasWord(t, 'ram')
+      || any(t, 'how much memory', 'memory usage', 'system load', 'uptime', 'how are you running'),
     run: async () => {
       const api = ipc()?.system;
       if (!api) return { say: 'System readings need the desktop app.' };
@@ -174,7 +207,9 @@ export const SKILLS = [
     id: 'self.capabilities',
     domain: 'meta',
     describe: 'what can you do',
-    match: (t) => any(t, 'what can you do', 'your capabilities', 'what are you able', 'list your abilities', 'help'),
+    // A bare "help" only. As a substring it also took "help me refactor this function" and answered it
+    // with the capabilities summary, silently discarding the request.
+    match: (t) => isBareHelp(t) || any(t, 'what can you do', 'your capabilities', 'what are you able', 'list your abilities'),
     /**
      * Speaks from the SELF-MODEL (Section 89), not from a second computation.
      *
@@ -226,6 +261,7 @@ export const SKILLS = [
   {
     id: 'self.cognition',
     domain: 'meta',
+    cap: 'models.use',
     describe: 'which tier answered / how you think',
     match: (t) => any(t, 'how do you think', 'which model', 'what tier', 'are you using the cloud', 'cognition'),
     run: async () => {
@@ -308,6 +344,21 @@ export async function resolveReflex(text, ctx = {}) {
     try { return s.match(t); } catch { return false; }
   });
   if (!skill) return null;
+
+  // THE CAPABILITY LAYER (Section 150.4, D9). Tier-0 reflexes ran with no check at all, so a Guest could
+  // ask for CPU and memory in chat and be answered. The check lives HERE and not on the IPC channel:
+  // `system:get-metrics` also feeds the Titlebar and Home for every tier, so gating the channel would
+  // blank the titlebar for lower tiers. What is gated is what a SKILL will say.
+  if (skill.cap && !can(ctx?.user, skill.cap)) {
+    const needs = TIER_LABELS[String(CAPABILITY_MATRIX[skill.cap])] ?? 'a higher';
+    record({ action: 'cognition', ok: false, tool: `reflex:${skill.id}`, error: `denied: ${skill.cap}` });
+    return {
+      tier: TIERS.REFLEX, tierName: 'REFLEX', skill: skill.id, denied: true, needs: skill.cap,
+      say: ctx?.user
+        ? `That needs a ${needs} account or above, and this one is not. I have not done it.`
+        : 'Sign in first, and I will see what this account is allowed to ask for.',
+    };
+  }
 
   try {
     const result = await skill.run(ctx, t);

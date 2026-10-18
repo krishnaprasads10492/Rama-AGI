@@ -85,6 +85,9 @@ import csv
 import json
 import math
 import sys
+# `simulate` is copied out with its annotations, and `Optional[...]` is evaluated when the def runs on
+# Python before 3.14. The engine runs on 3.12, so a script without this import was a NameError there.
+from typing import Optional
 
 # PARSED, NOT PASTED AS A LITERAL. This was `SPEC = {{...}}` with the JSON written straight into the
 # file, which is valid Python only while the spec contains no booleans and no nulls. It contains both:

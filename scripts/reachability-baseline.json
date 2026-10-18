@@ -299,9 +299,6 @@
     "vault.lock",
     "vector.bulkStore",
     "vector.health",
-    "voice.capabilities",
-    "voice.rescan",
-    "voice.transcribe",
     "workspace.detect"
   ],
   "closed": [

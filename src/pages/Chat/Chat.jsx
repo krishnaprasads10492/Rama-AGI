@@ -7,7 +7,7 @@ import { classifyTurn } from '@services/turnSensitivity.js';
 import { useNavigate }  from 'react-router-dom';
 import { useUserStore } from '@store/userStore.js';
 import { getSystemPromptAsync, shouldRevealIdentity, getIdentityDisclosure, recordInteraction } from '@services/consciousness.js';
-import { speak }        from '@services/voiceEngine.js';
+import { speak, getVoiceEngine } from '@services/voiceEngine.js';
 import RamaOrb          from '@components/RamaOrb.jsx';
 import { FS, LH } from '@config/type.js';
 
@@ -189,7 +189,7 @@ export default function Chat() {
 
   // Reflex skills can navigate and change mute state, so Chat needs both
   const { masterAuthenticated, setMicMuted, setSpeechMuted,
-          ramaSpeaks, toggleRamaSpeaks } = useUIStore();
+          ramaSpeaks, toggleRamaSpeaks, pendingUtterance, clearUtterance } = useUIStore();
   const { currentUser } = useUserStore();
   const navigate = useNavigate();
 
@@ -213,11 +213,14 @@ export default function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isThinking, streamText]);
 
-  const handleSend = useCallback(async () => {
-    const text = input.trim();
+  /**
+   * THE ONE SEND PATH. The Enter key and a spoken line both arrive here (Section 149.3), so what
+   * master says is handled exactly as what he types: the reflex tier first, then the sensitivity class,
+   * `models.use`, the egress boundary and the model. Voice is not a second, quieter door.
+   */
+  const sendText = useCallback(async (raw) => {
+    const text = String(raw ?? '').trim();
     if (!text || isThinking) return;
-
-    setInput('');
 
     // Add user message
     const userMsg = { role: 'user', content: text, id: Date.now() };
@@ -240,8 +243,17 @@ export default function Chat() {
     const reflex = await resolveReflex(text, { user: currentUser });
     if (reflex) {
       if (reflex.action?.type === 'navigate') navigate(reflex.action.route);
-      if (reflex.action?.type === 'mute-mic')    setMicMuted(true);
-      if (reflex.action?.type === 'mute-speech') setSpeechMuted(true);
+      // The STORE says what master prefers; the ENGINE is what actually holds the microphone and the
+      // speech queue. This used to set the store alone, so a typed "be quiet" changed a flag while the
+      // utterance in flight kept talking, and a typed mute left the device open (Section 149.3, D4).
+      const engine = getVoiceEngine();
+      switch (reflex.action?.type) {
+        case 'mute-mic':      setMicMuted(true);      engine?.setMicMuted(true);      break;
+        case 'unmute-mic':    setMicMuted(false);     engine?.setMicMuted(false);     break;
+        case 'mute-speech':   setSpeechMuted(true);   engine?.setSpeechMuted(true);   break;
+        case 'unmute-speech': setSpeechMuted(false);  engine?.setSpeechMuted(false);  break;
+        default: break;
+      }
 
       addMessage({
         role:    'assistant',
@@ -360,8 +372,27 @@ export default function Chat() {
     } finally {
       setThinking(false);
     }
-  }, [input, isThinking, messages, provider, model, activeSessionId, currentUser, addMessage,
-      setThinking, ramaSpeaks]);
+  }, [isThinking, messages, provider, model, activeSessionId, currentUser, addMessage,
+      setThinking, ramaSpeaks, masterAuthenticated, navigate, setMicMuted, setSpeechMuted]);
+
+  const handleSend = useCallback(() => {
+    const text = input.trim();
+    if (!text || isThinking) return;
+    setInput('');
+    sendText(text);
+  }, [input, isThinking, sendText]);
+
+  // A spoken line arrives in the store's one-slot mailbox. It is taken only when Rāma is not mid-turn:
+  // an utterance that lands while a reply is streaming waits, and is cleared only once it has actually
+  // been handed to `sendText`, so it cannot be lost to the `isThinking` guard.
+  // `addMessage` returns silently when there is no active session, so a line that arrives before
+  // Chat has made one would be cleared and lost; it waits for the session instead.
+  useEffect(() => {
+    if (!pendingUtterance || isThinking || !activeSessionId) return;
+    const { text } = pendingUtterance;
+    clearUtterance();
+    sendText(text);
+  }, [pendingUtterance, isThinking, activeSessionId, sendText, clearUtterance]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {

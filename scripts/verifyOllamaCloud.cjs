@@ -1123,7 +1123,10 @@ function sectionDaemonUntouched() {
   check('searchWeb\u2019s first line is still the playwright absence check',
     /async function searchWeb\(query, engine = 'bing'\) \{\s*\n\s*if \(!playwright\) return \{ ok: false, error: 'playwright not installed' \};/.test(be));
   check('and the browser:search handler DELEGATES to it, so there is one implementation',
-    /ipcMain\.handle\('browser:search', async \(_e, query, engine = 'bing'\) => searchWeb\(query, engine\)\)/.test(be));
+    // The handler is now wrapped in browserEngine's capability gate (Section 149.3):
+    // `ipcMain.handle('browser:search', gate('browser.search', <handler>))`. The pin is on the
+    // DELEGATION to `searchWeb`, so it accepts the bare form and the gated form and nothing else.
+    /ipcMain\.handle\('browser:search', (?:gate\('browser\.search', )?async \(_e, query, engine = 'bing'\) => searchWeb\(query, engine\)\)\)?;/.test(be));
   residual('that browser:search returns the identical playwright-absent object AT RUNTIME is '
     + 'specified and NOT EXECUTED here: browserEngine.cjs requires electron at module scope and '
     + 'node_modules is absent, so the assertion above is structural. It runs under npm run verify '

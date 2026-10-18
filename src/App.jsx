@@ -21,7 +21,7 @@ import { useAppStore }  from '@store/appStore.js';
 import { useUIStore }   from '@store/uiStore.js';
 import { useUserStore } from '@store/userStore.js';
 import { startConsciousnessLoop, stopConsciousnessLoop, authenticateMaster } from '@services/consciousness.js';
-import { loadSession, saveSession, instanceApi } from '@services/authClient.js';
+import { loadSession, saveSession, clearSession as clearStoredSession, authApi, instanceApi } from '@services/authClient.js';
 import { TIERS } from '@services/accessControl.js';
 import Login   from '@pages/Login/Login.jsx';
 import Setup   from '@pages/Setup/Setup.jsx';
@@ -240,14 +240,39 @@ export default function App() {
   const [instanceInfo,   setInstanceInfo]   = useState(null);   // null = not asked yet
   const [setupDone,      setSetupDone]      = useState(false);
 
-  // Restore an existing session, if the tab still holds one
+  // Restore an existing session, if the tab still holds one.
+  //
+  // IT IS ASKED OF MAIN, NOT TAKEN ON FAITH (Section 150.1, D6). `sessionStorage` is the renderer's own
+  // claim about who it is. Main decides which account a window is by the session it validated, so a
+  // restored session is only real once `auth:me` has accepted the token, which is also what binds this
+  // window again. If main does not recognise it - a restart, an expiry, a suspension - the stored copy is
+  // dropped and the sign-in screen shows, instead of a UI that looks signed in and is denied everywhere.
+  // Browser-only dev mode has no main process to ask, so it restores as it always did.
   useEffect(() => {
+    let alive = true;
     const existing = loadSession();
-    if (existing) {
-      setSession(existing.user, existing.token);
-      if (existing.user?.tier === TIERS.MASTER) authenticateMaster(true);
+    const finish = () => { if (alive) setAuthChecked(true); };
+    if (!existing) { finish(); return () => { alive = false; }; }
+
+    const adopt = (user) => {
+      if (!alive) return;
+      setSession(user, existing.token);
+      if (user?.tier === TIERS.MASTER) authenticateMaster(true);
+    };
+
+    if (!window.rama?.auth) {
+      adopt(existing.user);
+      finish();
+    } else {
+      authApi.me(existing.token)
+        .then((res) => {
+          if (res?.ok && res.user) adopt({ ...existing.user, ...res.user, expiresAt: res.expiresAt ?? existing.user?.expiresAt });
+          else clearStoredSession();
+        })
+        .catch(() => clearStoredSession())
+        .finally(finish);
     }
-    setAuthChecked(true);
+    return () => { alive = false; };
   }, [setSession]);
 
   // Registry integrity — a page defined without a loader would silently 404

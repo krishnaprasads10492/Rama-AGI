@@ -92,6 +92,20 @@ export const useUIStore = create((set, get) => ({
     return next;
   },
 
+  // A spoken line waiting for Chat (Section 149.3). ONE SLOT, not a queue: master is talking to one
+  // Rāma, and a second utterance arriving before the first is taken replaces it rather than stacking
+  // replies to things he has already moved on from. Chat consumes it through its own `sendText`, so a
+  // spoken line is handled exactly like a typed one - reflex, sensitivity class, `models.use`, egress
+  // boundary and all. It is deliberately NOT persisted: a half-heard sentence must not survive a
+  // restart and be answered later. `id` makes two identical sentences two events.
+  pendingUtterance: null,           // { id, text } | null
+  submitUtterance: (text) => {
+    const t = String(text ?? '').trim();
+    if (!t) return;
+    set({ pendingUtterance: { id: Date.now() + Math.random(), text: t } });
+  },
+  clearUtterance: () => set({ pendingUtterance: null }),
+
   // Does Rāma SPEAK its conversation replies? DEFAULTS OFF, and that is deliberate rather than
   // cautious: this is the only preference in the app whose "on" state makes noise in a room the app
   // cannot see. `speechMuted` is a separate, older switch meaning "stop talking now" and still wins —

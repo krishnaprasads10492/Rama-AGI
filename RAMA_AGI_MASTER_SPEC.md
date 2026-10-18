@@ -1844,6 +1844,16 @@ authenticated **Master session**, not merely an open store.
 | 173 | Electron 31 → 44, sharp without a compiler, and three upgrades that broke the app while every suite stayed green | done | Section 147. Master: *"for electron family upgrade — check for compability and performance issues before upgrade. no to C++, find a work around for scripts and sharp. I see a microsoft c++ redistributable installed as part of windows update. is it the same?"* **THE REDISTRIBUTABLE IS NOT THE COMPILER — they are different halves. Measured: six VC++ Redistributables installed (2015–2022, x86 and x64) and `vcruntime140.dll`/`msvcp140.dll` both present in System32; `cl.exe` and `link.exe` both NOT FOUND. A Redistributable lets an ALREADY-COMPILED binary run; the Build Tools C++ workload provides the compiler that node-gyp needs to PRODUCE a `.node`. THE USEFUL COROLLARY, and it is what made everything below possible: because the runtime IS installed, PREBUILT native binaries work perfectly — which is why argon2 loads. So the workaround for every native dependency is the same: never compile, always obtain a prebuilt binary.** **SHARP NEEDED NO WORKAROUND AND MY SECTION 146 REASON WAS WRONG: I held it back claiming its binary is "fetched by an install script" that `--ignore-scripts` suppresses. Measured: sharp resolves its binary through `optionalDependencies` — `@img/sharp-win32-x64` is an ordinary npm package, already present — and `install: node install/check` only VERIFIES, it does not build or download. `sharp@0.35.5` installed cleanly under `--ignore-scripts` and WORKS: libvips 8.18.7, encoded a real 95-byte PNG. One HIGH closed.** **ELECTRON COMPATIBILITY CHECKED AGAINST SOURCE AND IT CAME OUT CLEAN. The surface is narrow and modern — 13 modules, and all three `webPreferences` blocks declare `contextIsolation: true` with `nodeIntegration: false`. ZERO HITS probing every API removed between 31 and 44 (remote module, `enableRemoteModule`, `webSecurity:false`, `new-window`, `new BrowserView`, `registerFileProtocol`, `registerBufferProtocol`, `nativeWindowOpen`, `isDarkMode`, `allowRendererProcessReuse`, `desktopCapturer.getSources`, `getPrinters`, `moveItemToTrash`, `getCrashesDirectory`). Then the three changes Electron's own breaking-changes document raises: `clipboard` REMOVED FROM THE RENDERER in 44 — the renderer uses `navigator.clipboard`, the WEB api, in five places and Electron's module nowhere, so UNAFFECTED; `nativeImage.toBitmap()` colour-space normalisation in 43 — only `createFromPath` and `createEmpty` are used, UNAFFECTED; and `openAsHidden` removed from `setLoginItemSettings` in 44 — ONE HIT at `main.cjs:1668`, macOS-12-and-below only so always a no-op on Windows, removed, with `args: ['--hidden']` carrying the intent here. `net.request` appears throughout but it is the project's own `lib/http.cjs`, not Electron's `net`, so 44's Sec-Fetch enforcement does not apply. ONE EDIT FOR THIRTEEN MAJOR VERSIONS.** **INSTALLED: Electron 44.7.0 — Node 24.21.0, Chromium 152.0.7977.130, V8 15.2 (from 31.7.7 / Node 20.18 / Chromium 126), with `electron-builder` 26.15.3 because 24.13.3 cannot package Electron 44 and carried the critical `tar` advisory. IT LAUNCHES, AND THAT IS THE CLAIM SECTION 146 COULD NOT MAKE: `[doctor] startup healthy` with NO capabilities on fallbacks, 354 IPC channels registered, vector index ready, renderer loaded, nothing on stderr but ordinary logs.** **ON PERFORMANCE, HONESTLY: I CANNOT GIVE A COMPARISON. 44 measured 718.8 MB across 5 processes at 28 seconds; the Electron 31 baseline sampled 241.9 MB across 2 — but a separate 31 run showed 5 processes, so the two samples caught different numbers of children and ARE NOT COMPARABLE. Chromium 152 does use more memory than 126 and ~700 MB over 5 processes is unremarkable, but I am not turning two uneven samples into a regression or a win. A real comparison needs both versions sampled the same way at the same point in startup.** **THE SERIOUS FINDING — THREE OF MY OWN SECTION 146 UPGRADES BROKE THE APP SILENTLY, and launching it is what exposed them: `chokidar@5.0.0`, `uuid@14.0.3` and `vectra@0.15.0` (via `uuid@13`) are ALL `"type": "module"` — ESM-only — and a CommonJS main process cannot `require()` them. On Electron 31 the log read "Version control did not load (require() of ES Module chokidar/index.js ... not supported) — continuing without it", "1 capability(ies) on fallbacks", and "vectra unavailable — keyword fallback active". THE ENTIRE GIT SUBSYSTEM WAS DOWN AND VECTOR MEMORY HAD DEGRADED. THEY ALL PASSED MY CHECKS AND THE REASON IS THE LESSON: I verified each with `node -e "require('x')"` and SYSTEM NODE 22 PERMITS `require()` OF AN ES MODULE, while Electron 31 bundles Node 20, WHICH DOES NOT — I measured the wrong interpreter, the same class of error as testing the dev server instead of the build in Section 140. AND ALL 42 SUITES WERE GREEN THROUGHOUT, because `safeRequire` degrades gracefully and `vectorMemory` has a keyword fallback: GRACEFUL DEGRADATION IS CORRECT BEHAVIOUR AND IT IS ALSO EXACTLY WHAT HID THIS — a whole capability can vanish while every gate passes. Reverted to the newest COMMONJS-LOADABLE versions rather than the oldest safe ones: `chokidar@4.0.3`, WHICH IS STILL COMMONJS AND STILL FIXES THE `braces` ADVISORY so no security ground was given up, plus `uuid@11.1.0` (dual-published with a CJS entry) and `vectra@0.9.0`. Re-launched: startup healthy with NO fallbacks — observed, not inferred.** **`verifyCjsLoadable.cjs` — 5 assertions, and the one that matters runs the probe INSIDE ELECTRON via `ELECTRON_RUN_AS_NODE=1`, so the answer comes from the Node that will actually execute the code; confirmed on Node 20.18.0 inside Electron 31 and then Node 24.21.0 inside Electron 44. It derives the list FROM SOURCE — 9 production dependencies required from `electron/` — with comments stripped first, because a package NAMED IN PROSE is not a package REQUIRED IN CODE and this project has paid five times for patterns that could not tell the difference. IT DEGRADES HONESTLY: with no Electron binary it falls back to the system Node and SAYS that is a weaker check, naming the exact failure mode that produced this defect rather than printing a green line that means less than it appears to. REDBY CONFIRMED: reinstalling `chokidar@5.0.0` reddens two rows, one static and one from the live probe quoting the real error; restoring 4.0.3 returns it to 5/5.** **VERIFIED: chain 4,991 across 43 entries 0 failures exit 0 ON ELECTRON 44; build exit 0 with `verifyBundleGraph` 21/0; `verify:render` 85/0 with 18 of 18 routes; `package:check` validates on builder 26 and reports what it always has here — no usable 7-Zip, so a portable zip only. Advisories 21 → 13.** **NOT VERIFIED: no window was interacted with (nobody typed a passcode, opened the IDE or ran a git operation through the UI on 44); nothing was packaged, since `package:check` is a dry run and builder 26 has never produced an artifact here; and the memory comparison is not sound.** **STILL OPEN: `electron-rebuild` (pointless without a compiler), and NODE-PTY STILL CANNOT SPAWN — `conpty.node` was never built. Master declined the C++ workload, so the only route to a working Terminal is a PREBUILT node-pty distribution, which is a dependency SUBSTITUTION and therefore master's decision rather than a fix I will make unilaterally. The same "never compile, always prebuilt" principle that solved sharp applies, but it means changing which package provides the terminal.** |
 
 | 174 | The Terminal works, and no fork was needed | done | Section 148. Master said yes to investigating a prebuilt node-pty. **THE DECISION MASTER WAS ASKED FOR TURNED OUT NOT TO BE NEEDED. Section 147 raised this as a DEPENDENCY SUBSTITUTION — swapping the official package for a community fork — and said that was master's call rather than mine. The investigation made the question moot: the official package fixed it.** **FOUR CANDIDATES CHECKED ON NPM RATHER THAN ASSUMED: `node-pty@1.1.0` (MIT, official, `node-addon-api`) CHOSEN; `@lydell/node-pty@1.2.0-beta.15` rejected because a beta is not a foundation for a terminal; `@homebridge/node-pty-prebuilt-multiarch@0.14.1` (MIT, actively maintained, `node-addon-api` 8 + `prebuild-install`) kept as the viable fallback; and `node-pty-prebuilt-multiarch`/`@cdktf/...` at 0.10.x REJECTED as NAN-BASED AND ABANDONED (2022 and 2025) — NAN binds the binary to a specific ABI, so every Electron upgrade would need a matching prebuild.** **TWO THINGS CHANGED BETWEEN node-pty 1.0.0 AND 1.1.0 AND BOTH MATTER: it moved from `nan` to `node-addon-api`, so it is NODE-API NOW AND ABI-STABLE across Node and Electron versions exactly like argon2 — an Electron upgrade can no longer break it; and its install script became `node scripts/prebuild.js || node-gyp rebuild`, prebuilt first and compile only as a fallback. BETTER THAN THAT: THE PREBUILDS SHIP INSIDE THE NPM TARBALL — `prebuilds/win32-x64/` arrives with `pty.node`, `conpty.node`, `conpty_console_list.node`, `conpty.dll`, `OpenConsole.exe`, `winpty.dll` and `winpty-agent.exe`. The install script only CHECKS them (it printed "> Checking prebuilds..." and exited 0), SO `--ignore-scripts` DOES NOT BREAK IT, which is what made this work under the only install mode that is safe on this machine. So the answer is an UPGRADE, NOT A SWAP: official package, MIT, no fork, nothing for master to decide.** **VERIFIED IN THE RUNTIME, NOT THE CONVENIENT ONE. Section 147's lesson was that the system Node is the wrong interpreter to ask, so the spawn was probed INSIDE ELECTRON via `ELECTRON_RUN_AS_NODE=1`: `{ok:true, node:"24.21.0", electron:"44.7.0", pid:37616, bytesRead:218}`. A REAL SHELL STARTED AND WROTE 218 BYTES BACK — and `bytesRead > 0` is the part that matters, because a pty that spawns but is not connected would report a pid and never speak.** **A HELD-BY-HAND NOTE BECAME AN ASSERTION: `verifyCjsLoadable.cjs` carried "a dependency that loads is not a dependency that WORKS — node-pty require()s cleanly and cannot spawn". That note is now FOUR ASSERTIONS — the prebuild directory for this platform exists, it contains a pty binary, node-pty spawns inside Electron's Node, and the shell writes something back. BECAUSE "IT LOADS" PASSING WHILE "IT SPAWNS" FAILED IS PRECISELY WHAT HID A DEAD TERMINAL, and `package.json`'s own note had reasoned from that clean `require()` to the conclusion that the gyp step was "ceremony" — true for argon2, wrong for node-pty. That note is corrected again and now states what is actually true of both modules. WHEN THERE IS NO ELECTRON BINARY THE SPAWN ROW FAILS RATHER THAN SKIPPING, and says why: the Terminal was dead for an unknown length of time precisely because nothing asserted it could start.** **VERIFIED: `verifyCjsLoadable.cjs` 5 → 9 assertions; chain 4,988 across 43 entries 0 failures exit 0; build exit 0 with `verifyBundleGraph` 21/0; app launches with startup healthy, 354 IPC channels, vector index ready, renderer loaded. Advisories 19 — the count moved from 13 because node-pty 1.1.0 and the sharp/Electron trees pull different transitive sets; THE ONE CRITICAL IS STILL `tar`, reachable only through `electron-rebuild`.** **NOT VERIFIED: NO TERMINAL HAS BEEN TYPED INTO THROUGH THE UI. The pty spawns, connects and reads back under Electron's Node — that is the hard part and it is proven. Whether `/terminal` renders a working shell, resizes correctly and survives a close is a renderer claim that needs master at the keyboard.** **STILL OPEN: `electron-rebuild` carries the last critical advisory and exists only to compile native modules — which this machine cannot do and, as of now, DOES NOT NEED TO, since both native dependencies are Node-API with shipped prebuilds. Removing it is a capability removal in name only, but it is still a removal, so it is master's decision; dropping it would close the last critical.** |
+| 175 | StockMind strategy: a verdict that passed 45% of pure noise, a stop that filled better than the market, and Section 135's ranking core | first tranche done; route and UI not built | Section 149.2. Master: *"upgrading and evolving strategy-capability in stockmind."* **MEASURED, NOT REASONED: `strategy_eval.evaluate()` annualised the per-trade Sharpe by sqrt(252) and fed it to `deflated_sharpe`, whose standard error and noise benchmark are per-observation. On 1,500 simulated strategies per cell with ZERO true net edge, a single-trial verdict returned PASSED 45.7% / 45.7% / 44.7% of the time at 30 / 60 / 150 trades - a correct 95% gate passes about 5%.** After the fix the same simulation passes 4.5% / 5.5% / 4.5%, and a planted real edge (+1.0% per trade net, sd 1.5) still passes 97.7% / 100% / 100% at one trial. The 102 existing assertions never saw it: every fixture planted a strong edge, which passes under either unit, so the suite tested half of a gate's two properties. **THREE ITEMS DONE: (1) deflation in per-trade units with the null trial-Sharpe sd 1/sqrt(n-1); annualised `net_sharpe` kept for display, `per_trade_sharpe` added, the UI and glossary now compare like with like (I11 additive); (2) `simulate()` filled a stop at the stop price even when the bar GAPPED through it - now fills at the open; a target gapped through is deliberately not improved; (3) Section 135 as a pure module `ai_backend/engine/strategy_rank.py` - profit gate that EXCLUDES with its reason, accuracy ordering, minimum sample, out-of-sample mandatory, per-row selection-noise ceiling, claim and measurement kept apart.** **VERIFIED, executed here: `test_strategy_eval` 114 (+12, including a seeded calibration section proven RED against the old module at 48-51%), `test_strategy_spec` 229 (+9, gap-through stop, generated script still reproduces the interpreter bar for bar), `test_strategy_rank` 59 NEW, six mutations of the ranking module all caught.** **NOT BUILT, and why: the route, the generator, storage and the ranked-list UI - a route that runs candidates needs bars, bars need pandas, and pandas is not on this machine, so it would ship unexercised; Section 135.7 also forbids showing a ranked list before an out-of-sample run has actually happened.** **NEXT, in order: (a) on a machine with the engine running, a `/strategy/rank` route that feeds the library templates through `search_and_judge` and `strategy_rank.rank` (trial count must cover ALL candidates and instruments); (b) wire `purged_walk_forward` for several out-of-sample folds instead of one 30% holdout; (c) surface `costBasis`, payoff, profit factor, breakeven win rate and the in-sample vs out-of-sample gap in `StrategyBuilder.jsx` - Section 135.4 says that gap must be shown, and today it exists only inside a note string; (d) save and reload specs; (e) regime awareness: `strategy_scorer` takes `regime` from the request and nothing detects it. Open and unfixed: the older `/backtest` still enters at the signal bar's close and can use a model fitted on the tested data (`backtest.py` 322, 518); `trial_sharpe_sd` uses the null 1/sqrt(n-1) rather than the measured cross-trial spread; stops, targets and the combiner cannot be swept so hand-tuning them is not counted as trials.** |
+| 176 | Communication audit: master's voice never reached a model, "unmute" muted, a research agent could not be spawned by voice, and 14 browser channels had no gate | done; its open items (D5, D6, D8, D9, D10, D12) were closed in Section 150, rows 177-180 | Section 149.3. Master: *"thorough check on communication module of Rama and its link to all capability access based on masters commands and orders."* **THE FINDING: three intent parsers (reflex `SKILLS`, `matchVoiceCommand`, palette search) sharing only `matchVoiceToRoute`, and the spoken one ended in a dead branch.** `CommandPalette.onCommand` tested `matched.route` first and every free-form utterance carries `route:'/'`, so speech navigated Home and the `inject-message` branch could never run: **free-form speech had never reached a model.** **FIXED: (D1) `resolveVoiceDispatch` decides utterance / action / navigate / none in an order a test holds, and a spoken line enters Chat through a one-slot store mailbox consumed by Chat's single `sendText`, so voice is not a second door - reflex, sensitivity class, `models.use`, egress boundary and claim gate apply as for typed text; (D3) one pure parser `src/services/commandIntents.js` for mute/unmute, word-bounded, questions are never orders, bare "mute" only when it is nearly the whole utterance - BOTH old parsers had the bug: the reflex tested `t.includes('mute')`, and the voice table listed 'mute yourself' before 'unmute yourself' while `"unmute yourself".includes('mute yourself')` is true; (D4) Chat applies a typed mute to the voice ENGINE as well as the store; (D11) `ram`/`help` no longer match inside `program`/`help me refactor`; (D2) `identify` is routed to Chat instead of dropped; (D7) all 14 `browser:*` channels gated on the existing `browser.*` capabilities - `execute-js` on `browser.forms` (tier 1), `download` on `browser.download` (2), search on `browser.search` (3), the rest on `browser.read` (3) - via `gate(cap, handler)` at each registration, the plain `ipcMain.handle` spelling kept because the reachability audit, the invariants and the applier suite all find channels by it (a first wrapper form made 14 live channels look unhandled and `verifyReachability` caught it); `user` is the last argument on every preload member.** **ALSO FOUND BY THE NEW SUITE: `spawn a research agent` was answered as a web search because "research" matched the search regex first - spawning an agent by voice had never worked.** **VERIFIED: `scripts/verifyCommandRouting.mjs` 123 assertions, in `npm run verify`, loading the SHIPPED `voiceEngine.js` and `cognition.js` with only the Vite alias import stubbed; mutations restoring each defect (dispatch order, mute parsing in both parsers, spawn order, each gate row, the user-stripping, the preload member, the caller, the mailbox order) were run in scratch copies and each turned the suite red; two first SURVIVED and exposed weak tests (an expectation read from the table under test, and a behaviourally invisible strip, now stated independently and at source level). `npm run verify` exit 0, 44 suites reporting; `npm run audit` 164 + 12; `vite build` green 27s.** **NEEDS MASTER: (D5) the autonomy stop has no command surface - `lift()` needs `system.suspend-autonomy`, absent from the PROTECTED `capabilities.json`; exact entry specified in 149.3, not added. (D8) `voice:transcribe` sends raw audio to api.openai.com with no capability check or egress boundary, against the Ollama-only scope of Section 130. (D6) tier is renderer-supplied - known. (D9) reflex skills run no capability check (`system:get-metrics` skips `os.metrics-read`). (D10) "Opening X" is said for pages the tier cannot see. (D12) `instanceManager.express` skips its tier check when `user` is omitted, but `selfCare` auto-failover calls it without one, so denying by default would break that.** **NOT VERIFIED: nothing seen on a screen; no spoken line was actually heard through a microphone; the new mailbox path is asserted at source level and by the pure dispatcher, not by a DOM render. Voice still has no speech-to-text backend on this machine, so the path above is exercised by tests, not by master's voice.** **NEXT: master decides D5 and D8; then a reflex-skill capability layer (D9) and `visiblePages(user)` in `matchVoiceToRoute` (D10); an abort for an in-flight `models:converse` (none exists).** |
+| 177 | The tier was whatever the renderer said it was (D6), and the failover that could express any gene (D12) | done | Section 150.1. Master: *"D6--yes, D12--do it."* **BUILT: `electron/lib/principalBinding.cjs` binds each WINDOW to a session main validated itself, and wraps the real `ipcMain.handle` before anything registers so any renderer-supplied user is replaced by that principal.** Bound only by `auth:login-step2` / `auth:me` after `authCore` accepts the token; unbound by `auth:logout` and the window's `destroyed` event; re-validated against `authCore` on EVERY call, so a tier change or suspension takes effect on the next request. Handles a top-level or nested `user`, a positional user and a trailing user; never injects one where none was sent; skips `auth:*` and `session:*`; drops `__proto__`/`constructor`. A pop-out inherits its opener's binding through the existing single-use grant, and is refused if the opener has no session. `App.jsx` now asks main to confirm a restored session instead of taking `sessionStorage` on faith. **D12, worse than first reported:** `express(id, gene, null)` skipped the tier check, `selfCare` passed null on purpose, and the matrix's `instances.*` capabilities were enforced by NOTHING. The 120-second sweep could express any of 31 genes (nine tier 0). Also, `requires` came with a gene unchecked: `g.store`/`g.vector` (tier 4) pull in `g.crypto` and `g.self-model` (tier 3) pulls in `g.metacognition` (both tier 0). **FIXED: no actor is denied; one traversal is both authorised and added; a frozen `SYSTEM_ACTOR` (identity-compared) may never add a tier-0 gene or one above the instance's recorded `ownerTier`; all 13 `instance:*` channels are gated on the declared capabilities from the principal; `spawn` records the caller's tier from main.** **ALSO FOUND: the renderer's `can()` COERCED (`{tier:'0'}`, `{tier:null}`, `{tier:[]}` were MASTER there and denied by main) and so did `visiblePages`; both now use one `tierOf()`.** **VERIFIED: `verifyPrincipalBinding.cjs` 57 (real `authCore`, real argon2 sessions, real suspension/revocation); `verifyInstanceAuthority.cjs` 63 (real genome, real `selfCare` failover end to end); `smokePrincipalBinding.cjs` 10 under REAL Electron (real `ipcMain`, real IPC, real `destroyed` event; opt-in, needs a display session, NOT in `npm run verify`); mutations: 11 on the binding, 9 on the instances, all caught, one survivor (look-alike actor) fixed.** **NOT VERIFIED: the full app was not launched; a real login through the UI, a page reload with a restored session, and a real pop-out were not exercised. `App.jsx`'s new `auth:me` restore is reasoned and builds, not seen.** |
+| 178 | The autonomy stop gets its command surface - master approved the protected entry | done in code; **AWAITING MASTER'S `--approve`** | Section 150.2. Master: *"It is under loyalty, based on decision of master. --A."* **BUILT: `"system.suspend-autonomy": 0` added to the protected `shared/capabilities.json` (a one-line diff, and the ONLY protected file that differs).** Channels `autonomy:stop` (any window, no capability, signed by main's account of the caller), `autonomy:resume` (master only, from the validated principal, with a note), `autonomy:status`; a Settings panel; "stop everything" in chat and by voice. **The four pre-existing dispatchers now skip their SCHEDULED tick while halted (`refreshScheduler`, the metacognition audit, `selfCare`'s sweep incl. failover, both `marketIntel` ticks), and keep firing, so resuming needs no re-arm and no restart; master's on-demand `refresh:run`, `selfcare:sweep` and StockMind calls are NOT halted.** **TWO DESIGN CORRECTIONS MADE WHILE BUILDING: (1) `lift()` writes `allowed: true`, so using it to undo a stop on a default install would have moved Rāma from "new autonomy stopped" to "allowed" - a bigger grant than before the stop. A new `resume()` clears the halt and restores the allow-file ONLY from `priorAllow`; `lift()` keeps zero callers. (2) `engage()` twice overwrote `priorAllow` with null, destroying the only record of who allowed autonomy; it is now idempotent, which matters once any window can press it.** **There is NO spoken or typed resume**, asserted from six angles. **VERIFIED: `verifyAutonomyControl.cjs` 106 (the halt measured as work NOT done by driving real scheduled ticks with injected timers; resume restores/does-not-grant; env halt reported as still in force); `verifyAutonomyStop.cjs` 201 (its Section 132 pins updated to assert the new truth, not deleted); mutations: 19 across D5 and D8, all caught, one survivor (an unsaved opt-in) exposed a weak test and was fixed.** **MASTER MUST DO (Rāma will not): the loyalty tripwire is RED by design until he records the approval - `$env:RAMA_MASTER_APPROVAL = '<digest the tripwire prints>'` then `node scripts/verifyLoyaltyTripwire.cjs --approve --note "<why>"`, and commit `shared/loyalty-tripwire.json` with the change.** The digest is deliberately NOT written here: it is a hash of the file's exact bytes, goes stale on any later edit, and an approval you did not have to read is not an approval. Run `node scripts/verifyLoyaltyTripwire.cjs`, read the one-line diff, and use the digest it prints. |
+| 179 | Cloud speech-to-text: local first, cloud only by explicit opt-in | done | Section 150.3. Master: *"2. combination of A and B."* **BUILT: audio stays on this machine unless ALL of: an `OPENAI_API_KEY` in the vault, master's opt-in (encrypted `config` domain, so inside the I14 re-key; default OFF; boolean `true` only; master-only to change, from the validated principal; saved at once), and a session holding `chat.send`.** Previously a key alone silently enabled it, and `voice:transcribe` had no check at all. A cloud result carries `leftMachine: true, provider` whether it succeeded or FAILED (the clip was sent either way), and the UI says so each time. A master-only switch is in Settings. Local Whisper stays first; nothing auto-installed (disk). **VERIFIED: inside `verifyAutonomyControl.cjs` with an in-memory config store and a stubbed HTTP client (no real request): key alone is not enough, only boolean `true` is consent, stranger/guest/admin refused, persisted, a failed attempt still reported as sent, opted-out makes no request at all.** **NOT VERIFIED: a real OpenAI call, a real Whisper binary (neither exists here), the Settings switch on screen.** |
+| 180 | Reflex skills had no capability check (D9) and said "Opening X" for pages the tier cannot see (D10) | done | Section 150.4. Master: *"D9--fix it, D10--fix it."* **The check is in the reflex, not on the IPC channel:** `system:get-metrics` also feeds the Titlebar and Home for every tier, so gating the channel would blank the titlebar. Each skill declares `cap`; `resolveReflex` enforces it once. Gated: `system.status` -> `os.metrics-read`, `self.cognition` -> `models.use`. `self.capabilities` is deliberately NOT gated: its detail is already gated in the IPC and it falls back to a safe summary for a Guest. `matchVoiceToRoute(text, user)` filters to the account's visible pages when given a user (default unchanged); `resolveVoiceRoute` reports a page that EXISTS but is hidden, and the reflex says so instead of "Opening"; the palette checks the CURRENT account's routes through a ref (the voice effect closes over its first render). **VERIFIED: `verifyCommandRouting.mjs` now 222 assertions against the REAL page registry and the REAL `accessControl` (only `react` and the capability-JSON alias are stubbed), up from 124 against a stub table; 7 mutations caught (reflex check removed, a cap dropped, hidden page "opened", matcher ignoring the user, an unknown user seeing every page, renderer `can()` coercing again, the palette navigating to hidden pages).** |
+| 181 | The strategy book: Rāma generates, judges, stores, refreshes and reads out strategies so master chooses parameters and not rules | built, verified by tests; routes and screen never run | Section 151. Master: *"what about evolving strategies tab - reduce the work on master. suggestions of well calculated strategies for various items in the stock market based on selection of params and that can be stored, updated and utilised. you know Rama's capabilities, see if it can be enhanced."* This is Section 135 (decided, not built) and row 175's "next". **DECIDED BEFORE BUILDING: a new EVOLVE sub-tab under STRATEGISE. Master picks instruments, interval, instrument type, capital, risk and direction; Rāma generates candidates from the published library (its own sweeps, optionally a declared exit grid), judges each by WALK-FORWARD (parameters re-chosen on the past only, scored on the fold after, pooled across folds), ranks the survivors by Section 135's rule (profit is a gate, hit rate orders), STORES them with the claim and the measurement as separate fields, REFRESHES them against newer bars with the parameters frozen, and shows each one's CURRENT state (flat / conditions met at the last close / in a trade) with the size it would take.** **FOUND FIRST: `/strategy/backtest` has raised a TypeError on every call since it was written** - `search_and_judge` needs the callback to return trade RETURNS (floats) and the route returned trade DICTS - which the route's `except` turned into `{ok:false}`. BUILD & TEST has never produced a verdict, on top of the engine never having run. The 220 spec tests could not see it because `main.py` needs pandas and no test imports it. **So the orchestration lives in stdlib modules that run and are tested here; `main.py` is reduced to adapters.** **BUILT (Section 151.8): `strategy_factory.py`, `strategy_book.py`, `strategy_service.py` (+ thin routes in `main.py`), the `marketIntel.cjs` channels and preload members, `EvolvePanel.jsx` + `evolveModel.js` + 12 glossary terms, and suites `test_strategy_factory` (130), `test_strategy_service` (60), `test_strategy_routes_static` (32), `verifyStrategyBook.cjs` (50), `verifyEvolve.mjs` (87); 53 mutations across them, every one killed. Decided while testing: `holding` needs a forward probabilistic Sharpe of 0.90, not just a positive sign (a sign alone called a dead strategy healthy in 3 of 7 noise worlds). Evolving stores nothing; KEEP is master's click, read from a server-side cache. NOT VERIFIED: the routes have never run (pandas and FastAPI are absent here, so they are checked statically against the service signatures only), and nothing has been seen on screen. NEXT: master runs one EVOLVE on a stored symbol with 5,000+ daily bars and reports what the tab shows.** |
+| 182 | Multiple Zerodha API accounts, each with its own whitelisted static IP, visible to SuperAdmin only | built, verified by tests; never seen on screen | Section 152. Master is taking a new paid Kite Connect subscription and wants the UI to hold several API accounts with their whitelist IPs, shown only to SuperAdmin, with every distributable carrying its own IP. **DECIDED BEFORE BUILDING - see Section 152 for the reason and the limits.** BUILT: `electron/lib/brokerAccounts.cjs` (pure rules), `egressIp.cjs`, `electron/ipc/brokerAccounts.cjs` (6 channels), `BrokerAccounts.jsx` + `brokerAccountsModel.js` in the Models → Brokers tab, `verifyBrokerAccounts.cjs` (204) and `verifyBrokerAccountsUi.mjs` (46); 33 mutations, every one killed. **FOUND WHILE BUILDING: the generic `store:*` channels let any signed-in window read or overwrite ANY encrypted domain (`users`, `config`, ...) with no capability check; fixed by an allowlist (`knowledge` only), see 152.4.** NEXT: master runs the tripwire `--approve` with the digest it prints (the capability file changed again), then adds his first real account in the panel. |
+| 183 | Candle display is view-only by default; saving is a named, explicit act | in-progress | Section 153. Master: *"for normal display why the fetch and store just on change the display ... if user wants to specifically save for future ref then store it in DB and fetch with name convention."* Found first: parameter changes already read from disk only (`sync=false`); the writes come from the Fetch buttons and from predict/backtest. **DECIDED: a view-only fetch that writes nothing, an explicit named dataset (SQLite, stdlib) and the old persisting fetch kept under a clearer name.** BUILT per 153.6: `datasets.py` (SQLite, stdlib), `store.sync(persist=)`, `/ohlcv?persist=false`, `/dataset/*`, four bridge channels, `DatasetPanel.jsx`, the NOT SAVED badge, a request-sequence guard, and a per-key lock with atomic writes in `store.merge`. Suites: `test_datasets` (84), `test_store_persist` (93, needs pandas, skips cleanly without), `verifyDatasets.cjs` (56), `verifyDatasetsUi.mjs` (135); 111 mutations, all killed. NEXT: master tries Fetch (view only), Save dataset, Load and Delete on a real symbol. |
+| 184 | Real-world readiness audit: what stands between the installed app and a working engine | done; two fixes applied, the rest listed | Section 154. The verdict: **an installed Rāma cannot deliver a working StockMind on a clean machine today** (no engine runtime is created on install, and user data lives in the install directory). |
 
 ### Resume checklist for a cold session
 
@@ -19147,3 +19157,636 @@ native modules — which this machine cannot do and, as of now, **does not need 
 dependencies are Node-API with shipped prebuilds. **Removing it is therefore a capability removal in
 name only, but it is still a removal, so it is master's decision** (Section 143's standing rule).
 Dropping it would close the last critical.
+
+
+---
+
+## SECTION 149 — Strategy honesty, and the communication audit
+
+**STATUS: FIRST TRANCHE BUILT AND VERIFIED; the items marked FOR MASTER and the route/UI half of the strategy work are open.** Ledger rows 175 and 176. The decisions were written before implementation per Section 28 and the measured results are filled in below.
+Master's scope for this session, verbatim: *"upgrading and evolving strategy-capability in stockmind"*
+and *"thorough check on communication module of Rama and its link to all capability access based on
+masters commands and orders."*
+
+Resume state checked first: `git log` head `4394ee9`, tree clean, `node start.cjs --diagnose` 0 blocking.
+Python 3.14 IS present on this machine and the stdlib-only suites run: `test_strategy_eval` 102/102,
+`test_strategy_spec` 220/220 (executed this session, not read off the ledger). numpy/pandas are absent,
+so nothing that loads bars can run here.
+
+### 149.1 What master was asked to rule on
+
+Nothing new. Everything below stays inside already-locked decisions: no order placement (Section 95),
+ROI an output (103), profit a gate and accuracy the ranking (135), Ollama-only (130), I6/I11/I12/I15.
+
+### 149.2 Strategy
+
+**(a) THE DEFLATED SHARPE WAS IN THE WRONG UNITS - MEASURED.** `evaluate()` computes
+`sharpe(net, periods_per_year=252)`, i.e. the per-trade mean/sd multiplied by sqrt(252) (about 15.9),
+then passes that to `deflated_sharpe`, whose Lo standard error `(1 - g3*SR + (g4-1)/4*SR^2)/(T-1)` and
+whose `expected_max_sharpe` are per-observation quantities. An annualised numerator over a
+per-observation standard error inflates the z-score by roughly 16x.
+
+Measured on this machine (`evaluate()` on `drag + N(0, 1.5)` gross returns, so net expectancy is exactly
+zero; 1,500 runs per cell; seed 7), the rate at which pure noise PASSED:
+
+| trades | trials 1 | trials 50 | trials 500 |
+|---|---|---|---|
+| 30 | 45.7% | 16.1% | 10.1% |
+| 60 | 45.7% | 9.1% | 4.7% |
+| 150 | 44.7% | 2.4% | 0.5% |
+
+A 95% gate should pass about 5% of zero-edge strategies at one trial. It passed 45%. The cause is also
+why the damage hides: at higher trial counts the benchmark rises with the count and masks it, and the
+existing suite uses strong planted edges, which pass under either unit.
+
+**Decision.** The deflation runs in PER-TRADE units. `evaluate()` computes `per_trade_sharpe = mean/sd`
+(no annualisation) and passes it to `deflated_sharpe` with `trial_sharpe_sd = 1/sqrt(n_obs - 1)`, the
+null standard error of a Sharpe estimate (Bailey and Lopez de Prado's default when the cross-trial
+variance is not measured). `deflated_sharpe` and `expected_max_sharpe` stay unit-agnostic with their
+signatures and defaults UNCHANGED, so callers and the 102 existing assertions keep their meaning.
+`net_sharpe` / `gross_sharpe` stay annualised for display and the `ns <= 0` cost gate (I11: additive),
+and a new `per_trade_sharpe` field carries the unit the deflation used. `benchmark_sharpe` becomes
+per-trade as well, because it is only meaningful beside the number it is compared with - the UI now
+shows `per_trade_sharpe` next to it rather than the annualised figure.
+
+**Retained, not re-litigated:** deflating a FRESH holdout by the number of search trials is stricter than
+the statistics strictly require (a single run on unseen data is one test). It is the project's declared
+conservative choice (`search_and_judge` docstring) and stays. This section fixes a unit error, not a
+policy.
+
+**Acceptance, set before the fix:** at one trial and zero edge the pass rate must be at most 8% at every
+tested trade count (5% nominal plus Monte Carlo slack), and a planted real edge must still pass. Both
+become suite assertions, with the seed fixed so they are reproducible.
+
+**Result, measured after the fix** (same simulation, same seed, 1,500 runs per cell):
+
+| trades | zero-edge pass, 1 trial | 50 trials | 500 trials | planted +1.0%/trade edge, 1 trial | 50 trials |
+|---|---|---|---|---|---|
+| 30 | 4.5% | 0.0% | 0.0% | 97.7% | 33.3% |
+| 60 | 5.5% | 0.0% | 0.0% | 100% | 86.8% |
+| 150 | 4.5% | 0.1% | 0.0% | 100% | 100% |
+
+The gate is now near its nominal 5% where it should be, and it is strict at high trial counts (the
+retained conservative choice above), which is why a real edge needs more trades to survive a wide search.
+That cost is real and master should know it: at 30 trades a genuine edge found among 50 variants passes
+only a third of the time. The remedy is more trades, not a looser gate. Added to `test_strategy_eval.py`
+as a seeded calibration section, shown RED against the pre-fix module (pass rates 50.7%, 49.5%, 48.0%).
+
+**(b) A STOP FILLED BETTER THAN THE MARKET.** `simulate()` exits a stopped trade at exactly
+`stop_price`. When a bar opens beyond the stop, no one can fill at the stop price; the first available
+price is the open. Filling at the stop on a gap is optimistic for every long and every short, and it
+is largest in precisely the volatile sessions where stops matter. Fixed: a stop that the bar's open has
+already crossed fills at the open. A target is deliberately NOT improved on a gap (filling at the
+better price would be the optimistic direction; the existing rule of exiting at the target price is the
+cautious one). `strategy_codegen` emits `inspect.getsource(simulate)`, so the generated script agrees
+with the interpreter by construction and its bar-for-bar reproduction assertion keeps covering this.
+
+**(c) SECTION 135 BUILT AS A PURE CORE.** `ai_backend/engine/strategy_rank.py`, stdlib only, so it is
+runnable and testable on this machine. Implements 135.2 and 135.4 exactly:
+
+1. **Requirement, not preference:** a candidate is excluded WITH its reason unless its out-of-sample
+   verdict shows positive cost-adjusted expectancy.
+2. **Minimum sample:** below `MIN_TRADES` the candidate is `insufficient`, never ranked.
+3. **Out-of-sample mandatory:** a candidate with no out-of-sample verdict is not rankable.
+4. **Ranking:** among survivors, hit rate descending (master's stated precedence), ties broken by
+   expectancy then by more trades.
+5. **Both numbers shown:** in-sample and out-of-sample hit rate and the gap between them; a large gap is
+   reported as the finding, not averaged.
+6. **Claim kept apart from measurement (135.5):** `claim` (what the source asserted) and `measurement`
+   are separate fields, `measuredOn` carries the date.
+7. **The 40-wins-of-1%-against-10-of-5% case** is a named assertion: 80% accurate, negative expectancy,
+   EXCLUDED, never ranked.
+
+**Verified:** `test_strategy_rank.py`, 59 assertions, built from real `evaluate()` verdicts. Six
+mutations of the module (profit gate off, sample floor off, out-of-sample not required, ordering removed,
+claim overwriting measurement, selection ceiling ignoring K) were each caught.
+
+**Not built here, said plainly:** the route, the generator, the storage and the UI list. A route that
+runs real candidates needs bars, bars need pandas, and pandas is not installed on this machine, so a
+route written now would ship unexercised. Per Section 135.7 no ranked list is shown to master before
+out-of-sample validation exists in a run that has actually happened.
+
+### 149.3 Communication
+
+Method: traced every path from master's input to a capability, from the code and not from the spec.
+
+| # | Finding | Evidence | Decision |
+|---|---|---|---|
+| D1 | Spoken free-form speech never reaches a model | `CommandPalette.onCommand` tests `matched.route` first; `matchVoiceCommand` returns `route:'/'` for search and for the unmatched fallback, so the `inject-message` branch is unreachable and speech only navigates Home | FIX: free-form utterances go to Chat's own send path |
+| D2 | `identify` and `spawn-agent` matched, then dropped | no handler in `onCommand` | FIXED `identify` (routes to Chat). `spawn-agent` navigates and now carries `agentType` in the dispatch result, but the Agents page does not read it, so the argument is still not USED. Recorded |
+| D2b | **`spawn a research agent` was answered as a web search** (found by the routing suite) | `matchVoiceCommand` tested the search regex first and "research" matches it | FIXED: the spawn test runs first. Spawning an agent by voice could not have worked |
+| D3 | "unmute the microphone" MUTES it | reflex `voice.mute` is `t.includes('mute')` | FIX: one shared parser, word-bounded |
+| D4 | A typed mute changes the store, not the engine | Chat reflex calls `setMicMuted` only; the palette also calls `engine.setMicMuted` | FIX: Chat applies it to the engine too |
+| D5 | The autonomy stop has no command surface | `autonomyStop` exports are called only by the gate and the applier | SPECIFIED FOR MASTER, NOT BUILT (below) |
+| D6 | Tier is renderer-supplied | `capability.can(user, ...)` reads the payload | KNOWN, on the "FOR MASTER" list in `upgradeApplier`; untouched |
+| D7 | `browserEngine.cjs`: 14 handlers, zero capability checks | grep for `capability/can/deny/requireCap` returns nothing; includes `execute-js` and `download` | FIX on the EXISTING `browser.*` capabilities |
+| D8 | `voice:transcribe` sends raw audio to a third party with no capability check or egress boundary | `electron/ipc/voiceEngine.cjs` | REPORTED; conflicts with the Ollama-only scope (Section 130), master to decide |
+| D9 | Reflex skills perform no capability check | e.g. `system:get-metrics` skips `os.metrics-read` | REPORTED |
+| D10 | `matchVoiceToRoute` scans all `PAGES`, so "Opening X" is said for a page the tier cannot see | `registry.js` | REPORTED |
+| D11 | Over-matching reflex substrings (`ram`, `help`) | `cognition.js` | FIX with the D3 parser |
+| D12 | `instanceManager.express` skips the tier check when `user` is omitted | `if (user && gene.cap)` | REPORTED; deny-by-default would break `selfCare` auto-failover, which calls it without a user |
+
+**D5 - what master needs to decide.** Section 132 deliberately built the stop first and left the resume
+path (`lift()`) requiring `system.suspend-autonomy`, a capability that is NOT in
+`shared/capabilities.json`, a file protected by `verifyLoyaltyTripwire`. So there is no way to say
+"stop" and have it reach the kill-switch. The exact entry is `"system.suspend-autonomy": 0` (tier 0,
+master only). Adding it, then an `autonomy:stop` / `autonomy:lift` pair of IPC channels and one voice
+phrase ("stop everything"), needs master's recorded approval for the protected file. Engaging the stop is
+fail-safe; lifting it is the privileged half. Not added.
+
+**Design for D1, D2, D3, D4, D11.** One pure module, `src/services/commandIntents.js`, with no imports
+so it runs under Node:
+- `parseMuteIntent(text)` returns `{ target: 'mic'|'speech', mute: true|false }` or null, word-bounded.
+  The reflex skill and the voice action table both read it, so the two surfaces cannot diverge again.
+- `isDirectCommand(text)` is how the voice path decides whether an utterance is a UI command or
+  conversation. Anything else is conversation.
+- `uiStore.submitUtterance(text)` / `pendingUtterance` carry a spoken line to Chat, which consumes it
+  once through `sendText`, the same function the Enter key calls. There is no second send path.
+- Spoken text is not a privileged channel. It enters Chat exactly as typed text, so reflex matching,
+  `classifyTurn`, `models.use`, the egress boundary and the claim gate apply identically.
+
+**Design for D7, as built.** Each registration names its capability at the call site:
+`ipcMain.handle('browser:x', gate('browser.read', handler))`. `gate` takes `user` as the LAST argument,
+checks it with `capability.deny`, and strips it before the handler runs, so handler signatures are
+unchanged. Mapping: `browser.search` for search; `browser.read` for runtime/launch/close/open-page/
+navigate/get-content/screenshot/list-pages/close-page/get-downloads/fetch-url; `browser.download` for
+download; `browser.forms` for `execute-js` (running script in a page is the most dangerous verb; tier 1).
+Every preload member takes `user` last. The one renderer caller (`Models.jsx` drift check) passes
+`currentUser`. `models:search-web` already checks `browser.search` and calls `searchWeb` directly, so it
+is unaffected.
+
+**A first form of this was wrong, and the project's own audit caught it.** The gate was first a wrapper
+`handle(channel, handler)` with a table. `verifyReachability` finds registered channels by the literal
+`ipcMain.handle('x'` spelling, so the wrapper made 14 live channels look unhandled ("no preload channel is
+missing its handler - got 14, want 0"), and `verifyInvariants` and `verifyUpgradeApplier` scan for the same
+spelling. Teaching four scanners a second spelling would have been the larger change and the one more
+likely to be forgotten; the call-site `gate(cap, handler)` keeps the spelling every tool already reads and
+puts the capability beside the channel name, where a missing one is visible in review.
+`verifyOllamaCloud.cjs` pinned the old registration text for `browser:search`; its pin is on the
+DELEGATION to `searchWeb` and now accepts the gated form.
+
+**Honest limit of D7 and of every gate in this project:** the tier is supplied by the renderer (D6), so
+these checks stop a lower-tier account using the UI and a mis-wired caller; they do not stop code already
+running inside the renderer. That is the existing, recorded posture, not a regression.
+
+### 149.4 Verified, and not
+
+**Executed this session:** `test_strategy_eval` 114, `test_strategy_spec` 229, `test_strategy_rank` 59,
+`test_strategy_library` 149, `test_costs` 82, `test_instrument` 65, `test_macro` 84, `test_charge_watch`
+99 (Python 3.14, stdlib only); `scripts/verifyCommandRouting.mjs` 123; `verifyGlossary` 48;
+`verifyPositionMath` 115; `npm run verify` exit 0; `npm run audit` (invariants 164, loyalty tripwire 12,
+renderer audit 150 bridge calls); `node --check` on `browserEngine.cjs` and `preload.cjs`; mutations of the
+ranking module, the intent parser, the dispatcher, the voice table, the browser gate, the preload and the
+caller, each turning the relevant suite red.
+
+**Not verified:** nothing in the renderer has been seen on a screen. No spoken line was heard through a
+microphone, and this machine has no speech-to-text backend, so the voice path is exercised by tests of the
+real `matchVoiceCommand` and the pure dispatcher, not by master's voice. The mailbox in `Chat.jsx` and the
+palette's use of `resolveVoiceDispatch` are asserted at source level, not through a DOM render. No backtest
+has ever run on real bars: the false-positive tables above are simulations of the verdict function, not
+measurements of any real strategy. The Python engine (numpy, pandas) still cannot run on this machine.
+
+### 149.5 Next
+
+Recorded in ledger rows 175 and 176. In short:
+
+- **For master (decisions, not work):** D5 the autonomy stop's command surface and the protected
+  `system.suspend-autonomy` entry; D8 cloud speech-to-text against the Ollama-only scope.
+- **Strategy:** the `/strategy/rank` route on a machine where the engine runs; multi-fold out-of-sample via
+  `purged_walk_forward`; the in-sample / out-of-sample gap and `costBasis` shown in the UI; saved specs;
+  regime detection.
+- **Communication:** a capability layer for reflex skills (D9); `visiblePages(user)` in
+  `matchVoiceToRoute` (D10); an abort for an in-flight `models:converse`; the Agents page reading
+  `agentType`.
+
+
+---
+
+## SECTION 150 - Identity, the stop, the voice, and the reflex layer
+
+**STATUS: BUILT AND VERIFIED, except the one step only master can take (150.2).** Ledger rows 177-180. Decisions were recorded before implementation; where the build changed one, the text below says so. Master's rulings on Section
+149's open items, verbatim: *"1. It is under loyality, bsed on decision of master.--A. 2. combination of
+A and B. 3. D6--yes, D12--do it, D9--fix it, D10--fix it."*
+
+### 150.1 Identity (D6) and the failover (D12)
+
+**What was true.** Every gated IPC channel took `user` from the renderer and believed it. The main
+process already holds the real session table (`authCore.sessions`, token to user, fingerprint-bound), but
+only the `auth:*` channels ever consulted it. Any renderer code could claim tier 0.
+
+**Decision: bind the window, not the payload.** A new module `electron/lib/principalBinding.cjs`:
+
+- remembers, per `webContents`, the token and fingerprint that window authenticated with. The binding is
+  written by MAIN, inside `auth:login-step2` and `auth:me` after `authCore` has accepted them, and removed
+  by `auth:logout` and by the window's `destroyed` event. The renderer cannot write it.
+- resolves a window to a principal by asking `authCore.validateSession` on EVERY call, so a revoked
+  session, a deactivated account or a changed tier takes effect on the next request, not at next login.
+  The principal is built fresh from the account record (`publicUser`), never from what the renderer holds.
+- is installed as a wrapper on `ipcMain.handle` / `handleOnce` BEFORE any `register()` runs. The existing
+  `ipcRec` recorder is not used: it states that it "is not a policy layer and must not become one", and
+  many modules register on `ipcMain` directly, so only `ipcMain` itself is a complete chokepoint.
+- on each call replaces a renderer-supplied user with that principal wherever one appears: a top-level or
+  nested `user` key (to depth 3), and a positional argument that looks like a user (numeric `tier` plus an
+  id, userId or username, and no `token`). It does NOT inject a user where none was sent, so payload
+  shapes that enumerate their keys (the egress body, for one) are untouched, and a channel that was
+  already denying keeps denying. `auth:*` channels are skipped: they carry tokens and `tier` as data and
+  already validate against the session table.
+- hands new and changed channels the principal directly (`getPrincipal(event)`), so they do not need the
+  renderer to send a user at all. `autonomy:*` and `voice:transcribe` use this.
+
+**Restore.** `App.jsx` restored a session from `sessionStorage` without asking main whether it was real.
+After a reload main still holds the binding (same `webContents`), but a restored session must not be taken
+on faith: it now calls `auth:me` and drops the session if main does not recognise it.
+
+**Pop-outs.** A pop-out is a new `webContents`. `window:popout` mints its grant from the OPENER's
+principal (not `params.user`), the grant carries the opener's binding, and `popout:redeem` binds the new
+window to it. A grant minted for an opener with no binding is refused.
+
+**What this does and does not close.** It closes "any renderer code can claim tier 0". It does not stop
+code that runs inside a window that is legitimately signed in from using that window's own authority; that
+is what a signed-in window is. It also does not touch the `auth:*` paths, which were already correct.
+
+**D12 - the failover bypass, found while reading, worse than first reported.** `express(id, gene, user)`
+checked the tier only `if (user && gene.cap)`. `selfCare.checkInstanceFailover` passes `null`
+deliberately, and its comment says "express() already refuses to exceed the expressing instance owner's
+tier". It does not: with `null` there is no check at all, so the 120-second health sweep could express any
+of the 31 genes on any sibling, including the nine tier-0 genes (`g.loyalty`, `g.ethics`, `g.crypto`,
+`g.vault`, `g.ipc-seal`, `g.metacognition`, `g.experience`, `g.self-modify`, `g.evolution`). The IPC
+channel `instance:express` had the same hole for any caller who omitted `user`.
+
+**Three further facts found while building it.** (1) The matrix already declares `instances.express: 0`,
+`instances.spawn: 1`, `instances.terminate: 1` and `instances.view: 2`, and NOTHING enforced any of them:
+none of the thirteen `instance:*` channels checks a capability. (2) `Genome.jsx` calls `express(id, g)` with
+no user, so the Express button worked only BECAUSE of the bypass. (3) `express` expands a gene's `requires`
+after checking only the NAMED gene, and three genes reach a more privileged one that way: `g.store` and
+`g.vector` (tier 4) pull in `g.crypto` (tier 0), and `g.self-model` (tier 3) pulls in `g.metacognition`
+(tier 0). Checking the named gene was never sufficient; the check must cover everything about to be added.
+
+**Decision.**
+- `express` denies when no actor is given, and checks EVERY gene it is about to add (the named gene and its
+  `requires` closure), not only the named one.
+- A user actor must hold the gene's capability for each of them (unchanged rule, now applied to the
+  closure) AND `instances.express` (master only), enforced in the handler from the main-process principal.
+  The Express button is therefore master's, as the matrix always said.
+- Internal callers pass a named, frozen `SYSTEM_ACTOR` (compared by identity, so nothing arriving over IPC
+  can be it). It may add a gene only if NONE of the genes in the closure is tier 0, so the loyalty class is
+  never auto-expressed, and none is more privileged than the target instance's recorded `ownerTier`, which
+  `spawn` now stores from the spawning principal. An instance with no recorded owner tier is bounded only
+  by "never tier 0": weakening failover for system-spawned instances to the weakest tier would have
+  removed a capability (I11) to guard against a risk the tier-0 rule already closes.
+- The remaining `instance:*` channels are gated on the declared capabilities from the principal:
+  spawn `instances.spawn`, terminate/suspend/resume `instances.terminate`, and the reads `instances.view`.
+  `instance:ensure-prime` and `instance:restore` stay open to a signed-in session, because the app calls
+  them at start-up for every tier.
+- `selfCare`'s comment ("express() already refuses to exceed the expressing instance owner's tier") was
+  false when written and is true after this change.
+
+### 150.2 The autonomy stop (D5, option A)
+
+Master approved adding `"system.suspend-autonomy": 0` to `shared/capabilities.json`, a protected file.
+
+**The ceremony is not mine to perform.** `verifyLoyaltyTripwire.cjs --approve` refuses unless the approver
+supplies the exact digest being approved in `RAMA_MASTER_APPROVAL`, so that approving a loyalty-core change
+requires having read what it is. Running it for master would defeat the property it exists for. The edit
+is made on his decision; recording it is his command. Until he runs it the tripwire is RED, and that is the
+correct state, not a defect. The exact command and digest are handed to him at the end of the work.
+
+**Built:**
+
+- `autonomy:stop` engages the halt. Open to any session, no capability: a stop that can be refused is
+  not a stop (Section 132). It records WHO engaged it from the main-process principal.
+- `autonomy:resume` resumes. It uses the main-process principal and `autonomyStop.resume`, which requires
+  `system.suspend-autonomy` (master only) and a written note. Never reachable by voice or chat.
+  **Changed while building:** this was `autonomy:lift` over `lift()`. But `lift()` writes `allowed: true`,
+  an explicit grant of NEW autonomous action, so on a default install (autonomy never allowed) "resume"
+  after a stop would have expanded what Rāma may do beyond the state before the stop. `resume()` shares
+  `lift()`'s gate (`authoriseLift`) but restores the allow-file ONLY from `priorAllow`, with its original
+  author and note, and writes none if there was none. `lift()` keeps zero callers.
+- `engage()` is idempotent. **Found while building:** a second engage found no allow-file and overwrote
+  the stopped-record with `priorAllow: null`, destroying the only record of who allowed autonomy. With a
+  stop any window can now reach, pressing it twice would have erased that.
+- `autonomy:status` returns `statusText()` and the booleans.
+- Each of the four pre-existing dispatchers returns early from its SCHEDULED tick while `isHalted()`
+  (if the stop module cannot be read the answer is "not halted", so shipped work is never silently
+  disabled by a stop that failed to load):
+  `refreshScheduler.runNow`, the metacognition audit, `selfCare.runHealthSweep` (which includes
+  `checkInstanceFailover`) and the two `marketIntel` ticks. On-demand IPC handlers are untouched, so
+  master's own StockMind requests still work. Because the timers keep firing and merely do nothing, lifting
+  needs no re-arm, which was the stated reason Section 132 deferred this.
+- "stop everything" is a voice and chat command and engages the halt; there is NO spoken lift.
+- A Settings control shows the status and offers Stop and, to master, Resume with a note.
+
+**What changed in the comment census.** `verifyCommentCensus` freezes a per-file comment ceiling on twelve
+files, two of them these. The first build grew them past it (+25, +11). Rather than raise a ceiling, the
+comments were condensed, which also removed three paragraphs that had become FALSE the moment the capability
+was approved ("cannot succeed for anyone", "nothing calls that predicate"). The opposing floor then caught
+a condensation that dropped a "measured" evidence word; the finding was kept, not the floor lowered.
+
+`PRE_EXISTING[].haltedByEngage` flips to true and the Section 132 suite is updated to assert the new
+behaviour, including that a halted tick performs no work.
+
+### 150.3 Voice egress (D8, A and B combined)
+
+**Decision.** Audio never leaves this machine unless ALL hold: an `OPENAI_API_KEY` in the vault, master's
+explicit opt-in, and a session holding `chat.send`. The opt-in lives in the encrypted `config` domain
+(inside the I14 re-key), defaults OFF, and only master can change it. The capability report no longer
+counts cloud as an available level without the opt-in, and the transcription result says
+`leftMachine: true` with the provider whenever the cloud path ran, which the UI surfaces. Local Whisper
+remains first and the stated goal; nothing is installed automatically, because of the disk constraint.
+
+This is a tightening: previously a key alone enabled cloud transcription silently. Audio cannot be
+classified before transcription, so the gate is on the whole path and not on content.
+
+### 150.4 The reflex layer (D9) and page visibility (D10)
+
+`system:get-metrics` also feeds the Titlebar and Home for every tier, so a capability check on that IPC
+channel would blank the titlebar for lower tiers. The check therefore belongs where the leak is: in what a
+reflex skill will say. Each skill declares `cap` (system status `os.metrics-read`, self description
+`self.describe`, cognition `models.use`; purely local UI skills declare none). A denied skill answers with
+what it needs instead of running. `matchVoiceToRoute(text, user)` resolves against `visiblePages(user)`
+when a user is supplied and against all pages otherwise, so existing callers are unchanged; a page that
+exists but is hidden from the tier is reported as unavailable, not "opened". The voice path checks the
+route against the current user's visible pages before navigating.
+
+### 150.5 Found while building (not in the original audit)
+
+- **The renderer's `can()` coerced.** `user.tier <= required` makes `{tier:'0'}`, `{tier:null}` and
+  `{tier:[]}` compare as 0, so each was MASTER in the renderer while `capability.cjs` denied them. The same
+  coercion put a malformed user on every page in `visiblePages`. Both now go through `tierOf()` (integer,
+  MASTER to GUEST). The renderer never allows what main denies, asserted over 16 malformed shapes and every
+  capability. This is the I8 drift (one matrix, three runtimes) showing up in the code that reads it.
+- **`spawn a research agent` by voice had never worked** (Section 149), and the same suite then found that
+  `instances.*` capabilities were declared and enforced by nothing (150.1).
+- **`gate(cap, handler)` at the call site, not a wrapper**, for the browser channels (Section 149): the
+  reachability audit caught that a wrapper hid 14 live channels from every tool that finds channels by the
+  literal `ipcMain.handle('x'` spelling.
+- **The project's own guards caught five of my mistakes before master did:** the comment ceiling, the
+  comment floor, the reachability ratchet (both directions: a new unreached member, then three members that
+  were reached all along), the secret-prefix scan (a dummy `sk-` key in a test) and the invariants suite.
+
+### 150.6 Verified, and not
+
+**Executed this session:** `verifyPrincipalBinding` 57; `verifyInstanceAuthority` 63; `verifyAutonomyControl`
+106; `verifyAutonomyStop` 201; `verifyCommandRouting` 222; `verifyOllamaCloud` 265 (its browser:search pin
+updated); `verifyCommentCensus` 118; `verifyReachability` (debt register shrank 301 -> 298); `verifyPopoutGrant`
+39 (unchanged); `smokePrincipalBinding` 10 under real Electron. `npm run verify`: 46 suites reporting zero
+failures, with the loyalty tripwire the only red, by design. `vite build` green; `node --check` on 19 touched
+`.cjs`. 46 mutations across these suites, restoring each defect in a scratch copy: 44 turned a suite red at once, and the two that survived (a look-alike system actor accepted; an opt-in that is never saved) exposed weak tests that were strengthened and re-run until they died.
+
+**Not verified:** the application was not launched. A real sign-in through the UI, a reload with a restored
+session (the new `auth:me` restore in `App.jsx`), a real pop-out, the Settings panels on screen, a spoken
+"stop everything" through a microphone, a real OpenAI call and a real Whisper binary were not exercised. The
+four dispatchers were measured by driving their real code (the scheduler and `marketIntel` ticks) or, for the
+metacognition audit and `selfCare`'s sweep, by source assertions, which are labelled as such in the suite.
+
+### 150.7 What master has to do
+
+1. **Record the approval of `system.suspend-autonomy`.** Review the diff (one added line in
+   `shared/capabilities.json`), then run, in this order:
+   `$env:RAMA_MASTER_APPROVAL = '<the digest the tripwire prints>'` and
+   `node scripts/verifyLoyaltyTripwire.cjs --approve --note "<why>"`, and commit
+   `shared/loyalty-tripwire.json` in the same commit as the change. Until then
+   `verifyLoyaltyTripwire` and so `npm run verify` are red, which is the correct state.
+2. Decide whether to open the whole tranche's commit now (Section 28: `dev` and `source`).
+3. Look at it running: sign in, reload, open a pop-out, press Stop in Settings, say "stop everything".
+
+
+---
+
+## SECTION 151 - The strategy book
+
+**STATUS: DECISIONS RECORDED BEFORE IMPLEMENTATION.** Ledger row 181. Master's words: *"what about evolving
+strategies tab - reduce the work on master. suggestions of well calculated strategies for various items in
+the stock market based on selection of params and that can be stored, updated and utilised."*
+
+### 151.1 What exists, and what is missing
+
+Built and tested: the block catalogue, `simulate`, the library of nine published templates, the judge
+(`strategy_eval`: costs, deflated Sharpe, purged walk-forward folds), the ranking rule (`strategy_rank`, Section
+149). Missing: anything that RUNS them for master. Today he builds one rule by hand, backtests it, and the result
+is gone on navigation. Nothing is stored, nothing is refreshed, nothing says what a strategy reads right now, and
+`purged_walk_forward` has had no caller since Section 95.
+
+### 151.2 The bug found first
+
+`/strategy/backtest` passes `search_and_judge` the callback `lambda v, a, b: simulate(v, bars, a, b)`. The judge
+subtracts costs from each element, and `simulate` returns dicts, so every call raised `TypeError: unsupported
+operand type(s) for -: 'dict' and 'float'` (reproduced on synthetic bars). The route catches it and returns
+`{ok: false}`. **Fix:** `strategy_spec.returns_runner(bars)` returns the gross trade returns, the route uses it, and a
+behavioural test runs `search_and_judge` through it. This is the second time in this project a capability was
+present, wired, and unreachable behind a mismatch no test crossed (Section 106 was the first).
+
+### 151.3 The pipeline (`strategy_factory.py`, stdlib only)
+
+1. **Candidates.** Each backtestable library template, optionally filtered by side and horizon, completed with its
+   OWN published sweep (1-3 variants). `explore: "wider"` adds a declared exit grid (stop and target at 0.67x, 1x
+   and 1.5x of the template's): up to 9x the variants, and every one is counted. Options are refused with the
+   reason (no premium history); futures without a lot size carry the existing warning.
+2. **Costs.** The same real-charge basis `/strategy/backtest` computes (`costs.effective_round_trip_pct` at the
+   quantity the risk budget sizes), moved into a function so evolve and refresh cannot disagree about cost.
+3. **Walk-forward.** Each variant is simulated ONCE over the whole series (continuous trading, entry on the next
+   open) and its trades are sliced by ENTRY INDEX. For each fold from `purged_walk_forward` (label horizon = the
+   template's maximum hold, a 1% embargo) the variant is chosen by net per-trade Sharpe on trades that were
+   OPENED AND CLOSED before the cut, and scored on trades opened in the fold. Folds whose training window is under
+   30% of the series or has fewer than 10 eligible trades are skipped and reported. The pooled fold trades are the
+   `outOfSample` verdict. It measures the PROCEDURE ("tune on the past, trade the next stretch"), which is what the
+   stored strategy will actually do.
+4. **The stored parameters** are the procedure applied to ALL data. Their record over that same data is the
+   `inSample` verdict, so the gap between the two hit rates is reported, not averaged away (135.4).
+5. **Trials.** `evaluate(n_trials = variants this template tried)`. Ranking K candidates on the same window is a
+   second search, handled by `strategy_rank`'s per-row selection-noise ceiling. The total variants across the run
+   are reported as `familyTrials`. The deflation policy is unchanged from Section 149.2: a unit fix, not a policy
+   change.
+6. **Stability.** Per-fold expectancy and trade counts, and "positive in X of K folds", are carried on every
+   candidate. A strategy whose pooled result comes from one fold is visibly that.
+
+### 151.4 Storing, updating, utilising (`strategy_book.py`)
+
+- **File:** `<store_root>/_strategies/book.json`, written atomically (`.tmp`, `os.replace`, retried for Windows),
+  schema-versioned, `STOCKMIND_DATA_DIR` honoured. The root is passed in, so the module imports no pandas.
+- **Record:** the CLEAN spec with its sweep cleared (one variant, frozen); `claim` (the source's words) and
+  `baseline` (what was measured when stored) as SEPARATE fields, never merged (135.5); `current` (the updated
+  column) and `measuredOn`; a bounded history. The id is the hash of the frozen spec, so re-evolving the same
+  strategy updates it and a changed parameter makes a NEW record rather than silently rewriting an old one.
+- **Update = a forward test.** Refresh simulates the frozen spec over the bars AFTER the one it was stored on.
+  Those trades are genuinely out of sample (the parameters were fixed before they happened), so they are judged
+  with `n_trials = 1`, which is the one case where that assertion is true. States: `watch` (fewer than 10 forward
+  trades, OR it pays so far but the forward result is not distinguishable from luck), `holding` (10+ forward
+  trades, a positive expectancy after costs AND a forward probabilistic Sharpe of at least 0.90), `decaying`
+  (10+ forward trades and a non-positive expectancy), `retired` (master's act). **Rāma never retires or deletes
+  on its own.** A `decaying` record proposes it; the UI offers it.
+  *Decision made while testing:* the first rule was "10+ trades and expectancy > 0 is holding". Measured on pure
+  noise (the edge removed), 3 of 7 seeds came out `holding` on a sign alone (e.g. +0.07% over 29 trades), i.e. a
+  coin flip told master a dead strategy was fine. A sign is not evidence, so `holding` now also needs the forward
+  probabilistic Sharpe (`deflated` at `n_trials=1`) ≥ 0.90 (`HOLD_CONFIDENCE`). The asymmetry is deliberate: a
+  false `holding` keeps a dead strategy in use; a false `decaying` only PROPOSES a retirement master can ignore.
+- **Utilise = the current state.** `signal_now` reports one of `in-trade` (entry, stop, target, days held,
+  unrealised %), `conditions-met` (the entry conditions hold on the last close; a fill would be the NEXT open),
+  `flat`, with the size the risk budget gives and lots for futures. It reuses `entry_signals` and `simulate`
+  (new `include_open` flag, default off, so every existing caller is byte-identical) so it cannot disagree with
+  the backtest. It says how old the last bar is. **It places no order and the words "buy" and "sell" do not
+  appear**: no path to order placement, ever (Section 95).
+
+- **Who stores (decided at the service step).** Evolving stores NOTHING. The run is held in a bounded in-memory
+  cache (8 runs, process lifetime) under a `runId`, and master's "Keep" names rows of that run. Keeping reads the
+  row FROM THE CACHE, never from the request, so a request cannot assert that a candidate is `demonstrated`; the
+  only things a client chooses are which cached rows to keep. A restarted backend loses the cache and says
+  "that run is gone, evolve again" instead of guessing. One button keeps every `demonstrated` row; `unproven`
+  rows are kept one at a time, by name, so keeping luck is a deliberate act and is labelled `unproven` in the book.
+- **One cost definition.** `strategy_service.cost_for(spec, bars)` is the extracted real-charge block from
+  `/strategy/backtest`; the route, evolve and refresh all call it, so a strategy cannot be judged under one cost
+  when stored and another when refreshed. A refresh uses the cost basis of TODAY's last price, which is reported.
+- **Routes** (thin adapters over `strategy_service`, bar loader injected so it is tested without pandas):
+  `POST /strategy/evolve`, `POST /strategy/book/keep`, `GET /strategy/book`, `POST /strategy/book/refresh`,
+  `POST /strategy/book/retire`, `/restore`, `/remove`, `GET /strategy/book/signals`.
+
+### 151.5 What is deliberately NOT built, and why
+
+- **No scheduled refresh.** A timer is NEW autonomous activity, which Sections 132 and 150 default to stopped. The
+  refresh runs when master opens the tab (if the book is more than a day stale) and on a button, so every run is
+  master-initiated. If he later wants it scheduled, it is an allowed autonomy class, not a quiet addition.
+- **No regime detection.** There is no stdlib regime classifier and `strategy_scorer` takes `regime` as input.
+  Inventing one here would be a number with no measurement behind it.
+- **No cross-instrument pooling of a template** (which would give far more out-of-sample trades and tests the
+  template, not the instrument). Worth building; a different claim from this one, so a different row.
+- **No claim of probability.** A backtested hit rate describes the past. Every surface says so, and says
+  NOT DEMONSTRATED rather than "failed".
+
+### 151.6 Build order
+
+1. `strategy_spec.returns_runner` + `simulate(include_open)`; fix the route; tests.
+2. `strategy_factory.py`; tests on synthetic series with a PLANTED edge and with pure noise.
+3. `strategy_book.py` (store, refresh, signal); tests.
+4. `strategy_service.py` (the glue `main.py` calls, with the bar loader injected); routes in `main.py`.
+5. `marketIntel.cjs` channels (reads on `stockmind.view`, writes on `stockmind.request`), preload.
+6. The EVOLVE tab, its pure view-model, glossary terms; `verifyEvolve.mjs`.
+7. Mutation checks; the full chain; results recorded here.
+
+### 151.7 Acceptance, set before building
+
+- On pure noise (zero edge) the factory must store NOTHING from at least 90% of runs, and the pooled
+  out-of-sample hit rate of whatever it does rank must not exceed its own selection-noise ceiling by chance
+  alone more than ~5% of the time. This is the test that matters; a strategy generator that finds winners in
+  noise is the machine for manufacturing false confidence that Section 95 was written to prevent.
+- On a series with a planted, costs-surviving edge in one template, that template must be ranked and stored.
+- Refresh on a frozen strategy over bars with the planted edge removed must reach `decaying`.
+- A forward test must never see a bar at or before the one the strategy was stored on.
+
+### 151.8 Built, measured, and not verified
+
+**Built.** Python: `strategy_factory.py` (candidates, walk-forward, verdict class), `strategy_book.py` (store, forward test,
+classify, rule state), `strategy_service.py` (glue, injected bar loader, the one cost definition), eight routes in
+`main.py` that only adapt. Bridge: eight `market:` channels (reads `stockmind.view`: book list, signals; writes
+`stockmind.request`: evolve, keep, refresh, retire, restore, remove), forwarding only the declared fields, with long timeouts for
+the minutes-long calls. Screen: STRATEGISE → EVOLVE (`EvolvePanel.jsx`), every sentence made by `evolveModel.js`.
+The only automatic act is refreshing a stale book when the tab opens, for a user who may request, decided in one function.
+
+**Measured (synthetic series with known truth, `tests/synthetic_bars.py`).**
+- Pure noise: 0 demonstrated in every run (1 of 24 at 8,000 bars, about 4%, inside the 5% the acceptance bar allows). At 5,000 bars
+  31 of 216 template runs were profitable after costs by luck and ranked; none was demonstrated. That is why every ranked row carries
+  `verdictClass` and the screen says NOT DEMONSTRATED on it: profit gates the list (Section 135), and a list of profitable rows is
+  read as a recommendation unless it says otherwise.
+- Planted trend edge: found, ranked and demonstrated from about 5,000 daily bars (47 to 106 trades). Below that the templates are
+  too low-frequency to judge and the row reports `barsNeeded` instead of a number.
+- An edge that stops: the frozen strategy reaches `decaying` and the book PROPOSES retirement without retiring. Across 12 no-edge
+  worlds at most 2 were called `holding` (the rule that needed the confidence bar to exist).
+- The reversion series was not recovered: the published Bollinger template makes about one trade per 5,000 bars. That is a property
+  of the template and was not tuned away.
+- Floors were not lowered to get answers: MIN_TRADES stays 30.
+
+**Faults the work found in its own earlier steps.** `/strategy/backtest` had raised a TypeError on every call (151.2). A positive
+sign was being read as `holding`. Reading an empty book created its directory on disk (a read must not write). The factory test
+assumed a noise seed would lose money; seed 9 made +0.07% by luck.
+
+**Not verified, plainly.**
+- No route has run. `main.py` needs pandas and FastAPI, neither of which is installed here. `test_strategy_routes_static` checks every
+  `strategy_service` call against the real signature and every `req.<field>` against its model, and was shown to catch a renamed
+  keyword; it does not prove the routes respond.
+- The engine has not run on a real stored series, so the 5,000-bar guidance comes from synthetic data. Real prices have regimes,
+  gaps and volume that the generator only approximates.
+- The screen has not been seen. `vite build` passes and the model and source are tested, but layout, density and wording on a real
+  display are unchecked.
+- The Python backend has no authentication (as before: it listens on 127.0.0.1 and the gate is in the bridge), so any local process
+  could call the book's routes, including remove. The new routes do not change that exposure; they add state it can reach.
+- The loyalty tripwire is still red by design until master approves the one-line `capabilities.json` change from Section 150.
+
+
+## Section 152 - Several Zerodha API accounts, each with its own static IP (SuperAdmin only)
+
+*Master:* "I'm taking a new account for the Zerodha paid API subscription. Give the UI the ability to have multiple APIs and the related whitelisting IPs, which should be provided (display this data only for SuperAdmin, and each distributable created from the UI should have its own IP - understand the reason)."
+
+### 152.1 The reason, from Zerodha's own page (checked 2026-10-17)
+- From 1 April 2026 an API-based **order** needs a static IP registered on the Kite Connect developer account (NSE/SEBI retail-algo rules). The **WebSocket market data stream, orderbook, positions and the other read APIs work from any IP.**
+- One primary IP is required, a secondary is optional, **two at most per app**. Exchange rules allow **one change per calendar week**, so an IP typed wrongly can lock the account for seven days.
+- Saving the IP is a declaration that it will be used **only by the account holder and immediate family**. One IP may be shared across family accounts under one developer account; it may not be shared with unrelated people.
+- Therefore **each distributable has its own IP**: a distributable runs on someone else's machine and network. Putting master's IP on it would break the declaration, and the egress IP of an installed copy is whatever that network gives it, not something the installer can carry.
+- **Consequence stated plainly:** Rāma places no orders (Section 95). Every connector is data-only and a suite fails if one declares an order path. So the whitelist is **bookkeeping that matters only if order APIs are ever enabled elsewhere**; data calls do not need it. It is recorded here because master asked and because a registry that is wrong later is expensive (one change a week), not because Rāma needs it today.
+
+### 152.2 Decisions
+1. **A new store, not the vault.** The vault is tier 0 (master) and unlocks with a master password; a distributed copy's owner is SuperAdmin (tier 1), who cannot use it at all (`authCore.provision`). Accounts live in a new encrypted dataStore domain `brokerAccounts`, written only by main.
+2. **Secrets never reach the renderer.** The API secret is accepted once, stored encrypted, and returned only as `hasSecret: true` and a last-4 hint. There is **no reveal channel**. The API key (declared `secret:false` in `brokerConnectors`) is shown masked except its first four characters.
+3. **New capabilities `brokers.accounts.view` and `brokers.accounts.write`, both tier 1 (SuperAdmin).** The renderer does not fetch the data unless `can()` passes, and main withholds it regardless (the renderer check is UX only). Tier 1 means SuperAdmin **and Master**, which is how every other tier-1 capability works. This edits `shared/capabilities.json`, a loyalty-tripwire file, so the digest master approves changes once more; Rāma does not run `--approve`.
+4. **Data model.** `account {id, brokerId:'kite', label, clientId, apiKey, secret(encrypted), distributableId, primaryIp, secondaryIp, ipChangedAt, sharedWithFamily, notes, createdAt, updatedAt}` and `distributable {id, label, createdAt, notes}`. The installation itself is always one distributable (id = its `authCore` instance id), so an installed copy's registry is its own.
+5. **IP rules, in a pure module:** syntactically valid IPv4/IPv6; **public only** (private, loopback, link-local, CGNAT and documentation ranges are refused, since Zerodha cannot reach them); at most two per account; primary required once a secondary exists; **one change a week** is enforced locally with the date, and a violation is refused with the day it clears; **an IP already used by a different distributable is refused unless the account carries an explicit `sharedWithFamily` declaration**, which is recorded.
+6. **Detected vs registered.** A button asks an IP-echo endpoint (through `lib/http.cjs`, I9) for this machine's egress IP and shows it beside the registered ones, flagging a mismatch. It is explicit, never on a timer, and it **tells a third party this machine's address**, which the button says. The endpoint is configurable, defaulting to `https://api.ipify.org`.
+7. **Not built, and said:** the installer pipeline does not embed or enforce an IP (an installer cannot know its future network); there is no Kite login or token exchange (data only, as before); nothing is written to Zerodha. The registry records what master intends and what is detected.
+
+### 152.4 Amendments made while building
+
+- **Weekly lock is a confirmation, not a wall.** The registry has to be able to record what is TRUE at Zerodha. A change inside seven days is refused with the date it clears and a `needsAcknowledgement` flag; the form then offers "I have already changed it at Zerodha, record it". The window is a rolling seven days, stricter than a calendar week, so it can only err toward caution.
+- **API key and secret are both optional on update**; blank keeps the stored value, so editing a label never needs the secret re-typed and the secret box is always empty.
+- **A security hole found and closed.** `store:get/set/push/update/remove/find` took any domain name with no capability check, so a signed-in guest (or anything running in the window) could read `users` and `config`, overwrite `users.accounts`, or read this registry's secrets. Only `Knowledge.jsx` uses them, and only for `knowledge`. They now refuse every domain not in `RENDERER_DOMAINS = ['knowledge']`. Main-process modules still reach their own domains directly.
+- `shared/capabilities.json` gained `brokers.accounts.view` and `brokers.accounts.write` (tier 1). `verifyAutonomyControl` now names the three sanctioned additions instead of "exactly one". The tripwire digest changed again; master approves the digest it prints.
+- **Not built:** nothing embeds an IP in the installer or enforces one; there is no Kite login or token exchange; the registry does not call Zerodha. `secretFor()` exists for a future main-process caller and is reachable from no channel (a test asserts it).
+
+## Section 153 - Candle display is view-only by default; saving is an explicit, named act
+
+*Master:* "for normal display why the fetch and store just on change the display when any parameter is modified - and if user wants to specifically save for future ref then store it in DB and fetch with name convention."
+
+### 153.1 What the code actually does (read, not assumed)
+Changing symbol, exchange, interval or dates calls `loadBars(false)`: **a disk read only (`sync=false`), no network, no write.** Writes come from three places: the "Fetch from provider" button and the chart's empty-state fetch (`sync=true`), and `predict`/`backtest`, which sync the daily series implicitly through `data_fetcher.get_ohlcv`. Strategy, training, ledger marks and outcomes all read the keyed store, so it is a working store, not a display cache. Separately found: no request-sequence guard (a slow earlier reply can overwrite a later one), no lock around `store.merge` (a fixed `.tmp` name, a non-atomic `meta.json`), and a full CSV re-parse on every read.
+
+### 153.2 Decisions
+1. **View-only fetch.** `GET /ohlcv?...&persist=false` fetches from the provider and returns the union with what is stored, **writing nothing**. The chart's fetch actions use it, and the chart says "NOT SAVED" while showing such a result.
+2. **Named datasets in SQLite (Python stdlib, no new dependency).** `<store_root>/_datasets/datasets.db`. A dataset is an immutable snapshot of exactly the bars on screen, with provenance. **Name convention:** `SYMBOL.EXCHANGE.INTERVAL.YYYYMMDD.label`, the label `[A-Za-z0-9_-]{1,40}`, suggested by the UI and editable. A name that exists is refused unless master chooses overwrite. Saving, listing, loading and deleting are separate acts; delete is confirmed.
+3. **The working store is unchanged and kept under a clearer name.** "Fetch from provider" becomes **"Fetch & keep for analysis"** (persist=true): strategy, training and outcomes need it, and removing it would make backtests report "no stored bars". Additive (I11).
+4. **A saved dataset is a view, not engine input.** Loading one draws it on the chart. Evolving strategies on a named snapshot is a separate row.
+5. **Fixed with it:** a request-sequence guard in `loadBars`; a per-key lock, a unique temp name and an atomic `meta.json` in `store.merge`.
+
+### 153.5 Build order
+`datasets.py` (stdlib, tested) -> `store.sync(persist=)` + routes -> bridge channels (reads `stockmind.view`, save/delete `stockmind.request`) -> chart UI -> `verifyDatasets` suites.
+
+### 153.6 Built, and where it deviates (from the build report)
+
+`list_datasets` (not `list`, which would shadow the builtin). `/dataset/save` always uses view-only semantics and builds the snapshot itself on the server rather than trusting bars posted from the window; it accepts `sync`, `limit`, `note`, `expectBars` and says if the data moved since the chart drew. `persisted` is false only when the returned bars include provider data that is not on disk. The view-only cooldown is 5 minutes (daily and coarser) or `max(5, span)` (intraday), cached in memory so a repeat click shows the same candles; failures are not remembered; `force` bypasses it. Dataset names that differ only in case are the same name. A first-ever save that fails leaves an empty database file with no tables. The NOT SAVED badge sits in the button row and chart header. After a view-only fetch, changing only the dates re-windows the fetched candles without a new provider call. **Not verified:** the UI was not clicked through; routes ran through FastAPI's TestClient, not uvicorn; the lock is in-process only; a crash mid-`meta.json` write is untested.
+
+## Section 154 - Real-world readiness audit (2026-10-18)
+
+Method: the pinned engine was installed on a throwaway Python 3.12.10 venv and run for real against a COPY of the stored data; about 14 public Yahoo requests were made; every route was hit. 26 of 27 Python modules passed on 3.12 (all 26 after the fixes below). `npm run verify`: everything passes except the two loyalty-tripwire rows.
+
+**Verdict: an installed Rāma cannot deliver a working StockMind on a clean machine today.** The engine itself is healthy: it started, and every route returned 200, including the strategy-book routes that had never run.
+
+| Sev | Finding | Fix |
+|---|---|---|
+| BLOCKER | The installer ships `ai_backend/*.py` but nothing at install time creates the Python environment. The venv is built only by `buildInstaller.cjs` on the BUILD machine; the error text sends the user to `Rama.bat`, which is not packaged. This machine has only Python 3.14, and every pin (numpy 1.26.4, pandas 2.2.3, scipy, scikit-learn, statsmodels) has no 3.14 wheel. | First-run bootstrap: find 3.10-3.12 (or fetch a standalone Python), create `<userData>/python-env`, install with progress; make the remedy text version-aware. |
+| BLOCKER | `STOCKMIND_DATA_DIR` and `STOCKMIND_MODELS_DIR` are set nowhere. Bars, ledger, outcomes, strategy book, news and trained models all land under `resources/ai_backend/data` inside the install directory (read-only under Program Files, wiped on upgrade), while the build comments say they belong in userData. | Set both in `aiProcess.cjs` spawn env to `userData/stockmind/...` for a packaged build; migrate the old location on first run. |
+| HIGH | `_fetch_yahoo` stores `close = adjclose or close` while open/high/low are raw. Measured on live RELIANCE.NS: raw close is inside [low, high] on 100% of bars, adjclose outside on 93.3%; the stored file has close below low on 7,047 of 7,524 bars. NIFTY (no dividends) is unaffected. | Store raw OHLC and keep `adjclose` in its own column, or scale O/H/L by adj/close. |
+| HIGH | That break changes strategy verdicts on the same data: as stored, 0 demonstrated and Livermore 14 trades; consistently adjusted, 1 demonstrated and 59 trades. | Same fix, then re-run. |
+| HIGH | A GitHub personal access token is embedded in the `origin` remote URL (`.git/config`). `git:get-remotes` returns remote URLs to the window; git error strings are returned raw. | Revoke and rotate; use a credential manager or SSH; strip userinfo in `getRemotes` and in error strings. |
+| HIGH | The generic `store:*` channels reached every encrypted domain. | **Fixed here (152.4).** |
+| MEDIUM | The generated strategy script was a `NameError` on Python 3.12: `simulate` is copied with `Optional[...]` annotations and the script did not import `Optional`. Hidden because the suite ran on 3.14, where annotations are lazy. | **Fixed here** (`from typing import Optional` in the generated header); `test_strategy_spec` 243 on 3.12. |
+| MEDIUM | `ensureBackendRunning` polls /health for only 8 s; a warm start measured 4.5-5.0 s and the first import after install 14 s; the loop keeps polling after the child has died. | About 30 s on first run, break on child exit, show "starting engine". |
+| MEDIUM | Out of the box there are zero bars and 0 of 8 models trained; stored series end 2026-08-28 (51 days stale) because the default load is `sync=false`. | Auto-sync when `is_stale`; a first-run seed and train step. |
+| MEDIUM | `start.cjs --diagnose` has no Python or engine check. | Add interpreter version, requirements import probe, venv path, port 8001. |
+| MEDIUM | `to_yahoo_symbol('BAJAJ-AUTO')` has no `.NS` (the "-" passthrough meant for crypto), so it 404s; `MIDCPNIFTY` maps to Midcap 50 (inferred). A dead second symbol map sits in `data_fetcher.py`. | Passthrough "-" only for crypto; delete the dead map. |
+| MEDIUM | `ta==0.11.0` has no wheel: `--only-binary=:all:` fails even on 3.12. | Do not force binary for `ta`. |
+| MEDIUM | `npm audit --omit=dev`: 6 vulnerabilities (3 high: axios, openai, vectra). | `npm audit fix`; review the vectra bump. |
+| LOW | `npm run verify` chains with `&&`, so one red suite hides every suite after it (it hid 21 behind `verifyMarketClock` for a while). | Run all suites and collect failures. |
+| LOW | Index volume is zero on 28.7% of NIFTY daily bars and on all intraday; one flat post-close bar at 10:00 UTC on the last intraday day. | Flag volume unavailable for indices; drop zero-range post-close prints. |
+| LOW | The engine is unauthenticated on fixed port 8001 (CORS limited, but any local process can write the ledger); a foreign service on 8001 would pass /health. | Per-launch token header and a random port. |
+| LOW | Chart path: mount fetches twice; each date change fetches up to 20,000 bars. | Dedupe the mount fetch; debounce dates. |
+| LOW | `requirements.txt` carries `scipy`, `statsmodels`, `numpy-financial`, `python-dotenv` that nothing imports. 3 test modules crash under cp1252 console output (pass with `PYTHONIOENCODING=utf-8`). 1,476 `rama-*` temp dirs in %TEMP%. `.venv-stockmind/` and `python-env/` were not gitignored (**fixed**). | Prune pins; `PYTHONUTF8=1` for the spawned engine; clean temp dirs in tests. |
+| LOW | `dist-electron` holds only a 2026-08-21 portable zip: no NSIS installer, and `win-unpacked/resources` has no `ai_backend`. | Rebuild the installer. |
+| INFERRED | Corporate-action seams: a top-up fetches 1 year and keeps the newer row, so older rows keep the old adjustment base. Not demonstrated. `is_stale` has no holiday calendar. | Compare overlap on top-up and refetch on a ratio change; add an NSE holiday calendar. |
+
+**Not verified:** a real installer on a clean machine (none exists); the Program Files write failure (inferred); a true cold boot; behaviour across a dividend or split; `/train` and the LSTM path; the rendered UI.

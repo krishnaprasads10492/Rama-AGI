@@ -131,8 +131,11 @@ export default function HelpPanel() {
             <H>FIVE MINUTES, START TO FINISH</H>
             <Step n={1} title="Pick an instrument and load its history">
               Open the INSTRUMENT dropdown at the top. A ● means Rāma already has bars for it and the
-              chart will draw immediately. Otherwise press <strong>⇩ Fetch from provider</strong> once
-              — it pulls as much history as free data allows and keeps it on disk.
+              chart will draw immediately. Otherwise press <strong>⇩ Fetch (view only)</strong> to look
+              at the latest candles without storing anything, or <strong>⇩ Fetch &amp; keep for
+              analysis</strong> once — it pulls as much history as free data allows and keeps it on
+              disk, which strategy and training read. <strong>💾 Save dataset…</strong> keeps exactly
+              the candles on screen under a name you can load again later.
             </Step>
             <Step n={2} title="Choose what you are asking about">
               On the chart, the interval row says how much time one bar covers and the window row says

@@ -148,8 +148,9 @@ console.log('\n  two predicates, and collapsing them back into one goes red');
   check('and the record carries the reason and who', engaged.record.reason === 'a test' && engaged.record.by === 'verifyAutonomyStop');
   check('now the pre-existing dispatchers are halted', stop.isHalted() === true);
   check('and the new work is still stopped', stop.isStopped() === true);
-  check('engage() declares that it performed no teardown, rather than implying it did',
-    engaged.teardown.performed === false && typeof engaged.teardown.reason === 'string');
+  check('engage() reports the halt is in effect, with how (Section 150.2: the old "no teardown" pin flipped)',
+    engaged.teardown.performed === true && /skip their scheduled work/.test(engaged.teardown.how)
+    && /Your own requests still work/.test(engaged.teardown.how));
 }
 
 // 5. engage records BEFORE it destroys
@@ -177,14 +178,15 @@ console.log('\n  lift() — the only gated direction');
   check('a string user is refused — a name is not an identity',
     stop.lift('master', 'because').ok === false);
   check('a user with no numeric tier is refused', stop.lift({ name: 'x' }, 'because').ok === false);
-  const refused = stop.lift({ name: 'master', tier: 0 }, 'because');
-  check('even tier 0 is refused, because system.suspend-autonomy is not in the matrix',
-    refused.ok === false && refused.missingCapability === 'system.suspend-autonomy');
-  check('and the refusal names the file master must write instead',
-    refused.error.includes(stop.ALLOW_FILE));
   const matrix = JSON.parse(read('shared/capabilities.json'));
-  check('the capability really is absent, so the degradation is the live state',
-    matrix.capabilities['system.suspend-autonomy'] === undefined);
+  check('system.suspend-autonomy is in the matrix at tier 0, master only (Section 150.2)',
+    matrix.capabilities['system.suspend-autonomy'] === 0);
+  const refused = stop.lift({ name: 'admin', tier: 1 }, 'because');
+  check('a superadmin (tier 1) is refused, and the refusal names the capability',
+    refused.ok === false && refused.missingCapability === 'system.suspend-autonomy');
+  check('and the refusal no longer tells anyone to hand-write the allow-file',
+    !refused.error.includes(stop.ALLOW_FILE) && /only master holds/.test(refused.error));
+  check('master with NO note is refused', stop.lift({ name: 'master', tier: 0 }, '').ok === false);
   const libs = fs.readdirSync(path.join(ROOT, 'electron', 'lib'))
     .concat(fs.readdirSync(path.join(ROOT, 'electron', 'ipc')).map(f => path.join('..', 'ipc', f)));
   const callers = libs.filter((f) => {
@@ -194,19 +196,30 @@ console.log('\n  lift() — the only gated direction');
       : read(path.join('electron', 'lib', f));
     return /\.lift\s*\(/.test(src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, ''));
   });
-  check('zero in-process callers of lift() — the absence is the guarantee, not a comment',
-    callers.length === 0, callers.join(', '));
+  check('zero in-process callers of lift() — the absence is the guarantee, not a comment. (resume(), which '
+    + 'restores the pre-stop state without granting anything, has its own single caller, asserted in '
+    + 'verifyAutonomyControl.cjs)', callers.length === 0, callers.join(', '));
 }
 
 // 7. the empty note, and the ordering on the way back
 console.log('\n  the resume path, asserted on the source because the capability blocks the behaviour');
 {
   const liftBody = stopCode.slice(stopCode.indexOf('function lift('));
-  check('an empty note is refused', /String\(note \|\| ''\)\.trim\(\)/.test(liftBody) && /requires a note/.test(liftBody));
+  const authBody = stopCode.slice(stopCode.indexOf('function authoriseLift('), stopCode.indexOf('function lift('));
+  check('an empty note is refused, in the one helper lift() and resume() share (Section 150.2)',
+    /String\(note \|\| ''\)\.trim\(\)/.test(authBody) && /requires a note/.test(authBody)
+    && /authoriseLift\(user, note, injectedCapability\)/.test(liftBody));
   check('the allow-file is written BEFORE the stopped-record is removed, so a crash leaves "allowed but still halted"',
     liftBody.indexOf('writeFileSync(allowPath()') < liftBody.indexOf('unlinkSync(stoppedRecordPath()'));
   check('and lift() clears the halt rather than leaving an undoable one',
     /unlinkSync\(stoppedRecordPath\(\)\)/.test(liftBody));
+  const resumeBody = stopCode.slice(stopCode.indexOf('function resume('), stopCode.indexOf('// Reporting'));
+  check('resume() uses the SAME authorisation as lift(): there is no second, weaker gate',
+    /authoriseLift\(user, note, injectedCapability\)/.test(resumeBody) && /authoriseLift\(user, note, injectedCapability\)/.test(liftBody));
+  check('resume() restores the allow-file BEFORE removing the stopped-record',
+    resumeBody.indexOf('writeFileSync(allowPath()') < resumeBody.indexOf('unlinkSync(stoppedRecordPath()'));
+  check('resume() writes the allow-file only from `priorAllow`, never a fresh `allowed: true`',
+    /prior\.allowed === true/.test(resumeBody) && !/allowed:\s*true/.test(resumeBody));
 }
 
 // 8. what the stop governs, and what it must not
@@ -249,8 +262,8 @@ for (const d of stop.PRE_EXISTING) {
   }
   check(`${d.fn} DECLARES isHalted() as the predicate it will consult — the field, not the wiring`,
     d.governedByWhenBuilt === 'isHalted');
-  check(`and this build does not tear it down, which is declared rather than assumed`,
-    d.haltedByEngage === false && typeof d.why === 'string' && d.why.length > 20);
+  check(`and it IS halted by engage(), declared per entry with the reason it is safe to resume`,
+    d.haltedByEngage === true && typeof d.why === 'string' && d.why.length > 20);
   const code = src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
   check(`${path.basename(d.module)} is untouched by the stop — no isStopped() reaches it`,
     !/isStopped\s*\(/.test(code));
@@ -270,10 +283,12 @@ for (const d of stop.PRE_EXISTING) {
       if (/isHalted\s*\(/.test(src)) consumers.push(path.join(...parts, name));
     }
   }
-  check('isHalted() has no production consumer yet, so governedByWhenBuilt names an intention and the '
-    + 'header must not claim a mechanism', consumers.length === 0, consumers.join(', '));
-  check('and the module header says exactly that, in words',
-    /NOTHING CALLS IT YET/.test(stopSrc) && /governedByWhenBuilt/.test(stopSrc));
+  const wanted = stop.PRE_EXISTING.map(d => d.module.replace(/\\/g, '/')).sort();
+  const got = consumers.map(c => c.replace(/\\/g, '/')).sort();
+  check('isHalted() is consulted by exactly the four dispatchers PRE_EXISTING names (Section 150.2)',
+    JSON.stringify(got) === JSON.stringify(wanted), `got ${got.join(',')} wanted ${wanted.join(',')}`);
+  check('and the module header no longer says NOTHING CALLS IT YET',
+    !/NOTHING CALLS IT YET/.test(stopSrc));
 }
 
 // 9. the behavioural proof for I11
@@ -296,7 +311,7 @@ async function provePreExistingStillDispatches() {
   check('the stop reports this install as stopped for new autonomous work', stop.isStopped() === true);
   check('and not halted', stop.isHalted() === false);
   await scheduler.runNow('stop-suite-probe');
-  check('refreshScheduler.runNow still called the task — ollama-catalog and dependency-review keep running',
+  check('runNow still calls the task: it is master\'s refresh:run, so it is not halted (see verifyAutonomyControl)',
     ran === 1);
   const before = JSON.stringify(saved);
   await scheduler.runNow('stop-suite-probe', { now: Date.now() + 1000 });
@@ -316,13 +331,15 @@ console.log('\n  statusText() — both halves, by name, in both states');
   check('and names the allow-file master must create', shipped.includes(stop.ALLOW_FILE));
   check('and says the pre-existing work is still running, by name',
     /Still running on their own schedule/.test(shipped) && /ollama-catalog/.test(shipped), shipped);
-  check('and names the missing capability instead of offering a dead button',
-    /system\.suspend-autonomy/.test(shipped));
+  check('and says who can resume, instead of naming a capability that is missing',
+    /Resuming is master only/.test(shipped) && /system\.suspend-autonomy/.test(shipped));
   stop.engage('an operator halt', 'tray');
   const halted = stop.statusText();
   check('after an engage it reports the halt and its reason', /an operator halt/.test(halted), halted);
-  check('and does NOT claim the timers were torn down', /Still ARMED/.test(halted), halted);
-  check('and says how to undo it without a working lift', halted.includes(stop.STOPPED_RECORD));
+  check('and says the dispatchers skip their work while halted, and does NOT say they are still armed',
+    /skip their scheduled work/.test(halted) && !/Still ARMED/.test(halted), halted);
+  check('and says resuming is master only, rather than pointing at a file to delete',
+    /Resuming is master only/.test(halted) && !halted.includes('deleting'));
   writeAllow(root, { allowed: true, by: 'master', at: 'now', note: 'allowed' });
   const allowed = stop.statusText();
   check('with an allow-file it says the loop is allowed, and by whom', /loop is allowed \(master/.test(allowed), allowed);

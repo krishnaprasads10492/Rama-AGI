@@ -20,6 +20,15 @@ useRequire(require);
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog, Notification } = require('electron');
 const path = require('path');
 const fs   = require('fs');
+
+// WHO IS ON THE OTHER END OF AN IPC CALL is decided by main, not by the payload (Section 150.1, D6).
+// Installed on `ipcMain` itself and BEFORE anything registers, because the recorder further down says it
+// "is not a policy layer" and many modules register on `ipcMain` directly. This is a plain `require`,
+// not `safeRequire`, on purpose: a stub that degrades to "trust the renderer again" would be the exact
+// defect this removes, and a loud failure to start is the safe direction.
+const principalBinding = require('./lib/principalBinding.cjs');
+principalBinding.install(ipcMain);
+
 // electron-updater is NOT required here. It was, at module scope, and its
 // dependency chain (builder-util-runtime -> debug) is what killed the installed
 // app. setupAutoUpdater() guards its *invocation* with `if (isDev) return`, but
@@ -42,6 +51,7 @@ const marketIPC    = safeRequire('./ipc/marketIntel.cjs',       'Market intellig
 const browserIPC   = safeRequire('./ipc/browserEngine.cjs',     'Browser engine');
 const vaultIPC     = safeRequire('./ipc/credentialVault.cjs',   'Credential vault');
 const brokersIPC   = safeRequire('./ipc/brokers.cjs',           'Broker connectors');
+const brokerAccountsIPC = safeRequire('./ipc/brokerAccounts.cjs', 'Broker accounts');
 const modelIPC     = safeRequire('./ipc/modelRouter.cjs',       'Model router');
 const agentIPC         = safeRequire('./ipc/agentOrchestrator.cjs',    'Agent orchestrator');
 const intelligenceIPC  = safeRequire('./ipc/intelligenceEngine.cjs',   'Intelligence engine');
@@ -54,6 +64,7 @@ const trackingIPC  = safeRequire('./ipc/tracking.cjs',           'Function track
 const sandboxIPC       = safeRequire('./ipc/sandboxEngine.cjs',  'Execution sandbox');
 const graphIPC         = safeRequire('./ipc/graphReasoner.cjs',  'Graph planner');
 const selfCareIPC      = safeRequire('./ipc/selfCare.cjs',       'Self-care monitor');
+const autonomyControlIPC = safeRequire('./ipc/autonomyControl.cjs', 'Autonomy control');
 // ─── Neural Lattice Nexus + Code Intelligence ─────────────────────────────────
 const eventBus         = safeRequire('./ramaEventBus.cjs',       'Event bus');
 const astIPC           = safeRequire('./ipc/astEngine.cjs',      'Code comprehension');
@@ -1554,7 +1565,16 @@ let popoutOpener = null;
  */
 ipcMain.handle('popout:redeem', async (e, { grant } = {}) => {
   const res = popoutGrant.redeem(grant, e.sender?.id);
-  return res.ok ? { ok: true, user: res.user, panel: res.panel } : { ok: false, error: res.reason };
+  if (!res.ok) return { ok: false, error: res.reason };
+  // The new window inherits the OPENER'S binding and nothing else. It is a different webContents, so it
+  // has no binding of its own until this line gives it one; the ticket is burned either way.
+  if (res.binding) principalBinding.bind(e.sender, res.binding.token, res.binding.fp);
+  // The user handed back is rebuilt from the account NOW, not the snapshot taken when the ticket was
+  // minted, so a tier change or a suspension in between is honoured.
+  const user = principalBinding.getPrincipal(e);
+  return user
+    ? { ok: true, user, panel: res.panel }
+    : { ok: false, error: 'the session behind this pop-out is no longer valid' };
 });
 
 /** Send a panel back to the workspace board and close its window. */
@@ -1593,9 +1613,16 @@ ipcMain.handle('window:popout', async (_e, { panel, title, params = {} } = {}) =
     if (typeof v === 'string' && re.test(v)) query[k] = v;
   }
 
-  // A single-use ticket so the new window can adopt this one's session (Section 109). `user` comes from
-  // the renderer, which already passes it to every gated channel, so nothing new is trusted here.
-  const grant = popoutGrant.mint({ user: params.user, panel: id });
+  // A single-use ticket so the new window can adopt this one's session (Section 109). The user it
+  // carries is the OPENER'S principal as main validated it (Section 150.1), never `params.user`, which is
+  // whatever the renderer said. An opener with no session gets no pop-out: a window with no session
+  // would LOOK like a signed-in one and be nobody.
+  const openerPrincipal = principalBinding.getPrincipal(_e);
+  const openerBinding = principalBinding.bindingFor(_e?.sender?.id);
+  if (!openerPrincipal || !openerBinding) {
+    return { ok: false, error: 'Sign in before popping a panel out' };
+  }
+  const grant = popoutGrant.mint({ user: openerPrincipal, panel: id, binding: openerBinding });
   if (grant) query.grant = grant;
   popoutOpener = _e?.sender || popoutOpener;
 
@@ -1809,6 +1836,7 @@ app.whenReady().then(async () => {
     // AFTER the vault, because the broker channels gate on `vault.read` and read the connector
     // declarations — registering them earlier would work, but the order says what depends on what.
     ['Broker connectors',     () => brokersIPC.register(ipcRec)],
+  ['Broker accounts',       () => brokerAccountsIPC.register(ipcRec)],
     ['Model router',          () => modelIPC.register(ipcRec)],
     ['Agent orchestrator',    () => agentIPC.register(ipcRec)],
     ['Intelligence engine',   () => intelligenceIPC.register(ipcRec)],
@@ -1824,6 +1852,9 @@ app.whenReady().then(async () => {
     ['Execution sandbox',     () => sandboxIPC.register(ipcRec)],
     ['Graph planner',         () => graphIPC.register(ipcRec)],
     ['Self-care monitor',     () => selfCareIPC.register(ipcRec)],
+    // The stop's command surface (Section 150.2). Registered early and on its own so a throw elsewhere
+    // never costs master the one control he reaches for in an incident.
+    ['Autonomy control',      () => autonomyControlIPC.register(ipcRec)],
     ['Event bus',             () => eventBus.register(ipcRec)],
     ['Code comprehension',    () => astIPC.register(ipcRec)],
     ['Self-modification',     () => codeRegenIPC.register(ipcRec)],

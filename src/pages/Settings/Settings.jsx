@@ -54,6 +54,195 @@ function Toggle({ value, onChange }) {
  * the other. The IPC has existed since Section 35 and was reachable by chat or voice command only
  * — there was no way to find it by looking.
  */
+/**
+ * AutonomyPanel - the stop, and the way back (Section 150.2).
+ *
+ * STOP is offered to everyone and needs nothing: a stop that can be refused is not a stop. RESUME is
+ * offered only when main says this account holds `system.suspend-autonomy`, and always with a written
+ * note. The decision is main's: the button being visible is a convenience, and `autonomy:resume` checks
+ * the account it validated for this window regardless of what this panel shows.
+ *
+ * It states what a halt does AND what it does not. "Stop" over-promises if it is read as "everything":
+ * only Rāma's own background work pauses, and anything master asks for directly still works.
+ */
+function AutonomyPanel() {
+  const [st, setSt] = useState(null);       // the status payload from main
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const [msg, setMsg] = useState('');
+  const api = window.rama?.autonomy ?? null;
+
+  const refresh = useCallback(async () => {
+    if (!api) return;
+    const r = await api.status().catch(() => null);
+    if (r?.ok) { setSt(r.data); setErr(''); }
+    else setErr(r?.error || 'The stop did not answer');
+  }, [api]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  if (!api) {
+    return (
+      <div className="hud-card" style={{ padding: '16px 20px' }}>
+        <div className="section-label" style={{ marginBottom: 10 }}>AUTONOMY</div>
+        <div style={{ fontSize: FS.dense, color: 'var(--muted)' }}>The stop needs the desktop app.</div>
+      </div>
+    );
+  }
+
+  const stop = async () => {
+    setBusy(true); setMsg('');
+    const r = await api.stop({ reason: 'stop pressed in Settings', via: 'settings' }).catch(() => null);
+    if (r?.ok) { setSt(r.data); setErr(''); setMsg(r.alreadyHalted ? 'It was already halted.' : 'Halted.'); }
+    else setErr(r?.error || 'The stop did not answer. Nothing has changed.');
+    setBusy(false);
+  };
+
+  const resume = async () => {
+    setBusy(true); setMsg('');
+    const r = await api.resume({ note }).catch(() => null);
+    if (r?.ok) {
+      setSt(r.data); setErr(''); setNote('');
+      setMsg(r.stillHalted
+        ? `The halt record is cleared, but ${r.env || 'the environment'} still holds it. Unset that and restart.`
+        : r.restoredAllow ? 'Resumed. The earlier permission was restored.' : 'Resumed.');
+    } else setErr(r?.error || 'The resume did not answer. Nothing has changed.');
+    setBusy(false);
+  };
+
+  const halted = st?.halted === true;
+  const colour = halted ? 'var(--amber)' : 'var(--green)';
+
+  return (
+    <div className="hud-card" style={{ padding: '16px 20px' }}>
+      <div className="section-label" style={{ marginBottom: 12 }}>AUTONOMY</div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+        <span aria-hidden="true" style={{ width: 10, height: 10, borderRadius: '50%', background: colour }} />
+        <span style={{ fontSize: FS.dense, fontWeight: 700, color: colour }} role="status">
+          {st == null ? 'CHECKING' : halted ? 'HALTED' : 'RUNNING'}
+        </span>
+      </div>
+
+      <div style={{ fontSize: FS.chrome, color: 'var(--muted)', lineHeight: 1.6, marginBottom: 12 }}>
+        {halted
+          ? 'Rāma\'s own background work is paused: the model-catalogue and dependency refresh, the metacognition audit, the health sweep (including automatic failover) and the StockMind outcome and news ticks. Anything you ask for directly still works.'
+          : 'Stopping pauses Rāma\'s own background work. It does not stop anything you ask for directly, and it does not close any window.'}
+      </div>
+
+      {halted && st?.record && (
+        <div style={{ fontSize: FS.chrome, color: 'var(--text)', marginBottom: 12, lineHeight: 1.6 }}>
+          Halted {st.record.at ? new Date(st.record.at).toLocaleString() : ''} by {st.record.by || 'unknown'}.
+          {st.record.reason ? ` Reason: ${st.record.reason}.` : ''}
+        </div>
+      )}
+
+      {!halted && (
+        <button type="button" disabled={busy || st == null} onClick={stop}
+          style={{ padding: '8px 16px', fontFamily: 'var(--font)', fontSize: FS.dense, cursor: 'pointer',
+            color: '#fff', background: 'var(--red)', border: 'none', borderRadius: 'var(--radius)' }}>
+          {busy ? 'Stopping…' : 'STOP AUTONOMY'}
+        </button>
+      )}
+
+      {halted && st?.canResume && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 420 }}>
+          <label htmlFor="autonomy-note" style={{ fontSize: FS.chrome, color: 'var(--muted)' }}>
+            Why are you resuming? (required, kept in the record)
+          </label>
+          <input id="autonomy-note" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500}
+            style={{ padding: '8px 10px', fontFamily: 'var(--font)', fontSize: FS.dense,
+              background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius)' }} />
+          <button type="button" disabled={busy || !note.trim()} onClick={resume}
+            style={{ alignSelf: 'flex-start', padding: '8px 16px', fontFamily: 'var(--font)', fontSize: FS.dense,
+              cursor: note.trim() ? 'pointer' : 'not-allowed', color: '#fff', background: 'var(--green)',
+              border: 'none', borderRadius: 'var(--radius)', opacity: note.trim() ? 1 : 0.5 }}>
+            {busy ? 'Resuming…' : 'RESUME'}
+          </button>
+        </div>
+      )}
+
+      {halted && st && !st.canResume && (
+        <div style={{ fontSize: FS.chrome, color: 'var(--muted)', lineHeight: 1.6 }}>
+          Only the master can resume this, from a signed-in session.
+        </div>
+      )}
+
+      {msg && <div role="status" style={{ marginTop: 10, fontSize: FS.chrome, color: 'var(--green)' }}>{msg}</div>}
+      {err && <div role="alert" style={{ marginTop: 10, fontSize: FS.chrome, color: 'var(--red)' }}>{err}</div>}
+
+      {st?.text && (
+        <details style={{ marginTop: 12 }}>
+          <summary style={{ cursor: 'pointer', fontSize: FS.chrome, color: 'var(--muted)' }}>the full account</summary>
+          <div style={{ fontSize: FS.chrome, color: 'var(--muted)', lineHeight: 1.6, marginTop: 8 }}>{st.text}</div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+/**
+ * VoiceEgressPanel - whether audio may leave this machine (Section 150.3).
+ *
+ * Off by default. Local Whisper is always preferred and needs no permission; this is only about the
+ * cloud fallback, which sends the recording to a third party. Only master can change it, and `main`
+ * decides that from the account it validated for this window: the switch being visible is a convenience.
+ */
+function VoiceEgressPanel() {
+  const { currentUser } = useUserStore();
+  const [st, setSt] = useState(null);          // { optedIn, keyPresent, available }
+  const [caps, setCaps] = useState(null);      // the voice capability report
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const api = window.rama?.voice ?? null;
+  const isMaster = currentUser?.tier === 0;
+
+  const refresh = useCallback(async () => {
+    if (!api) return;
+    const [a, b] = await Promise.all([api.cloudOptIn().catch(() => null), api.capabilities().catch(() => null)]);
+    if (a?.ok) { setSt(a.data); setErr(''); } else if (a) setErr(a.error || '');
+    if (b?.ok) setCaps(b.data);
+  }, [api]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  if (!api) return null;
+
+  const toggle = async () => {
+    setBusy(true); setErr('');
+    const r = await api.setCloudOptIn(!st?.optedIn).catch(() => null);
+    if (r?.ok) setSt(r.data); else setErr(r?.error || 'The choice was not recorded. Nothing has changed.');
+    await refresh();
+    setBusy(false);
+  };
+
+  const local = caps?.local?.available === true;
+
+  return (
+    <div className="hud-card" style={{ padding: '16px 20px' }}>
+      <div className="section-label" style={{ marginBottom: 12 }}>CLOUD SPEECH-TO-TEXT</div>
+      <div style={{ fontSize: FS.chrome, color: 'var(--muted)', lineHeight: 1.6, marginBottom: 12 }}>
+        Your recordings stay on this machine unless you allow otherwise. Local Whisper is used first when it is
+        installed ({local ? 'it is' : 'it is not, so voice input needs this or an install'}). If you turn this on and an
+        OpenAI key is in the vault, a recording that local Whisper cannot handle is sent to OpenAI, and Rāma says so
+        each time it happens.
+      </div>
+      <SettingRow
+        label="Allow audio to be sent to OpenAI"
+        desc={st?.keyPresent ? 'An OpenAI key is in the vault.' : 'No OpenAI key is in the vault yet, so this has no effect until one is added.'}
+      >
+        <Toggle value={st?.optedIn === true} onChange={() => { if (isMaster && !busy) toggle(); }} />
+      </SettingRow>
+      {!isMaster && (
+        <div style={{ fontSize: FS.chrome, color: 'var(--muted)', marginTop: 8 }}>Only the master can change this.</div>
+      )}
+      {err && <div role="alert" style={{ marginTop: 10, fontSize: FS.chrome, color: 'var(--red)' }}>{err}</div>}
+    </div>
+  );
+}
+
 function AppearancePanel() {
   const [zoom, setZoom] = useState(1);
   const [info, setInfo] = useState(null);
@@ -444,6 +633,12 @@ export default function Settings() {
                 ))}
               </div>
             </div>
+
+            {/* The autonomy stop (Section 150.2) - offered to every session; resume is master's. */}
+            <AutonomyPanel />
+
+            {/* Whether a recording may be sent to a third party (Section 150.3) - off by default. */}
+            <VoiceEgressPanel />
 
             {/* Change passcode */}
             {canDo('vault.write') && (

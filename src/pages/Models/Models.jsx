@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useUserStore } from '@store/userStore.js';
 import { FS, LH } from '@config/type.js';
+import BrokerAccounts from './BrokerAccounts.jsx';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -421,7 +422,9 @@ export default function Models() {
     setDrift(null);
     setDriftBusy(id);
     try {
-      const page = await window.rama.browser.fetchUrl(docsUrl);
+      // `currentUser` is the LAST argument: the browser channels check it against `browser.read`
+      // (Section 149.3, D7) and a call without it is denied.
+      const page = await window.rama.browser.fetchUrl(docsUrl, currentUser);
       const text = page?.ok ? (page.text ?? page.data ?? page.body ?? '') : '';
       if (!text) {
         // A FAILED FETCH IS NOT AN ALL-CLEAR, and saying so here as well as in the channel means a
@@ -776,6 +779,8 @@ export default function Models() {
 
         {tab === 'brokers' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {/* Renders nothing unless the signed-in account holds brokers.accounts.view (SuperAdmin, Section 152). */}
+            <BrokerAccounts currentUser={currentUser} />
             <div className="hud-card" style={{ padding: '12px 16px' }}>
               <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text-dim)' }}>
                 {brokers?.note

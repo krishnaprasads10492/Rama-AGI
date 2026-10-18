@@ -324,12 +324,24 @@ function wireBus() {
 }
 
 // ─── IPC ──────────────────────────────────────────────────────────────────────
+/**
+ * Is autonomy explicitly halted? Consulted at the top of a SCHEDULED tick (Section 150.2).
+ * If the stop module cannot be read the answer is "no": this is pre-existing work, and a stop that
+ * cannot load must not silently disable it (Section 132's posture for the work that already ships).
+ */
+function autonomyHalted() {
+  try { return require('../lib/autonomyStop.cjs').isHalted() === true; } catch { return false; }
+}
+
 function register(ipcMain) {
   restore();
   wireBus();
 
   if (!auditTimer) {
     auditTimer = setInterval(() => {
+      // Halted by an explicit autonomy stop: skip (Section 150.2). The interval keeps firing so lifting
+      // the halt needs no re-arm.
+      if (autonomyHalted()) return;
       // Skip entirely when nothing happened — idle must cost nothing
       if (outcomes.length === 0) return;
       selfAudit();

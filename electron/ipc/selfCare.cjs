@@ -148,7 +148,10 @@ async function checkInstanceFailover() {
         if (candidates.length === 0) continue;
 
         const target = candidates[0];
-        const res = instMod.express(target.id, geneId, null);   // null = system-initiated, no tier gate to bypass
+        // The NAMED system actor, not null. `null` used to mean 'no gate' - it now means 'denied'. The
+        // actor may not add a tier-0 gene, or one above the target's recorded owner tier, anywhere in the
+        // gene's dependency closure (Section 150.1, D12).
+        const res = instMod.express(target.id, geneId, instMod.SYSTEM_ACTOR);
         actions.push({
           geneId, failedOn: inst.id, healedOn: target.id, ok: !!res.ok,
           message: res.ok
@@ -194,6 +197,25 @@ async function checkGraphReasoner() {
     components.graphReasoner.status = 'error';
     return { status: 'error', error: err.message };
   }
+}
+
+/**
+ * Is autonomy explicitly halted? Consulted at the top of a SCHEDULED tick (Section 150.2).
+ * If the stop module cannot be read the answer is "no": this is pre-existing work, and a stop that
+ * cannot load must not silently disable it (Section 132's posture for the work that already ships).
+ */
+function autonomyHalted() {
+  try { return require('../lib/autonomyStop.cjs').isHalted() === true; } catch { return false; }
+}
+
+/**
+ * The SCHEDULED sweep. Both timer sites call this, never `runHealthSweep` directly, so the halt cannot be
+ * missed at one of them (Section 150.2). The on-demand `selfcare:sweep` still calls `runHealthSweep`.
+ * `checkInstanceFailover` runs inside the sweep, so a halt stops auto-failover with it.
+ */
+async function scheduledSweep() {
+  if (autonomyHalted()) return null;
+  return runHealthSweep();
 }
 
 // ─── Full health sweep ────────────────────────────────────────────────────────
@@ -341,8 +363,8 @@ function register(ipcMain) {
   ipcMain.handle('selfcare:start', async () => {
     if (monitoring) return { ok: true, message: 'Already monitoring' };
     monitoring = true;
-    await runHealthSweep();   // immediate first sweep
-    monitorInterval = setInterval(runHealthSweep, 120000);  // every 2 min
+    await scheduledSweep();   // immediate first sweep
+    monitorInterval = setInterval(scheduledSweep, 120000);  // every 2 min
     return { ok: true };
   });
 
@@ -392,9 +414,9 @@ function register(ipcMain) {
   });
 
   // Auto-start monitoring
-  setTimeout(() => runHealthSweep(), 5000);
-  monitorInterval = setInterval(runHealthSweep, 120000);
+  setTimeout(() => scheduledSweep(), 5000);
+  monitorInterval = setInterval(scheduledSweep, 120000);
   monitoring = true;
 }
 
-module.exports = { register, runHealthSweep, trackCapabilityScore, checkGenome, broadcast };
+module.exports = { register, runHealthSweep, trackCapabilityScore, checkGenome, broadcast, checkInstanceFailover };

@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useUIStore }   from '@store/uiStore.js';
-import { useRamaStore } from '@store/ramaStore.js';
 import {
   VoiceEngine, MIC_MODES, MIC_MODE_LABELS, modesForLevel, registerVoiceEngine,
 } from '@services/voiceEngine.js';
+import { resolveVoiceDispatch } from '@services/commandIntents.js';
 
 
 // Pages come from the single registry — see src/config/registry.js
@@ -399,10 +399,8 @@ export default function CommandPalette({ extraPages = [] }) {
     micMode, setMicMode, micMuted, setMicMuted, toggleMicMuted,
     speechMuted, setSpeechMuted, toggleSpeechMuted,
     pendingModification, clearPendingMod,
-    masterAuthenticated,
+    masterAuthenticated, submitUtterance,
   } = useUIStore();
-
-  const { addMessage, activeSessionId, createSession } = useRamaStore();
 
   const inputRef      = useRef(null);
   const voiceRef      = useRef(null);
@@ -421,6 +419,12 @@ export default function CommandPalette({ extraPages = [] }) {
     () => [...visiblePages(currentUser), ...extraPages],
     [currentUser, extraPages]
   );
+
+  // The routes this account can see, kept in a ref because the voice engine is built once and its command
+  // handler closes over the FIRST render. Reading `allPages` there would check the page list of whoever
+  // was signed in when the app started (Section 150.4, D10).
+  const visibleRoutesRef = useRef(new Set());
+  visibleRoutesRef.current = new Set(allPages.map((p) => p.route));
 
   // ── Keyboard: Ctrl+K toggle ──────────────────────────────────────────────
   useEffect(() => {
@@ -470,35 +474,56 @@ export default function CommandPalette({ extraPages = [] }) {
       onCommand: (matched, command) => {
         setLastVoiceCmd(command);
         setWakeActive(false);
-        if (matched.route) {
-          goTo(matched.route);
-        } else if (matched.action === 'close-palette') {
-          closePalette();
-        } else if (matched.action === 'open-palette') {
-          openPalette();
-        } else if (matched.action === 'mute-speech') {
-          setSpeechMuted(true);
-          engine.setSpeechMuted(true);
-        } else if (matched.action === 'unmute-speech') {
-          setSpeechMuted(false);
-          engine.setSpeechMuted(false);
-        } else if (matched.action === 'mute-mic') {
-          setMicMuted(true);
-          engine.setMicMuted(true);
-        } else if (matched.action === 'badge-enable') {
-          window.rama?.badge?.setEnabled(true);
-        } else if (matched.action === 'badge-disable') {
-          window.rama?.badge?.setEnabled(false);
-        } else if (matched.action === 'bring-to-front') {
-          window.rama?.badge?.bringToFront();
-        } else if (matched.action === 'inject-message') {
-          if (!activeSessionId) createSession();
-          addMessage({ role: 'user', content: matched.message, id: Date.now() });
+
+        // WHAT TO DO is decided by `resolveVoiceDispatch`, in an order a test holds. This chain used to
+        // test `matched.route` first, and free-form speech carries route '/', so every sentence master
+        // spoke navigated Home and the branch meant to carry it to Rāma was unreachable (Section 149.3).
+        const d = resolveVoiceDispatch(matched, command);
+
+        if (d.kind === 'utterance') {
+          // Handed to Chat as if typed. It is not a privileged channel: Chat applies the same reflex,
+          // sensitivity class, `models.use` check and egress boundary as for a keystroke.
+          submitUtterance(d.text);
           navigate('/');
           closePalette();
+        } else if (d.kind === 'navigate') {
+          // A page the account cannot see is REPORTED, not navigated to and not silently dropped: the
+          // router declines to render it and the user would be left on a page that did not change.
+          if (visibleRoutesRef.current.has(d.route) || d.route === '/') {
+            goTo(d.route);
+          } else {
+            setVoiceError('That page is not available to this account');
+            setTimeout(() => setVoiceError(''), 4000);
+          }
+        } else if (d.kind === 'action') {
+          switch (d.action) {
+            case 'close-palette':  closePalette(); break;
+            case 'open-palette':   openPalette(); break;
+            case 'mute-speech':    setSpeechMuted(true);  engine.setSpeechMuted(true);  break;
+            case 'unmute-speech':  setSpeechMuted(false); engine.setSpeechMuted(false); break;
+            case 'mute-mic':       setMicMuted(true);     engine.setMicMuted(true);     break;
+            case 'unmute-mic':     setMicMuted(false);    engine.setMicMuted(false);    break;
+            case 'badge-enable':   window.rama?.badge?.setEnabled(true);  break;
+            case 'badge-disable':  window.rama?.badge?.setEnabled(false); break;
+            case 'bring-to-front': window.rama?.badge?.bringToFront();    break;
+            case 'autonomy-stop': {
+              // STOP ONLY. There is no resume case here and no spoken way to add one: resuming needs a
+              // signed-in master and a written note (Section 150.2). The answer is reported on screen.
+              const api = window.rama?.autonomy;
+              if (!api) { setVoiceError('Stopping needs the desktop app'); break; }
+              api.stop({ reason: 'stop command heard by voice', via: 'voice' })
+                .then((res) => { setVoiceError(res?.ok ? 'Autonomy halted' : `Stop failed: ${res?.error ?? 'no answer'}`); })
+                .catch(() => setVoiceError('Stop failed: no answer'))
+                .finally(() => setTimeout(() => setVoiceError(''), 5000));
+              break;
+            }
+            default: break;
+          }
         }
       },
       onError:  (err) => { setVoiceError(String(err)); setTimeout(() => setVoiceError(''), 6000); },
+      // Not an error: audio left the machine (Section 150.3). Held a little longer than a toast.
+      onNotice: (msg) => { setVoiceError(String(msg)); setTimeout(() => setVoiceError(''), 8000); },
       onLevel:  (cap) => setVoiceCap(cap),
       onState:  (st)  => { setRecording(st.recording); setVoiceActive(st.listening || st.recording); },
       onReady:  async (cap) => {
