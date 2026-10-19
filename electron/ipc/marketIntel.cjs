@@ -977,6 +977,7 @@ function schedulerStatus() {
 }
 
 module.exports = {
+  postPath, getPath,
   register, predict, backtest, backtestPresets, strategyScore, health,
   ohlcv, inventory, symbolSearch, news, newsCoverage, newsBackfill, derivatives, optionChain,
   strategyBlocks, strategyValidate, strategyBacktest, strategyCode,

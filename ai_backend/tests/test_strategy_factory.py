@@ -374,6 +374,11 @@ try:
     import datetime as _dt
     today = _dt.date(2026, 10, 20)
     check("measured today is fresh", B.is_stale({"current": {"measuredOn": "2026-10-20T08:00:00+00:00"}}, today) is False)
+    # No `today` argument: the default must compare UTC with UTC. It compared a UTC stamp with the machine's LOCAL
+    # date, so for the hours when the two dates differ (every evening in IST) a measurement made one minute ago
+    # read a day old and the tab refreshed again and again.
+    just_now = _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat()
+    check("a measurement taken just now is fresh whatever the machine's local date is", B.is_stale({"current": {"measuredOn": just_now}}) is False)
     check("measured yesterday is stale", B.is_stale({"current": {"measuredOn": "2026-10-19T08:00:00+00:00"}}, today) is True)
     check("never measured falls back to the stored date", B.is_stale({"storedAt": "2026-10-20T01:00:00+00:00"}, today) is False)
     check("no date at all is stale", B.is_stale({}, today) is True)

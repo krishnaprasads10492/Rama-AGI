@@ -8,6 +8,7 @@ import SymbolSearch from './SymbolSearch.jsx';
 import StrategyBuilder from './StrategyBuilder.jsx';
 import EvolvePanel from './EvolvePanel.jsx';
 import EngineSetup from './EngineSetup.jsx';
+import KiteFetch from './KiteFetch.jsx';
 import DatasetPanel, { SnapshotBanner } from './DatasetPanel.jsx';
 import { createSequence, isUnsaved, unsavedBadge, LABELS, TIPS } from './datasetModel.js';
 import HelpPanel from './HelpPanel.jsx';
@@ -802,6 +803,8 @@ override where an unlisted ticker should be looked up.">
               {LABELS.fetchKeep}
             </button>
             <InfoTip id="fetchProvider" />
+            <KiteFetch currentUser={currentUser} symbol={sym} exchange={exchange} interval={barInterval}
+                       fromDate={fromDate} toDate={toDate} onDone={() => loadBars(false)} />
             <button className="btn" disabled={!canView || !bars.length || !!viewDataset}
                     onClick={() => setDsMode(dsMode === 'save' ? null : 'save')}
                     title={viewDataset ? 'This is already a saved dataset.' : TIPS.save}>

@@ -65,7 +65,9 @@ const CONNECTORS = Object.freeze([
       Object.freeze({ key: 'accessToken', kind: 'secret', label: 'Access token (per session)', secret: true }),
     ]),
     // Only read paths. Anything that could place an order is absent BY DECLARATION.
-    paths: Object.freeze(['/quote', '/quote/ohlc', '/quote/ltp', '/instruments', '/historical']),
+    // What Rāma actually calls (kiteClient.cjs holds the enforced allowlist; Section 156): the token exchange, a
+    // last-price lookup used only to learn an instrument token, and historical candles.
+    paths: Object.freeze(['/session/token', '/quote/ltp', '/instruments/historical']),
   }),
   Object.freeze({
     id: 'dhan',

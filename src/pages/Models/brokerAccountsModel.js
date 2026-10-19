@@ -104,3 +104,57 @@ export function visibleTo(can, user) {
 export function mayWrite(can, user) {
   return typeof can === 'function' && can(user, 'brokers.accounts.write') === true;
 }
+
+// ─── Kite Connect as a data source (Section 156) ─────────────────────────────────────────────────
+
+export const KITE_REDIRECT_NOTE = 'In your Kite app\'s settings the redirect URL can be any address you own, for example http://127.0.0.1/ . Nothing has to be running there: Rāma reads the address from your browser\'s address bar after you log in. If Kite will not accept that address, use one it does accept.';
+
+export const KITE_STEPS = [
+  'Press OPEN KITE LOGIN. Your browser opens Zerodha\'s own login page; Rāma never sees your password.',
+  'Log in. Kite then sends the browser to your redirect address, which may show an error page. That is fine.',
+  'Copy the full address from the address bar, paste it below, and press COMPLETE LOGIN.',
+];
+
+/** One account's Kite session as a sentence and a tone. */
+export function sessionStatus(acct) {
+  const s = (acct && acct.session) || { state: 'none' };
+  if (s.state === 'live') {
+    const until = s.expiresAt ? String(s.expiresAt).replace('T', ' ').slice(0, 16) : 'tomorrow 06:00 IST';
+    return { state: 'live', tone: 'good', label: 'LOGGED IN', text: `Logged in${s.userId ? ` as ${s.userId}` : ''}. The session ends at 6 AM IST (${until} UTC) and then needs a new login.` };
+  }
+  if (s.state === 'expired') return { state: 'expired', tone: 'bad', label: 'SESSION ENDED', text: 'The Kite session ended (they last until 6 AM IST). Log in again to fetch candles.' };
+  return { state: 'none', tone: 'muted', label: 'NOT LOGGED IN', text: 'Not logged in to Kite. Candles can be fetched only while a session is live.' };
+}
+
+/** Only Zerodha accounts have a Kite session. */
+export const isKite = (acct) => !!acct && acct.brokerId === 'kite';
+
+const KITE_INTERVALS = ['1m', '3m', '5m', '10m', '15m', '30m', '60m', '1h', '1d'];
+export const kiteSupportsInterval = (interval) => KITE_INTERVALS.includes(String(interval || '').toLowerCase());
+
+/** The first Kite account with a live session, or the first Kite account at all, or null. */
+export function pickKiteAccount(snapshot) {
+  const list = ((snapshot && snapshot.accounts) || []).filter(isKite);
+  return list.find((a) => a.session && a.session.state === 'live') || list[0] || null;
+}
+
+/** Why the Kite fetch button cannot be pressed, as one sentence; null when it can. */
+export function whyCannotKiteFetch({ account, symbol, interval, busy }) {
+  if (!account) return 'No Zerodha account is registered.';
+  if (!symbol) return 'Pick an instrument first.';
+  if (!kiteSupportsInterval(interval)) return `Kite has no ${interval} candles (use 1m, 5m, 15m, 30m, 60m or 1d).`;
+  if (!account.session || account.session.state !== 'live') return 'Log in to Kite first (Models > Brokers). Sessions end at 6 AM IST.';
+  if (busy) return 'A Kite fetch is running.';
+  return null;
+}
+
+/** What to say after a fetch. Never includes a token; the reply has none. */
+export function kiteFetchMessage(res) {
+  if (!res) return 'No answer from Kite.';
+  if (res.ok === false) return res.error || 'Kite fetch failed.';
+  const st = res.stored || {};
+  const range = st.firstBar && st.lastBar ? ` The store now holds ${st.bars} bars, ${String(st.firstBar).slice(0, 10)} to ${String(st.lastBar).slice(0, 10)}.` : '';
+  const partial = res.partial ? ` Stopped early: ${res.partial}` : '';
+  const skipped = res.skipped ? ` ${res.skipped} malformed candles were ignored.` : '';
+  return `Kite sent ${res.fetched} candles in ${res.requests} ${res.requests === 1 ? 'request' : 'requests'} and they were kept for analysis.${range}${skipped}${partial}`;
+}

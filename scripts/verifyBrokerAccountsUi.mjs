@@ -90,5 +90,56 @@ check('Models mounts it inside the brokers tab with the signed-in account', /tab
 const reg = fs.readFileSync(path.join(ROOT, 'src/config/registry.js'), 'utf8');
 check('the Models page itself is SuperAdmin-gated, so the tab is reachable by the account that holds the capability', /route:\s*'\/models'[^]{0,200}minTier:\s*TIERS\.SUPERADMIN/.test(reg));
 
+
+console.log('\n--- Kite: the session, said plainly ---');
+const kacct = (session, over = {}) => ({ id: 'k1', brokerId: 'kite', session, ...over });
+const live = M.sessionStatus(kacct({ state: 'live', userId: 'AB1234', expiresAt: '2026-10-19T00:30:00.000Z' }));
+check('a live session says who, and that it ends at 6 AM IST', live.state === 'live' && live.tone === 'good' && /AB1234/.test(live.text) && /6 AM IST/.test(live.text));
+check('an ended session is red and says to log in again', M.sessionStatus(kacct({ state: 'expired' })).tone === 'bad' && /Log in again/.test(M.sessionStatus(kacct({ state: 'expired' })).text));
+check('no session says candles need one', M.sessionStatus(kacct({ state: 'none' })).label === 'NOT LOGGED IN' && /live/.test(M.sessionStatus(kacct({ state: 'none' })).text));
+check('a missing or junk session is "none", never "live"', M.sessionStatus(null).state === 'none' && M.sessionStatus({}).state === 'none' && M.sessionStatus(kacct(undefined)).state === 'none' && M.sessionStatus(kacct({ state: 'live-ish' })).state === 'none');
+check('only Zerodha accounts are Kite accounts', M.isKite(kacct({})) && !M.isKite({ brokerId: 'dhan' }) && !M.isKite(null));
+check('the login steps say Rāma never sees the password, and there are three', M.KITE_STEPS.length === 3 && /never sees your password/.test(M.KITE_STEPS[0]) && /address bar/.test(M.KITE_STEPS[2]));
+check('the redirect note says nothing has to listen there', /Nothing has to be running/.test(M.KITE_REDIRECT_NOTE));
+
+console.log('\n--- Kite: what can be fetched, and why not ---');
+check('the supported intervals', ['1m', '5m', '15m', '30m', '60m', '1h', '1d'].every((i) => M.kiteSupportsInterval(i)) && !M.kiteSupportsInterval('1wk') && !M.kiteSupportsInterval('1mo') && !M.kiteSupportsInterval(''));
+const snapK = { accounts: [{ id: 'z', brokerId: 'dhan' }, kacct({ state: 'none' }, { id: 'k0' }), kacct({ state: 'live' }, { id: 'k2' })] };
+check('the live Zerodha account is preferred over an idle one', M.pickKiteAccount(snapK).id === 'k2');
+check('with no live one the first Zerodha account is returned (so the button can explain)', M.pickKiteAccount({ accounts: [kacct({ state: 'none' }, { id: 'k0' })] }).id === 'k0');
+check('with no Zerodha account there is nothing', M.pickKiteAccount({ accounts: [{ brokerId: 'dhan' }] }) === null && M.pickKiteAccount(null) === null);
+const okAcct = kacct({ state: 'live' });
+check('a live account, a symbol and a supported interval can fetch', M.whyCannotKiteFetch({ account: okAcct, symbol: 'RELIANCE', interval: '1d', busy: false }) === null);
+check('no account, no symbol, a weekly interval, no session and busy each give their own sentence', new Set([
+  M.whyCannotKiteFetch({ account: null, symbol: 'X', interval: '1d' }), M.whyCannotKiteFetch({ account: okAcct, symbol: '', interval: '1d' }),
+  M.whyCannotKiteFetch({ account: okAcct, symbol: 'X', interval: '1wk' }), M.whyCannotKiteFetch({ account: kacct({ state: 'expired' }), symbol: 'X', interval: '1d' }),
+  M.whyCannotKiteFetch({ account: okAcct, symbol: 'X', interval: '1d', busy: true })]).size === 5);
+check('an expired session points at the login and at 6 AM IST', /Log in to Kite first/.test(M.whyCannotKiteFetch({ account: kacct({ state: 'expired' }), symbol: 'X', interval: '1d' })) && /6 AM IST/.test(M.whyCannotKiteFetch({ account: kacct({ state: 'none' }), symbol: 'X', interval: '1d' })));
+const msg = M.kiteFetchMessage({ ok: true, fetched: 250, requests: 1, skipped: 2, stored: { bars: 300, firstBar: '2025-10-16 00:00:00', lastBar: '2026-10-16 00:00:00' } });
+check('a fetch reports counts, the store depth and that it was KEPT for analysis', /250 candles in 1 request/.test(msg) && /kept for analysis/.test(msg) && /300 bars/.test(msg) && /2 malformed/.test(msg));
+check('a partial fetch says why it stopped', /Stopped early: cap/.test(M.kiteFetchMessage({ ok: true, fetched: 5, requests: 300, partial: 'cap', stored: {} })));
+check('a failure shows the engine\'s own sentence', M.kiteFetchMessage({ ok: false, error: 'Kite rejected the session. Log in again.' }) === 'Kite rejected the session. Log in again.');
+check('junk does not throw', (() => { try { M.kiteFetchMessage(null); M.kiteFetchMessage({}); M.pickKiteAccount({}); M.sessionStatus('x'); return true; } catch { return false; } })());
+
+console.log('\n--- Kite: the components, read as source ---');
+const kf = fs.readFileSync(path.join(ROOT, 'src/pages/StockMind/KiteFetch.jsx'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+check('the fetch button renders nothing unless the account may write AND a Zerodha account exists', /visibleTo\(can, currentUser\) && mayWrite\(can, currentUser\)/.test(kf) && /if \(!allowed \|\| !inBridge \|\| !account\) return null;/.test(kf));
+check('the registry is read only for an allowed account', /useEffect\(\(\) => \{ if \(allowed && inBridge\) load\(\); \}/.test(kf));
+check('a fetch happens only on a click: fetchBars is called once, inside run()', (kf.match(/kiteSession\.fetchBars\(/g) || []).length === 1 && /const run = async/.test(kf) && /onClick=\{run\}/.test(kf) && !/useEffect[^]{0,200}fetchBars/.test(kf));
+check('the button says it keeps the data and uses the subscription', /keep them for analysis/.test(kf) && /subscription/.test(kf));
+check('no timer, no token handling, no console.log', !/setInterval|setTimeout|accessToken|console\.log/.test(kf));
+check('no font size is a literal number', !/fontSize:\s*['"]?\d/.test(kf));
+const ba = fs.readFileSync(path.join(ROOT, 'src/pages/Models/BrokerAccounts.jsx'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+check('the Kite controls appear only on a Zerodha account for a writer', /isKite\(a\) && writable/.test(ba));
+check('the login members are called with literal names', /kiteSession\.loginStart\(id\)/.test(ba) && /kiteSession\.loginComplete\(id, redirectText\)/.test(ba) && /kiteSession\.logout\(a\.id\)/.test(ba));
+check('the panel never reads a token from an account', !/accessToken|\.session\.token|session\.secret/.test(ba));
+check('the pasted address is kept in memory only and cleared after use', /setRedirectText\(''\)/.test(ba) && !/localStorage|sessionStorage/.test(ba));
+check('the login opens only when the button is pressed (no effect starts it)', !/useEffect[^]{0,300}loginStart/.test(ba));
+const preK = fs.readFileSync(path.join(ROOT, 'electron/preload.cjs'), 'utf8');
+const blkK = preK.slice(preK.indexOf('kiteSession: {'), preK.indexOf('brokerAccounts: {'));
+check('every kiteSession member the UI calls exists in the preload', [['loginStart', ba], ['loginComplete', ba], ['logout', ba], ['fetchBars', kf]].every(([m, src]) => src.includes(`kiteSession.${m}(`) && new RegExp(`${m}:`).test(blkK)));
+const smK = fs.readFileSync(path.join(ROOT, 'src/pages/StockMind/StockMind.jsx'), 'utf8');
+check('StockMind mounts the fetch button beside the other fetches and reloads from disk afterwards', /<KiteFetch currentUser=\{currentUser\}[^>]*onDone=\{\(\) => loadBars\(false\)\}/.test(smK.replace(/\n\s*/g, ' ')) && /import KiteFetch from '\.\/KiteFetch\.jsx'/.test(smK));
+
 console.log(`\n  ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

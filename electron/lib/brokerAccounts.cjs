@@ -22,6 +22,7 @@
 
 const net = require('net');
 const crypto = require('crypto');
+const kite = require('./kiteClient.cjs');
 
 const DOMAIN = 'brokerAccounts';
 const MAX_ACCOUNTS = 40;
@@ -286,6 +287,18 @@ function view(account, ctx = {}) {
     sharedWithFamily: account.sharedWithFamily === true, notes: account.notes || '',
     createdAt: account.createdAt || null, updatedAt: account.updatedAt || null,
     ipState, detectedIp: self ? detected : null,
+    // The token itself never leaves: state, who, and when it dies (Section 156).
+    session: sessionView(account, now),
+  };
+}
+
+function sessionView(account, now) {
+  const s = account.session;
+  if (!s || !s.accessToken) return { state: 'none', userId: null, userName: null, issuedAt: null, expiresAt: null };
+  return {
+    state: kite.sessionState(s, now), userId: s.userId || null, userName: s.userName || null,
+    issuedAt: Number.isFinite(s.issuedAt) ? new Date(s.issuedAt).toISOString() : null,
+    expiresAt: Number.isFinite(s.issuedAt) ? new Date(kite.tokenExpiry(s.issuedAt)).toISOString() : null,
   };
 }
 
@@ -324,6 +337,8 @@ function saveAccount(store, input, ctx) {
     distributableId, primaryIp: c.primaryIp, secondaryIp: c.secondaryIp,
     sharedWithFamily: c.sharedWithFamily, notes: c.notes, updatedAt: new Date(now).toISOString(),
   };
+  // A different key or a new secret is a different Kite app: the old session does not belong to it.
+  if (existing && ((c.apiKey && c.apiKey !== existing.apiKey) || c.secret)) next.session = null;
   const change = checkIpChange(existing, next, now, c.acknowledgeWeeklyLimit);
   if (!change.ok) return change;
   if (!(change.unchanged)) next.ipChangedAt = new Date(now).toISOString();
@@ -380,6 +395,33 @@ function recordDetected(store, ip, source, now = Date.now()) {
   return { ok: true, detected };
 }
 
+/** What the token exchange needs, for the main process only. No channel returns it. */
+function credentialsFor(store, id) {
+  const a = read(store).accounts.find((x) => x.id === id);
+  return a ? { brokerId: a.brokerId, apiKey: a.apiKey, secret: a.secret || null } : null;
+}
+
+function saveSession(store, id, session) {
+  const { accounts } = read(store);
+  if (!accounts.some((a) => a.id === id)) return { ok: false, error: 'That account no longer exists.' };
+  store.set(DOMAIN, 'accounts', accounts.map((a) => (a.id === id ? { ...a, session: { ...session } } : a)));
+  return { ok: true };
+}
+
+function clearSession(store, id) {
+  const { accounts } = read(store);
+  if (!accounts.some((a) => a.id === id)) return { ok: false, error: 'That account no longer exists.' };
+  store.set(DOMAIN, 'accounts', accounts.map((a) => (a.id === id ? { ...a, session: null } : a)));
+  return { ok: true };
+}
+
+/** The key and live token, for a main-process caller making a data request. Null unless the session is live. */
+function liveSession(store, id, now = Date.now()) {
+  const a = read(store).accounts.find((x) => x.id === id);
+  if (!a || !a.session || kite.sessionState(a.session, now) !== 'live') return null;
+  return { apiKey: a.apiKey, accessToken: a.session.accessToken };
+}
+
 /** The secret, for a main-process caller that needs to USE it. Not reachable from any channel in this repo. */
 function secretFor(store, id) {
   const a = read(store).accounts.find((x) => x.id === id);
@@ -390,5 +432,5 @@ module.exports = {
   DOMAIN, MAX_ACCOUNTS, MAX_DISTRIBUTABLES, WEEK_MS, MIN_SECRET,
   classifyIp, normaliseIps, checkIpChange, checkIpConflicts, validateAccount, maskKey,
   view, snapshot, saveAccount, removeAccount, saveDistributable, removeDistributable, recordDetected,
-  secretFor, allDistributables, read,
+  secretFor, allDistributables, read, credentialsFor, saveSession, clearSession, liveSession, sessionView,
 };

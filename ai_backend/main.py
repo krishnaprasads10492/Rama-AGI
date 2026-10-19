@@ -817,6 +817,25 @@ def dataset_load(name: str):
         return {"ok": False, "reason": str(e)}
 
 
+class StoreImportRequest(BaseModel):
+    symbol:   str = Field(..., min_length=1, max_length=20)
+    exchange: str = Field(default="NSE", max_length=12)
+    interval: str = Field(..., min_length=2, max_length=4)
+    source:   Literal["kite"]
+    bars:     list[dict] = Field(..., min_length=1, max_length=60000)
+
+
+@app.post("/store/import")
+def store_import(req: StoreImportRequest):
+    """Bars fetched by another process (Kite, from the Electron side) merged into the working store."""
+    try:
+        from engine import store
+        return store.import_bars(req.symbol.upper(), req.exchange.upper(), req.interval, req.source, req.bars)
+    except Exception as e:
+        logger.error(f"Store import failed: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e)}
+
+
 @app.get("/store/inventory")
 def store_inventory():
     """Every series held locally, with its depth and provenance."""

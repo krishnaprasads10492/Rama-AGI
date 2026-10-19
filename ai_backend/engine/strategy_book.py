@@ -332,7 +332,10 @@ def is_stale(entry: dict, today: Optional[_dt.date] = None) -> bool:
         then = _dt.datetime.fromisoformat(str(at).replace("Z", "+00:00")).date()
     except Exception:
         return True
-    return ((today or _dt.date.today()) - then).days >= STALE_AFTER_DAYS
+    # UTC on BOTH sides: the stamps are written in UTC, so comparing them with the machine's LOCAL date made a
+    # measurement taken a minute ago read a day old for the hours when the two dates differ (found when a test
+    # failed only in the evening, Section 156).
+    return ((today or _dt.datetime.now(_dt.timezone.utc).date()) - then).days >= STALE_AFTER_DAYS
 
 
 # ── Utilise: what the rule says right now ─────────────────────────────────────

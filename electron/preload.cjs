@@ -823,6 +823,13 @@ const RAMA_API = {
     run:           () => ipcRenderer.invoke('engineSetup:run'),
     installPython: () => ipcRenderer.invoke('engineSetup:install-python'),
   },
+  // Kite Connect as a DATA source (Section 156). No `user` is sent; the token and the secret never come back.
+  kiteSession: {
+    loginStart:    (accountId)           => ipcRenderer.invoke('kiteSession:login-start', { accountId }),
+    loginComplete: (accountId, redirect) => ipcRenderer.invoke('kiteSession:login-complete', { accountId, redirect }),
+    logout:        (accountId)           => ipcRenderer.invoke('kiteSession:logout', { accountId }),
+    fetchBars:     (opts)                => ipcRenderer.invoke('kiteSession:fetch-bars', opts),
+  },
   brokerAccounts: {
     list:               ()     => ipcRenderer.invoke('brokerAccounts:list'),
     save:               (acct) => ipcRenderer.invoke('brokerAccounts:save', acct),

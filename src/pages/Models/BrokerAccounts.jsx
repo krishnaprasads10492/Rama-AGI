@@ -3,7 +3,7 @@ import { FS, LH } from '@config/type.js';
 import { can } from '@services/accessControl.js';
 import {
   REASON, ipStatus, changeLock, groupByDistributable, draftProblems, blankDraft, draftFrom,
-  isWeeklyLock, visibleTo, mayWrite,
+  isWeeklyLock, visibleTo, mayWrite, isKite, sessionStatus, KITE_STEPS, KITE_REDIRECT_NOTE,
 } from './brokerAccountsModel.js';
 
 /**
@@ -35,6 +35,8 @@ export default function BrokerAccounts({ currentUser }) {
   const [draft, setDraft] = useState(null);
   const [lock, setLock] = useState(null);
   const [distLabel, setDistLabel] = useState('');
+  const [loginFor, setLoginFor] = useState(null);       // account id with a Kite login in progress
+  const [redirectText, setRedirectText] = useState('');
 
   const load = useCallback(async () => {
     const res = await window.rama.brokerAccounts.list();
@@ -72,6 +74,15 @@ export default function BrokerAccounts({ currentUser }) {
     const res = await run(() => window.rama.brokerAccounts.save({ ...draft, acknowledgeWeeklyLimit: acknowledge }),
       draft.id ? 'Account updated.' : 'Account saved. The secret is stored encrypted and will not be shown again.');
     if (res?.ok) setDraft(null);
+  };
+
+  const startLogin = async (id) => {
+    const res = await run(() => window.rama.kiteSession.loginStart(id));
+    if (res?.ok) { setLoginFor(id); setRedirectText(''); setNote(res.opened ? 'Kite\'s login page was opened in your browser.' : `Open this address in your browser: ${res.url}`); }
+  };
+  const finishLogin = async (id) => {
+    const res = await run(() => window.rama.kiteSession.loginComplete(id, redirectText), 'Logged in to Kite.');
+    if (res?.ok) { setLoginFor(null); setRedirectText(''); }
   };
 
   const groups = groupByDistributable(snap);
@@ -170,6 +181,39 @@ export default function BrokerAccounts({ currentUser }) {
                   <strong>{st.label}</strong> {st.text}
                 </div>
                 {locked && <div style={{ fontSize: FS.dense, color: 'var(--gold)' }}>{locked}</div>}
+                {isKite(a) && writable && (() => {
+                  const ss = sessionStatus(a);
+                  return (
+                    <div style={{ borderTop: '1px solid var(--border)', paddingTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span className={ss.tone === 'good' ? 'badge badge-green' : ss.tone === 'bad' ? 'badge badge-red' : 'badge'}>{ss.label}</span>
+                        <span style={{ fontSize: FS.dense, color: 'var(--muted)', lineHeight: LH.chrome }}>{ss.text}</span>
+                        <span style={{ flex: 1 }} />
+                        <button type="button" className="btn btn-sm" disabled={busy || !a.hasSecret} onClick={() => startLogin(a.id)}
+                                title={a.hasSecret ? 'Opens Zerodha\'s login page in your browser' : 'Store the API secret first'}>OPEN KITE LOGIN</button>
+                        {ss.state !== 'none' && (
+                          <button type="button" className="btn btn-sm" disabled={busy}
+                                  onClick={() => run(() => window.rama.kiteSession.logout(a.id), 'Logged out of Kite.')}>LOG OUT</button>
+                        )}
+                      </div>
+                      {loginFor === a.id && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <ol style={{ margin: 0, paddingLeft: '18px', fontSize: FS.dense, color: 'var(--text-dim)', lineHeight: LH.chrome }}>
+                            {KITE_STEPS.map((t) => <li key={t}>{t}</li>)}
+                          </ol>
+                          <input className="input" value={redirectText} spellCheck={false} autoComplete="off" aria-label="Address Kite redirected to"
+                                 placeholder="http://127.0.0.1/?request_token=...&action=login&status=success&state=..."
+                                 onChange={(e) => setRedirectText(e.target.value)} />
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button type="button" className="btn btn-primary btn-sm" disabled={busy || !redirectText.trim()} onClick={() => finishLogin(a.id)}>COMPLETE LOGIN</button>
+                            <button type="button" className="btn btn-sm" onClick={() => { setLoginFor(null); setRedirectText(''); }}>CANCEL</button>
+                          </div>
+                          <div style={{ fontSize: FS.dense, color: 'var(--muted)', lineHeight: LH.chrome }}>{KITE_REDIRECT_NOTE}</div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}

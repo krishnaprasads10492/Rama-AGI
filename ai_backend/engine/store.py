@@ -591,6 +591,57 @@ def _sync_view(symbol, exchange, interval, want_years, force, stored, info, prov
     return union, info
 
 
+# Providers whose bars may be pushed in from outside the engine. Kite's access token lives in the Electron main
+# process, so the main process fetches and hands the bars over; the engine never sees the token (Section 156).
+IMPORT_SOURCES = {"kite"}
+IMPORT_INTERVALS = {"1m", "3m", "5m", "10m", "15m", "30m", "60m", "1h", "1d"}
+MAX_IMPORT_BARS = 60000
+
+
+def import_bars(symbol: str, exchange: str, interval: str, source: str, bars: list) -> dict:
+    """
+    Validate bars handed in from another process and merge them into the working store.
+
+    Nothing is trusted: the source must be on the list, the shape and size are checked, every price must be a
+    positive number, and a batch with impossible bars (Section 154) is refused whole rather than stored.
+    @returns {ok, imported, bars, firstBar, lastBar} or {ok: False, reason}
+    """
+    if source not in IMPORT_SOURCES:
+        return {"ok": False, "reason": f"{source!r} is not an allowed import source"}
+    iv = str(interval or "").lower()
+    if iv not in IMPORT_INTERVALS:
+        return {"ok": False, "reason": f"{interval!r} is not an interval that can be imported"}
+    if not isinstance(bars, list) or not bars:
+        return {"ok": False, "reason": "no bars were supplied"}
+    if len(bars) > MAX_IMPORT_BARS:
+        return {"ok": False, "reason": f"{len(bars)} bars is more than one import may carry ({MAX_IMPORT_BARS})"}
+    try:
+        df = pd.DataFrame(bars)
+    except Exception as exc:
+        return {"ok": False, "reason": f"the bars could not be read: {exc}"}
+    need = ["date", "open", "high", "low", "close"]
+    if any(c not in df.columns for c in need):
+        return {"ok": False, "reason": "every bar needs date, open, high, low and close"}
+    if "volume" not in df.columns:
+        df["volume"] = 0.0
+    for c in ("open", "high", "low", "close", "volume"):
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    bad_rows = int(df[need].isna().any(axis=1).sum())
+    if bad_rows:
+        return {"ok": False, "reason": f"{bad_rows} bars have a missing or unreadable value"}
+    if (df[["open", "high", "low", "close"]] <= 0).any().any():
+        return {"ok": False, "reason": "a price is zero or negative"}
+    if ohlc_violations(df) / len(df) > REPAIR_SHARE:
+        return {"ok": False, "reason": "the bars contradict themselves (a close outside its own high-low range), so none were stored"}
+    df = df[["date", "open", "high", "low", "close", "volume"]].drop_duplicates(subset=["date"], keep="last")
+    merged = merge(symbol, df, exchange, iv, source=source)
+    if merged is None:
+        return {"ok": False, "reason": "the store did not accept the bars"}
+    return {"ok": True, "imported": int(len(df)), "bars": int(len(merged)),
+            "firstBar": str(merged["date"].iloc[0]), "lastBar": str(merged["date"].iloc[-1]), "source": source}
+
+
 def inventory() -> list[dict]:
     """Every symbol held locally, with its depth — so master can see what Rāma has."""
     out = []
