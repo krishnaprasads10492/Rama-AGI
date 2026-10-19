@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import Titlebar       from './Titlebar.jsx';
 import CommandPalette from './CommandPalette.jsx';
 import ActivityStream from './ActivityStream.jsx';
+import TokenExpiryNotice from './TokenExpiryNotice.jsx';
 
 export default function AppShell({ children }) {
   const [streamVisible, setStreamVisible] = useState(false);
@@ -16,6 +17,7 @@ export default function AppShell({ children }) {
       background:    'var(--bg)',
     }}>
       <Titlebar />
+      <TokenExpiryNotice />
       <CommandPalette />
       <main
         className="grid-bg"

@@ -1,7 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useUserStore } from '@store/userStore.js';
 import { FS, LH } from '@config/type.js';
+import { useLocation } from 'react-router-dom';
 import BrokerAccounts from './BrokerAccounts.jsx';
+import GitHubKeyFacts, { TONE } from './GitHubKeyFacts.jsx';
+import { keyRow, EXPIRY_EVENT } from '@pages/GitSync/gitCredentialModel.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -189,12 +192,16 @@ function AddCustomProviderModal({ onSave, onClose }) {
 function AddKeyModal({ credKey, info, onSave, onClose }) {
   const [value, setValue] = useState('');
   const [busy,  setBusy]  = useState(false);
+  const [error, setError] = useState(null);
 
   const save = async () => {
     if (!value.trim()) return;
     setBusy(true);
-    await onSave(credKey, value.trim());
+    setError(null);
+    const res = await onSave(credKey, value.trim());
     setBusy(false);
+    // A refusal keeps the dialog open and says why; it used to close as if the key had been stored.
+    if (res && res.ok === false) { setError(res.error || 'The key was not stored.'); return; }
     onClose();
   };
 
@@ -224,8 +231,10 @@ function AddKeyModal({ credKey, info, onSave, onClose }) {
             onKeyDown={e => e.key === 'Enter' && save()} />
           <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '4px' }}>
             Stored AES-256-GCM encrypted in your local vault. Never leaves this machine.
+            {credKey === 'GITHUB_TOKEN' && ' GitHub is asked first and its expiry is recorded; a token GitHub rejects is not stored.'}
           </div>
         </div>
+        {error && <div role="alert" style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--red)' }}>{error}</div>}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
           <button className="btn btn-sm" onClick={onClose}>Cancel</button>
@@ -239,7 +248,8 @@ function AddKeyModal({ credKey, info, onSave, onClose }) {
 }
 
 export default function Models() {
-  const { currentUser } = useUserStore();
+  const { currentUser, canDo } = useUserStore();
+  const location = useLocation();
   const [models,      setModels]      = useState([]);
   const [credentials, setCredentials] = useState({});
   const [primary,     setPrimary]     = useState('gpt-4o');
@@ -266,7 +276,9 @@ export default function Models() {
   const [brokers,      setBrokers]      = useState(null);
   const [brokerFields, setBrokerFields] = useState(null);
   const [brokersError, setBrokersError] = useState(null);
-  const [tab,         setTab]         = useState('cloud');
+  // The expiry bar sends master here with `state.tab = 'keys'` to replace the token.
+  const [tab,         setTab]         = useState(() => location.state?.tab || 'cloud');
+  const [gitExpiry,   setGitExpiry]   = useState(null);
   const [customProviders,   setCustomProviders]   = useState([]);
   const [showAddCustom,     setShowAddCustom]     = useState(false);
   const [customError,       setCustomError]       = useState(null);
@@ -291,9 +303,10 @@ export default function Models() {
       window.rama.models.listCustomProviders({ user: currentUser }),
       window.rama.models.cloudStatus(),
       window.rama.models.checkCredentials(),
+      window.rama.gitAuth?.expiry ? window.rama.gitAuth.expiry() : Promise.resolve(null),
     ]);
     const value = (i) => (settled[i].status === 'fulfilled' ? settled[i].value : null);
-    const [mRes, pRes, vRes, cpRes, csRes, cRes] = [0, 1, 2, 3, 4, 5].map(value);
+    const [mRes, pRes, vRes, cpRes, csRes, cRes, gRes] = [0, 1, 2, 3, 4, 5, 6].map(value);
 
     if (mRes?.ok) { setModels(mRes.data); setOllamaModels(mRes.ollama || []); }
     if (pRes?.ok) setPrimary(pRes.model);
@@ -304,6 +317,7 @@ export default function Models() {
     if (cpRes?.ok) setCustomProviders(cpRes.data);
     if (csRes?.ok) setCloudStatus(csRes);
     if (cRes?.ok) setCredentials(cRes.data);
+    if (gRes?.ok) setGitExpiry(gRes);
 
     // A channel that REJECTED is a different fact from one that returned
     // `ok:false`, and the vault's is the one that strands this page, so it is
@@ -315,6 +329,14 @@ export default function Models() {
   }, [currentUser]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => { if (location.state?.tab) setTab(location.state.tab); }, [location.state]);
+
+  // The expiry bar and the Git Sync token tab change the token's facts; this page re-reads when they say so.
+  useEffect(() => {
+    window.addEventListener(EXPIRY_EVENT, load);
+    return () => window.removeEventListener(EXPIRY_EVENT, load);
+  }, [load]);
 
   /**
    * A FAILED UNLOCK USED TO DO NOTHING AT ALL. The result was checked with
@@ -448,10 +470,17 @@ export default function Models() {
   // The broker list is cheap and has no side effect, so it loads when its tab opens.
   useEffect(() => { if (tab === 'brokers' && !brokers) loadBrokers(); }, [tab, brokers, loadBrokers]);
 
+  // The GitHub token goes through `gitAuth:set`, which asks GitHub before storing it and records its expiry
+  // (Section 158.3, D3); every other key is stored as before. A refusal is returned so the dialog can show it.
   const saveKey = async (credKey, value) => {
-    if (!isElectron) return;
-    await window.rama.vault.set(currentUser, credKey, value, { label: PROVIDER_LINKS[credKey]?.label });
+    if (!isElectron) return { ok: false, error: 'The desktop app is required.' };
+    const res = credKey === 'GITHUB_TOKEN'
+      ? await window.rama.gitAuth.set(value)
+      : await window.rama.vault.set(currentUser, credKey, value, { label: PROVIDER_LINKS[credKey]?.label });
+    if (res && res.ok === false) return res;
+    if (credKey === 'GITHUB_TOKEN') window.dispatchEvent(new Event(EXPIRY_EVENT));
     load();
+    return { ok: true };
   };
 
   const setAsPrimary = async (modelId) => {
@@ -865,16 +894,17 @@ export default function Models() {
         {tab === 'keys' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {Object.entries(PROVIDER_LINKS).map(([key, info]) => {
-              const has = credentials[key.toLowerCase()] === 'available' ||
-                          Object.values(credentials).find((_, i) => Object.keys(credentials)[i] === key);
+              const isGit = key === 'GITHUB_TOKEN';
+              const gitRow = isGit ? keyRow(gitExpiry?.notice, { vaultUnlocked: gitExpiry?.vaultUnlocked, stored: gitExpiry?.stored }) : null;
               return (
                 <div key={key} className="hud-card" style={{ padding: '14px 16px',
                   display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <div style={{ width: '6px', height: '6px', borderRadius: '50%', flexShrink: 0,
-                    background: 'var(--border)' }} />
+                    background: gitRow ? TONE[gitRow.tone] : 'var(--border)' }} />
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 700, fontSize: '12px', color: 'var(--text)' }}>{info.label}</div>
                     <div style={{ fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--muted)', marginTop: '2px' }}>{info.hint}</div>
+                    {isGit && <GitHubKeyFacts data={gitExpiry} canWrite={canDo ? canDo('vault.write') : false} onChanged={load} />}
                   </div>
                   <button className="btn btn-sm btn-primary"
                     onClick={() => vaultLocked ? alert('Unlock vault first') : setAddKeyFor(key)}>

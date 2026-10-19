@@ -20,8 +20,14 @@
  * with no network, no repository and no vault.
  */
 
+const tokenExpiry = require('./tokenExpiry.cjs');
+
 const GITHUB_HOST = 'https://github.com/';
 const SERVICE = 'GITHUB_TOKEN';
+// Where the non-secret facts about the token live: the encrypted app store, which is open at login while the vault
+// usually is not (Section 158.3, D1).
+const RECORD_DOMAIN = 'config';
+const RECORD_KEY = 'githubToken';
 
 // ─── Shapes ──────────────────────────────────────────────────────────────────────────────────────
 const CLASSIC = /^(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,255}$/;
@@ -85,6 +91,37 @@ function storedToken() {
   return typeof t === 'string' && t ? t : null;
 }
 
+// ─── The record of what is known about the token (no secret in it) ───────────────────────────────
+let store = null;
+function useStore(s) { store = s || null; }
+function theStore() {
+  if (store) return store;
+  try { return require('../dataStore.cjs'); } catch { return null; }
+}
+function readRecord() {
+  const s = theStore();
+  try { const r = s && s.get(RECORD_DOMAIN, RECORD_KEY); return r && typeof r === 'object' ? r : null; } catch { return null; }
+}
+/** @returns {boolean} whether it was written */
+function writeRecord(record) {
+  const s = theStore();
+  if (!s) return false;
+  try { s.set(RECORD_DOMAIN, RECORD_KEY, record || null); return true; } catch { return false; }
+}
+
+/**
+ * A git command failed. If it failed in GitHub's words for a refused credential AND the stored token was the one in
+ * use, the token is marked rejected, so a token revoked early raises the standing notice without waiting for the
+ * date (Section 158.3, D7). A bare 403 is not treated this way: a token without write access gets one.
+ */
+function noteAuthFailure(text, now = Date.now()) {
+  if (!tokenExpiry.looksLikeAuthFailure(text)) return false;
+  if (!storedToken()) return false;
+  const rec = readRecord();
+  if (!rec) return false;
+  return writeRecord(tokenExpiry.recordRejected(rec, now));
+}
+
 /** A simple-git client; with the stored token it carries the one-shot header, otherwise it is exactly as before. */
 function open(repoPath, simpleGit) {
   const sg = simpleGit || require('simple-git').simpleGit;
@@ -136,8 +173,9 @@ async function scrubRemotes(git) {
  * access reported `push: true` and was then refused with a 403 (Section 156 session). So for a fine-grained token
  * the answer is "visible", never "can push", and the panel says the first push is the real test.
  */
-async function probe(http, token, slug) {
+async function probe(http, token, slug, now = Date.now) {
   const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+  const callMs = now();
   let me;
   try { me = await http.request('https://api.github.com/user', { method: 'GET', headers, retries: 0, timeout: 15000 }); }
   catch (err) { return { ok: false, error: `GitHub could not be reached: ${redact(err.message)}` }; }
@@ -147,7 +185,8 @@ async function probe(http, token, slug) {
   try { user = JSON.parse(me.body); } catch { user = {}; }
   const scopes = me.headers && me.headers['x-oauth-scopes'] !== undefined ? String(me.headers['x-oauth-scopes']).split(',').map((s) => s.trim()).filter(Boolean) : null;
   const kind = scopes === null ? 'fine-grained' : 'classic';
-  const out = { ok: true, login: String(user.login || ''), kind, scopes: scopes ? scopes.slice(0, 40) : null, broad: !!(scopes && scopes.some((s) => /^(admin:|delete_repo|write:packages|delete:packages)/.test(s))) };
+  const expiry = tokenExpiry.parseExpiryHeader(me.headers && me.headers[tokenExpiry.HEADER], callMs);
+  const out = { ok: true, expiry, login: String(user.login || ''), kind, scopes: scopes ? scopes.slice(0, 40) : null, broad: !!(scopes && scopes.some((s) => /^(admin:|delete_repo|write:packages|delete:packages)/.test(s))) };
   if (slug) {
     let repo;
     try { repo = await http.request(`https://api.github.com/repos/${slug}`, { method: 'GET', headers, retries: 0, timeout: 15000 }); } catch { repo = null; }
@@ -165,4 +204,5 @@ module.exports = {
   SERVICE, GITHUB_HOST,
   redact, scrubUrl, hasCredential, validateToken, authConfig, useVault, storedToken, open,
   describeRemotes, slugOf, scrubRemotes, probe,
+  useStore, readRecord, writeRecord, noteAuthFailure,
 };

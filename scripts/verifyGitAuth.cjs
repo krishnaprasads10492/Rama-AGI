@@ -240,8 +240,10 @@ const b64 = (t) => Buffer.from('x-access-token:' + t, 'utf8').toString('base64')
     getRemotes: async () => { sgCalls.push(['getRemotes', rp]); return [{ name: 'origin', refs: { fetch: urlWith, push: urlWith } }]; },
     remote: async (a) => { sgCalls.push(['remote', ...a]); },
   });
-  ipc.register({ handle: (ch, fn) => handlers.set(ch, fn) }, { vault, http: probeHttp, simpleGit: stubGit });
-  check('five channels', handlers.size === 5 && ['status', 'set', 'remove', 'test', 'scrub'].every((c) => handlers.has('gitAuth:' + c)), [...handlers.keys()].join());
+  const records = new Map();
+  const fakeStore = { get: (dom, key) => records.get(dom + '/' + key) || null, set: (dom, key, v) => { records.set(dom + '/' + key, v); } };
+  ipc.register({ handle: (ch, fn) => handlers.set(ch, fn) }, { vault, http: probeHttp, simpleGit: stubGit, store: fakeStore, now: () => Date.parse('2026-10-20T10:00:00Z') });
+  check('seven channels', handlers.size === 7 && ['status', 'set', 'remove', 'test', 'scrub', 'expiry', 'set-expiry'].every((c) => handlers.has('gitAuth:' + c)), [...handlers.keys()].join());
   const pOf = {};
   principalBinding.useAuth({
     validateSession: (tok) => (pOf[tok] ? { userId: pOf[tok].userId } : null),
@@ -256,8 +258,8 @@ const b64 = (t) => Buffer.from('x-access-token:' + t, 'utf8').toString('base64')
   const keep = (r) => { everything.push(r); return r; };
 
   for (const [who, win] of Object.entries({ anonymous: nobody, guest: W.guest, viewer: W.viewer, operator: W.operator, admin: W.admin })) {
-    for (const ch of ['status', 'set', 'remove', 'test', 'scrub']) {
-      const r = keep(await call(ch, win, { token: PAT, repoPath: '/r' }));
+    for (const ch of ['status', 'set', 'remove', 'test', 'scrub', 'expiry', 'set-expiry']) {
+      const r = keep(await call(ch, win, { token: PAT, repoPath: '/r', date: '2027-01-01' }));
       check(`${who} is refused ${ch}`, r.ok === false && !('hasToken' in r) && !('changed' in r));
     }
   }
@@ -298,7 +300,7 @@ const b64 = (t) => Buffer.from('x-access-token:' + t, 'utf8').toString('base64')
 
   const t1 = keep(await call('test', W.sa, { repoPath: '/r' }));
   check('test asks GitHub as the stored token and finds the repository', t1.ok && t1.login === 'krishna' && t1.repo && t1.repo.slug === 'krishnaprasads10492/Rama-AGI' && t1.repo.visible);
-  check('test sent the stored token to api.github.com only', probeHttp.calls.length === 2 && probeHttp.calls.every((c) => c.url.startsWith('https://api.github.com/') && c.headers.Authorization === 'Bearer ' + PAT));
+  check('test sent the stored token to api.github.com only', probeHttp.calls.length === 3 && probeHttp.calls.every((c) => c.url.startsWith('https://api.github.com/') && c.headers.Authorization === 'Bearer ' + PAT));
   check('test reply carries no token', !JSON.stringify(t1).includes(PAT));
 
   const sc = keep(await call('scrub', W.sa, { repoPath: '/r' }));
@@ -310,7 +312,7 @@ const b64 = (t) => Buffer.from('x-access-token:' + t, 'utf8').toString('base64')
   const rm = keep(await call('remove', W.master, {}));
   check('master removes it', rm.ok && rm.hasToken === false && vault.store.size === 0);
   const t2 = keep(await call('test', W.sa, { repoPath: '/r' }));
-  check('test with nothing stored says so and makes no GitHub call', t2.ok === false && /No token/.test(t2.error) && probeHttp.calls.length === 2);
+  check('test with nothing stored says so and makes no GitHub call', t2.ok === false && /No token/.test(t2.error) && probeHttp.calls.length === 3);
   const st2 = keep(await call('status', W.sa, {}));
   check('status afterwards: no token', st2.hasToken === false);
 
@@ -350,10 +352,10 @@ const b64 = (t) => Buffer.from('x-access-token:' + t, 'utf8').toString('base64')
   check('releaseChannel and publishProposal push through it too', /gitAuth\.open\(/.test(release) && /gitAuth\.open\(/.test(propose));
   check('every error reply in git.cjs is redacted', !/error:\s*err\.message/.test(gitSrc) && (gitSrc.match(/gitAuth\.redact\(err\.message\)/g) || []).length >= 12);
   check('the gate is the validated principal, never a payload user', /principalBinding\.getPrincipal\(e\)/.test(ipcSrc) && !/\{\s*user\b/.test(ipcSrc));
-  check('set and remove are vault.write; the rest are git.push', (ipcSrc.match(/gated\('vault\.write'/g) || []).length === 2 && (ipcSrc.match(/gated\('git\.push'/g) || []).length === 3);
+  check('set, remove and set-expiry are vault.write; expiry is vault.read; status, test and scrub are git.push', (ipcSrc.match(/gated\('vault\.write'/g) || []).length === 3 && (ipcSrc.match(/gated\('vault\.read'/g) || []).length === 1 && (ipcSrc.match(/gated\('git\.push'/g) || []).length === 3);
   check('the token is never written to a URL, file or environment variable', !/writeFileSync|appendFile|process\.env\[|process\.env\./.test(lib + ipcSrc) && !/remote\(\['(add|set-url)'[^)]*token/i.test(lib + ipcSrc));
   check('there is no console.log', !/console\.log/.test(lib + ipcSrc));
-  check('the IPC is registered in main.cjs and in the preload', /gitAuthIPC/.test(main) && /Git credential/.test(main) && /gitAuth:\s*\{/.test(preload) && ['status', 'set', 'remove', 'test', 'scrub'].every((c) => preload.includes(`'gitAuth:${c}'`)));
+  check('the IPC is registered in main.cjs and in the preload', /gitAuthIPC/.test(main) && /Git credential/.test(main) && /gitAuth:\s*\{/.test(preload) && ['status', 'set', 'remove', 'test', 'scrub', 'expiry', 'set-expiry'].every((c) => preload.includes(`'gitAuth:${c}'`)));
   check('the scrub is a click, not a startup action', !/gitAuth\.scrubRemotes|gitAuth:scrub/.test(main));
   check('the header is scoped to one host', /GITHUB_HOST\s*=\s*'https:\/\/github\.com\/'/.test(lib) && /http\.\$\{GITHUB_HOST\}\.extraheader/.test(lib));
   check('the vault service name is GITHUB_TOKEN', lib.includes("SERVICE = 'GITHUB_TOKEN'"));

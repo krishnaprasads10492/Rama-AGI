@@ -3,6 +3,7 @@ import { FS, LH } from '@config/type.js';
 import { useUserStore } from '@store/userStore.js';
 import {
   REVOKE_NOTE, HOW_TO, headline, details, tokenProblem, actions, testSummary, scrubSummary, stateOf,
+  saveSummary, expiryLine, sourceNote, verifiedLine, EXPIRY_EVENT,
 } from './gitCredentialModel.js';
 
 /**
@@ -14,6 +15,9 @@ import {
  */
 
 const inBridge = typeof window !== 'undefined' && !!window.rama?.gitAuth;
+
+// Tells the expiry bar to re-ask now rather than at its next 5-minute look (Section 158.3, D8).
+const tellExpiryBar = () => { if (typeof window !== 'undefined') window.dispatchEvent(new Event(EXPIRY_EVENT)); };
 
 export default function GitCredential({ repoPath }) {
   const { canDo } = useUserStore();
@@ -51,7 +55,8 @@ export default function GitCredential({ repoPath }) {
     setBusy(false);
     if (res?.ok === false) { setError(res.error || 'The token was not stored.'); return; }
     setError(null);
-    setNote(`Stored in the vault (${res.kind === 'classic' ? 'classic' : 'fine-grained'} token). Press TEST to check it with GitHub.`);
+    setNote(saveSummary(res));
+    tellExpiryBar();
     await refresh();
   };
 
@@ -61,6 +66,7 @@ export default function GitCredential({ repoPath }) {
     const res = await fn();
     setBusy(false);
     if (after) after(res);
+    tellExpiryBar();
     await refresh();
   };
 
@@ -68,6 +74,11 @@ export default function GitCredential({ repoPath }) {
     <div className="hud-card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
       <div className="section-label">GITHUB TOKEN</div>
       <div role="status" style={{ fontSize: FS.chrome, color: stateOf(st) === 'has-token' ? 'var(--green)' : 'var(--gold)', lineHeight: LH.body }}>{headline(st)}</div>
+      {st?.notice && st.notice.state !== 'none' && (
+        <div style={{ fontSize: FS.denseLg, color: ['expired', 'rejected', 'unverified'].includes(st.notice.state) ? 'var(--red)' : 'var(--text-dim)', lineHeight: LH.body }}>
+          {[expiryLine(st.notice), sourceNote(st.notice), verifiedLine(st.notice)].filter(Boolean).join(' ')}
+        </div>
+      )}
       {details(st).map((d) => (
         <div key={d} style={{ fontSize: FS.denseLg, color: 'var(--text-dim)', lineHeight: LH.body }}>{d}</div>
       ))}

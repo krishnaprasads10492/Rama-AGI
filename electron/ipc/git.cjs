@@ -112,6 +112,7 @@ function register(ipcMain) {
       const result = await git.push('origin', branch);
       return { ok: true, data: result };
     } catch (err) {
+      gitAuth.noteAuthFailure(err.message);
       return { ok: false, error: gitAuth.redact(err.message) };
     }
   });
@@ -125,6 +126,7 @@ function register(ipcMain) {
       const result = await git.pull();
       return { ok: true, data: result };
     } catch (err) {
+      gitAuth.noteAuthFailure(err.message);
       return { ok: false, error: gitAuth.redact(err.message) };
     }
   });
@@ -138,6 +140,7 @@ function register(ipcMain) {
       await git.clone(url, dest);
       return { ok: true };
     } catch (err) {
+      gitAuth.noteAuthFailure(err.message);
       return { ok: false, error: gitAuth.redact(err.message) };
     }
   });

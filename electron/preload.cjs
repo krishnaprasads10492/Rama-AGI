@@ -831,6 +831,8 @@ const RAMA_API = {
     remove: ()         => ipcRenderer.invoke('gitAuth:remove'),
     test:   (repoPath) => ipcRenderer.invoke('gitAuth:test', { repoPath }),
     scrub:  (repoPath) => ipcRenderer.invoke('gitAuth:scrub', { repoPath }),
+    expiry: ()         => ipcRenderer.invoke('gitAuth:expiry'),
+    setExpiry: (date)  => ipcRenderer.invoke('gitAuth:set-expiry', { date }),
   },
   // Kite Connect as a DATA source (Section 156). No `user` is sent; the token and the secret never come back.
   kiteSession: {
