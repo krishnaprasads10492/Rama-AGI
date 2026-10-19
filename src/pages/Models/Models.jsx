@@ -265,7 +265,7 @@ export default function Models() {
   const [unlocking,   setUnlocking]   = useState(false);
   // `exists` + `unreadable` from vault:status, so the banner can tell "nothing
   // stored yet" from "stored but undecryptable" instead of calling both locked.
-  const [vaultState,  setVaultState]  = useState({ exists: false, unreadable: false });
+  const [vaultState,  setVaultState]  = useState({ exists: false, unreadable: false, weakKdf: false });
 
   // ── Roles and brokers (Section 145) ──────────────────────────────────────
   // Loaded ON DEMAND, not with the page: `models:roles` calls `refreshOllamaModels()` first, and
@@ -312,7 +312,7 @@ export default function Models() {
     if (pRes?.ok) setPrimary(pRes.model);
     if (vRes?.ok) {
       setVaultLocked(!vRes.unlocked);
-      setVaultState({ exists: !!vRes.exists, unreadable: !!vRes.unreadable });
+      setVaultState({ exists: !!vRes.exists, unreadable: !!vRes.unreadable, weakKdf: !!vRes.weakKdf });
     }
     if (cpRes?.ok) setCustomProviders(cpRes.data);
     if (csRes?.ok) setCloudStatus(csRes);
@@ -595,6 +595,17 @@ export default function Models() {
         </div>
       )}
 
+      {/* The vault says which key derivation sealed it (Section 159). On scrypt it is still encrypted, but a stolen
+          vault file is cheaper to guess passwords against, and nothing used to say so. */}
+      {vaultState.weakKdf && (
+        <div role="status" style={{ padding: '8px 20px', borderBottom: '1px solid var(--amber)', background: 'rgba(255,170,0,0.08)',
+          fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--text)', flexShrink: 0 }}>
+          <strong style={{ color: 'var(--amber)' }}>Vault uses the weaker key derivation (scrypt).</strong>{' '}
+          The Argon2 module is not available in this installation. Your stored keys are still encrypted with AES-256-GCM,
+          but a stolen vault file is cheaper to guess passwords against. Use a build that includes the argon2 module; the
+          existing vault keeps working.
+        </div>
+      )}
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
         {/* TWO NEW TABS, and they are the consumers the bridge never had (Section 145).

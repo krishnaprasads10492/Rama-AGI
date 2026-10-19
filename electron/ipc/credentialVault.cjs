@@ -17,6 +17,8 @@ const capability = require('../lib/capability.cjs');
 let vaultKey      = null;   // 32-byte AES key derived from master password
 let vaultData     = {};     // Decrypted in-memory store { [service]: { key, meta, addedAt } }
 let vaultUnlocked = false;
+/** The key derivation this vault was sealed with, once known (Section 159). Null while locked and unread. */
+let vaultKdf       = null;
 /**
  * Whether the ciphertext on disk was actually READ. False means either there is
  * nothing stored yet (fine) or there is something we could not decrypt (not
@@ -86,12 +88,23 @@ function decrypt(key, ciphertext) {
   return decipher.update(data) + decipher.final('utf8');
 }
 
-// ─── Derive key from master password (scrypt as Argon2 fallback) ──────────────
-async function deriveKey(password, salt) {
-  // Try Argon2id first (if argon2 native module available)
-  try {
+// ─── Key derivation, NAMED IN THE FILE (Section 159) ──────────────────────────
+/**
+ * The derivation used to be chosen at run time — Argon2id if the native module loaded, scrypt if not — and written
+ * nowhere. A vault sealed under one and opened where the other was available derived a DIFFERENT key from the same
+ * password, and the verifier reported "wrong master password". So the file now records which one sealed it, unlock
+ * uses exactly that one, and a missing module is reported as a missing module.
+ */
+const KDFS = Object.freeze(['argon2id', 'scrypt']);
+
+function argon2Present() {
+  try { require('argon2'); return true; } catch { return false; }
+}
+
+async function deriveKeyWith(kdf, password, salt) {
+  if (kdf === 'argon2id') {
     const argon2 = require('argon2');
-    const hash   = await argon2.hash(password, {
+    return argon2.hash(password, {
       type:         argon2.argon2id,
       memoryCost:   ARGON_MEMORY,
       timeCost:     ARGON_ITER,
@@ -100,15 +113,56 @@ async function deriveKey(password, salt) {
       salt:         Buffer.from(salt, 'hex'),
       raw:          true,
     });
-    return hash;
-  } catch {
-    // Fallback to scrypt if argon2 native not built
-    return new Promise((resolve, reject) => {
-      crypto.scrypt(password, salt, 32, { N: 16384, r: 8, p: 1 }, (err, key) => {
-        if (err) reject(err); else resolve(key);
-      });
-    });
   }
+  // scrypt: the parameters and the salt encoding are EXACTLY what every existing scrypt vault was sealed with.
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, 32, { N: 16384, r: 8, p: 1 }, (err, key) => {
+      if (err) reject(err); else resolve(key);
+    });
+  });
+}
+
+/** What the vault file says about itself. Not a secret: no value, no key, no service name. */
+function readHeader() {
+  const p = getVaultPath();
+  if (!fs.existsSync(p)) return { exists: false, hasCipher: false, kdf: null };
+  try {
+    const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+    return {
+      exists: true,
+      hasCipher: typeof raw.enc === 'string' && raw.enc.length > 0,
+      kdf: typeof raw.kdf === 'string' ? raw.kdf : null,
+    };
+  } catch {
+    return { exists: true, hasCipher: true, kdf: null };   // present but unreadable: loadVault will say so
+  }
+}
+
+/**
+ * Which derivations to try, in order, or a refusal.
+ * @returns {{candidates?:string[], refuse?:string, kdfMissing?:boolean}}
+ */
+function planKdf() {
+  const h = readHeader();
+  const have = argon2Present();
+  // Nothing sealed yet: a NEW vault. Argon2id when it loads; otherwise the weaker fallback, flagged by status.
+  if (!h.hasCipher) return { candidates: [have ? 'argon2id' : 'scrypt'] };
+  if (h.kdf !== null) {
+    if (!KDFS.includes(h.kdf)) {
+      const shown = /^[a-z0-9-]{1,20}$/i.test(h.kdf) ? h.kdf : '(unprintable)';
+      return { refuse: `This vault names a key derivation this version does not know ("${shown}"). It was left untouched.` };
+    }
+    if (h.kdf === 'argon2id' && !have) {
+      return { kdfMissing: true,
+        refuse: 'This vault was sealed with Argon2id, but the argon2 module is not available in this installation, '
+          + 'so the password cannot derive its key. This is not a wrong password. The vault was left untouched; '
+          + 'run a build that includes the argon2 module.' };
+    }
+    return { candidates: [h.kdf] };
+  }
+  // LEGACY (written before Section 159, no record): whichever was available then may differ from now, so try the
+  // stronger first and the other second. The verifier decides; a wrong password costs two derivations.
+  return { candidates: have ? ['argon2id', 'scrypt'] : ['scrypt'] };
 }
 
 /** The key's own fingerprint, used to reject a wrong password before decrypting. */
@@ -140,7 +194,7 @@ function saveVault() {
   // `verifier` travels with the blob; the SALT no longer does, and must not be
   // reintroduced here — see getSaltPath() for what that cost.
   fs.writeFileSync(getVaultPath(),
-    JSON.stringify({ version: VAULT_VERSION, enc: encrypted, hmac, verifier: verifierFor(vaultKey) }),
+    JSON.stringify({ version: VAULT_VERSION, enc: encrypted, hmac, verifier: verifierFor(vaultKey), ...(vaultKdf ? { kdf: vaultKdf } : {}) }),
     { encoding: 'utf8', mode: 0o600 });
   return { ok: true };
 }
@@ -259,7 +313,22 @@ function register(ipcMain) {
         fs.writeFileSync(saltPath, salt, { encoding: 'utf8', mode: 0o600 });
       }
 
-      const key = await deriveKey(password, salt);
+      const plan = planKdf();
+      if (plan.refuse) {
+        vaultKey = null; vaultData = {}; vaultUnlocked = false; vaultKdf = null;
+        vaultReadable = false; vaultCorrupt = true;
+        return { ok: false, unreadable: true, kdfMissing: !!plan.kdfMissing, error: plan.refuse };
+      }
+      // The recorded derivation only; a legacy vault tries two. Each attempt is judged by the verifier.
+      let key = null;
+      let loaded = null;
+      let usedKdf = null;
+      for (const kdf of plan.candidates) {
+        key = await deriveKeyWith(kdf, password, salt);
+        vaultKey = key;
+        loaded = loadVault();
+        if (loaded.state !== 'unreadable') { usedKdf = kdf; break; }
+      }
 
       // 4. VERIFY BEFORE COMMITTING. The old handler assigned the key and set
       //    `unlocked = true` unconditionally, so ANY password "worked" and left
@@ -268,10 +337,8 @@ function register(ipcMain) {
       //    cleared again below if the read fails. Nothing is exposed in between:
       //    `vaultUnlocked` stays false until the read has succeeded, and every
       //    read/write handler gates on that flag rather than on the key.
-      vaultKey = key;
-      const loaded = loadVault();
-      if (loaded.state === 'unreadable') {
-        vaultKey = null; vaultData = {}; vaultUnlocked = false;
+      if (usedKdf === null) {
+        vaultKey = null; vaultData = {}; vaultUnlocked = false; vaultKdf = null;
         vaultReadable = false; vaultCorrupt = true;
         return { ok: false, unreadable: true, error: `Vault not unlocked — ${loaded.why}.` };
       }
@@ -281,7 +348,8 @@ function register(ipcMain) {
       vaultUnlocked = true;
       vaultReadable = true;
       vaultCorrupt  = false;
-      return { ok: true, entries: Object.keys(vaultData).length, fresh: loaded.state === 'empty' };
+      vaultKdf      = usedKdf;
+      return { ok: true, entries: Object.keys(vaultData).length, fresh: loaded.state === 'empty', kdf: vaultKdf, weakKdf: vaultKdf === 'scrypt' };
     } catch (err) {
       vaultKey = null; vaultData = {}; vaultUnlocked = false; vaultReadable = false;
       return { ok: false, error: err.message };
@@ -296,6 +364,7 @@ function register(ipcMain) {
     vaultData     = {};
     vaultUnlocked = false;
     vaultReadable = false;
+    vaultKdf      = null;
     // `vaultCorrupt` is deliberately NOT cleared here. It is a fact about the
     // file on disk, not about this session, and clearing it on lock would let a
     // lock/unlock cycle re-arm the overwrite that saveVault refuses.
@@ -308,8 +377,15 @@ function register(ipcMain) {
   // os.metrics-read so the UI can show vault state before master authenticates.
   ipcMain.handle('vault:status', async () => {
     const exists = fs.existsSync(getVaultPath());
+    // The derivation is in the file header, so it is known while locked. A vault with no record (legacy) is
+    // reported as unknown rather than guessed; a vault that does not exist yet reports what a new one WOULD use.
+    const h = readHeader();
+    const recorded = vaultUnlocked && vaultKdf ? vaultKdf : (h.kdf && KDFS.includes(h.kdf) ? h.kdf : null);
+    const kdf = recorded || (h.hasCipher ? null : (argon2Present() ? 'argon2id' : 'scrypt'));
     return {
       ok: true,
+      kdf,
+      weakKdf: kdf === 'scrypt',
       unlocked: vaultUnlocked,
       entries: Object.keys(vaultData).length,
       // `exists` plus `unreadable` is what lets the UI tell master the three
