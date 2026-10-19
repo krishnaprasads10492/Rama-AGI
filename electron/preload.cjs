@@ -823,6 +823,15 @@ const RAMA_API = {
     run:           () => ipcRenderer.invoke('engineSetup:run'),
     installPython: () => ipcRenderer.invoke('engineSetup:install-python'),
   },
+  // The GitHub token, kept in the vault and handed to git per command (Section 157). The token goes in through
+  // `set` and is never returned by any member. No `user` is sent: main uses the account behind the window.
+  gitAuth: {
+    status: (repoPath) => ipcRenderer.invoke('gitAuth:status', { repoPath }),
+    set:    (token)    => ipcRenderer.invoke('gitAuth:set', { token }),
+    remove: ()         => ipcRenderer.invoke('gitAuth:remove'),
+    test:   (repoPath) => ipcRenderer.invoke('gitAuth:test', { repoPath }),
+    scrub:  (repoPath) => ipcRenderer.invoke('gitAuth:scrub', { repoPath }),
+  },
   // Kite Connect as a DATA source (Section 156). No `user` is sent; the token and the secret never come back.
   kiteSession: {
     loginStart:    (accountId)           => ipcRenderer.invoke('kiteSession:login-start', { accountId }),

@@ -1856,6 +1856,7 @@ authenticated **Master session**, not merely an open store.
 | 184 | Real-world readiness audit: what stands between the installed app and a working engine | done; two fixes applied, the rest listed | Section 154. The verdict: **an installed Rāma cannot deliver a working StockMind on a clean machine today** (no engine runtime is created on install, and user data lives in the install directory). |
 | 185 | Readiness fixes: engine environment on install, data out of the install directory, one price basis, small audit items | built, verified by tests; never run on a clean machine | Section 155. Closes the two BLOCKERS and most of the HIGH/MEDIUM items of Section 154. **Context from master: the app runs on another machine that has no organisational restrictions; THIS machine does (its network re-signs TLS, so live fetches fail here), so nothing that downloads or installs was run here against the real network.** NEXT: run it once on that machine: open StockMind > ENGINE, press Set up, then load a chart. |
 | 186 | Zerodha Kite Connect as a DATA source: daily login, session, historical candles into the store | built, verified against fakes only; never run against Zerodha | Section 156. BUILT: `kiteClient.cjs` (allowlist, login URL, checksum, redirect parsing, expiry, chunked and throttled candle fetch), session fields in `brokerAccounts.cjs`, `kiteSession.cjs` (4 channels, `brokers.accounts.write`), `store.import_bars` + `POST /store/import`, the login steps in the account card, and a Fetch from Kite button. Suites: `verifyKite.cjs` (207; 33 mutations, all killed), `test_store_import` (38), 77 in the extended UI suite (15 more mutations killed). NEXT: master logs in once with the real key and fetches one symbol, then reports what Kite said. |
+| 187 | Git credential from the UI (no token in a remote URL) and the Kite documentation pass | built, verified against fakes and a throwaway repository; never run against GitHub or Zerodha | Section 157. Master: "go through documentation for utilising the zerodha. revoke the tokens but user should be able to add it from UI - enable this capability". BUILT: token in the vault (`GITHUB_TOKEN`), added/tested/removed from a Git Sync tab, used per command as a one-shot header, never in a URL; credential removed from the `origin` URL; Kite rate limits, gzip, TokenException and 2FA notes applied. Suites: `verifyGitAuth.cjs` (155), `verifyGitAuthUi.mjs` (64), 50 mutations all killed; `verifyKite.cjs` 215. NEXT: master revokes the pasted tokens at github.com/settings/tokens (only GitHub can), unlocks the vault, adds a new token in Git Sync > TOKEN, presses TEST, then pushes once. |
 
 ### Resume checklist for a cold session
 
@@ -19849,3 +19850,37 @@ Method: the pinned engine was installed on a throwaway Python 3.12.10 venv and r
 - Kite candles are **kept** in the working store (like "Fetch & keep"); a view-only variant is not built.
 
 **Not built:** WebSocket streaming, live LTP polling, open interest, continuous futures, holdings, positions, margins, and anything that writes to Zerodha apart from logout.
+
+## Section 157 - A git credential that lives in the vault, and a second pass over the Kite documentation
+
+### 157.1 Why
+Three GitHub tokens ended up in chat and one in the `origin` URL in `.git/config`, where `git:get-remotes` returned it to the window and git error text echoed it. Nothing in the repo or its history holds any of them (checked: tracked files and `git log -S`, 0 hits). A token in a URL cannot be revoked from the app and leaks through every surface that prints a remote, so the capability master asked for is: **add the token from the UI, store it where credentials already live, use it without ever writing it into a URL or a file.**
+
+### 157.2 Decisions
+1. **Revoking is GitHub's, not ours.** GitHub offers no API to revoke a personal access token, so Rāma cannot. What Rāma can do, and now does: remove the token from the remote URL, stop any surface from printing one, and let master replace it. The UI links to github.com/settings/tokens and says so.
+2. **Stored in the vault under `GITHUB_TOKEN`** (the name the Models key list already offers). Vault capabilities apply: tier 0, unlocked. Setting, removing and scrubbing need `vault.write`; reading status and testing need `git.push`.
+3. **Used per command, never persisted.** A push, pull or clone from the app passes the token as a one-shot `http.extraheader` (`-c`), with the credential helper disabled for that command. It is never put in a URL, a file, an environment variable or git config.
+4. **Redaction everywhere.** One function strips GitHub token shapes (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`) and URL credentials from any text before it leaves the main process; `git:get-remotes` returns remotes with the credentials removed plus a flag saying one was found.
+5. **Scrub is explicit.** "Remove the token from the remote URL" rewrites each remote that carries credentials with `git remote set-url`, only on a click, and says what it changed. It does not run at start-up.
+6. **Test before trusting.** A token can be tested against GitHub (who it is, what kind, whether the repository is visible). GitHub's `permissions.push` describes the USER, not a fine-grained token, so for those the panel says the first push is the only real test (this misled us earlier: `push: true` and a 403).
+
+### 157.3 The Kite documentation pass (read 2026-10-19)
+New facts from the vendor's general and errors pages, and what changed:
+- **Rate limits are documented:** quote 1 request/second, historical candles 3/second, other endpoints 10/second. The 300-per-fetch cap stays; spacing for candles stays at 500 ms (inside 3/s); the last-price lookup, which is the quote endpoint, is now spaced at 1.1 s process-wide so two quick fetches cannot exceed 1/s.
+- **Responses may be gzipped.** Requests now send `Accept-Encoding: identity`, so the body is always plain JSON (the shared HTTP client reads bodies as UTF-8 text).
+- **A `TokenException` also happens when the user logs in to another Kite instance**, not only at 06:00 IST. The message now says so, because it explains a session that "ended early".
+- **Account prerequisite:** the Zerodha account needs TOTP 2FA enabled. The login steps now say it.
+- **Gateway errors:** 502, 503 and 504 mean the broker backend or API is down. They are classified `unavailable` with a "try later" message and are not retried by Rāma beyond the shared client's single retry.
+- **Still not on the pages read:** the maximum days per historical request. Spans stay conservative and halve on a range error.
+
+### 157.4 Not built
+Creating or revoking a token at GitHub; an OAuth device flow; SSH keys; storing any other service's token through this panel.
+
+### 157.5 Result (2026-10-19)
+**Built.** `electron/lib/gitAuth.cjs` (redact, scrubUrl, validateToken, one-shot header config, vault lookup, remote description and rewrite, probe), `electron/ipc/gitAuth.cjs` (5 channels: status, test, scrub need `git.push`; set, remove need `vault.write`), `git.cjs`/`releaseChannel.cjs`/`publishProposal.cjs` now open git through `gitAuth.open` and redact every error, `git:get-remotes` returns remotes without credentials plus a flag, main/preload registration, a "token" tab in Git Sync (`GitCredential.jsx` + `gitCredentialModel.js`). The `origin` remote in `.git/config` was rewritten without its credential (checked: no token-shaped string remains in `.git/config`).
+
+**A defect the real-git test found.** simple-git 4.0.2 refuses `credential.helper` in `config` unless `unsafe.allowUnsafeCredentialHelper` is set; it throws when the command runs, not when the client is built. Without the flag every push, pull and clone would have failed the moment a token was stored. `open()` now sets it; the value is the constant `credential.helper=` and nothing the window supplied. A check keeps it.
+
+**Verified (fakes plus one throwaway real repository):** `verifyGitAuth.cjs` 155 checks (real git: credentialed remotes found, rewritten, clean one untouched, config file free of the token; the header is visible to the one command and written nowhere; helper reset last in the list; `git:get-remotes` reply and error replies carry no credential; every role below master refused set/remove, below SuperAdmin refused the rest, a forged payload tier ignored; no token in any reply). `verifyGitAuthUi.mjs` 64 checks. 50 mutations of the library, IPC, `git.cjs`, model, component and tab wiring: 50 killed (two survived on the first run and were fixed with checks: a whitespace-specific message, and a bypass of `gitAuth.open` in push). Kite pass: 8 more checks in `verifyKite.cjs` (215).
+
+**NOT verified:** any call to the real GitHub (the test button, a push with the stored token); the real vault round trip (set, restart, unlock, use); the tab on screen; real Zerodha. Revoking the three tokens that were pasted in chat is GitHub's act, at github.com/settings/tokens; Rāma cannot do it and has not.

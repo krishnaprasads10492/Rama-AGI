@@ -213,6 +213,25 @@ const candle = (iso, o, h, l, c, v = 1000) => [iso, o, h, l, c, v];
   check('an unknown instrument is a clear failure', (await kite.resolveToken(recorder(() => okJson({})), creds, 'NOPE', 'NSE')).ok === false);
   check('a bad symbol never reaches the network', (async () => { const r = recorder(() => okJson({})); await kite.resolveToken(r, creds, 'A;B', 'NSE'); return r.calls.length === 0; })() instanceof Promise && await (async () => { const r = recorder(() => okJson({})); await kite.resolveToken(r, creds, 'A;B', 'NSE'); return r.calls.length === 0; })());
 
+  section('from the vendor documentation (read 2026-10-19)');
+  const hdr = recorder(() => okJson({}));
+  await kite.call(hdr, { method: 'GET', path: '/quote/ltp', query: { i: 'NSE:X' } });
+  check('every request asks for an UNcompressed body (the vendor says responses may be gzipped)', hdr.calls[0].headers['Accept-Encoding'] === 'identity');
+  check('502, 503 and 504 are "unavailable" (the broker backend or API is down), not a token or input problem', [502, 503, 504].every((c) => kite.classify(c, null) === 'unavailable'));
+  check('500 stays a vendor error, 404/405/410 too', kite.classify(500, null) === 'vendor' && [404, 405, 410].every((c) => kite.classify(c, null) === 'vendor'));
+  check('the documented limits: candles 3/s (we use 2/s), quotes 1/s (we use under it)', kite.MIN_GAP_MS >= 1000 / 3 && kite.QUOTE_GAP_MS >= 1000);
+  kite.resetQuoteGate();
+  const qc = clock();
+  const qs = recorder(() => okJson({ 'NSE:A': { instrument_token: 1 } }));
+  await kite.resolveToken(qs, creds, 'A', 'NSE', { sleep: qc.sleep, now: qc.now });
+  const afterFirst = qc.sleeps.length;
+  await kite.resolveToken(qs, creds, 'A', 'NSE', { sleep: qc.sleep, now: qc.now });
+  check('the first quote lookup does not wait', afterFirst === 0);
+  check('a second lookup right after waits out the 1-per-second quote limit (process-wide, so two fetches cannot add up)', qc.sleeps.length === 1 && qc.sleeps[0] >= kite.QUOTE_GAP_MS - 5, JSON.stringify(qc.sleeps));
+  qc.t += 5000;
+  await kite.resolveToken(qs, creds, 'A', 'NSE', { sleep: qc.sleep, now: qc.now });
+  check('after a pause it does not wait again', qc.sleeps.length === 1);
+
   // a server that returns one candle per calendar day in the requested span
   const dayServer = (limitDays) => recorder((rec) => {
     const [, , , token, interval] = rec.path.split('/');
@@ -422,6 +441,7 @@ const candle = (iso, o, h, l, c, v = 1000) => [iso, o, h, l, c, v];
   httpScript = (rec) => (rec.path === '/quote/ltp' ? okJson({ [rec.query.i]: { instrument_token: 1 } }) : errJson(403, 'TokenException', 'Session expired'));
   const tok = keep(await call('fetch-bars', W.sa, { accountId: id, symbol: 'RELIANCE', exchange: 'NSE', interval: '1d' }));
   check('a rejected token ends the session and tells master to log in again', tok.ok === false && tok.needsLogin === true && /Log in again/.test(tok.error));
+  check('the token message also explains the early end: logging in to Kite elsewhere', /somewhere else/.test(tok.error));
   check('the dead session was forgotten', ba.snapshot(store, { self: SELF }).accounts.find((a) => a.id === id).session.state === 'none');
   const noSess = await call('fetch-bars', W.sa, { accountId: id, symbol: 'RELIANCE', exchange: 'NSE', interval: '1d' });
   check('with no session the fetch says to log in, and makes no request', noSess.ok === false && noSess.needsLogin === true);

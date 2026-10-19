@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { gitClient, fsClient } from '@services/ipcClient.js';
 import { useUserStore } from '@store/userStore.js';
 import { FS, LH } from '@config/type.js';
+import GitCredential from './GitCredential.jsx';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
 
@@ -759,7 +760,7 @@ export default function GitSync() {
         <>
           {/* Tabs */}
           <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
-            {['status', 'log', 'diff', 'update', 'release'].map(t => (
+            {['status', 'log', 'diff', 'update', 'release', 'token'].map(t => (
               <button key={t} onClick={() => setTab(t)} style={{
                 padding: '9px 18px', border: 'none', background: 'transparent',
                 color: tab === t ? 'var(--amber)' : 'var(--muted)',
@@ -827,6 +828,8 @@ export default function GitSync() {
             {tab === 'update' && <LocalUpdatePanel repoPath={repoPath} />}
 
             {tab === 'release' && <ReleasePanel repoPath={repoPath} />}
+
+        {tab === 'token' && <GitCredential repoPath={repoPath} />}
 
             {tab === 'diff' && (
               <div className="hud-card" style={{ padding: '0', overflow: 'hidden' }}>

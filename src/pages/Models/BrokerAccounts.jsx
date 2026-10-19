@@ -3,7 +3,7 @@ import { FS, LH } from '@config/type.js';
 import { can } from '@services/accessControl.js';
 import {
   REASON, ipStatus, changeLock, groupByDistributable, draftProblems, blankDraft, draftFrom,
-  isWeeklyLock, visibleTo, mayWrite, isKite, sessionStatus, KITE_STEPS, KITE_REDIRECT_NOTE,
+  isWeeklyLock, visibleTo, mayWrite, isKite, sessionStatus, KITE_STEPS, KITE_REDIRECT_NOTE, KITE_PREREQ,
 } from './brokerAccountsModel.js';
 
 /**
@@ -198,6 +198,7 @@ export default function BrokerAccounts({ currentUser }) {
                       </div>
                       {loginFor === a.id && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <div style={{ fontSize: FS.dense, color: 'var(--muted)', lineHeight: LH.chrome }}>{KITE_PREREQ}</div>
                           <ol style={{ margin: 0, paddingLeft: '18px', fontSize: FS.dense, color: 'var(--text-dim)', lineHeight: LH.chrome }}>
                             {KITE_STEPS.map((t) => <li key={t}>{t}</li>)}
                           </ol>

@@ -4,6 +4,7 @@ const { simpleGit } = require('simple-git');
 const chokidar  = require('chokidar');
 const path      = require('path');
 const capability = require('../lib/capability.cjs');
+const gitAuth    = require('../lib/gitAuth.cjs');
 
 // Active watchers per repo path
 const watchers = {};
@@ -42,7 +43,7 @@ function register(ipcMain) {
         },
       };
     } catch (err) {
-      return { ok: false, error: err.message };
+      return { ok: false, error: gitAuth.redact(err.message) };
     }
   });
 
@@ -55,7 +56,7 @@ function register(ipcMain) {
       const diff = await git.diff();
       return { ok: true, data: diff };
     } catch (err) {
-      return { ok: false, error: err.message };
+      return { ok: false, error: gitAuth.redact(err.message) };
     }
   });
 
@@ -68,7 +69,7 @@ function register(ipcMain) {
       const log = await git.log({ maxCount: limit });
       return { ok: true, data: log.all };
     } catch (err) {
-      return { ok: false, error: err.message };
+      return { ok: false, error: gitAuth.redact(err.message) };
     }
   });
 
@@ -85,7 +86,7 @@ function register(ipcMain) {
       }
       return { ok: true };
     } catch (err) {
-      return { ok: false, error: err.message };
+      return { ok: false, error: gitAuth.redact(err.message) };
     }
   });
 
@@ -98,7 +99,7 @@ function register(ipcMain) {
       const result = await git.commit(message);
       return { ok: true, data: result };
     } catch (err) {
-      return { ok: false, error: err.message };
+      return { ok: false, error: gitAuth.redact(err.message) };
     }
   });
 
@@ -107,11 +108,11 @@ function register(ipcMain) {
     const denied = capability.deny(user, 'git.push');
     if (denied) return denied;
     try {
-      const git    = simpleGit(repoPath);
+      const git    = gitAuth.open(repoPath, simpleGit);
       const result = await git.push('origin', branch);
       return { ok: true, data: result };
     } catch (err) {
-      return { ok: false, error: err.message };
+      return { ok: false, error: gitAuth.redact(err.message) };
     }
   });
 
@@ -120,11 +121,11 @@ function register(ipcMain) {
     const denied = capability.deny(user, 'git.commit');
     if (denied) return denied;
     try {
-      const git    = simpleGit(repoPath);
+      const git    = gitAuth.open(repoPath, simpleGit);
       const result = await git.pull();
       return { ok: true, data: result };
     } catch (err) {
-      return { ok: false, error: err.message };
+      return { ok: false, error: gitAuth.redact(err.message) };
     }
   });
 
@@ -133,11 +134,11 @@ function register(ipcMain) {
     const denied = capability.deny(user, 'git.push');
     if (denied) return denied;
     try {
-      const git = simpleGit();
+      const git = gitAuth.open(null, simpleGit);
       await git.clone(url, dest);
       return { ok: true };
     } catch (err) {
-      return { ok: false, error: err.message };
+      return { ok: false, error: gitAuth.redact(err.message) };
     }
   });
 
@@ -158,7 +159,7 @@ function register(ipcMain) {
         },
       };
     } catch (err) {
-      return { ok: false, error: err.message };
+      return { ok: false, error: gitAuth.redact(err.message) };
     }
   });
 
@@ -171,7 +172,7 @@ function register(ipcMain) {
       await git.checkout(branch);
       return { ok: true };
     } catch (err) {
-      return { ok: false, error: err.message };
+      return { ok: false, error: gitAuth.redact(err.message) };
     }
   });
 
@@ -182,9 +183,11 @@ function register(ipcMain) {
     try {
       const git     = simpleGit(repoPath);
       const remotes = await git.getRemotes(true);
-      return { ok: true, data: remotes };
+      // Credentials removed from every URL (Section 157): this reply used to carry an embedded token to the window.
+      const shown = gitAuth.describeRemotes(remotes).map((r) => ({ name: r.name, refs: { fetch: r.fetch, push: r.push }, hadCredential: r.hadCredential }));
+      return { ok: true, data: shown };
     } catch (err) {
-      return { ok: false, error: err.message };
+      return { ok: false, error: gitAuth.redact(err.message) };
     }
   });
 
@@ -228,7 +231,7 @@ function register(ipcMain) {
       watchers[repoPath] = watcher;
       return { ok: true };
     } catch (err) {
-      return { ok: false, error: err.message };
+      return { ok: false, error: gitAuth.redact(err.message) };
     }
   });
 

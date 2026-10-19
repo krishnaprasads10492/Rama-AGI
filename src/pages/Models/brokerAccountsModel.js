@@ -109,6 +109,8 @@ export function mayWrite(can, user) {
 
 export const KITE_REDIRECT_NOTE = 'In your Kite app\'s settings the redirect URL can be any address you own, for example http://127.0.0.1/ . Nothing has to be running there: Rāma reads the address from your browser\'s address bar after you log in. If Kite will not accept that address, use one it does accept.';
 
+export const KITE_PREREQ = 'Kite Connect needs TOTP two-factor sign-in turned on for the Zerodha account. A session also ends if you log in to Kite somewhere else.';
+
 export const KITE_STEPS = [
   'Press OPEN KITE LOGIN. Your browser opens Zerodha\'s own login page; Rāma never sees your password.',
   'Log in. Kite then sends the browser to your redirect address, which may show an error page. That is fine.',

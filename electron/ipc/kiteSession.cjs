@@ -132,7 +132,7 @@ function register(ipcMain, injected = {}) {
       const to = /^\d{4}-\d{2}-\d{2}$/.test(String(body.toDate || '')) ? body.toDate : ymd(d.now());
       const from = /^\d{4}-\d{2}-\d{2}$/.test(String(body.fromDate || '')) ? body.fromDate : ymd(d.now() - DEFAULT_DAYS[kInterval] * 86400000);
 
-      const tok = await kite.resolveToken(d.http, live, body.symbol, body.exchange);
+      const tok = await kite.resolveToken(d.http, live, body.symbol, body.exchange, { sleep: d.sleep, now: d.now });
       if (!tok.ok) return fail(tok);
       const got = await kite.fetchCandles(d.http, live, { instrumentToken: tok.instrumentToken, interval: body.interval, fromDate: from, toDate: to, sleep: d.sleep, now: d.now });
       if (!got.ok && !(got.bars && got.bars.length)) return fail(got);
@@ -153,7 +153,8 @@ function register(ipcMain, injected = {}) {
     function fail(r) {
       if (r.kind === 'token') accounts.clearSession(d.store, id);
       const hint = {
-        token: 'Kite rejected the session (it may have expired at 6 AM IST). Log in again.',
+        token: 'Kite rejected the session. A session ends at 6 AM IST, and also when you log in to Kite somewhere else. Log in again.',
+        unavailable: 'Kite or the broker backend is not answering (502, 503 or 504). Try again in a few minutes.',
         permission: 'This API key has no historical-data permission. The Kite Connect data subscription is separate from the key.',
         rate: 'Kite is rate limiting this key. Wait a minute and try a shorter range.',
         input: r.message, range: 'Kite refused the range even at one day per request.', limit: r.message,

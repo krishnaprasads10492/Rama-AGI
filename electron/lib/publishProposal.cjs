@@ -51,6 +51,7 @@
 const fs   = require('fs');
 const path = require('path');
 const { simpleGit } = require('simple-git');
+const gitAuth = require('./gitAuth.cjs');
 
 // NOT under data/ — that whole directory is gitignored (encrypted stores,
 // per-machine key material). Release notes must actually be committed, so
@@ -171,7 +172,7 @@ async function publishProposal({ repoPath, proposalId, push = true } = {}) {
     return { ok: false, error: `Proposal is "${proposal.status}" — it must be applied before it can be published` };
   }
 
-  const git = simpleGit(repoPath);
+  const git = gitAuth.open(repoPath, simpleGit);
 
   let startBranch;
   try {

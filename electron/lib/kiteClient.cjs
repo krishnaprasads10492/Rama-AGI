@@ -26,7 +26,8 @@ const LOGIN_BASE = 'https://kite.zerodha.com/connect/login';
 const IST_MS = 5.5 * 3600 * 1000;
 const DAY_MS = 24 * 3600 * 1000;
 const MAX_REQUESTS = 300;
-const MIN_GAP_MS = 500;
+const MIN_GAP_MS = 500;            // historical candles: the vendor allows 3 a second; this is 2
+const QUOTE_GAP_MS = 1100;         // the quote endpoints: the vendor allows 1 a second, so a little under it
 
 // ─── The allowlist ───────────────────────────────────────────────────────────────────────────────
 const KITE_INTERVALS = ['minute', '3minute', '5minute', '10minute', '15minute', '30minute', '60minute', 'day'];
@@ -192,6 +193,7 @@ function classify(status, body) {
   const msg = (body && body.message) || '';
   if (status === 429) return 'rate';
   if (type === 'TokenException' || (status === 403 && /token|session|login/i.test(msg))) return 'token';
+  if (status === 502 || status === 503 || status === 504) return 'unavailable';
   if (type === 'PermissionException') return 'permission';
   if (type === 'InputException' && /interval|limit|days/i.test(msg)) return 'range';
   if (type === 'InputException') return 'input';
@@ -212,7 +214,8 @@ async function call(http, { method, path, query, headers, body }) {
   try {
     res = await http.request(`${API_BASE}${path}${qs}`, {
       method, body: body || null, retries: 1, timeout: 30000,
-      headers: { 'X-Kite-Version': '3', Accept: 'application/json', ...(headers || {}) },
+      // identity: the vendor says responses MAY be gzipped, and the shared client reads bodies as UTF-8 text.
+      headers: { 'X-Kite-Version': '3', Accept: 'application/json', 'Accept-Encoding': 'identity', ...(headers || {}) },
     });
   } catch (err) { return { ok: false, kind: 'network', status: 0, message: err.message }; }
   let parsed = null;
@@ -237,10 +240,17 @@ async function logout(http, { apiKey, accessToken }) {
   return call(http, { method: 'DELETE', path: '/session/token', query: { api_key: apiKey, access_token: accessToken } });
 }
 
+// Process-wide, because two fetches a second apart would otherwise each look innocent and together break the 1/s limit.
+let lastQuoteAt = 0;
+function resetQuoteGate() { lastQuoteAt = 0; }
+
 /** Learn an instrument's token from its key, through the last-price API (no instruments dump needed). */
-async function resolveToken(http, { apiKey, accessToken }, symbol, exchange) {
+async function resolveToken(http, { apiKey, accessToken }, symbol, exchange, { sleep = defaultSleep, now = Date.now } = {}) {
   const k = instrumentKey(symbol, exchange);
   if (!k.ok) return { ok: false, kind: 'input', status: 0, message: k.error };
+  const wait = lastQuoteAt + QUOTE_GAP_MS - now();
+  if (lastQuoteAt && wait > 0) await sleep(wait);
+  lastQuoteAt = now();
   const r = await call(http, { method: 'GET', path: '/quote/ltp', query: { i: k.key }, headers: { Authorization: authHeader(apiKey, accessToken) } });
   if (!r.ok) return r;
   const hit = r.data && r.data[k.key];
@@ -296,7 +306,7 @@ async function fetchCandles(http, creds, { instrumentToken, interval, fromDate, 
 }
 
 module.exports = {
-  API_BASE, LOGIN_BASE, MAX_REQUESTS, MIN_GAP_MS, KITE_INTERVALS, CHUNK_DAYS, INDEX_SYMBOLS,
+  API_BASE, LOGIN_BASE, MAX_REQUESTS, MIN_GAP_MS, QUOTE_GAP_MS, resetQuoteGate, KITE_INTERVALS, CHUNK_DAYS, INDEX_SYMBOLS,
   ALLOWED, ORDER_LIKE, assertAllowed, loginUrl, checksum, parseRedirect, tokenExpiry, sessionState, authHeader,
   toKiteInterval, instrumentKey, planChunks, parseStamp, toBar, rateLimiter, classify,
   call, exchangeToken, logout, resolveToken, fetchCandles,

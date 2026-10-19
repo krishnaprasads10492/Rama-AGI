@@ -40,6 +40,7 @@
 const fs   = require('fs');
 const path = require('path');
 const { simpleGit } = require('simple-git');
+const gitAuth = require('./gitAuth.cjs');
 
 const CHANGELOG_NAME = 'CHANGELOG.md';
 const WORKFLOW_PATH  = path.join('.github', 'workflows', 'release.yml');
@@ -107,7 +108,7 @@ async function getState(repoPath) {
   out.workflowPresent = fs.existsSync(path.join(repoPath, WORKFLOW_PATH));
 
   try {
-    const git = simpleGit(repoPath);
+    const git = gitAuth.open(repoPath, simpleGit);
     const tags = await git.tags();
     out.lastTag = tags.latest || null;
     if (out.lastTag) {
@@ -144,7 +145,7 @@ async function cutRelease({ repoPath, bump = 'patch', notes = '', push = false }
   const nextVersion = bumpSemver(pkg.data.version, bump);
   const tag = `v${nextVersion}`;
 
-  const git = simpleGit(repoPath);
+  const git = gitAuth.open(repoPath, simpleGit);
 
   // Refuse to overwrite an existing tag rather than silently reusing it
   const existingTags = await git.tags().catch(() => ({ all: [] }));
