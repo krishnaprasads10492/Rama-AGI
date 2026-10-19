@@ -61,3 +61,6 @@ rama.verify
 # StockMind engine virtual environments (machine-specific, built by scripts/buildInstaller.cjs)
 .venv-stockmind/
 python-env/
+# Kiro IDE config (hooks, steering, settings). Untracked for now; remove this
+# entry and `git add -f .kiro/...` when the master asks for them to be pushed.
+.kiro/
