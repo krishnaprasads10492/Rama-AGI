@@ -1,0 +1,66 @@
+Rāma AGI packaging log
+started  2026-10-20T15:56:33.920Z
+node     v20.10.0 on win32-x64
+root     C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI
+argv     --readiness
+
+
+  ⬢ Rāma AGI — packaging v1.0.0
+
+▸ STAGE 0  TOOLCHAIN — can this machine package at all
+21:26:33 ✓ Node.js 20.10.0
+21:26:34 ! Node 20.10.0 is an older patch line than Vite 6 prefers.
+21:26:34 !   If the renderer build fails on "crypto.hash is not a function", that is why —
+21:26:34 !   Node 22 LTS fixes it. Harmless otherwise.
+21:26:47 ✓ npm 10.4.0
+21:26:47 ✓ Project rama-agi v1.0.0 at C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI
+21:26:48 ✕ Only 643 MB free. Packaging Electron needs the unpacked tree plus the installer.
+21:26:48 ✕ Free up space and run this again — nothing has been changed.
+21:26:48 ✓ Symlink privilege present — winCodeSign will extract cleanly
+21:26:48 ✓ assets\installer.nsh checks out (ASCII, symbols resolvable, macros balanced)
+
+▸ STAGE 1  DEPENDENCIES — measuring only, installing nothing
+21:26:49 ! 21 of 34 package(s) missing or mismatched:
+      @babel/parser — 7.29.7 installed, 7.29.9 pinned
+      @babel/traverse — 7.29.7 installed, 7.29.10 pinned
+      axios — 1.7.9 installed, 1.20.0 pinned
+      chokidar — 3.6.0 installed, 4.0.3 pinned
+      cors — 2.8.5 installed, 2.8.6 pinned
+      electron — 31.7.7 installed, 44.7.0 pinned
+      electron-builder — 24.13.3 installed, 26.15.3 pinned
+      electron-updater — 6.3.9 installed, 6.8.9 pinned
+      express — 4.21.2 installed, 4.22.3 pinned
+      helmet — 8.1.0 installed, 8.3.0 pinned
+      … and 11 more
+21:26:49 · A build would install these automatically; readiness reports them as-is.
+21:26:49 ! node-pty — 1.0.0 installed, 1.1.0 pinned — optional, Rāma has a fallback
+21:26:49 ✓ argon2 native binary present — bin/win32-x64-125/argon2.node
+21:27:09 ✓ StockMind runtime (managed venv): Python 3.12.1, all 13 engine packages importable
+21:27:18 ✓ Web research: driving Microsoft Edge (channel)
+      An installed browser is used, so Playwright's ~150 MB Chromium is not needed.
+
+▸ STAGE 3  ARCHIVER — is a usable 7-Zip actually reachable
+21:27:18 ✓ L0 bundled 7-Zip 21.07 (remembered from 2026-08-20 11:56) — installer targets available
+
+  READINESS  NOT-READY
+  Would produce   nothing — the build cannot complete
+
+    ✕ toolchain            no
+    ✓ dependencies         
+    · archiver level       0
+    · archiver version     21.07
+    ✓ symlink privilege    
+    ✓ installer script     
+    ✓ renderer present     
+
+  Blocking — a build cannot succeed until these are fixed:
+    ✕ The toolchain cannot package at all — see the stage 0 report above.
+
+  Limits — the build will succeed, with these consequences:
+    ! Capability degraded in the build: node-pty unavailable (fallback active)
+
+  Verdict saved to data\system\readiness.json — the build reads it and adapts.
+
+  Full transcript: data\logs\build-2026-10-20T15-56-33-905Z.log
+  Shipping it to the build-logs branch — readable from any machine.
+
