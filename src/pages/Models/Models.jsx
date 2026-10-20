@@ -474,9 +474,15 @@ export default function Models() {
   // (Section 158.3, D3); every other key is stored as before. A refusal is returned so the dialog can show it.
   const saveKey = async (credKey, value) => {
     if (!isElectron) return { ok: false, error: 'The desktop app is required.' };
-    const res = credKey === 'GITHUB_TOKEN'
+    let res = credKey === 'GITHUB_TOKEN'
       ? await window.rama.gitAuth.set(value)
       : await window.rama.vault.set(currentUser, credKey, value, { label: PROVIDER_LINKS[credKey]?.label });
+    // GitHub could not confirm it AND one is already stored: master decides, rather than a dead token quietly
+    // displacing a working one (Section 160.3, D3).
+    if (res && res.needsConfirm) {
+      if (!window.confirm(`${res.error}\n\nStore it anyway, replacing the token you have?`)) return { ok: false, error: 'Nothing was changed.' };
+      res = await window.rama.gitAuth.set(value, true);
+    }
     if (res && res.ok === false) return res;
     if (credKey === 'GITHUB_TOKEN') window.dispatchEvent(new Event(EXPIRY_EVENT));
     load();

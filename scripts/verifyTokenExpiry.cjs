@@ -56,6 +56,10 @@ const NOW = Date.parse('2026-10-20T10:00:00Z');
   check('119 s after the call is still unreliable', P(fmt(NOW + 119000)).kind === 'unreliable');
   check('119 s before the call is unreliable too (a clock a little off)', P(fmt(NOW - 119000)).kind === 'unreliable');
   check('three minutes on is believed', P(fmt(NOW + 180000)).kind === 'known');
+  for (const bad of ['2026-11-20 24:00:00 UTC', '2026-11-20 10:99:00 UTC', '2026-11-20 10:00:60 UTC', '2026-11-20 99:99:99 UTC']) {
+    check(`"${bad}" is refused rather than rolled over`, P(bad).kind === 'unparsable', JSON.stringify(P(bad)));
+  }
+  check('the last valid second of a day is accepted', P('2026-11-20 23:59:59 UTC').kind === 'known' && P('2026-11-20 23:59:59 UTC').ms === Date.parse('2026-11-20T23:59:59Z'));
   check('without a call time nothing is called unreliable', te.parseExpiryHeader(fmt(NOW), undefined).kind === 'known');
 
   section('parseManualDate');
@@ -226,7 +230,10 @@ const NOW = Date.parse('2026-10-20T10:00:00Z');
 
   // 5. a replacement GitHub cannot be reached for: stored, but the notice STAYS
   gh.answer = new Error('connect ETIMEDOUT');
-  const off = keep(await call('set', W.master, { token: PAT2 }));
+  const guard = keep(await call('set', W.master, { token: PAT2 }));
+  check('replacing a stored token while GitHub is unreachable is refused, and asks master (Section 160)', guard.ok === false && guard.needsConfirm === true && vault.m.get('GITHUB_TOKEN') === PAT);
+  check('and the notice is untouched by the refused attempt', (await stateNow()).state === 'expired');
+  const off = keep(await call('set', W.master, { token: PAT2, force: true }));
   check('GitHub unreachable: stored, but reported as not confirmed', off.ok && off.verified === false && typeof off.unverifiedReason === 'string' && off.unverifiedReason.length > 0);
   check('the new token is in the vault', vault.m.get('GITHUB_TOKEN') === PAT2);
   n = await stateNow();
@@ -260,6 +267,15 @@ const NOW = Date.parse('2026-10-20T10:00:00Z');
   T += 1000;
   await call('test', W.sa, { repoPath: null });
   check('and a good TEST clears it again', (await stateNow()).state === 'ok');
+  // A token stored by an older path has no record. The refusal used to be dropped, so the notice never appeared.
+  records.delete('config/githubToken');
+  T += 1000;
+  check('a refused credential with NO record on file creates one and raises the notice', ga.noteAuthFailure('remote: Invalid username or password.', T) === true && (await stateNow()).state === 'rejected');
+  check('the record it creates says the token was never confirmed', records.get('config/githubToken').verifiedAt === null && typeof records.get('config/githubToken').savedAt === 'number');
+  gh.answer = { status: 200, headers: hdr(NOW + 400 * DAY) };
+  T += 1000;
+  await call('test', W.sa, { repoPath: null });
+  check('and a good TEST still clears that one', (await stateNow()).state === 'ok');
   check('a bare 403 does not (a token without write access gets one)', ga.noteAuthFailure('The requested URL returned error: 403', T) === false && (await stateNow()).state === 'ok');
   vault.unlocked = false;
   check('with the vault locked the stored token was not what git used: nothing is marked', ga.noteAuthFailure('remote: Bad credentials', T) === false);

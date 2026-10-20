@@ -67,6 +67,19 @@ function register(ipcMain, injected = {}) {
     }
     const verified = check.ok === true;
 
+    // AND THE GUARANTEE HELD ONLY WHILE GITHUB ANSWERED (Section 160.1, item 1). When it did not - the circuit
+    // breaker open after four refusals, or no network - an unconfirmed token was stored anyway, so a dead token
+    // could displace a working one and wipe what was known about it. A REPLACEMENT now needs master to say so;
+    // storing the FIRST token unconfirmed is still allowed, because adding one offline is a real case.
+    if (!verified && gitAuth.storedToken() && body.force !== true) {
+      return {
+        ok: false,
+        needsConfirm: true,
+        error: `GitHub could not confirm this token (${check.error || 'no answer'}), and a token is already stored. `
+          + 'Nothing was changed. The one you have may still work; replacing it with an unconfirmed token would hide that.',
+      };
+    }
+
     const saved = d.vault.setCredentialDirect(gitAuth.SERVICE, v.token, { kind: v.kind, via: 'git-sync' });
     if (!saved || saved.ok === false) return { ok: false, error: gitAuth.redact((saved && saved.error) || 'The vault did not accept it.') };
 

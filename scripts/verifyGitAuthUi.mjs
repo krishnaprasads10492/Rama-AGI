@@ -109,6 +109,11 @@ check('the field is cleared BEFORE the reply is awaited', (() => {
 check('the token is held in no store, no storage and no log', !/localStorage|sessionStorage|useUserStore\(\)\.[a-z]*[tT]oken|console\./.test(jsx + model));
 check('the model holds no token value', !/gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}/.test(model + jsx));
 check('removing asks first', /window\.confirm\([^)]*Remove the stored GitHub token/.test(jsx));
+check('replacing a token GitHub could not confirm asks before it replaces anything (Section 160)',
+  /res\?\.needsConfirm/.test(jsx) && /window\.confirm\(`\$\{res\.error\}/.test(jsx) && /gitAuth\.set\(sent, true\)/.test(jsx));
+check('and saying no changes nothing, and says so', /Nothing was changed/.test(jsx));
+check('the forced retry uses the value already sent, never new state', !/useState\([^)]*sent/.test(jsx) && (jsx.match(/gitAuth\.set\(sent/g) || []).length === 2);
+check('the window does not re-decide which states are serious: it obeys the notice', /st\.notice\.persistent \? 'var\(--red\)'/.test(jsx) && !/\['expired', 'rejected', 'unverified'\]/.test(jsx));
 check('the confirm comes before the call', jsx.indexOf('window.confirm') < jsx.indexOf('window.rama.gitAuth.remove'));
 check('no timers', !/setTimeout|setInterval/.test(jsx));
 check('save goes through the quick check first', jsx.indexOf('tokenProblem(token)') > 0 && jsx.indexOf('tokenProblem(token)') < jsx.indexOf('window.rama.gitAuth.set'));

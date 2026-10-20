@@ -116,9 +116,12 @@ function writeRecord(record) {
  */
 function noteAuthFailure(text, now = Date.now()) {
   if (!tokenExpiry.looksLikeAuthFailure(text)) return false;
-  if (!storedToken()) return false;
-  const rec = readRecord();
-  if (!rec) return false;
+  const token = storedToken();
+  if (!token) return false;
+  // A token stored by an older path has no record. Dropping the refusal there left the standing notice unraised
+  // while `gitAuth:test` created a record in the same situation, so the two paths disagreed (Section 160.3, D6).
+  const rec = readRecord()
+    || tokenExpiry.recordSaved({ kind: validateToken(token).kind || 'fine-grained', verified: false, now });
   return writeRecord(tokenExpiry.recordRejected(rec, now));
 }
 
@@ -176,11 +179,31 @@ async function scrubRemotes(git) {
 async function probe(http, token, slug, now = Date.now) {
   const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
   const callMs = now();
-  let me;
-  try { me = await http.request('https://api.github.com/user', { method: 'GET', headers, retries: 0, timeout: 15000 }); }
-  catch (err) { return { ok: false, error: `GitHub could not be reached: ${redact(err.message)}` }; }
-  if (!me || me.status === 401) return { ok: false, rejected: true, error: 'GitHub rejected this token (revoked, expired or mistyped).' };
-  if (!me.ok) return { ok: false, error: `GitHub answered ${me.status || 'with an error'}.` };
+  const ask = (url, expectStatuses) => http.request(url, { method: 'GET', headers, retries: 0, timeout: 15000, expectStatuses });
+  // BOTH AT ONCE (Section 160.3, D4). The repository reply is only INTERPRETED after the user reply, so what is
+  // reported is unchanged; issuing them together halves the wait, and the one extra request on the rejected path
+  // costs the circuit breaker nothing now that an expected status is not a failure.
+  const userCall = ask('https://api.github.com/user', [401]).then((r) => ({ r }), (err) => ({ err }));
+  const repoCall = slug ? ask(`https://api.github.com/repos/${slug}`, [401, 404]).then((r) => r, () => null) : null;
+  const first = await userCall;
+  if (first.err) {
+    if (repoCall) await repoCall;                                   // never leave a request unobserved
+    return { ok: false, error: `GitHub could not be reached: ${redact(first.err.message)}` };
+  }
+  const me = first.r;
+  // "Not asked" is not an answer: the breaker in lib/http.cjs refused locally, so nothing is known about the token.
+  if (me && me.circuitOpen) {
+    if (repoCall) await repoCall;
+    return { ok: false, notAsked: true, error: 'GitHub was not asked: too many failed attempts in the last few seconds. Wait about twenty seconds and try again.' };
+  }
+  if (!me || me.status === 401) {
+    if (repoCall) await repoCall;
+    return { ok: false, rejected: true, error: 'GitHub rejected this token (revoked, expired or mistyped).' };
+  }
+  if (!me.ok) {
+    if (repoCall) await repoCall;
+    return { ok: false, error: `GitHub answered ${me.status || 'with an error'}.` };
+  }
   let user = {};
   try { user = JSON.parse(me.body); } catch { user = {}; }
   const scopes = me.headers && me.headers['x-oauth-scopes'] !== undefined ? String(me.headers['x-oauth-scopes']).split(',').map((s) => s.trim()).filter(Boolean) : null;
@@ -188,8 +211,7 @@ async function probe(http, token, slug, now = Date.now) {
   const expiry = tokenExpiry.parseExpiryHeader(me.headers && me.headers[tokenExpiry.HEADER], callMs);
   const out = { ok: true, expiry, login: String(user.login || ''), kind, scopes: scopes ? scopes.slice(0, 40) : null, broad: !!(scopes && scopes.some((s) => /^(admin:|delete_repo|write:packages|delete:packages)/.test(s))) };
   if (slug) {
-    let repo;
-    try { repo = await http.request(`https://api.github.com/repos/${slug}`, { method: 'GET', headers, retries: 0, timeout: 15000 }); } catch { repo = null; }
+    const repo = await repoCall;
     let r = {};
     try { r = repo && repo.body ? JSON.parse(repo.body) : {}; } catch { r = {}; }
     out.repo = { slug, visible: !!(repo && repo.ok), canPush: kind === 'classic' && repo && repo.ok ? !!(r.permissions && r.permissions.push) : null };

@@ -126,6 +126,9 @@ check('Models reads the expiry with the page', /window\.rama\.gitAuth\?\.expiry 
 check('the GitHub row shows the facts beside the token, and only that row', /\{isGit && <GitHubKeyFacts data=\{gitExpiry\}/.test(models) && (models.match(/<GitHubKeyFacts/g) || []).length === 1);
 check('the row\'s dot reflects the state for GitHub and is unchanged for the others', /background: gitRow \? TONE\[gitRow\.tone\] : 'var\(--border\)'/.test(models));
 check('the GitHub token is saved through gitAuth:set (GitHub is asked first)', /credKey === 'GITHUB_TOKEN'\s*\?\s*await window\.rama\.gitAuth\.set\(value\)/.test(models));
+check('the Keys dialog also asks before replacing an unconfirmed GitHub token (Section 160)',
+  /res && res\.needsConfirm/.test(models) && /gitAuth\.set\(value, true\)/.test(models) && /Nothing was changed/.test(models));
+check('the preload only ever sends a real boolean for that confirmation', /set:\s+\(token, force\)\s*=>\s*ipcRenderer\.invoke\('gitAuth:set', \{ token, force: force === true \}\)/.test(preload));
 check('other keys still go to the vault', /await window\.rama\.vault\.set\(currentUser, credKey, value/.test(models));
 check('a refused save keeps the dialog open and says why', /res && res\.ok === false\) \{ setError/.test(models) && /\{error && <div role="alert"/.test(models));
 check('saving the GitHub token tells the bar', /if \(credKey === 'GITHUB_TOKEN'\) window\.dispatchEvent\(new Event\(EXPIRY_EVENT\)\)/.test(models));

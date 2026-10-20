@@ -38,6 +38,9 @@ function parseExpiryHeader(value, callMs) {
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})\s*(UTC|Z|[+-]\d{2}:?\d{2})$/i.exec(String(raw).trim());
   if (!m) return { kind: 'unparsable' };
   const [, y, mo, d, h, mi, s, tz] = m;
+  // Range-checked, because Date.UTC rolls over silently: "10:99:00" became 11:39 and was recorded as the expiry
+  // (Section 160.3, D7). The month and day check below cannot see that, since the date does not change.
+  if (Number(h) > 23 || Number(mi) > 59 || Number(s) > 59) return { kind: 'unparsable' };
   let ms = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s));
   if (!Number.isFinite(ms)) return { kind: 'unparsable' };
   const probe = new Date(ms);

@@ -51,7 +51,13 @@ export default function GitCredential({ repoPath }) {
     setNote(null);
     const sent = token;
     setToken('');                                                 // gone from the field before the reply arrives
-    const res = await window.rama.gitAuth.set(sent);
+    let res = await window.rama.gitAuth.set(sent);
+    // Replacing a token GitHub could not confirm is master's call, and it is asked here rather than assumed. The
+    // pasted value is a local of this function, not state: it is gone when the handler returns either way.
+    if (res?.needsConfirm) {
+      if (!window.confirm(`${res.error}\n\nStore it anyway, replacing the token you have?`)) { setBusy(false); setNote('Nothing was changed.'); return; }
+      res = await window.rama.gitAuth.set(sent, true);
+    }
     setBusy(false);
     if (res?.ok === false) { setError(res.error || 'The token was not stored.'); return; }
     setError(null);
@@ -74,8 +80,10 @@ export default function GitCredential({ repoPath }) {
     <div className="hud-card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
       <div className="section-label">GITHUB TOKEN</div>
       <div role="status" style={{ fontSize: FS.chrome, color: stateOf(st) === 'has-token' ? 'var(--green)' : 'var(--gold)', lineHeight: LH.body }}>{headline(st)}</div>
+      {/* The colour follows the notice's own `persistent` flag. Listing the states here meant the main process
+          and this file could disagree about which ones are serious (Section 160.3, D5). */}
       {st?.notice && st.notice.state !== 'none' && (
-        <div style={{ fontSize: FS.denseLg, color: ['expired', 'rejected', 'unverified'].includes(st.notice.state) ? 'var(--red)' : 'var(--text-dim)', lineHeight: LH.body }}>
+        <div style={{ fontSize: FS.denseLg, color: st.notice.persistent ? 'var(--red)' : 'var(--text-dim)', lineHeight: LH.body }}>
           {[expiryLine(st.notice), sourceNote(st.notice), verifiedLine(st.notice)].filter(Boolean).join(' ')}
         </div>
       )}

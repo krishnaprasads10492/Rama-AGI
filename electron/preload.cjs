@@ -827,7 +827,7 @@ const RAMA_API = {
   // `set` and is never returned by any member. No `user` is sent: main uses the account behind the window.
   gitAuth: {
     status: (repoPath) => ipcRenderer.invoke('gitAuth:status', { repoPath }),
-    set:    (token)    => ipcRenderer.invoke('gitAuth:set', { token }),
+    set:    (token, force) => ipcRenderer.invoke('gitAuth:set', { token, force: force === true }),
     remove: ()         => ipcRenderer.invoke('gitAuth:remove'),
     test:   (repoPath) => ipcRenderer.invoke('gitAuth:test', { repoPath }),
     scrub:  (repoPath) => ipcRenderer.invoke('gitAuth:scrub', { repoPath }),

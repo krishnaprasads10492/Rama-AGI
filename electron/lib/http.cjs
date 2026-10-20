@@ -38,7 +38,12 @@ function circuitOpen(origin) {
   const c = circuits.get(origin);
   if (!c) return false;
   if (c.openUntil > Date.now()) return true;
-  circuits.delete(origin);
+  // ONLY CLEAR ONCE AN OPEN WINDOW HAS EXPIRED (Section 160.3, D8). This used to delete the record whenever
+  // `openUntil` was in the past - which it is from the first failure until the threshold, since it starts at 0.
+  // So the count was wiped at the start of the very next request, could never reach four, and the breaker
+  // documented at the top of this file HAD NEVER ONCE OPENED. Clearing after a real open window is deliberate:
+  // the origin gets a fresh count rather than being punished forever for one bad spell.
+  if (c.openUntil > 0) circuits.delete(origin);
   return false;
 }
 
@@ -84,7 +89,13 @@ function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 // ─── Core request ─────────────────────────────────────────────────────────────
 /**
  * @param {string} url
- * @param {object} opts { method, headers, body, timeout, human, retries, maxSize }
+ * @param {object} opts { method, headers, body, timeout, human, retries, maxSize, expectStatuses }
+ *
+ * `expectStatuses` (Section 160.3, D1) lists statuses that are CORRECT ANSWERS for this request, so they do not
+ * count against the origin's circuit breaker. A 401 from a token check and a 404 from "can this token see that
+ * repository" are accurate replies from a healthy origin; counting them as transport failures put a 20-second
+ * local blackout within reach of ordinary use. Default empty, so every existing caller is unchanged. Only the
+ * caller knows which statuses it expects, which is why this is an argument rather than a policy in here.
  * @returns {Promise<{ ok, status, body, headers }>}
  */
 async function request(url, opts = {}) {
@@ -96,7 +107,9 @@ async function request(url, opts = {}) {
     human    = false,
     retries  = MAX_RETRIES,
     maxSize  = MAX_RESPONSE_SIZE,
+    expectStatuses = [],
   } = opts;
+  const expected = (status) => Array.isArray(expectStatuses) && expectStatuses.includes(status);
 
   let parsed;
   try { parsed = new URL(url); }
@@ -104,7 +117,9 @@ async function request(url, opts = {}) {
 
   const origin = parsed.origin;
   if (circuitOpen(origin)) {
-    return { ok: false, status: 503, error: `Circuit open for ${origin}` };
+    // FLAGGED, so a caller never has to match on message text: this is "not asked", which is a different fact
+    // from "answered 503" and must be able to be reported as such (Section 160.3, D2).
+    return { ok: false, status: 503, circuitOpen: true, error: `Circuit open for ${origin}` };
   }
 
   const baseHeaders = human ? humanHeaders() : ramaHeaders();
@@ -157,7 +172,7 @@ async function request(url, opts = {}) {
       }
 
       if (result.status >= 200 && result.status < 400) recordOk(origin);
-      else recordFail(origin);
+      else if (!expected(result.status)) recordFail(origin);
 
       return { ok: result.status >= 200 && result.status < 400, ...result };
 
