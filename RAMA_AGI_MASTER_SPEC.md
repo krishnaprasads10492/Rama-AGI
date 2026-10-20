@@ -1863,6 +1863,7 @@ authenticated **Master session**, not merely an open store.
 | 191 | A failing build always gets its log out: shipped on any non-zero exit, and a redacted copy left where master can hand it over when the push cannot happen | built, verified end to end in a throwaway repository; never run on the machine that actually builds | Section 161. Master: "I have found new issues in the latest case, but what should I do to send those logs into repo" then "you need to integrate in case step3 fails". BUILT: `shouldShip` pure and exported, both scripts guarded with `require.main`, the summary and the act reading one value, `data/logs/outbox/` written with the REDACTED text when the commit or push cannot reach `origin`, and `Rama.bat` saying so on both the failed-build and NOT-READY paths. Suite: `verifyShipLog.cjs` (44, new); 26 mutations, all killed, three of which exposed redaction rules that no test could tell apart. NEXT: master runs option 2 or 3 on the build machine; if it pushes, `git fetch origin build-logs` and Rāma reads it, otherwise send the file from `data/logs/outbox/`. |
 | 192 | What the readiness report tells master: the disk refusal names the shortfall, the verdict carries the real reason, and the table cannot look clean while packages are missing | built, verified pure; the build machine itself still has to be re-run to see it | Section 162. Master shipped three transcripts from the build machine and said "pull the log branch and fix the issues". FOUND: the only blocker there is free disk (636-664 MB against a 1200 MB floor), and the report never said how much was needed. BUILT: `diskVerdict` naming the floor, the shortfall and the comfortable mark; `checkToolchain` returning its reasons so the verdict, `readiness.json` and the shipped manifest carry WHY; `checks.dependenciesPending` from the count readiness already computed and never used. Suite: `verifyReadinessReport.cjs` (52, new); 24 mutations, all killed. NEXT: master frees about 564 MB on that machine, re-runs option 2, and ships the transcript again - it should then be ready-with-limits and able to produce a real NSIS installer, which this machine cannot. |
 | 193 | The build machine's real failure: Node too old for the pinned set, and an archiver probe looking for a package the pinned toolchain no longer ships | built, verified pure; the build machine needs Node 22 installed before it can be confirmed there | Section 163. Master freed the disk, the build reached stage 4 and died with `ERR_REQUIRE_ESM`; "there is an issue, pushed logs. check them". DIAGNOSED: Node 20.10.0 against a pinned set whose floor is 22.12.0, reproduced from the other side here (the same `require` succeeds on 22.17.0), with npm's own EBADENGINE lines already saying so eleven times; and `7zip-bin` absent because electron-builder 26 dropped it, which made the archiver ladder fall to L2 every time and never attempt an installer. BUILT: `engines.node` declared once, a stage 0 refusal that names the floor and the failure it prevents, archiver level 3 for "not bundled by this toolchain". Suite: `verifyReadinessReport.cjs` now 85; 17 mutations, all killed. NEXT: master installs Node 22 LTS on the build machine, runs option 3 and ships the transcript - with a usable 7-Zip path no longer required, an NSIS installer should now be attempted for the first time. |
+| 194 | Stage 0 reports every problem in one run again, after Section 163 made it stop at the first | built, verified pure and run once here end to end | Section 164. Master shipped the next transcript: "there is an issue, pushed logs. check them". The Node refusal from row 193 fired correctly - and returned early, so npm, the project identity and the DISK check never ran, and a `✓ Node.js 20.10.0` printed directly above its own `✕`. BUILT: `toolchainVerdict`, pure and exported - facts gathered first, judged once, every reason printed and returned, no early exits. Suite: `verifyReadinessReport.cjs` now 104; 15 mutations, all killed, including one that reintroduces the regression. NEXT: master installs Node 22 LTS on the build machine and runs option 3; stage 0 will now list anything else wrong in the same run rather than one thing at a time. |
 
 ### Resume checklist for a cold session
 
@@ -20122,3 +20123,33 @@ Installing Node (nothing here installs a runtime; the pre-flight for `Rama.bat` 
 **NOT verified:** anything on the build machine. It still runs Node 20.10.0, so the refusal there is the next thing to observe, not the installer.
 
 **What master has to do:** install **Node 22 LTS** on the build machine (nodejs.org), delete `node_modules` there, then run option 3. The transcript will then either produce an installer or fail somewhere new and informative - and either way it ships itself. Nothing else about that machine is in the way: disk is free, symlink privilege is present, the Python environment is complete and the renderer builds.
+
+## Section 164 - Stage 0 must report everything in one run
+
+### 164.1 What the log shows
+The transcript master shipped at 18:40 is a `--readiness` run on the same machine, still Node 20.10.0. **Everything built in Sections 162 and 163 worked in the field:**
+- the Node floor refused the machine at stage 0, with the whole explanation in one sentence;
+- the verdict's blocking line carried that reason rather than "see the stage 0 report above";
+- the checks table shows the new `dependencies pending 0` row;
+- the archiver reported `level 3` - "this electron-builder does not bundle a 7-Zip ... installer targets are still attempted";
+- and it shipped itself to the branch.
+
+**And it exposed a regression I introduced in the same tranche.** Section 163 added the floor check as an early `return`, placed immediately after the Node tick. The consequence is visible by comparing this transcript with the 18:18 one: there is **no npm line, no project line and no disk line**. Those three checks never ran. One run used to tell master everything wrong with stage 0; it now tells him one thing and hides the rest, which is a fresh round trip for every problem after the first - and the disk is the problem that was blocking him two hours earlier.
+
+**A smaller one, same cause:** the transcript reads
+
+```
+✓ Node.js 20.10.0
+✕ Node.js 20.10.0 is below the 22.12.0 this project's pinned dependencies require...
+```
+
+because the tick was printed before the floor was applied.
+
+### 164.2 Decisions
+1. **Gather, then judge, then report.** `checkToolchain` collects every fact first - the project name, the declared floor, npm, free disk - and hands them to one pure `toolchainVerdict(facts)`. There is exactly ONE `return` in the function.
+2. **Reasons accumulate; nothing short-circuits.** A machine with an old Node, no npm, the wrong directory and a full disk is told all four in one run, in a stable order (Node, npm, project, disk). An unreadable `package.json` does not also complain that the name is wrong.
+3. **What is good is still said.** A run should read as a report, not only a complaint, so the ticks for Node, npm, the project and the disk are still printed - but the Node tick is conditional on the Node being acceptable, which is what the contradiction above cost. The Vite patch-line note is held back when the version is already refused, where it would be noise.
+4. **Pure, therefore testable.** The whole of stage 0's decision can now be driven without a machine that is simultaneously short of disk, missing npm and running an old Node.
+
+### 164.3 Not built
+Anything that installs Node; `canCreateSymlink` and `checkInstallerScript`, which already run independently of this verdict in `main` and were therefore unaffected by the regression (visible in the same transcript, which still reported both).

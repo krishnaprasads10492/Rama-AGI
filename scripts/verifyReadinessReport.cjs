@@ -170,12 +170,63 @@ const COMFY = b.DISK_COMFY_MB;
   check('level 2 still means a zip only', /portable zip only/.test(b.computeReadiness({ toolchain: true, ...base, archiver: { level: 2 } }).predicted));
   check('the level is recorded for the manifest', notBundled.checks.archiverLevel === 3);
 
+  // ═══ stage 0 reports everything, once (Section 164) ═══════════════════════════════════════════
+  section('toolchainVerdict: no refusal hides the measurement after it');
+  const facts = {
+    nodeVersion: '22.17.0', floor: '>=22.12.0', npmOk: true,
+    projectName: 'rama-agi', projectError: null, root: 'C:/repo',
+    disk: { state: 'ok', message: 'Disk space 102101 MB free' },
+  };
+  const T = (o) => b.toolchainVerdict({ ...facts, ...o });
+  check('a healthy machine has nothing to report', T({}).ok === true && T({}).reasons.length === 0 && T({}).nodeOk === true);
+
+  check('a Node below the project floor is a reason', (() => {
+    const r = T({ nodeVersion: '20.10.0' });
+    return r.ok === false && r.reasons.length === 1 && /below the 22\.12\.0/.test(r.reasons[0]) && r.nodeOk === false;
+  })());
+  check('a Node below the hard v18 minimum is its own reason, not the floor message', (() => {
+    const r = T({ nodeVersion: '16.20.0' });
+    return r.reasons.length === 1 && /v18 minimum/.test(r.reasons[0]) && !/ERR_REQUIRE_ESM/.test(r.reasons[0]);
+  })());
+  check('missing npm is a reason', (() => {
+    const r = T({ npmOk: false });
+    return r.ok === false && r.reasons.some((x) => /npm is not on PATH/.test(x));
+  })());
+  check('an unreadable package.json is a reason, with the path and the cause', (() => {
+    const r = T({ projectError: 'EACCES', projectName: null });
+    return r.reasons.some((x) => x.includes('C:/repo') && x.includes('EACCES'));
+  })());
+  check('the wrong project is a reason, and names what it found', (() => {
+    const r = T({ projectName: 'someone-elses-app' });
+    return r.reasons.some((x) => /not the Rāma project root/.test(x) && x.includes('someone-elses-app'));
+  })());
+  check('an unreadable package.json does not ALSO complain about the name', T({ projectError: 'EACCES', projectName: null }).reasons.length === 1);
+  check('a failing disk is a reason, and it is the disk message itself', (() => {
+    const d = b.diskVerdict(636);
+    const r = T({ disk: d });
+    return r.reasons.includes(d.message);
+  })());
+
+  check('FOUR PROBLEMS AT ONCE ARE ALL REPORTED, in one run', (() => {
+    const r = T({ nodeVersion: '20.10.0', npmOk: false, projectName: 'wrong', disk: b.diskVerdict(100) });
+    return r.ok === false && r.reasons.length === 4;
+  })());
+  check('and in a stable order: Node, npm, project, disk', (() => {
+    const r = T({ nodeVersion: '20.10.0', npmOk: false, projectName: 'wrong', disk: b.diskVerdict(100) });
+    return /^Node\.js /.test(r.reasons[0]) && /^npm is not/.test(r.reasons[1]) && /project root/.test(r.reasons[2]) && /MB free/.test(r.reasons[3]);
+  })());
+
+  check('tight, unknown and ok disk states are never reasons', ['tight', 'unknown', 'ok'].every((state) => T({ disk: { state, message: 'x' } }).reasons.length === 0));
+  check('a missing disk fact does not throw', (() => { try { return T({ disk: null }).ok === true; } catch { return false; } })());
+  check('nodeOk is about Node only: npm and disk problems leave it true', T({ npmOk: false, disk: b.diskVerdict(100) }).nodeOk === true);
+  check('an unreadable Node version is refused rather than waved through', T({ nodeVersion: 'v-next' }).ok === false);
+
   // ═══ source rules ══════════════════════════════════════════════════════════════════════════════
   section('what must not drift');
   const src = fs.readFileSync(path.join(ROOT, 'scripts/buildInstaller.cjs'), 'utf8');
   check('the thresholds are declared once, not inline', /const DISK_FLOOR_MB = 1200;/.test(src) && /const DISK_COMFY_MB = 3000;/.test(src) && !/disk < 1200/.test(src) && !/disk < 3000/.test(src));
-  check('the toolchain check returns its reasons', /return \{ ok: true, reasons \};/.test(src) && (src.match(/return \{ ok: false, reasons \};/g) || []).length >= 4);
-  check('every toolchain refusal is recorded, not just printed', /const refuse = \(m\) => \{ fail\(m\); reasons\.push\(m\); \};/.test(src));
+  check('the toolchain check returns one verdict, reasons and all', src.includes('return { ok: verdict.ok, reasons: verdict.reasons };'));
+  check('what is printed and what is returned are the same list', src.includes('for (const r of verdict.reasons) fail(r);') && !src.includes('reasons.push(m)'));
   // Found by mutation: the verdict checks above all pass a hand-made toolchain object, so they never
   // notice if checkToolchain itself stops RECORDING a refusal. The disk case is the one that matters,
   // because it is the only blocking item the build machine has ever reported.
@@ -184,17 +235,15 @@ const COMFY = b.DISK_COMFY_MB;
     const j = src.indexOf('\n}', i);
     return i < 0 || j < 0 ? '' : src.slice(i, j);
   })();
-  check('the disk refusal is recorded, not merely printed', /refuse\(d\.message\)/.test(body) && !/fail\(d\.message\)/.test(body), body.length ? 'checked' : 'function body not found');
-  check('and every exit from the toolchain check records its reason first',
-    body.length > 0 && (body.match(/refuse\(/g) || []).length >= (body.match(/return \{ ok: false/g) || []).length,
-    `${(body.match(/refuse\(/g) || []).length} refuse vs ${(body.match(/return \{ ok: false/g) || []).length} refusals`);
+  check('the disk measurement reaches the verdict rather than being printed and dropped', body.includes('disk,') && body.includes('const disk = diskVerdict(freeDiskMB());'), body.length ? 'checked' : 'function body not found');
+  check('and there is no way out of it that skips the verdict', body.length > 0 && (body.match(/return /g) || []).length === 1);
   check('the call sites use the object', /const toolchain = checkToolchain\(\);/.test(src) && /if \(!toolchain\.ok && !readinessOnly\) return 1;/.test(src) && !/toolchainOk, deps, archiver/.test(src));
   check('the pending count comes from the value readiness already computed', /pendingInstall: audit\.required\.length/.test(src) && /Number\.isFinite\(deps\?\.pendingInstall\)/.test(src));
   check('requiring this script still does not run a build', /if \(require\.main === module\) runCli\(\)/.test(src));
   check('the Node floor is read from the declaration, not copied into the check', src.includes('(pkg().engines || {}).node'));
   // Found by mutation: asserting that `refuse(floor.message)` EXISTS passes even when the branch
   // around it has been turned off, so the gate itself is asserted as well as its body.
-  check('the floor gate is reachable, not just present', src.includes('if (!floor.ok) {') && src.includes('refuse(floor.message)'));
+  check('the floor is applied inside the verdict, where it cannot be bypassed', src.includes('const floor = nodeFloorVerdict(f.nodeVersion, f.floor);') && src.includes('if (!floor.ok) reasons.push(floor.message);'));
   check('the app launcher is deliberately NOT gated on it', !fs.readFileSync(path.join(ROOT, 'start.cjs'), 'utf8').includes('engines'));
   check('an absent 7zip-bin is its own state, and that branch is reachable', (() => {
     const gate = src.indexOf('if (!toolchainBundles7za()) {');
@@ -206,6 +255,16 @@ const COMFY = b.DISK_COMFY_MB;
   check('and it returns level 3 rather than the level-2 dead end', src.includes('return { level: 3, version: null'));
   check('the report can name rung 3', src.includes("3: 'not bundled by this electron-builder"));
   check('usability is still "anything but level 2"', src.includes('archiver.level !== 2'));
+  check('stage 0 judges once, from gathered facts, with no early return', (() => {
+    const i = src.indexOf('function checkToolchain()');
+    const j = src.indexOf('\n}', i);
+    const body = i < 0 || j < 0 ? '' : src.slice(i, j);
+    return body.includes('const verdict = toolchainVerdict({') && !body.includes('return { ok: false, reasons };');
+  })());
+  check('the facts are gathered before anything is judged', src.indexOf('const disk = diskVerdict(freeDiskMB());') < src.indexOf('const verdict = toolchainVerdict({'));
+  check('the Node tick is conditional, so it cannot contradict its own refusal', src.includes('if (verdict.nodeOk) ok(`Node.js ${process.versions.node}`);'));
+  check('the Vite note is held back when the version is already refused', src.includes('if (verdict.nodeOk && !modernLine) {'));
+  check('every reason is printed as well as returned', src.includes('for (const r of verdict.reasons) fail(r);'));
   check('no console.log', !/console\.log/.test(src));
 
   finished = true;

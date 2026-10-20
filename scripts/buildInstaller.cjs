@@ -305,75 +305,92 @@ function diskVerdict(freeMB) {
   return { state: 'ok', message: `Disk space ${freeMB} MB free` };
 }
 
+/**
+ * Decide stage 0 from facts, so EVERY problem is reported in one run.
+ *
+ * THE REGRESSION THIS FIXES (Section 164.1). Section 163 added the Node floor as an early `return`,
+ * and the next transcript from the build machine showed what that cost: the refusal fired, and npm,
+ * the project identity and the DISK CHECK never ran at all. One run used to tell master everything
+ * wrong with his environment; it now told him one thing and hid the rest, which is a second round
+ * trip for every problem after the first. The same log also printed `✓ Node.js 20.10.0` immediately
+ * above `✕ Node.js 20.10.0 is below ...`, because the tick was emitted before the floor was applied.
+ *
+ * PURE, so stage 0's whole decision can be driven in a suite instead of needing a machine that is
+ * short of disk, missing npm and running an old Node at the same time.
+ *
+ * @param {{nodeVersion:string, floor:string|null, npmOk:boolean,
+ *          projectName:string|null, projectError:string|null, root:string,
+ *          disk:{state:string, message:string}}} f
+ * @returns {{ok:boolean, reasons:string[], nodeOk:boolean}}
+ */
+function toolchainVerdict(f) {
+  const reasons = [];
+  const [major] = String(f.nodeVersion || '').split('.').map(Number);
+  const nodeTooOld = !Number.isFinite(major) || major < 18;
+  if (nodeTooOld) {
+    reasons.push(`Node.js ${f.nodeVersion} — packaging needs v18 minimum, v22 LTS recommended.`);
+  } else {
+    const floor = nodeFloorVerdict(f.nodeVersion, f.floor);
+    if (!floor.ok) reasons.push(floor.message);
+  }
+  if (!f.npmOk) reasons.push('npm is not on PATH. Reinstall Node.js from nodejs.org (npm ships with it).');
+  if (f.projectError) reasons.push(`package.json could not be read at ${f.root} (${f.projectError})`);
+  else if (f.projectName !== 'rama-agi') reasons.push(`This is not the Rāma project root — package.json says "${f.projectName}".`);
+  if (f.disk && f.disk.state === 'fail') reasons.push(f.disk.message);
+  return { ok: reasons.length === 0, reasons, nodeOk: !nodeTooOld && reasons.every((r) => !/^Node\.js /.test(r)) };
+}
+
 /** @returns {{ok:boolean, reasons:string[]}} ok false means stop: the environment cannot package anything. */
 function checkToolchain() {
   stage(0, 'TOOLCHAIN — can this machine package at all');
 
-  // Every refusal is also RETURNED, so the verdict, the saved JSON and the shipped manifest carry the
-  // reason instead of "see the stage 0 report above" (Section 162.3, D2).
-  const reasons = [];
-  const refuse = (m) => { fail(m); reasons.push(m); };
-
-  const [major, minor] = process.versions.node.split('.').map(Number);
-  if (!Number.isFinite(major) || major < 18) {
-    refuse(`Node.js ${process.versions.node} — packaging needs v18 minimum, v22 LTS recommended.`);
-    fail('Download: https://nodejs.org/en/download');
-    return { ok: false, reasons };
-  }
-    ok(`Node.js ${process.versions.node}`);
-
-  // The floor the PINNED set demands, which is far above the v18 minimum above.
+  // EVERY fact is gathered first, then judged once, so no refusal can hide the measurement after it.
+  let projectName = null;
+  let projectError = null;
+  try { projectName = pkg().name; } catch (e) { projectError = e.message; }
   let declaredFloor = null;
   try { declaredFloor = (pkg().engines || {}).node || null; } catch { declaredFloor = null; }
-  const floor = nodeFloorVerdict(process.versions.node, declaredFloor);
-  if (!floor.ok) {
-    refuse(floor.message);
-    fail('Download Node 22 LTS: https://nodejs.org/en/download');
-    return { ok: false, reasons };
-  }
+  const npm = tryRun('npm --version');
+  const disk = diskVerdict(freeDiskMB());
 
-  // Same rule start.cjs applies, for the same reason: Vite 5+ calls crypto.hash,
-  // which only exists on the newer patch lines. Packaging runs `vite build`, so
-  // it is exposed to exactly the same failure — worth naming here rather than
-  // letting it surface as an opaque "crypto.hash is not a function".
+  const verdict = toolchainVerdict({
+    nodeVersion: process.versions.node,
+    floor: declaredFloor,
+    npmOk: npm.ok,
+    projectName,
+    projectError,
+    root: ROOT,
+    disk,
+  });
+
+  // What is good is still said, so a run is a report and not only a complaint. The Node tick is
+  // conditional: printing it above its own refusal was the contradiction in the shipped transcript.
+  if (verdict.nodeOk) ok(`Node.js ${process.versions.node}`);
+  if (npm.ok) ok(`npm ${npm.out}`);
+  if (!projectError && projectName === 'rama-agi') ok(`Project rama-agi v${appVersion()} at ${ROOT}`);
+  if (disk.state === 'unknown' || disk.state === 'tight') warn(disk.message);
+  else if (disk.state === 'ok') ok(disk.message);
+
+  // Same rule start.cjs applies, for the same reason: Vite 5+ calls crypto.hash, which only exists
+  // on the newer patch lines. Packaging runs `vite build`, so it is exposed to the same failure.
+  // Only worth saying when the version is otherwise acceptable — below the floor it is noise.
+  const [major, minor] = process.versions.node.split('.').map(Number);
   const modernLine = (major === 20 && minor >= 19) || (major === 22 && minor >= 12) || major >= 23;
-  if (!modernLine) {
+  if (verdict.nodeOk && !modernLine) {
     warn(`Node ${process.versions.node} is an older patch line than Vite 6 prefers.`);
     warn('  If the renderer build fails on "crypto.hash is not a function", that is why —');
     warn('  Node 22 LTS fixes it. Harmless otherwise.');
   }
 
-    const npm = tryRun('npm --version');
-  if (!npm.ok) {
-    refuse('npm is not on PATH. Reinstall Node.js from nodejs.org (npm ships with it).');
-    return { ok: false, reasons };
-  }
-  ok(`npm ${npm.out}`);
-
-  // Project sanity: running this from the wrong directory would install a
-  // stranger's dependencies and package the wrong thing.
-    let name;
-  try { name = pkg().name; }
-  catch (e) {
-    refuse(`package.json could not be read at ${ROOT} (${e.message})`);
-    return { ok: false, reasons };
-  }
-  if (name !== 'rama-agi') {
-    refuse(`This is not the Rāma project root — package.json says "${name}".`);
-    return { ok: false, reasons };
-  }
-  ok(`Project rama-agi v${appVersion()} at ${ROOT}`);
-
-    const d = diskVerdict(freeDiskMB());
-  if (d.state === 'unknown' || d.state === 'tight') warn(d.message);
-  else if (d.state === 'ok') ok(d.message);
-  else {
-    refuse(d.message);
-    fail('Free up space and run this again — nothing has been changed.');
-    return { ok: false, reasons };
+  // Every refusal is PRINTED and RETURNED, so the verdict, the saved JSON and the shipped manifest
+  // carry the reasons instead of "see the stage 0 report above" (Section 162.3, D2).
+  for (const r of verdict.reasons) fail(r);
+  if (!verdict.ok) {
+    if (verdict.reasons.some((r) => /^Node\.js /.test(r))) fail('Download Node 22 LTS: https://nodejs.org/en/download');
+    if (disk.state === 'fail') fail('Free up space and run this again — nothing has been changed.');
   }
 
-  return { ok: true, reasons };
+  return { ok: verdict.ok, reasons: verdict.reasons };
 }
 
 /**
@@ -2333,4 +2350,4 @@ const runCli = async () => {
 // why it is needed: a require with no guard started packaging stage 0 and stage 1 immediately.
 if (require.main === module) runCli();
 
-module.exports = { shouldShip, diskVerdict, computeReadiness, nodeFloorVerdict, DISK_FLOOR_MB, DISK_COMFY_MB };
+module.exports = { shouldShip, diskVerdict, computeReadiness, nodeFloorVerdict, toolchainVerdict, DISK_FLOOR_MB, DISK_COMFY_MB };
