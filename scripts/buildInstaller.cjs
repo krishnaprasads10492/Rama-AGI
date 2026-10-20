@@ -239,6 +239,39 @@ function freeDiskMB() {
   } catch { return null; }
 }
 
+/**
+ * Is this Node new enough for the PINNED dependency set?
+ *
+ * THE FAILURE THIS FIXES (Section 163.1). The build machine ran Node 20.10.0. Stage 0 passed it,
+ * because the only rule was `major < 18`. Forty seconds later electron-builder died with
+ * `ERR_REQUIRE_ESM` on `@noble/hashes/blake2.js` - which is ESM-only, and which `app-builder-lib`
+ * loads with `require()`. Synchronous require of an ESM graph needs Node 22.12 (or 20.19 on the 20
+ * line). npm had printed EBADENGINE eleven times in the same transcript and nothing acted on it.
+ *
+ * The floor is read from `engines.node` so there is ONE declaration, not a second copy here.
+ *
+ * @param {string} current  process.versions.node
+ * @param {string|null} floor  e.g. '>=22.12.0'
+ * @returns {{ok:boolean, floor:string|null, message:string|null}}
+ */
+function nodeFloorVerdict(current, floor) {
+  const want = /^\s*>=\s*(\d+)\.(\d+)\.(\d+)/.exec(String(floor || ''));
+  if (!want) return { ok: true, floor: null, message: null };
+  const have = /^(\d+)\.(\d+)\.(\d+)/.exec(String(current || ''));
+  if (!have) return { ok: true, floor: String(floor), message: null };
+  const asNum = (m) => Number(m[1]) * 1e6 + Number(m[2]) * 1e3 + Number(m[3]);
+  if (asNum(have) >= asNum(want)) return { ok: true, floor: String(floor), message: null };
+  const need = `${want[1]}.${want[2]}.${want[3]}`;
+  return {
+    ok: false,
+    floor: String(floor),
+    message: `Node.js ${current} is below the ${need} this project's pinned dependencies require. `
+      + 'Packaging fails late and confusingly on it: electron-builder loads the ESM-only @noble/hashes '
+      + `with require(), which Node can only do from 22.12 (or 20.19 on the 20 line), so it dies with `
+      + 'ERR_REQUIRE_ESM inside app-builder-lib. Install Node 22 LTS and run this again.',
+  };
+}
+
 const DISK_FLOOR_MB = 1200;
 const DISK_COMFY_MB = 3000;
 
@@ -287,7 +320,17 @@ function checkToolchain() {
     fail('Download: https://nodejs.org/en/download');
     return { ok: false, reasons };
   }
-  ok(`Node.js ${process.versions.node}`);
+    ok(`Node.js ${process.versions.node}`);
+
+  // The floor the PINNED set demands, which is far above the v18 minimum above.
+  let declaredFloor = null;
+  try { declaredFloor = (pkg().engines || {}).node || null; } catch { declaredFloor = null; }
+  const floor = nodeFloorVerdict(process.versions.node, declaredFloor);
+  if (!floor.ok) {
+    refuse(floor.message);
+    fail('Download Node 22 LTS: https://nodejs.org/en/download');
+    return { ok: false, reasons };
+  }
 
   // Same rule start.cjs applies, for the same reason: Vite 5+ calls crypto.hash,
   // which only exists on the newer patch lines. Packaging runs `vite build`, so
@@ -1194,6 +1237,21 @@ async function buildRenderer() {
 // the single interception point used below.
 // ══════════════════════════════════════════════════════════════════════════════
 
+/**
+ * Does the INSTALLED electron-builder bundle a 7-Zip at all?
+ *
+ * electron-builder 24 depended on `7zip-bin`; 26 does not. The build machine's own transcript shows
+ * `npm install` removing 116 packages - `7zip-bin` among them - and stage 3 then reporting "7zip-bin
+ * is not installed" on a machine that had reported L0 an hour earlier. Checked here: nothing in
+ * `node_modules` declares it and no `7za.exe` exists in the tree. So ABSENT means "this toolchain
+ * does not ship one", which says NOTHING about whether an installer can be built - and treating it
+ * as decisive is why the ladder fell to L2 every time and the installer was never attempted
+ * (Section 163.1, second finding).
+ */
+function toolchainBundles7za() {
+  return fs.existsSync(path.join(ROOT, 'node_modules', '7zip-bin'));
+}
+
 function bundled7zaPath() {
   const dir = path.join(ROOT, 'node_modules', '7zip-bin');
   if (!fs.existsSync(dir)) return null;
@@ -1455,7 +1513,14 @@ function restoreBundled7za() {
 /** @returns {{level:0|1|2, version?:string, source?:string, reason?:string}} */
 function resolveArchiver() {
   stage(3, 'ARCHIVER — is a usable 7-Zip actually reachable');
-
+  // ABSENT IS NOT UNUSABLE (Section 163.3, D4). Level 3 means "nothing here bundles one, so this is
+  // electron-builder's business, not a reason to refuse an installer". A failed attempt still falls
+  // back to the unpacked tree and a zip, which is exactly what level 2 produces anyway.
+  if (!toolchainBundles7za()) {
+    ok('This electron-builder does not bundle a 7-Zip (26 dropped 7zip-bin) — installer targets are still attempted');
+    info('  If the installer step fails on archiving, the run falls back to the unpacked tree and zips it.');
+    return { level: 3, version: null, source: 'not bundled by this electron-builder' };
+  }
   const bundled = bundled7zaPath();
 
   const l0 = probe7za(bundled);
@@ -1878,7 +1943,8 @@ function report({ archiver, dirOnly, degraded, archive, salvaged, failureTail, n
   }
   plain('');
 
-  const rung = {
+    const rung = {
+    3: 'not bundled by this electron-builder — the installer target was attempted anyway',
     0: `bundled 7-Zip ${archiver.version ?? ''}`.trim(),
     1: `system 7-Zip ${archiver.version ?? ''}`.trim(),
     2: 'none available',
@@ -2267,4 +2333,4 @@ const runCli = async () => {
 // why it is needed: a require with no guard started packaging stage 0 and stage 1 immediately.
 if (require.main === module) runCli();
 
-module.exports = { shouldShip, diskVerdict, computeReadiness, DISK_FLOOR_MB, DISK_COMFY_MB };
+module.exports = { shouldShip, diskVerdict, computeReadiness, nodeFloorVerdict, DISK_FLOOR_MB, DISK_COMFY_MB };

@@ -130,6 +130,46 @@ const COMFY = b.DISK_COMFY_MB;
   check('what is GOOD on that machine is still reported as good', machine.checks.symlinkPrivilege === true && machine.checks.archiverLevel === 0 && machine.checks.rendererPresent === true);
   check('and the one degradation is still a limit', machine.limits.some((l) => /node-pty/.test(l)));
 
+  // ═══ the Node floor (Section 163) ══════════════════════════════════════════════════════════════
+  section('nodeFloorVerdict: the wrong Node is caught at stage 0, not forty seconds later');
+  const FLOOR_DECL = '>=22.12.0';
+  const tooOld = b.nodeFloorVerdict('20.10.0', FLOOR_DECL);
+  check('the build machine\'s Node is refused', tooOld.ok === false);
+  check('and the message names the version it has and the one it needs', tooOld.message.includes('20.10.0') && tooOld.message.includes('22.12.0'));
+  check('and names the failure it prevents, so it is recognisable in an old log', /ERR_REQUIRE_ESM/.test(tooOld.message) && tooOld.message.includes('@noble/hashes'));
+  check('and says what to install', /Node 22 LTS/.test(tooOld.message));
+  check('exactly the floor passes', b.nodeFloorVerdict('22.12.0', FLOOR_DECL).ok === true);
+  check('one patch under the floor is refused', b.nodeFloorVerdict('22.11.9', FLOOR_DECL).ok === false);
+  check('a later line passes', b.nodeFloorVerdict('22.17.0', FLOOR_DECL).ok === true && b.nodeFloorVerdict('24.0.0', FLOOR_DECL).ok === true);
+  check('the 20 line is refused however new, because the floor is 22.12', b.nodeFloorVerdict('20.19.5', FLOOR_DECL).ok === false);
+  check('a passing verdict carries no message to print', b.nodeFloorVerdict('22.17.0', FLOOR_DECL).message === null);
+  check('the floor is echoed back for the caller', b.nodeFloorVerdict('22.17.0', FLOOR_DECL).floor === FLOOR_DECL);
+  for (const [n, v] of [['no declaration', null], ['empty', ''], ['a caret range', '^22.12.0'], ['nonsense', 'latest'], ['an object', {}]]) {
+    check(`a floor that cannot be read (${n}) never blocks a build`, b.nodeFloorVerdict('18.0.0', v).ok === true);
+  }
+  for (const [n, v] of [['undefined', undefined], ['nonsense', 'v-next'], ['empty', '']]) {
+    check(`an unreadable current version (${n}) never blocks either`, b.nodeFloorVerdict(v, FLOOR_DECL).ok === true);
+  }
+
+  section('the declared floor is the real one');
+  const engines = (() => { try { return (JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).engines || {}).node || null; } catch { return null; } })();
+  check('package.json declares a Node floor at all', typeof engines === 'string' && /^>=[0-9]+\.[0-9]+\.[0-9]+$/.test(engines), String(engines));
+  check('and it is the 22.12.0 the pinned set needs', engines === '>=22.12.0', String(engines));
+  check('and it is not below what the pinned electron itself requires', (() => {
+    let ebEngine = null;
+    try { ebEngine = (JSON.parse(fs.readFileSync(path.join(ROOT, 'node_modules/electron/package.json'), 'utf8')).engines || {}).node || null; } catch { return true; }
+    if (!ebEngine) return true;
+    const num = (x) => { const m = /([0-9]+)\.([0-9]+)\.([0-9]+)/.exec(String(x)); return m ? Number(m[1]) * 1e6 + Number(m[2]) * 1e3 + Number(m[3]) : 0; };
+    return num(engines) >= num(ebEngine);
+  })(), 'electron asks for more than package.json declares');
+
+  section('the archiver: absent is not unusable');
+  const notBundled = b.computeReadiness({ toolchain: true, ...base, archiver: { level: 3, version: null } });
+  check('level 3 does not make the installer unreachable', notBundled.verdict === 'ready' && !notBundled.limits.some((l) => /7-Zip/.test(l)));
+  check('and an installer is still what it predicts', /NSIS installer/.test(notBundled.predicted));
+  check('level 2 still means a zip only', /portable zip only/.test(b.computeReadiness({ toolchain: true, ...base, archiver: { level: 2 } }).predicted));
+  check('the level is recorded for the manifest', notBundled.checks.archiverLevel === 3);
+
   // ═══ source rules ══════════════════════════════════════════════════════════════════════════════
   section('what must not drift');
   const src = fs.readFileSync(path.join(ROOT, 'scripts/buildInstaller.cjs'), 'utf8');
@@ -151,6 +191,21 @@ const COMFY = b.DISK_COMFY_MB;
   check('the call sites use the object', /const toolchain = checkToolchain\(\);/.test(src) && /if \(!toolchain\.ok && !readinessOnly\) return 1;/.test(src) && !/toolchainOk, deps, archiver/.test(src));
   check('the pending count comes from the value readiness already computed', /pendingInstall: audit\.required\.length/.test(src) && /Number\.isFinite\(deps\?\.pendingInstall\)/.test(src));
   check('requiring this script still does not run a build', /if \(require\.main === module\) runCli\(\)/.test(src));
+  check('the Node floor is read from the declaration, not copied into the check', src.includes('(pkg().engines || {}).node'));
+  // Found by mutation: asserting that `refuse(floor.message)` EXISTS passes even when the branch
+  // around it has been turned off, so the gate itself is asserted as well as its body.
+  check('the floor gate is reachable, not just present', src.includes('if (!floor.ok) {') && src.includes('refuse(floor.message)'));
+  check('the app launcher is deliberately NOT gated on it', !fs.readFileSync(path.join(ROOT, 'start.cjs'), 'utf8').includes('engines'));
+  check('an absent 7zip-bin is its own state, and that branch is reachable', (() => {
+    const gate = src.indexOf('if (!toolchainBundles7za()) {');
+    const probe = src.indexOf('const bundled = bundled7zaPath();');
+    return src.includes('function toolchainBundles7za()') && gate >= 0 && probe >= 0 && gate < probe;
+  })());
+  check('and the bundled test is a plain existence check, not an inverted one',
+    src.includes("return fs.existsSync(path.join(ROOT, 'node_modules', '7zip-bin'));"));
+  check('and it returns level 3 rather than the level-2 dead end', src.includes('return { level: 3, version: null'));
+  check('the report can name rung 3', src.includes("3: 'not bundled by this electron-builder"));
+  check('usability is still "anything but level 2"', src.includes('archiver.level !== 2'));
   check('no console.log', !/console\.log/.test(src));
 
   finished = true;
