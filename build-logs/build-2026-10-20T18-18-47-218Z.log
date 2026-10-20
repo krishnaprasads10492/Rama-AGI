@@ -1,0 +1,325 @@
+Rāma AGI packaging log
+started  2026-10-20T18:18:47.220Z
+node     v20.10.0 on win32-x64
+root     C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI
+argv     (none)
+
+
+  ⬢ Rāma AGI — packaging v1.0.0
+
+▸ STAGE 0  TOOLCHAIN — can this machine package at all
+23:48:47 ✓ Node.js 20.10.0
+23:48:47 ! Node 20.10.0 is an older patch line than Vite 6 prefers.
+23:48:47 !   If the renderer build fails on "crypto.hash is not a function", that is why —
+23:48:47 !   Node 22 LTS fixes it. Harmless otherwise.
+23:48:48 ✓ npm 10.4.0
+23:48:48 ✓ Project rama-agi v1.0.0 at C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI
+23:48:48 ✓ Disk space 16168 MB free
+23:48:48 ✓ Symlink privilege present — winCodeSign will extract cleanly
+23:48:48 ✓ assets\installer.nsh checks out (ASCII, symbols resolvable, macros balanced)
+
+▸ STAGE 1  DEPENDENCIES — what is missing, and installing it
+23:48:48 ! 21 of 34 package(s) need installing:
+      @babel/parser — 7.29.7 installed, 7.29.9 pinned
+      @babel/traverse — 7.29.7 installed, 7.29.10 pinned
+      axios — 1.7.9 installed, 1.20.0 pinned
+      chokidar — 3.6.0 installed, 4.0.3 pinned
+      cors — 2.8.5 installed, 2.8.6 pinned
+      electron — 31.7.7 installed, 44.7.0 pinned
+      electron-builder — 24.13.3 installed, 26.15.3 pinned
+      electron-updater — 6.3.9 installed, 6.8.9 pinned
+      express — 4.21.2 installed, 4.22.3 pinned
+      helmet — 8.1.0 installed, 8.3.0 pinned
+      monaco-editor — 0.56.0 installed, 0.57.0 pinned
+      playwright — 1.48.2 installed, 1.64.0 pinned
+      … and 9 more
+23:48:48 · npm install --no-audit --no-fund
+
+$ npm install --no-audit --no-fund
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@electron-internal/extract-zip@1.0.5',
+npm WARN EBADENGINE   required: { node: '>=22.12.0' },
+npm WARN EBADENGINE   current: { node: 'v20.10.0', npm: '10.4.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@electron/get@5.1.0',
+npm WARN EBADENGINE   required: { node: '>=22.12.0' },
+npm WARN EBADENGINE   current: { node: 'v20.10.0', npm: '10.4.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@electron/rebuild@4.2.1',
+npm WARN EBADENGINE   required: { node: '>=22.12.0' },
+npm WARN EBADENGINE   current: { node: 'v20.10.0', npm: '10.4.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'abbrev@4.0.0',
+npm WARN EBADENGINE   required: { node: '^20.17.0 || >=22.9.0' },
+npm WARN EBADENGINE   current: { node: 'v20.10.0', npm: '10.4.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'node-abi@4.37.0',
+npm WARN EBADENGINE   required: { node: '>=22.12.0' },
+npm WARN EBADENGINE   current: { node: 'v20.10.0', npm: '10.4.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'node-gyp@12.4.0',
+npm WARN EBADENGINE   required: { node: '^20.17.0 || >=22.9.0' },
+npm WARN EBADENGINE   current: { node: 'v20.10.0', npm: '10.4.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'nopt@9.0.0',
+npm WARN EBADENGINE   required: { node: '^20.17.0 || >=22.9.0' },
+npm WARN EBADENGINE   current: { node: 'v20.10.0', npm: '10.4.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'which@6.0.1',
+npm WARN EBADENGINE   required: { node: '^20.17.0 || >=22.9.0' },
+npm WARN EBADENGINE   current: { node: 'v20.10.0', npm: '10.4.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@noble/hashes@2.4.0',
+npm WARN EBADENGINE   required: { node: '>= 20.19.0' },
+npm WARN EBADENGINE   current: { node: 'v20.10.0', npm: '10.4.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'cheerio@1.2.0',
+npm WARN EBADENGINE   required: { node: '>=20.18.1' },
+npm WARN EBADENGINE   current: { node: 'v20.10.0', npm: '10.4.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'electron@44.7.0',
+npm WARN EBADENGINE   required: { node: '>= 22.12.0' },
+npm WARN EBADENGINE   current: { node: 'v20.10.0', npm: '10.4.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'proc-log@6.1.0',
+npm WARN EBADENGINE   required: { node: '^20.17.0 || >=22.9.0' },
+npm WARN EBADENGINE   current: { node: 'v20.10.0', npm: '10.4.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'undici@7.30.0',
+npm WARN EBADENGINE   required: { node: '>=20.18.1' },
+npm WARN EBADENGINE   current: { node: 'v20.10.0', npm: '10.4.0' }
+npm WARN EBADENGINE }
+npm WARN deprecated rimraf@2.6.3: Rimraf versions prior to v4 are no longer supported
+
+added 93 packages, removed 116 packages, and changed 79 packages in 33s
+23:49:23 ✓ Dependencies installed via: npm install --no-audit --no-fund
+23:49:23 ✓ Re-checked after install — all required packages resolve
+23:49:23 ✓ argon2 native binary present — bin/win32-x64-125/argon2.node
+23:49:23 ✓ node-pty native binary present — prebuilds/win32-x64/conpty.node
+23:49:26 ✓ StockMind engine venv already complete — AppData\Roaming\Rama AGI\python-env
+23:49:28 ✓ StockMind runtime (managed venv): Python 3.12.1, all 13 engine packages importable
+23:49:29 ✓ Web research: driving Microsoft Edge (channel)
+      An installed browser is used, so Playwright's ~150 MB Chromium is not needed.
+
+▸ STAGE 2  RENDERER — building the production bundle
+23:49:29 · vite build
+
+$ npm run build
+
+> rama-agi@1.0.0 build
+> vite build && node scripts/verifyBundleGraph.cjs
+
+The CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.
+vite v6.4.4 building for production...
+transforming...
+✓ 1358 modules transformed.
+rendering chunks...
+computing gzip size...
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+build/index.html                                    1.70 kB │ gzip:     0.80 kB
+build/assets/codicon-DF1abBS2.ttf                 153.23 kB
+build/assets/index-D9GAhkGW.css                    13.29 kB │ gzip:     3.73 kB
+build/assets/vendor-monaco-C4MAxlb5.css           186.72 kB │ gzip:    27.73 kB
+build/assets/vendor-zustand-B9ZhS1KJ.js             0.66 kB │ gzip:     0.41 kB
+build/assets/lang-azcli-Y6nb8tq_.js                 0.71 kB │ gzip:     0.28 kB
+build/assets/selfModify-BHIptnT6.js                 0.84 kB │ gzip:     0.47 kB
+build/assets/lang-javascript-B9AXVsz2.js            0.85 kB │ gzip:     0.47 kB
+build/assets/lang-ini-Kd9XrMLS.js                   0.96 kB │ gzip:     0.50 kB
+build/assets/vite-preload-Dp1pzeXC.js               1.27 kB │ gzip:     0.73 kB
+build/assets/lang-csp-D-4FJmMZ.js                   1.28 kB │ gzip:     0.49 kB
+build/assets/lang-pla-DSh2-awV.js                   1.55 kB │ gzip:     0.61 kB
+build/assets/lang-scheme-BPhDTwHR.js                1.63 kB │ gzip:     0.78 kB
+build/assets/lang-flow9-BeJ5waoc.js                 1.67 kB │ gzip:     0.81 kB
+build/assets/lang-sb-BBc9UKZt.js                    1.69 kB │ gzip:     0.79 kB
+build/assets/lang-bat-BwHxbl9M.js                   1.71 kB │ gzip:     0.83 kB
+build/assets/lang-dockerfile-BG73LgW2.js            1.73 kB │ gzip:     0.63 kB
+build/assets/lang-pascaligo-DtZ0uQbO.js             1.86 kB │ gzip:     0.87 kB
+build/assets/lang-xml--Gq2j-On.js                   1.97 kB │ gzip:     0.76 kB
+build/assets/lang-lua-Cyyb5UIc.js                   1.99 kB │ gzip:     0.89 kB
+build/assets/lang-cameligo-Bf6VGUru.js              2.05 kB │ gzip:     0.92 kB
+build/assets/lang-graphql-BxJiqAUM.js               2.12 kB │ gzip:     0.99 kB
+build/assets/ipcClient-Cl_qFDlK.js                  2.26 kB │ gzip:     0.81 kB
+build/assets/lang-objective-c-BDtDVThU.js           2.26 kB │ gzip:     1.02 kB
+build/assets/lang-lexon-OrD6JF1K.js                 2.30 kB │ gzip:     0.89 kB
+build/assets/lang-bicep-CFznDFnq.js                 2.40 kB │ gzip:     0.93 kB
+build/assets/lang-sparql-CJmd_6j2.js                2.41 kB │ gzip:     1.12 kB
+build/assets/lang-mips-CiqrrVzr.js                  2.44 kB │ gzip:     1.03 kB
+build/assets/lang-go-acbASCJo.js                    2.52 kB │ gzip:     1.11 kB
+build/assets/lang-sophia-CnS9iZB_.js                2.63 kB │ gzip:     1.17 kB
+build/assets/lang-typespec-Btyra-wh.js              2.66 kB │ gzip:     1.05 kB
+build/assets/lang-m3-B8OfTtLu.js                    2.68 kB │ gzip:     1.28 kB
+build/assets/lang-fsharp-PahG7c26.js                2.85 kB │ gzip:     1.28 kB
+build/assets/lang-pascal-vHIfCaH5.js                2.86 kB │ gzip:     1.36 kB
+build/assets/lang-shell-DiJ1NA_G.js                 2.94 kB │ gzip:     1.16 kB
+build/assets/lang-r-j7ic8hl3.js                     2.99 kB │ gzip:     1.24 kB
+build/assets/lang-qsharp-Bw9ernYp.js                3.05 kB │ gzip:     1.37 kB
+build/assets/lang-java-CXBNlu9o.js                  3.08 kB │ gzip:     1.36 kB
+build/assets/lang-powershell-COWaemsV.js            3.13 kB │ gzip:     1.34 kB
+build/assets/lang-cypher-cTPe9QuQ.js                3.25 kB │ gzip:     1.40 kB
+build/assets/lang-kotlin-s7OhZKlX.js                3.26 kB │ gzip:     1.43 kB
+build/assets/ramaClient-D0ssjyhY.js                 3.36 kB │ gzip:     1.64 kB
+build/assets/lang-redis-Bu5POkcn.js                 3.42 kB │ gzip:     1.44 kB
+build/assets/lang-tcl-Dm6ycUr_.js                   3.43 kB │ gzip:     1.33 kB
+build/assets/lang-coffee-Bd8akH9Z.js                3.45 kB │ gzip:     1.26 kB
+build/assets/lang-hcl-DtV1sZF8.js                   3.45 kB │ gzip:     1.45 kB
+build/assets/lang-liquid-Dds3TLlT.js                3.52 kB │ gzip:     1.45 kB
+build/assets/lang-yaml-BduhuEJ-.js                  3.58 kB │ gzip:     1.32 kB
+build/assets/lang-markdown-BFxVWTOG.js              3.65 kB │ gzip:     1.35 kB
+build/assets/lang-restructuredtext-CqXO7rUv.js      3.76 kB │ gzip:     1.33 kB
+build/assets/lang-less-9HpZscsL.js                  3.76 kB │ gzip:     1.38 kB
+build/assets/lang-python-CN7UgNmt.js                3.76 kB │ gzip:     1.48 kB
+build/assets/lang-apex-DNDY2TF8.js                  3.82 kB │ gzip:     1.73 kB
+build/assets/lang-rust-BzKRNQWT.js                  4.02 kB │ gzip:     1.79 kB
+build/assets/lang-dart-BOtBlQCF.js                  4.11 kB │ gzip:     1.61 kB
+build/assets/Home-BQ0_CsQ7.js                       4.23 kB │ gzip:     1.74 kB
+build/assets/lang-mdx-D-3fhuUF.js                   4.36 kB │ gzip:     1.24 kB
+build/assets/lang-css-DdJfP1eB.js                   4.37 kB │ gzip:     1.34 kB
+build/assets/lang-csharp-Co3qMtFm.js                4.39 kB │ gzip:     1.69 kB
+build/assets/Terminal-D3Syhj_H.js                   4.40 kB │ gzip:     1.95 kB
+build/assets/lang-html-DZy7KSkY.js                  4.57 kB │ gzip:     1.19 kB
+build/assets/lang-pug-8SOpv6rk.js                   4.69 kB │ gzip:     1.61 kB
+build/assets/lang-msdax-DmeGPVcC.js                 4.77 kB │ gzip:     1.91 kB
+build/assets/PopoutPanel-CWqZU5yI.js                4.90 kB │ gzip:     2.08 kB
+build/assets/lang-typescript-DG4eqRZz.js            4.95 kB │ gzip:     1.97 kB
+build/assets/lang-swift-Bqt4WxQ4.js                 5.03 kB │ gzip:     2.06 kB
+build/assets/lang-cpp-BbWJElDN.js                   5.16 kB │ gzip:     2.06 kB
+build/assets/lang-ecl-BEgZUVRK.js                   5.20 kB │ gzip:     2.19 kB
+build/assets/Knowledge-DRA7QLv2.js                  5.60 kB │ gzip:     2.03 kB
+build/assets/lang-vb-Db0cS2oM.js                    5.65 kB │ gzip:     2.02 kB
+build/assets/brokerAccountsModel-CtQmDuHP.js        5.71 kB │ gzip:     2.62 kB
+build/assets/lang-twig-Csy3S7wG.js                  5.84 kB │ gzip:     1.49 kB
+build/assets/lang-scss-CBJaRo0y.js                  6.27 kB │ gzip:     1.71 kB
+build/assets/lang-handlebars-CFJdp-1P.js            6.33 kB │ gzip:     1.41 kB
+build/assets/lang-julia-cl7-CwDS.js                 7.01 kB │ gzip:     2.62 kB
+build/assets/lang-scala-D9hQfWCl.js                 7.18 kB │ gzip:     2.06 kB
+build/assets/lang-wgsl-BTesnYfV.js                  7.21 kB │ gzip:     2.72 kB
+build/assets/lang-st-CHwy0fLd.js                    7.26 kB │ gzip:     2.21 kB
+build/assets/lang-systemverilog-Bs9z6M-B.js         7.47 kB │ gzip:     2.72 kB
+build/assets/cognition-CHXw96PH.js                  7.57 kB │ gzip:     3.00 kB
+build/assets/lang-postiats-CocnycG-.js              7.72 kB │ gzip:     2.40 kB
+build/assets/lang-php-BBUBE1dy.js                   7.89 kB │ gzip:     2.04 kB
+build/assets/lang-perl-Ub6l9XKa.js                  8.12 kB │ gzip:     3.10 kB
+build/assets/lang-razor-CNwxtJym.js                 8.34 kB │ gzip:     2.09 kB
+build/assets/lang-ruby-zBfavPgS.js                  8.37 kB │ gzip:     2.54 kB
+build/assets/lang-protobuf-Brw8urJB.js              8.91 kB │ gzip:     2.04 kB
+build/assets/lang-clojure-Dnu-v4kV.js               9.51 kB │ gzip:     3.57 kB
+build/assets/lang-elixir-BkW5O-1t.js               10.12 kB │ gzip:     2.50 kB
+build/assets/lang-sql-ClhHkBeG.js                  10.16 kB │ gzip:     3.79 kB
+build/assets/Introspect-COcSfDqq.js                10.16 kB │ gzip:     3.02 kB
+build/assets/Genome-CqwcTuZM.js                    10.98 kB │ gzip:     3.42 kB
+build/assets/lang-mysql-C_tMU-Nz.js                11.14 kB │ gzip:     4.01 kB
+build/assets/lang-redshift-Bs9aos_-.js             11.66 kB │ gzip:     4.30 kB
+build/assets/Agents-BBnxERg8.js                    11.91 kB │ gzip:     3.80 kB
+build/assets/lang-pgsql-BlNEE0v7.js                13.33 kB │ gzip:     4.46 kB
+build/assets/Users-CdzJYPvx.js                     13.39 kB │ gzip:     3.98 kB
+build/assets/Chat-DYp2ONG1.js                      13.53 kB │ gzip:     5.08 kB
+build/assets/lang-abap-DLDM7-KI.js                 14.03 kB │ gzip:     5.27 kB
+build/assets/lang-freemarker2-DMkXMSrD.js          15.64 kB │ gzip:     3.94 kB
+build/assets/lang-powerquery-tScXyioY.js           16.80 kB │ gzip:     4.81 kB
+build/assets/Intelligence-9nBa3Pq9.js              17.21 kB │ gzip:     4.69 kB
+build/assets/System-B5QfbFbU.js                    17.54 kB │ gzip:     5.05 kB
+build/assets/lang-solidity-Db0IVjzk.js             18.46 kB │ gzip:     4.41 kB
+build/assets/Evolution-DqcCh7HA.js                 19.33 kB │ gzip:     5.37 kB
+build/assets/RamaMind-CFXR7Udm.js                  22.25 kB │ gzip:     7.19 kB
+build/assets/Resources-DMAC6GJV.js                 22.54 kB │ gzip:     6.21 kB
+build/assets/Settings-CjMAvE2b.js                  28.26 kB │ gzip:     8.48 kB
+build/assets/GitSync-BmI6zZiZ.js                   29.94 kB │ gzip:     8.32 kB
+build/assets/IDE-Db6h3rRV.js                       34.67 kB │ gzip:    10.84 kB
+build/assets/vendor-router-CJ9q9IgE.js             38.10 kB │ gzip:    13.83 kB
+build/assets/Models-B1v1KH9H.js                    42.13 kB │ gzip:    10.93 kB
+build/assets/index-DiRMlLIR.js                    116.79 kB │ gzip:    35.35 kB
+build/assets/StockMind-DZj28DpN.js                144.19 kB │ gzip:    42.14 kB
+build/assets/vendor-charts-CSiXOtKj.js            188.86 kB │ gzip:    60.55 kB
+build/assets/WhyPanel-91srJKoq.js                 217.85 kB │ gzip:    69.51 kB
+build/assets/vendor-react-SaLnwSRd.js             223.21 kB │ gzip:    69.23 kB
+build/assets/vendor-monaco-BHphXLwn.js          4,301.43 kB │ gzip: 1,127.70 kB
+✓ built in 14.40s
+
+Rama bundle graph
+  PASS  the build emitted chunks to read
+        113 chunks, 147 static edges, 101 dynamic edges
+  PASS  every static import names a chunk that exists
+  PASS  no chunk statically imports a chunk that statically imports it back
+  PASS  the per-language grammar chunks were emitted
+  PASS  no chunk outside the grammar set statically imports a grammar
+        1 grammar-to-grammar static edge(s): lang-javascript-B9AXVsz2.js -> lang-typescript-DG4eqRZz.js
+  PASS  every grammar chunk is reached by dynamic import
+  PASS  exactly one chunk holds the language registry
+  PASS  and the registration helper lives in that same chunk
+  PASS  the chunk holding the registry is the monaco core, not a language chunk
+  PASS  index.html names an entry chunk
+        entry index-DiRMlLIR.js eagerly reaches 5 chunk(s): index-DiRMlLIR.js, vendor-react-SaLnwSRd.js, vendor-router-CJ9q9IgE.js, vendor-zustand-B9ZhS1KJ.js, vite-preload-Dp1pzeXC.js
+  PASS  monaco is NOT on the startup path
+  PASS  no grammar is on the startup path
+        startup payload: 371.12 kB raw across 5 chunk(s)
+  PASS  the startup payload stays under 600 kB
+  PASS  Vite's preload helper has a chunk of its own
+  PASS  and it is small, as a helper should be
+  PASS  and it is on the startup path, which is correct — every lazy route needs it
+  PASS  the startup set is exactly the chunks the design intends
+  PASS  a vendor-react chunk exists
+  PASS  and it is not empty — the 0.00 kB defect row 160 found
+  PASS  react-dom really is inside it
+  PASS  a default build ships no sourcemaps
+
+  held by hand, listed rather than implied:
+    - a cycle-free graph makes a cross-chunk TDZ impossible, but WITHIN one chunk Rollup
+      still orders module bodies itself; this suite does not re-derive that order
+    - that the editor actually opens is a browser claim. The reproduction used for the
+      Section 140 fix was to serve build/ and `await import()` the monaco chunk, which
+      threw the real error before the fix and resolved clean after it. That probe needs a
+      browser and is not part of this static check
+
+ALL PASS — 21 passed, 0 failed
+
+23:49:47 ✓ Renderer built → build/
+
+▸ STAGE 3  ARCHIVER — is a usable 7-Zip actually reachable
+23:49:47 ! Bundled 7-Zip is unusable: 7zip-bin is not installed
+23:49:47 · No system 7-Zip found to fall back to
+23:49:47 ! L2 no usable 7-Zip — NSIS and portable-exe targets are not reachable here.
+23:49:47 !   Building the unpacked app instead and zipping it without an external archiver.
+23:49:47 ✓ Build manifest written — the app will know its own limits at runtime
+
+▸ STAGE 4  PACKAGE — unpacked application tree
+23:49:47 · npx electron-builder --win --x64 -c.win.signAndEditExecutable=false --dir
+
+$ npx electron-builder --win --x64 -c.win.signAndEditExecutable=false --dir
+
+C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\app-builder-lib\out\targets\blockmap\blockmap.js:8
+const blake2_js_1 = require("@noble/hashes/blake2.js");
+                    ^
+Error [ERR_REQUIRE_ESM]: require() of ES Module C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\@noble\hashes\blake2.js from C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\app-builder-lib\out\targets\blockmap\blockmap.js not supported.
+Instead change the require of blake2.js in C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\app-builder-lib\out\targets\blockmap\blockmap.js to a dynamic import() which is available in all CommonJS modules.
+    at Object.<anonymous> (C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\app-builder-lib\out\targets\blockmap\blockmap.js:8:21)
+    at Object.<anonymous> (C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\app-builder-lib\out\targets\differentialUpdateInfoBuilder.js:10:20)
+23:49:57 ✕ electron-builder failed (exit 1)
+
+  Last output from electron-builder:
+    C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\app-builder-lib\out\targets\blockmap\blockmap.js:8
+    const blake2_js_1 = require("@noble/hashes/blake2.js");
+                        ^
+    Error [ERR_REQUIRE_ESM]: require() of ES Module C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\@noble\hashes\blake2.js from C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\app-builder-lib\out\targets\blockmap\blockmap.js not supported.
+    Instead change the require of blake2.js in C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\app-builder-lib\out\targets\blockmap\blockmap.js to a dynamic import() which is available in all CommonJS modules.
+        at Object.<anonymous> (C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\app-builder-lib\out\targets\blockmap\blockmap.js:8:21)
+        at Object.<anonymous> (C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI\node_modules\app-builder-lib\out\targets\differentialUpdateInfoBuilder.js:10:20)
+
+  Full transcript: data\logs\build-2026-10-20T18-18-47-218Z.log
+  Sending it to the build-logs branch — readable from any machine.
+
