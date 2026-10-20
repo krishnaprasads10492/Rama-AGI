@@ -1,0 +1,48 @@
+Rāma AGI packaging log
+started  2026-10-20T18:40:07.330Z
+node     v20.10.0 on win32-x64
+root     C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI
+argv     --readiness
+
+
+  ⬢ Rāma AGI — packaging v1.0.0
+
+▸ STAGE 0  TOOLCHAIN — can this machine package at all
+00:10:07 ✓ Node.js 20.10.0
+00:10:07 ✕ Node.js 20.10.0 is below the 22.12.0 this project's pinned dependencies require. Packaging fails late and confusingly on it: electron-builder loads the ESM-only @noble/hashes with require(), which Node can only do from 22.12 (or 20.19 on the 20 line), so it dies with ERR_REQUIRE_ESM inside app-builder-lib. Install Node 22 LTS and run this again.
+00:10:07 ✕ Download Node 22 LTS: https://nodejs.org/en/download
+00:10:07 ✓ Symlink privilege present — winCodeSign will extract cleanly
+00:10:07 ✓ assets\installer.nsh checks out (ASCII, symbols resolvable, macros balanced)
+
+▸ STAGE 1  DEPENDENCIES — measuring only, installing nothing
+00:10:07 ✓ All 34 pinned packages present at the pinned versions
+00:10:07 ✓ argon2 native binary present — bin/win32-x64-125/argon2.node
+00:10:07 ✓ node-pty native binary present — prebuilds/win32-x64/conpty.node
+00:10:11 ✓ StockMind runtime (managed venv): Python 3.12.1, all 13 engine packages importable
+00:10:11 ✓ Web research: driving Microsoft Edge (channel)
+      An installed browser is used, so Playwright's ~150 MB Chromium is not needed.
+
+▸ STAGE 3  ARCHIVER — is a usable 7-Zip actually reachable
+00:10:11 ✓ This electron-builder does not bundle a 7-Zip (26 dropped 7zip-bin) — installer targets are still attempted
+00:10:11 ·   If the installer step fails on archiving, the run falls back to the unpacked tree and zips it.
+
+  READINESS  NOT-READY
+  Would produce   nothing — the build cannot complete
+
+    ✕ toolchain            no
+    ✓ dependencies         
+    · dependencies pending 0
+    · archiver level       3
+    · archiver version     null
+    ✓ symlink privilege    
+    ✓ installer script     
+    ✓ renderer present     
+
+  Blocking — a build cannot succeed until these are fixed:
+    ✕ Node.js 20.10.0 is below the 22.12.0 this project's pinned dependencies require. Packaging fails late and confusingly on it: electron-builder loads the ESM-only @noble/hashes with require(), which Node can only do from 22.12 (or 20.19 on the 20 line), so it dies with ERR_REQUIRE_ESM inside app-builder-lib. Install Node 22 LTS and run this again.
+
+  Verdict saved to data\system\readiness.json — the build reads it and adapts.
+
+  Full transcript: data\logs\build-2026-10-20T18-40-07-327Z.log
+  Sending it to the build-logs branch — readable from any machine.
+
