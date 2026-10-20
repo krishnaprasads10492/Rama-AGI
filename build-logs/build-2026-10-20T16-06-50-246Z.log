@@ -1,0 +1,23 @@
+Rāma AGI packaging log
+started  2026-10-20T16:06:50.251Z
+node     v20.10.0 on win32-x64
+root     C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI
+argv     (none)
+
+
+  ⬢ Rāma AGI — packaging v1.0.0
+
+▸ STAGE 0  TOOLCHAIN — can this machine package at all
+21:36:50 ✓ Node.js 20.10.0
+21:36:50 ! Node 20.10.0 is an older patch line than Vite 6 prefers.
+21:36:50 !   If the renderer build fails on "crypto.hash is not a function", that is why —
+21:36:50 !   Node 22 LTS fixes it. Harmless otherwise.
+21:36:51 ✓ npm 10.4.0
+21:36:51 ✓ Project rama-agi v1.0.0 at C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI
+21:36:51 ✕ Only 664 MB free. Packaging Electron needs the unpacked tree plus the installer.
+21:36:51 ✕ Free up space and run this again — nothing has been changed.
+21:36:51 ✓ Symlink privilege present — winCodeSign will extract cleanly
+21:36:51 ✓ assets\installer.nsh checks out (ASCII, symbols resolvable, macros balanced)
+  Full transcript: data\logs\build-2026-10-20T16-06-50-246Z.log
+  Shipping it to the build-logs branch — readable from any machine.
+
