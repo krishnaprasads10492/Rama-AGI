@@ -232,6 +232,49 @@ function summariseCrash(full) {
   }
 }
 
+// ─── The outbox: what master can hand over when the remote is unreachable ─────
+/**
+ * Write the REDACTED text somewhere master can find and send by hand.
+ *
+ * WHY THIS EXISTS. When the push failed, the only plain file left was the RAW transcript in
+ * `data/logs/` - the one that still carries the username, home directory and hostname. So the
+ * fallback for "could not push" was, in practice, "hand over the unredacted copy". The commit on
+ * local `refs/heads/build-logs` is safe but invisible unless you know to look for it.
+ *
+ * `data/` is gitignored, so nothing written here is ever committed by accident.
+ *
+ * @param {Array<{destPath:string, content:string}>} entries
+ * @returns {{ok:boolean, dir:string, written:string[], error?:string}}
+ */
+function writeOutbox(entries) {
+  const dir = path.join(LOG_DIR, 'outbox');
+  const written = [];
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    for (const e of entries) {
+      const full = path.join(dir, e.destPath.replace(/[\\/]/g, '__'));
+      fs.writeFileSync(full, e.content, 'utf8');
+      written.push(full);
+    }
+    return { ok: true, dir, written };
+  } catch (err) {
+    return { ok: false, dir, written, error: err.message };
+  }
+}
+
+/** Say where the redacted copies are, so an unreachable remote is not a dead end. */
+function reportOutbox(entries) {
+  const box = writeOutbox(entries);
+  if (!box.ok) {
+    warn(`The redacted copies could not be written either: ${box.error}`);
+    warn(`  Do NOT send ${path.relative(ROOT, LOG_DIR)} as it stands — it is not redacted.`);
+    return box;
+  }
+  ok(`${box.written.length} redacted copy(ies) in ${path.relative(ROOT, box.dir)}`);
+  info('Those are safe to attach or paste anywhere — username, home and hostname are already removed.');
+  return box;
+}
+
 // ─── Retention ────────────────────────────────────────────────────────────────
 /**
  * Keep the most recent `keepCount`, delete the rest. Called after a successful
@@ -324,6 +367,7 @@ function help() {
 ${C.bold}Rāma AGI — ship a build transcript${C.reset}
 
   npm run ship-log                          crash reports + newest transcript
+  (push impossible? redacted copies are left in data/logs/outbox/)
   node scripts/shipLog.cjs --crashes-only    only the installed app's crashes
   node scripts/shipLog.cjs --transcripts-only  only build transcripts
   node scripts/shipLog.cjs --crash-dir <p>  read crashes from a specific folder
@@ -418,7 +462,11 @@ function main() {
     : `chore(logs): ${entries.length} build transcript(s)`;
 
   const committed = commitViaPlumbing(entries, subject);
-  if (!committed.ok) { fail(committed.error); return 1; }
+  if (!committed.ok) {
+    fail(committed.error);
+    reportOutbox(entries);          // no commit either: master should still hold something safe to send
+    return 1;
+  }
   ok(`Committed ${committed.count} file(s) (${committed.commit.slice(0, 8)}) on ${BRANCH}`);
 
   if (noPush) {
@@ -430,7 +478,8 @@ function main() {
   const pushed = tryGit(['push', 'origin', `refs/heads/${BRANCH}:refs/heads/${BRANCH}`]);
   if (!pushed.ok) {
     warn(`Commit is local — push failed: ${pushed.error.split('\n')[0]}`);
-    info(`Retry with: git push origin ${BRANCH}`);
+    info(`Retry with: git push origin ${BRANCH} — it sends everything accumulated, not just this one.`);
+    reportOutbox(entries);
     prune();
     return 0;   // the log is preserved locally; this is not a build failure
   }
@@ -443,9 +492,16 @@ function main() {
   return 0;
 }
 
-try {
-  process.exitCode = main();
-} catch (e) {
-  fail(`ship-log aborted: ${e.message ?? String(e)}`);
-  process.exitCode = 1;
+// GUARDED, so `scripts/verifyShipLog.cjs` can drive the redaction directly rather than inferring it
+// from a transcript. Redaction is the one thing here that stands between master's machine layout and
+// a public repo, and it had no test at all (Section 161.2, item 4).
+if (require.main === module) {
+  try {
+    process.exitCode = main();
+  } catch (e) {
+    fail(`ship-log aborted: ${e.message ?? String(e)}`);
+    process.exitCode = 1;
+  }
 }
+
+module.exports = { redact, writeOutbox, BRANCH, DEST_DIR };

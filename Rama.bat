@@ -35,6 +35,8 @@ if errorlevel 1 (
     echo.
     echo   NOT READY - the blocking items above must be fixed first.
     echo   Option 3 would refuse to build until they are resolved.
+    echo   This verdict's transcript is sent to the "build-logs" branch, or left
+    echo   redacted in data\logs\outbox\ if it could not be pushed.
     echo.
     pause
     goto MENU
@@ -69,6 +71,9 @@ call node scripts\buildInstaller.cjs
 if errorlevel 1 (
     echo.
     echo   Build did not complete - the reason is in the report above.
+    echo   The transcript is sent to the "build-logs" branch automatically, so it
+    echo   can be read from any machine. If that push could not happen, a REDACTED
+    echo   copy is left in data\logs\outbox\ - that one is safe to send by hand.
     pause
     goto MENU
 )

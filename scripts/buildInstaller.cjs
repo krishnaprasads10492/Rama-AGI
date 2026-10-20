@@ -2158,6 +2158,22 @@ function closeLog() {
 }
 
 /**
+ * Is this run's transcript worth sending to the build-logs branch?
+ *
+ * PURE, and exported, because the condition was wrong in a way reading could not catch: it was
+ * `sawFailure`, which only `fail()` sets. A NOT-READY readiness verdict reports itself with
+ * `plain()` and exits 1, so option 2's transcript - the single most useful log there is, the one
+ * that says why this machine cannot build - was never shipped (Section 161.2, item 1). The exit code
+ * is the fact that matters; `sawFailure` stays as a second way to notice the same thing.
+ *
+ * @param {{hadLog:boolean, sawFailure:boolean, code:number, noShipLog:boolean, dryRun:boolean}} s
+ */
+function shouldShip(s) {
+  if (!s.hadLog || s.noShipLog || s.dryRun) return false;
+  return s.sawFailure === true || s.code !== 0;
+}
+
+/**
  * Ship the transcript after a failed run.
  *
  * Runs as a child process on purpose: shipping touches git, and a fault in it
@@ -2176,7 +2192,7 @@ function shipTranscript() {
   });
 }
 
-(async () => {
+const runCli = async () => {
   let code = 1;
   try {
     code = await main();
@@ -2188,17 +2204,25 @@ function shipTranscript() {
   }
 
   const hadLog = logStream !== null;
+  // ONE SOURCE FOR THE PROMISE AND THE ACT (Section 161.3, D2). These were two expressions and they
+  // disagreed: a failed dry run announced that it was shipping, then did not.
+  const ship = shouldShip({ hadLog, sawFailure, code, noShipLog, dryRun });
   if (hadLog) {
     plain(`  ${C.dim}Full transcript: ${path.relative(ROOT, LOG_FILE)}${C.reset}`);
-    if (sawFailure && !noShipLog) {
-      plain(`  ${C.dim}Shipping it to the build-logs branch — readable from any machine.${C.reset}`);
-    }
+    if (ship) plain(`  ${C.dim}Sending it to the build-logs branch — readable from any machine.${C.reset}`);
     plain('');
   }
 
   await closeLog();
 
-  if (hadLog && sawFailure && !noShipLog && !dryRun) await shipTranscript();
+  if (ship) await shipTranscript();
 
   process.exitCode = code;
-})();
+};
+
+// GUARDED, so the file can be required - by `scripts/verifyShipLog.cjs`, to drive `shouldShip`
+// directly - without running a build as a side effect of the require. Writing this section proved
+// why it is needed: a require with no guard started packaging stage 0 and stage 1 immediately.
+if (require.main === module) runCli();
+
+module.exports = { shouldShip };
