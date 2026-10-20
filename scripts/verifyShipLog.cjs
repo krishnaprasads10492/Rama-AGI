@@ -50,7 +50,11 @@ const ship = require(path.join(ROOT, 'scripts/shipLog.cjs'));
   check('a dry run never ships, however badly it went', S({ sawFailure: true, code: 1, dryRun: true }) === false);
   check('with no transcript there is nothing to ship', S({ sawFailure: true, code: 1, hadLog: false }) === false);
   check('a truthy-but-not-true failure flag is not a failure on a clean exit', S({ sawFailure: 'yes', code: 0 }) === false);
-  check('requiring the build script does not run a build', typeof build.shouldShip === 'function' && Object.keys(build).join() === 'shouldShip');
+  // Pinning the exact export list was wrong: Section 162 added three more and this went red for a
+  // reason that had nothing to do with shipping. What matters is that the require is INERT and that
+  // everything it hands back is a plain value, not a side effect.
+  check('requiring the build script does not run a build', typeof build.shouldShip === 'function'
+    && Object.values(build).every((v) => typeof v === 'function' || typeof v === 'number' || typeof v === 'string'));
 
   // ═══ what it ships ═════════════════════════════════════════════════════════════════════════════
   section('redact: the machine never travels with the log');

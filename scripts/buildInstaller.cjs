@@ -239,15 +239,53 @@ function freeDiskMB() {
   } catch { return null; }
 }
 
-/** @returns {boolean} false means stop: the environment cannot package anything. */
+const DISK_FLOOR_MB = 1200;
+const DISK_COMFY_MB = 3000;
+
+/**
+ * What the free space means, in words master can act on.
+ *
+ * THE DEFECT THIS FIXES (Section 162.2, item 1). The refusal said "Only 636 MB free. Packaging
+ * Electron needs the unpacked tree plus the installer." - the floor and the comfortable mark were
+ * both in the code and in neither sentence, so the one blocking item in three shipped transcripts
+ * never said whether to free 100 MB or 10 GB.
+ *
+ * @param {number|null} freeMB
+ * @returns {{state:'unknown'|'fail'|'tight'|'ok', message:string, shortBy?:number}}
+ */
+function diskVerdict(freeMB) {
+  if (freeMB === null || freeMB === undefined || !Number.isFinite(freeMB)) {
+    return { state: 'unknown', message: 'Free disk space could not be measured — continuing' };
+  }
+  if (freeMB < DISK_FLOOR_MB) {
+    const shortBy = DISK_FLOOR_MB - Math.floor(freeMB);
+    return {
+      state: 'fail',
+      shortBy,
+      message: `Only ${freeMB} MB free. Packaging needs at least ${DISK_FLOOR_MB} MB — free about ${shortBy} MB more `
+        + `(${DISK_COMFY_MB} MB to be comfortable), because the unpacked tree and the installer both land on this drive.`,
+    };
+  }
+  if (freeMB < DISK_COMFY_MB) {
+    return { state: 'tight', message: `${freeMB} MB free — above the ${DISK_FLOOR_MB} MB floor but under ${DISK_COMFY_MB} MB. Packaging may fail late, near the end.` };
+  }
+  return { state: 'ok', message: `Disk space ${freeMB} MB free` };
+}
+
+/** @returns {{ok:boolean, reasons:string[]}} ok false means stop: the environment cannot package anything. */
 function checkToolchain() {
   stage(0, 'TOOLCHAIN — can this machine package at all');
 
+  // Every refusal is also RETURNED, so the verdict, the saved JSON and the shipped manifest carry the
+  // reason instead of "see the stage 0 report above" (Section 162.3, D2).
+  const reasons = [];
+  const refuse = (m) => { fail(m); reasons.push(m); };
+
   const [major, minor] = process.versions.node.split('.').map(Number);
   if (!Number.isFinite(major) || major < 18) {
-    fail(`Node.js ${process.versions.node} — packaging needs v18 minimum, v22 LTS recommended.`);
+    refuse(`Node.js ${process.versions.node} — packaging needs v18 minimum, v22 LTS recommended.`);
     fail('Download: https://nodejs.org/en/download');
-    return false;
+    return { ok: false, reasons };
   }
   ok(`Node.js ${process.versions.node}`);
 
@@ -262,41 +300,37 @@ function checkToolchain() {
     warn('  Node 22 LTS fixes it. Harmless otherwise.');
   }
 
-  const npm = tryRun('npm --version');
+    const npm = tryRun('npm --version');
   if (!npm.ok) {
-    fail('npm is not on PATH. Reinstall Node.js from nodejs.org (npm ships with it).');
-    return false;
+    refuse('npm is not on PATH. Reinstall Node.js from nodejs.org (npm ships with it).');
+    return { ok: false, reasons };
   }
   ok(`npm ${npm.out}`);
 
   // Project sanity: running this from the wrong directory would install a
   // stranger's dependencies and package the wrong thing.
-  let name;
+    let name;
   try { name = pkg().name; }
   catch (e) {
-    fail(`package.json could not be read at ${ROOT} (${e.message})`);
-    return false;
+    refuse(`package.json could not be read at ${ROOT} (${e.message})`);
+    return { ok: false, reasons };
   }
   if (name !== 'rama-agi') {
-    fail(`This is not the Rāma project root — package.json says "${name}".`);
-    return false;
+    refuse(`This is not the Rāma project root — package.json says "${name}".`);
+    return { ok: false, reasons };
   }
   ok(`Project rama-agi v${appVersion()} at ${ROOT}`);
 
-  const disk = freeDiskMB();
-  if (disk === null) {
-    warn('Free disk space could not be measured — continuing');
-  } else if (disk < 1200) {
-    fail(`Only ${disk} MB free. Packaging Electron needs the unpacked tree plus the installer.`);
+    const d = diskVerdict(freeDiskMB());
+  if (d.state === 'unknown' || d.state === 'tight') warn(d.message);
+  else if (d.state === 'ok') ok(d.message);
+  else {
+    refuse(d.message);
     fail('Free up space and run this again — nothing has been changed.');
-    return false;
-  } else if (disk < 3000) {
-    warn(`${disk} MB free — tight. Packaging may fail late, near the end.`);
-  } else {
-    ok(`Disk space ${disk} MB free`);
+    return { ok: false, reasons };
   }
 
-  return true;
+  return { ok: true, reasons };
 }
 
 /**
@@ -1487,12 +1521,17 @@ const MANIFEST_FILE  = path.join(ROOT, 'shared', 'buildManifest.json');
  *
  * @returns {object} the verdict, also written to data/system/readiness.json
  */
-function computeReadiness({ toolchainOk, deps, archiver, link, nsisNotes, rendererPresent }) {
+function computeReadiness({ toolchain, deps, archiver, link, nsisNotes, rendererPresent }) {
   const blocking = [];
   const limits   = [];
 
+  const toolchainOk = toolchain === true || !!(toolchain && toolchain.ok);
   if (!toolchainOk) {
-    blocking.push('The toolchain cannot package at all — see the stage 0 report above.');
+    // THE REASONS, not a pointer to scrollback. This is also what is saved to readiness.json and
+    // embedded in the shipped build manifest, where there is no scrollback to see (Section 162.2, item 2).
+    const reasons = (toolchain && Array.isArray(toolchain.reasons) ? toolchain.reasons : []).filter(Boolean);
+    if (reasons.length) for (const r of reasons) blocking.push(r);
+    else blocking.push('The toolchain cannot package at all — see the stage 0 report above.');
   }
   if (deps && !deps.ok) {
     blocking.push('Required dependencies are missing and could not be installed.');
@@ -1536,8 +1575,11 @@ function computeReadiness({ toolchainOk, deps, archiver, link, nsisNotes, render
     platform: `${process.platform}-${process.arch}`,
     node: process.versions.node,
     checks: {
-      toolchain:        !!toolchainOk,
+            toolchain:        !!toolchainOk,
       dependencies:     !!deps?.ok,
+      // The count readiness already had and never reported, so the table cannot show a tick while
+      // 21 of 34 packages are missing (Section 162.2, item 3). A build installs them; this says so.
+      dependenciesPending: Number.isFinite(deps?.pendingInstall) ? deps.pendingInstall : 0,
       archiverLevel:    archiver?.level ?? null,
       archiverVersion:  archiver?.version ?? null,
       symlinkPrivilege: canBrand,
@@ -2003,13 +2045,13 @@ async function main() {
     try { return appVersion(); } catch { return '?'; }
   })()}${C.reset}\n`);
 
-  const toolchainOk = checkToolchain();
+    const toolchain = checkToolchain();
   // Probed once, here, so stage 0's warning and the readiness verdict can never
   // disagree about the same machine.
   const link = isWin ? canCreateSymlink() : { ok: true };
   const nsisNotes = checkInstallerScript(link);
 
-  if (!toolchainOk && !readinessOnly) return 1;
+    if (!toolchain.ok && !readinessOnly) return 1;
 
   // In readiness mode nothing is installed — the question is what this machine can
   // do as it stands, and installing would change the answer while measuring it.
@@ -2021,7 +2063,7 @@ async function main() {
   if (readinessOnly) {
     const archiverProbe = resolveArchiver();
     const readiness = computeReadiness({
-      toolchainOk, deps, archiver: archiverProbe, link, nsisNotes,
+            toolchain, deps, archiver: archiverProbe, link, nsisNotes,
       rendererPresent: fs.existsSync(path.join(ROOT, 'build', 'index.html')),
     });
     printReadiness(readiness);
@@ -2051,7 +2093,7 @@ async function main() {
 
   // ── Readiness feeds the build, rather than the build rediscovering it ───────
   const readiness = computeReadiness({
-    toolchainOk, deps, archiver, link, nsisNotes,
+        toolchain, deps, archiver, link, nsisNotes,
     rendererPresent: fs.existsSync(path.join(ROOT, 'build', 'index.html')),
   });
 
@@ -2225,4 +2267,4 @@ const runCli = async () => {
 // why it is needed: a require with no guard started packaging stage 0 and stage 1 immediately.
 if (require.main === module) runCli();
 
-module.exports = { shouldShip };
+module.exports = { shouldShip, diskVerdict, computeReadiness, DISK_FLOOR_MB, DISK_COMFY_MB };
