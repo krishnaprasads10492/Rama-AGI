@@ -1,0 +1,18 @@
+Rāma AGI packaging log
+started  2026-10-21T09:39:12.849Z
+node     v20.10.0 on win32-x64
+root     C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI
+argv     (none)
+
+
+  ⬢ Rāma AGI — packaging v1.0.0
+
+▸ STAGE 0  TOOLCHAIN — can this machine package at all
+15:09:12 ✓ Node.js 20.10.0
+15:09:12 ✕ Node.js 20.10.0 is below the 22.12.0 this project's pinned dependencies require. Packaging fails late and confusingly on it: electron-builder loads the ESM-only @noble/hashes with require(), which Node can only do from 22.12 (or 20.19 on the 20 line), so it dies with ERR_REQUIRE_ESM inside app-builder-lib. Install Node 22 LTS and run this again.
+15:09:12 ✕ Download Node 22 LTS: https://nodejs.org/en/download
+15:09:12 ✓ Symlink privilege present — winCodeSign will extract cleanly
+15:09:12 ✓ assets\installer.nsh checks out (ASCII, symbols resolvable, macros balanced)
+  Full transcript: data\logs\build-2026-10-21T09-39-12-847Z.log
+  Sending it to the build-logs branch — readable from any machine.
+
