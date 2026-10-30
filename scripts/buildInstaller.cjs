@@ -268,7 +268,9 @@ function nodeFloorVerdict(current, floor) {
     message: `Node.js ${current} is below the ${need} this project's pinned dependencies require. `
       + 'Packaging fails late and confusingly on it: electron-builder loads the ESM-only @noble/hashes '
       + `with require(), which Node can only do from 22.12 (or 20.19 on the 20 line), so it dies with `
-      + 'ERR_REQUIRE_ESM inside app-builder-lib. Install Node 22 LTS and run this again.',
+      + 'ERR_REQUIRE_ESM inside app-builder-lib. That floor is also a SECURITY floor: 22.23.4 is the '
+      + '2026-10-21 release that patches the Brotli decoder RCE (CVE-2026-111497), two TLS hostname '
+      + 'bypasses and the eMudhra CA compromise. Install it and run this again.',
   };
 }
 
@@ -386,7 +388,7 @@ function checkToolchain() {
   // carry the reasons instead of "see the stage 0 report above" (Section 162.3, D2).
   for (const r of verdict.reasons) fail(r);
   if (!verdict.ok) {
-    if (verdict.reasons.some((r) => /^Node\.js /.test(r))) fail('Download Node 22 LTS: https://nodejs.org/en/download');
+    if (verdict.reasons.some((r) => /^Node\.js /.test(r))) fail('Download the current 22.x: https://nodejs.org/en/download — anything older is unpatched, and an end-of-life line is always affected.');
     if (disk.state === 'fail') fail('Free up space and run this again — nothing has been changed.');
   }
 

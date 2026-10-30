@@ -132,18 +132,18 @@ const COMFY = b.DISK_COMFY_MB;
 
   // ═══ the Node floor (Section 163) ══════════════════════════════════════════════════════════════
   section('nodeFloorVerdict: the wrong Node is caught at stage 0, not forty seconds later');
-  const FLOOR_DECL = '>=22.12.0';
+  const FLOOR_DECL = '>=22.23.4';
   const tooOld = b.nodeFloorVerdict('20.10.0', FLOOR_DECL);
   check('the build machine\'s Node is refused', tooOld.ok === false);
-  check('and the message names the version it has and the one it needs', tooOld.message.includes('20.10.0') && tooOld.message.includes('22.12.0'));
+  check('and the message names the version it has and the one it needs', tooOld.message.includes('20.10.0') && tooOld.message.includes('22.23.4'));
   check('and names the failure it prevents, so it is recognisable in an old log', /ERR_REQUIRE_ESM/.test(tooOld.message) && tooOld.message.includes('@noble/hashes'));
-  check('and says what to install', /Node 22 LTS/.test(tooOld.message));
-  check('exactly the floor passes', b.nodeFloorVerdict('22.12.0', FLOOR_DECL).ok === true);
-  check('one patch under the floor is refused', b.nodeFloorVerdict('22.11.9', FLOOR_DECL).ok === false);
-  check('a later line passes', b.nodeFloorVerdict('22.17.0', FLOOR_DECL).ok === true && b.nodeFloorVerdict('24.0.0', FLOOR_DECL).ok === true);
-  check('the 20 line is refused however new, because the floor is 22.12', b.nodeFloorVerdict('20.19.5', FLOOR_DECL).ok === false);
-  check('a passing verdict carries no message to print', b.nodeFloorVerdict('22.17.0', FLOOR_DECL).message === null);
-  check('the floor is echoed back for the caller', b.nodeFloorVerdict('22.17.0', FLOOR_DECL).floor === FLOOR_DECL);
+  check('and says what to install, by version rather than by label', /22\.23\.4/.test(tooOld.message) && /Install it and run this again/.test(tooOld.message));
+  check('exactly the floor passes', b.nodeFloorVerdict('22.23.4', FLOOR_DECL).ok === true);
+  check('one patch under the floor is refused', b.nodeFloorVerdict('22.23.3', FLOOR_DECL).ok === false);
+  check('a later line passes', b.nodeFloorVerdict('22.23.4', FLOOR_DECL).ok === true && b.nodeFloorVerdict('24.22.1', FLOOR_DECL).ok === true);
+  check('the 20 line is refused however new, and it is end-of-life besides', b.nodeFloorVerdict('20.19.5', FLOOR_DECL).ok === false);
+  check('a passing verdict carries no message to print', b.nodeFloorVerdict('22.23.4', FLOOR_DECL).message === null);
+  check('the floor is echoed back for the caller', b.nodeFloorVerdict('22.23.4', FLOOR_DECL).floor === FLOOR_DECL);
   for (const [n, v] of [['no declaration', null], ['empty', ''], ['a caret range', '^22.12.0'], ['nonsense', 'latest'], ['an object', {}]]) {
     check(`a floor that cannot be read (${n}) never blocks a build`, b.nodeFloorVerdict('18.0.0', v).ok === true);
   }
@@ -154,7 +154,29 @@ const COMFY = b.DISK_COMFY_MB;
   section('the declared floor is the real one');
   const engines = (() => { try { return (JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).engines || {}).node || null; } catch { return null; } })();
   check('package.json declares a Node floor at all', typeof engines === 'string' && /^>=[0-9]+\.[0-9]+\.[0-9]+$/.test(engines), String(engines));
-  check('and it is the 22.12.0 the pinned set needs', engines === '>=22.12.0', String(engines));
+  check('and it is the patched 22.23.4 the October 2026 security release shipped', engines === '>=22.23.4', String(engines));
+  check('the floor that was declared before the security release is now refused', b.nodeFloorVerdict('22.12.0', engines).ok === false);
+  check('the refusal says the floor is a SECURITY floor, not only a compatibility one', (() => {
+    const m = b.nodeFloorVerdict('22.12.0', engines).message;
+    return /SECURITY floor/.test(m) && m.includes('CVE-2026-111497') && /eMudhra/.test(m);
+  })());
+  check('the pinned electron is at or above the version that mitigates the compromised CA', (() => {
+    const p = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    const v = (p.devDependencies || {}).electron || (p.dependencies || {}).electron || '';
+    const n = (x) => { const m = /(\d+)\.(\d+)\.(\d+)/.exec(String(x)); return m ? Number(m[1]) * 1e6 + Number(m[2]) * 1e3 + Number(m[3]) : 0; };
+    return n(v) >= n('44.10.0');
+  })());
+  check('the pinned systeminformation is at or above the Windows command-injection fix', (() => {
+    const p = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    const v = (p.dependencies || {}).systeminformation || (p.devDependencies || {}).systeminformation || '';
+    const n = (x) => { const m = /(\d+)\.(\d+)\.(\d+)/.exec(String(x)); return m ? Number(m[1]) * 1e6 + Number(m[2]) * 1e3 + Number(m[3]) : 0; };
+    return n(v) >= n('5.33.19');
+  })());
+  check('every version in package.json is still exact, with no range (I12)', (() => {
+    const p = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    const all = { ...(p.dependencies || {}), ...(p.devDependencies || {}) };
+    return Object.values(all).every((v) => /^[0-9]+\.[0-9]+\.[0-9]+/.test(String(v)));
+  })());
   check('and it is not below what the pinned electron itself requires', (() => {
     let ebEngine = null;
     try { ebEngine = (JSON.parse(fs.readFileSync(path.join(ROOT, 'node_modules/electron/package.json'), 'utf8')).engines || {}).node || null; } catch { return true; }
@@ -173,7 +195,7 @@ const COMFY = b.DISK_COMFY_MB;
   // ═══ stage 0 reports everything, once (Section 164) ═══════════════════════════════════════════
   section('toolchainVerdict: no refusal hides the measurement after it');
   const facts = {
-    nodeVersion: '22.17.0', floor: '>=22.12.0', npmOk: true,
+    nodeVersion: '22.23.4', floor: '>=22.23.4', npmOk: true,
     projectName: 'rama-agi', projectError: null, root: 'C:/repo',
     disk: { state: 'ok', message: 'Disk space 102101 MB free' },
   };
@@ -182,7 +204,7 @@ const COMFY = b.DISK_COMFY_MB;
 
   check('a Node below the project floor is a reason', (() => {
     const r = T({ nodeVersion: '20.10.0' });
-    return r.ok === false && r.reasons.length === 1 && /below the 22\.12\.0/.test(r.reasons[0]) && r.nodeOk === false;
+    return r.ok === false && r.reasons.length === 1 && /below the 22\.23\.4/.test(r.reasons[0]) && r.nodeOk === false;
   })());
   check('a Node below the hard v18 minimum is its own reason, not the floor message', (() => {
     const r = T({ nodeVersion: '16.20.0' });

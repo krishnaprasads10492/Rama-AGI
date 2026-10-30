@@ -71,7 +71,13 @@ function humanHeaders() {
     'User-Agent':      p.ua,
     'Accept':          'application/json,text/html,application/xhtml+xml,*/*;q=0.8',
     'Accept-Language': p.lang,
-    'Accept-Encoding': 'gzip, deflate, br',
+    // IDENTITY, because THIS CLIENT DECOMPRESSES NOTHING (Section 165.2). Asking for gzip or brotli
+    // and then reading the body as UTF-8 returns rubbish whenever a server honours it — which is why
+    // kiteClient.cjs had to override this per request in Section 157, a local workaround for a general
+    // defect. It also means brotli we asked for can never reach a decoder, which is defence in depth
+    // for CVE-2026-111497 (out-of-bounds write in Node's bundled Brotli) whatever Node is installed.
+    // If a caller ever needs compression, decompress here first and change this with it.
+    'Accept-Encoding': 'identity',
     'Connection':      'keep-alive',
     'Sec-Fetch-Dest':  'document',
     'Sec-Fetch-Mode':  'navigate',

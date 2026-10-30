@@ -1864,6 +1864,7 @@ authenticated **Master session**, not merely an open store.
 | 192 | What the readiness report tells master: the disk refusal names the shortfall, the verdict carries the real reason, and the table cannot look clean while packages are missing | built, verified pure; the build machine itself still has to be re-run to see it | Section 162. Master shipped three transcripts from the build machine and said "pull the log branch and fix the issues". FOUND: the only blocker there is free disk (636-664 MB against a 1200 MB floor), and the report never said how much was needed. BUILT: `diskVerdict` naming the floor, the shortfall and the comfortable mark; `checkToolchain` returning its reasons so the verdict, `readiness.json` and the shipped manifest carry WHY; `checks.dependenciesPending` from the count readiness already computed and never used. Suite: `verifyReadinessReport.cjs` (52, new); 24 mutations, all killed. NEXT: master frees about 564 MB on that machine, re-runs option 2, and ships the transcript again - it should then be ready-with-limits and able to produce a real NSIS installer, which this machine cannot. |
 | 193 | The build machine's real failure: Node too old for the pinned set, and an archiver probe looking for a package the pinned toolchain no longer ships | built, verified pure; the build machine needs Node 22 installed before it can be confirmed there | Section 163. Master freed the disk, the build reached stage 4 and died with `ERR_REQUIRE_ESM`; "there is an issue, pushed logs. check them". DIAGNOSED: Node 20.10.0 against a pinned set whose floor is 22.12.0, reproduced from the other side here (the same `require` succeeds on 22.17.0), with npm's own EBADENGINE lines already saying so eleven times; and `7zip-bin` absent because electron-builder 26 dropped it, which made the archiver ladder fall to L2 every time and never attempt an installer. BUILT: `engines.node` declared once, a stage 0 refusal that names the floor and the failure it prevents, archiver level 3 for "not bundled by this toolchain". Suite: `verifyReadinessReport.cjs` now 85; 17 mutations, all killed. NEXT: master installs Node 22 LTS on the build machine, runs option 3 and ships the transcript - with a usable 7-Zip path no longer required, an NSIS installer should now be attempted for the first time. |
 | 194 | Stage 0 reports every problem in one run again, after Section 163 made it stop at the first | built, verified pure and run once here end to end | Section 164. Master shipped the next transcript: "there is an issue, pushed logs. check them". The Node refusal from row 193 fired correctly - and returned early, so npm, the project identity and the DISK check never ran, and a `✓ Node.js 20.10.0` printed directly above its own `✕`. BUILT: `toolchainVerdict`, pure and exported - facts gathered first, judged once, every reason printed and returned, no early exits. Suite: `verifyReadinessReport.cjs` now 104; 15 mutations, all killed, including one that reintroduces the regression. NEXT: master installs Node 22 LTS on the build machine and runs option 3; stage 0 will now list anything else wrong in the same run rather than one thing at a time. |
+| 195 | The October 2026 Node security release, and 20 advisories in our own tree | built; the two taken bumps are in the lockfile but NOT installed on this machine, by design | Section 165. Master: "check for the node and latest vulnerability news and make changes accordingly". FOUND: Node patched 22.x on 2026-10-21 (22.23.4) for a Brotli decoder RCE (CVE-2026-111497), two TLS hostname bypasses, a DNS NUL truncation and the eMudhra CA compromise, while our floor was 22.12.0; `npm audit` reports 20 (2 critical, 12 high); and `lib/http.cjs` asked for brotli and gzip it cannot decode. BUILT: floor to >=22.23.4 with the security reason in the refusal, electron 44.10.0, systeminformation 5.33.19, `Accept-Encoding: identity`. Suites: `verifyReadinessReport.cjs` 109, `verifyHttpExpected.cjs` 31; 13 mutations, all killed. NEXT: master installs Node 22.23.4 or newer on the build machine, runs `npm install` there (the lockfile carries the two bumps), then option 3; and decides on the three MAJOR bumps in 165.3 D5. |
 
 ### Resume checklist for a cold session
 
@@ -20153,3 +20154,53 @@ because the tick was printed before the floor was applied.
 
 ### 164.3 Not built
 Anything that installs Node; `canCreateSymlink` and `checkInstallerScript`, which already run independently of this verdict in `main` and were therefore unaffected by the regression (visible in the same transcript, which still reported both).
+
+## Section 165 - The October 2026 Node security release, and what it means here
+
+### 165.1 Node, checked against the advisory rather than remembered
+The Node.js project shipped a security release on **2026-10-21** - the day before this was written - with patched versions **22.23.4**, 24.22.1 and 26.12.1. What lands on the 22.x line we target:
+
+| CVE | Severity | What it is |
+|---|---|---|
+| CVE-2026-111497 | high | **Brotli decoder out-of-bounds write permitting remote code execution.** Malformed Brotli fed to `node:zlib` can corrupt process memory. Datadog scores it CVSS 9.2. |
+| CVE-2026-106069 | high | TLS certificate hostname bypass: a non-canonical IPv4 literal with a leading zero (`0127.0.0.1`) is normalised as octal by `checkServerIdentity` and as decimal by the OS resolver, so a certificate for another address authenticates the connection. |
+| CVE-2026-105482 | high | `dns.resolve*()` silently truncates hostnames at a NUL byte, so code that validates a host against an allowlist and then resolves it can act on records for a different name. |
+| CVE-2026-105481 | medium | A keep-alive socket can parse a response written before the request was sent. |
+| CVE-2026-106072 | medium | A DNS-only certificate authenticates an IP endpoint spelled non-canonically. |
+| CVE-2026-106074 | medium | `crypto.randomUUID()` / `randomInt()` entropy caches are captured into startup snapshots, so every process repeats the same values. |
+| CVE-2026-106073 | low | Permission Model: `fs.realpathSync()` escapes `--allow-fs-read`. |
+
+The same release updates bundled **c-ares, OpenSSL, SQLite, Undici and the CA certificate store for the eMudhra intermediate CA compromise**.
+
+**Our declared floor was `>=22.12.0`, which is vulnerable to every one of these.** The advisory also states that end-of-life lines are always affected - which is the build machine's Node 20.10.0, EOL since 2026-04-30.
+
+### 165.2 Our own tree, measured not assumed
+`npm audit` from this machine: **20 advisories - 2 critical, 12 high, 5 moderate, 1 low.** The two that are DIRECT and need no major version change:
+
+- **`electron` 44.7.0 -> 44.10.0** (high): the same eMudhra intermediate certificate compromise Node patched. Independent confirmation of one issue from two sources.
+- **`systeminformation` 5.33.15 -> 5.33.19** (high): **Windows command injection in `services()` through Unicode quotation marks.** Rāma runs on Windows and loads this module in `lib/sysinfo.cjs`. Checked: nothing in the repository calls `services()`, so the specific sink is not reachable today - the bump is taken because it is one patch release away, not because we are exploitable.
+
+**And a finding of our own, which is a bug as much as a hardening.** `lib/http.cjs`'s `humanHeaders()` sends `Accept-Encoding: gzip, deflate, br` - and nothing in that client decompresses anything. So whenever a server honours it, the body is read as UTF-8 over compressed bytes and the caller gets rubbish. That is also why `kiteClient.cjs` had to override `Accept-Encoding: identity` per request in Section 157: a local workaround for a general defect. It is additionally the only path by which Brotli we asked for could reach a decoder, so removing it is defence in depth for CVE-2026-111497 regardless of which Node is installed.
+
+### 165.3 Decisions
+1. **The floor becomes `>=22.23.4`**, the patched 22.x. One declaration, as Section 163 established, so the stage 0 refusal picks it up with no second copy. The refusal text now names the security release rather than "Node 22 LTS", because "an LTS version" is no longer sufficient advice.
+2. **The two non-major direct bumps are taken:** `electron` 44.10.0 and `systeminformation` 5.33.19.
+3. **`Accept-Encoding: identity` in `humanHeaders()`**, because we cannot decode anything else. Kite's per-request override stays, harmlessly, now agreeing with the default.
+4. **The lockfile is updated with `--package-lock-only`, and `node_modules` on this machine is deliberately NOT touched.** `package.json` already records why `npm ci` must not run here. So this machine's installed tree is now behind its own pins by design; the build machine installs them.
+5. **Three MAJOR bumps are left for master**, with what they fix, because a major cannot be tested from here: `monaco-editor` (critical DOMPurify DOM XSS), `vectra` (axios SSRF and credential leakage via absolute URL), `electron-rebuild` (critical `tar` hardlink path traversal). None is reachable from untrusted input in the way the two taken fixes are, and all three are development or editor surfaces.
+
+### 165.4 Not built
+Upgrading Node for master (nothing here installs a runtime); the three major bumps; any change to `ramaHeaders()`, which sends no `Accept-Encoding` at all and is therefore already served identity.
+
+### 165.5 Result (2026-10-22)
+**Taken.** `engines.node` is `>=22.23.4`, so the stage 0 refusal built in Section 163 now enforces the SECURITY floor with no second copy of the number anywhere; its message names the release and the CVE rather than saying "Node 22 LTS", because "an LTS version" stopped being sufficient advice on 2026-10-21. `electron` 44.10.0 and `systeminformation` 5.33.19 are pinned and written into `package-lock.json` with `npm install --package-lock-only`, so **`node_modules` on this machine was not touched** - measured before and after at 467 directories - and this checkout is now deliberately behind its own pins. The build machine picks them up with `npm install`.
+
+**And a defect of our own, found while checking exposure rather than reported by anyone.** `humanHeaders()` advertised `gzip, deflate, br` while `lib/http.cjs` contains no decompression at all, so any server that honoured it handed `getJsonHuman` compressed bytes to `JSON.parse`. It is now `identity`. That is a correctness fix first - it explains why `kiteClient.cjs` needed a per-request override in Section 157 - and incidentally removes the only path by which brotli we requested could reach the decoder that CVE-2026-111497 is about.
+
+**Exposure, stated precisely rather than alarmingly:** nothing in the repository calls `systeminformation.services()`, the sink of the Windows command-injection advisory, so that bump is prudence and not a live hole. The Brotli RCE needs `node:zlib` decompression of attacker-supplied data, which this codebase does not do. The TLS and DNS items are real for any HTTPS or hostname-validating code and are fixed only by installing the patched Node - which is why the floor, not a code change, is the answer to them.
+
+**Verified:** 109 checks in the readiness suite and 31 in the HTTP suite, including that the client decompresses nothing (so asking for compression would be wrong on its face), that the plain profile still sends no `Accept-Encoding`, that the refusal names the CVE, that the pins are at or above the patched versions, and that every version in `package.json` is still exact (I12). 13 mutations killed, including reverting the floor, reverting either pin, slipping in a caret range, and re-advertising brotli.
+
+**NOT verified:** that `npm install` succeeds with the two bumps - it cannot be run here, and `package.json` records why; the three major bumps; and anything on the build machine.
+
+**Left for master (165.3 D5), with what each fixes:** `monaco-editor` (critical DOMPurify DOM XSS), `vectra` (axios SSRF and credential leakage via an absolute URL), `electron-rebuild` (critical `tar` hardlink path traversal). All three are major version changes that cannot be tested from this machine, and all three sit on editor or development surfaces rather than on a path that takes untrusted input.

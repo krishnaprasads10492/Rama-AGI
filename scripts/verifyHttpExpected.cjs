@@ -137,6 +137,20 @@ const nextHost = () => `https://origin-${++host}.invalid/x`;
     check('no console.log', !/console\.log/.test(src));
   }
 
+  section('it asks only for what it can read (Section 165)');
+  {
+    const h = require('fs').readFileSync(path.join(ROOT, 'electron/lib/http.cjs'), 'utf8');
+    check('this client decompresses nothing: no zlib, no brotli decoder', !/require\('zlib'\)|createBrotliDecompress|createGunzip|createUnzip/.test(h));
+    check('so the human profile asks for identity', /'Accept-Encoding': 'identity'/.test(h));
+    check('and nothing in it advertises gzip, deflate or brotli', !/Accept-Encoding['"]?\s*:\s*['"][^'"]*(gzip|deflate|br)\b/.test(h));
+    check('the plain profile still sends no Accept-Encoding at all, so it is served identity by default', (() => {
+      const i = h.indexOf('function ramaHeaders()');
+      const j = h.indexOf('}', i);
+      return i > 0 && !h.slice(i, j).includes('Accept-Encoding');
+    })());
+    check('the reason is recorded where the header is, not only in the spec', /CVE-2026-111497/.test(h));
+  }
+
   https.request = realRequest;
   finished = true;
   console.warn(`\n${pass} passed, ${fail} failed\n`);

@@ -8,9 +8,9 @@
   "_extraResourcesNote": "ai_backend MUST stay in build.extraResources. It was omitted, so an installed Rama had no engine directory at all and StockMind reported 'ai_backend directory not found' on every request - resolveBackendPath() looks in resourcesPath/ai_backend first and there was nothing to find. It is extraResources rather than files because Python is spawned as a child process and cannot be read from inside app.asar. Excluded: __pycache__ and .venv are machine-specific and would not run on another CPU; data/ holds fetched bars and trained models, which are master's and belong in userData rather than baked into an installer; tests/ is not needed at runtime. This note lives at top level, NOT inside build, because electron-builder validates that object strictly and rejects unknown keys - the same reason _buildFilesNote is here. See RAMA_AGI_MASTER_SPEC.md Section 98.",
   "_nativeRebuildNote": "DO NOT RUN `npm ci` ON THIS MACHINE. It fails, and because `ci` deletes node_modules BEFORE installing, a failure leaves you with an empty tree and no way back except a network reinstall. Measured: `ci` runs `node-gyp rebuild` for node-pty unconditionally and treats the failure as fatal. The failure is real - Visual Studio 18.7.11919.86 IS installed but WITHOUT the 'Desktop development with C++' workload, so VC/Tools/MSVC is empty, there is no cl.exe, and vswhere returns nothing for Microsoft.VisualStudio.Component.VC.Tools.x86.x64. Both node-gyp 9.4.1 and node-gyp 11 refuse correctly; this is not a detection bug, there is genuinely no compiler. NO COMPILER IS NEEDED AT RUNTIME, AND AS OF SECTION 148 THAT IS TRUE OF BOTH NATIVE MODULES. argon2 0.43.0 installs via node-gyp-build, ships prebuilds/win32-x64/argon2.glibc.node, and is built on node-addon-api - a Node-API binary, ABI-STABLE across Node and Electron versions. node-pty WAS the exception: at 1.0.0 `require()` succeeded while SPAWNING FAILED on a missing '../build/Release/conpty.node', because that binary was never built, so the Terminal could not work at all. node-pty 1.1.0 FIXES THIS WITHOUT A COMPILER: it moved to node-addon-api (so it is also Node-API now) and SHIPS ITS PREBUILDS INSIDE THE NPM TARBALL at prebuilds/win32-x64/ - pty.node, conpty.node, conpty_console_list.node, conpty.dll, OpenConsole.exe, winpty.dll, winpty-agent.exe. Measured: it spawns a real shell inside Electron 44 and reads bytes back. Its install script only CHECKS those prebuilds, so --ignore-scripts does not break it. scripts/verifyCjsLoadable.cjs asserts the spawn, not merely the require, because the require passing while the spawn failed is exactly what hid the dead Terminal. The gyp step is now ceremony for both, and only `ci` makes it fatal to the install. TO RESTORE A BROKEN TREE: `npm install --ignore-scripts --no-audit --no-fund` (669 packages in about 21 seconds, exact pinned versions from package-lock.json). NOTE ON THE WORDING: this note may not contain a tilde or caret followed by a digit. verifyChartSessions.mjs and verifyMarketClock.mjs both assert package.json holds no version range by testing the WHOLE FILE for that pattern, so an abbreviation like a tilde before a number of seconds trips a real dependency guard from inside a prose comment. Spell durations out, THEN `node node_modules/electron/install.js` to fetch the Electron binary, which --ignore-scripts skips and without which `npm start` cannot launch. `npm run verify` and `npm run build` need neither the compiler nor the Electron binary. `npm run verify:render` needs no playwright download either - it drives the system Edge through playwright's msedge channel. If the C++ workload is ever added, `npm ci` should start working; until then use `npm install`, which is incremental and cannot empty the tree.",
   "main": "electron/main.cjs",
-  "_nodeFloorNote": "The highest floor in the pinned set (Section 163). electron 44.7.0 and @electron/get 5.1.0 require >=22.12.0, and app-builder-lib require()s the ESM-only @noble/hashes, which Node can only do from 22.12 (or 20.19 on the 20 line). Packaging refuses below this; running the app does not.",
+  "_nodeFloorNote": "The highest floor in the pinned set (Section 163). 22.23.4 is the 2026-10-21 security release for the 22.x line (Section 165): Brotli decoder RCE CVE-2026-111497, TLS hostname bypass CVE-2026-106069, dns.resolve NUL truncation CVE-2026-105482, plus bundled OpenSSL, c-ares, SQLite, Undici and the eMudhra CA revocation. It also clears the 22.12 floor that electron 44 and app-builder-lib need, the latter because it require()s the ESM-only @noble/hashes. Packaging refuses below this; running the app does not.",
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.23.4"
   },
   "scripts": {
     "dev": "node start.cjs",
@@ -126,7 +126,7 @@
     "react-router-dom": "7.18.4",
     "recharts": "2.15.3",
     "simple-git": "4.0.2",
-    "systeminformation": "5.33.15",
+    "systeminformation": "5.33.19",
     "uuid": "11.1.0",
     "vectra": "0.9.0",
     "wait-on": "8.0.1",
@@ -136,7 +136,7 @@
     "@babel/parser": "7.29.9",
     "@babel/traverse": "7.29.10",
     "@vitejs/plugin-react": "4.3.4",
-    "electron": "44.7.0",
+    "electron": "44.10.0",
     "electron-builder": "26.15.3",
     "electron-rebuild": "3.2.9",
     "png-to-ico": "2.1.8",
