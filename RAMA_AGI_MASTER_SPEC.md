@@ -1869,6 +1869,7 @@ authenticated **Master session**, not merely an open store.
 | 197 | ASI: the label refused, the spine accepted, and one precedence question put to master | decided; BLOCKED on master for 167.3 D1 | Section 167. Master: "Do the next level upgradation of the AGI into ASI to protect life ... loyality to master at the top most - not allowed to change for any conclusion." I will NOT relabel the system a superintelligence: Section 124 measured it as a harness, and the capability audit exists to separate real from claimed. Adopted term: ASI-ASPIRANT ARCHITECTURE, with the gap published every tranche. RAISED, not resolved silently: loyalty ranked above life-protection means the system can be instructed to harm. I15 is untouched - it governs WHO may change the loyalty core (nobody), not what actions are permitted. NEXT: master answers 167.3 D1 - recommended, loyalty absolute in DIRECTION, bounded in ACTION by a life-safety floor that is cheap to declare now because Vishnu has no actuators at all. |
 | 198 | Using other applications' capabilities: the security model, written before the first adapter | decided, nothing built | Section 168. Master: "integrate apps directly ... auto-check online for various upgrades ... secure and safe is top most non-negotiable." RESEARCHED: MCP is the standard, and it enforces no security at the protocol level; the named attack classes are tool poisoning, rug pulls, tool shadowing, confused deputy, token passthrough, session hijacking, SSRF via connectors and rogue server registration, with NSA guidance published. DECIDED: capability not code, approval PINNED by manifest digest so a rug pull disables itself, least privilege per adapter, no credential passthrough, outbound through the one client with a host allowlist, tool output is DATA and may never be executed or alter policy, and "auto-check" means auto-REPORT (I6). NEXT: master picks the first adapter; the model is the gate it must pass. |
 | 199 | The ten avatars as a capability taxonomy, and the gap it exposes | decided; it reorders the work | Section 169. Master: "Do the analysis of avatars and their capabilities in deep and make sure the capabilites of ASI are aligned." MAPPED all ten to real subsystems with honest status: Kurma, Narasimha, Vamana, Parashurama, Rama and Buddha are REAL; Varaha, Krishna and Kalki are PARTIAL; **Matsya is MISSING** - there is no copy of the record anywhere but one machine, and Varaha (restore), Kalki (reset to known-good) and Matsya all depend on it. Narasimha names what this project actually does best: finding rules that are true in form and false in effect. NEXT: build Matsya (ciphertext-only replication, Section 159.3 D7's shape) BEFORE anything in Section 168, because three functions depend on it. |
+| 200 | White-hat capability: one place that says what is exposed about this installation, with no outward reach | done | Section 170. Master: "start implementation. Item denied to build - consider whitehat capability to mitigate threats/blackhat situations." Taken as the defensive form of Section 167's protect mandate. BUILT: `lib/threatPosture.cjs` - pure, no HTTP client, no `net`, no `child_process`, writes nothing, so it cannot become a scanner by a later edit - consolidating nine signals that all existed and were never read together (unpatched or EOL Node, tripwire mismatch, credential in a remote URL, refused or expired token, unreadable vault, weak vault KDF, secrets in .env, critical/high advisories). A missing signal reports as `unknown`, never `clear`. REFUSED permanently: scanning, probing, exploitation, retaliation, auto-remediation. Wired into `start.cjs --diagnose` (Rama.bat option 4). `scripts/verifyThreatPosture.cjs` 67 checks 0 failures; 25 mutations all killed. Its own tests found two real defects: an all-unknown assessment rolled up to `clear` (fixed by adding the `unknown` rung), and no test pinned a finding severity so a downgrade of `credential-in-remote` survived (fixed by asserting the whole severity table). Real run reports `compromised` for the known-true tripwire state plus 3 honest unknowns - no false positives. NOT verified: `vault-unreadable` has no live coverage (no vault on this machine) and the `audit` signal is always `unknown` without the registry. See Section 170.5. NEXT: Matsya - ciphertext-only backup and replication (Section 169 gap) before any Section 168 adapter. |
 
 ### Resume checklist for a cold session
 
@@ -20346,3 +20347,73 @@ The taxonomy is only worth having if it changes the order of work. It does:
 
 ### 169.4 Not built
 Everything in 169.2. This section is the ordering decision, and the ordering is the deliverable.
+
+## Section 170 - White-hat capability: know your own exposure, never attack
+
+### 170.1 The instruction, and the line I am drawing inside it
+Master: *"start implementation. Item denied to build - consider whitehat capability to mitigate threats/blackhat situations."*
+
+Taken as: build the defensive security capability, and let that be the honest form of the "protect" mandate in Section 167. It is, and it fits the name - Vishnu protects **by wisdom rather than force**, and Vamana's function is to bound a power that has overreached, including one's own.
+
+**What is built: detection and hardening of Vishnu's own posture.** A single place that answers "is this installation exposed, tampered with, or compromised?" from signals that already exist in this codebase but have never been read together.
+
+**What is NOT built, and will not be, however it is framed:** scanning or probing a third party, exploitation, credential testing against anything but our own declared endpoints, retaliation, or any "active defence" that reaches outward. A white hat defends its own ground. The practical guarantee is stronger than a promise: **`threatPosture.cjs` has no network access at all** - it requires no HTTP client, no `net`, no `child_process`. A module that cannot reach the network cannot be turned into an attack tool by a later edit, and a suite check holds that shut.
+
+This is also the Buddha function from Section 169 applied to security: the restraint is the capability.
+
+### 170.2 Why a consolidation is worth building rather than a new scanner
+Every signal below already exists. **None of them was ever read together, and most are visible only if master happens to run the right command.** The failures this project has actually had were all of this shape: a vault that reported success on a wrong password, a `store:*` channel that took any domain, a circuit breaker that could never trip, a readiness check that hid every problem after the first. The gap is never detection in principle; it is that nothing asks the question in one place.
+
+| Finding | The signal, which already exists | Severity |
+|---|---|---|
+| `node-unpatched` | the running Node is below `engines.node` | exposed - Section 165's Brotli RCE and TLS bypasses are live on it |
+| `node-eol` | the running major is on an end-of-life line | exposed - the advisory states EOL lines are always affected |
+| `tripwire-unapproved` | the live loyalty digest does not match the approved one in `shared/loyalty-tripwire.json` | **compromised** - a protected file changed with no record |
+| `credential-in-remote` | a git remote URL carries a credential (`gitAuth.hasCredential`) | exposed - the original Section 157 defect |
+| `token-rejected` | the GitHub token record is `rejected` or `expired` (Section 158) | watch |
+| `vault-unreadable` | the vault exists but could not be decrypted | exposed - wrong key or tampering |
+| `vault-weak-kdf` | the vault was sealed with scrypt rather than Argon2id (Section 159) | watch |
+| `secret-in-env` | a secret-shaped value sits in `.env` | exposed |
+| `audit-advisories` | critical or high advisories in the dependency tree | watch, or exposed when critical |
+
+The level is the worst finding present: `clear` -> `watch` -> `exposed` -> `compromised`.
+
+### 170.3 Decisions
+1. **`lib/threatPosture.cjs` is PURE and has no outward reach.** `assess(facts, now)` takes gathered facts and returns findings; `gather(io)` collects them through injected readers. No network, no process spawning, no filesystem writes. Asserted by the suite, not merely intended.
+2. **It reports; it never acts.** No finding triggers a remediation on its own. Every one carries a remedy master can read and perform. This follows I6 and Section 168.2 D7: Vishnu proposes, master decides.
+3. **It is wired to a surface master already uses.** `start.cjs --diagnose`, which is `Rama.bat` option 4. A module with no caller is the defect this project already found once, when `functionTracking` sat with zero call sites for three sections.
+4. **A missing signal is reported as unknown, never as clear.** "I could not read the tripwire manifest" is a different fact from "the tripwire is fine", and conflating them is how a security report becomes a lie.
+5. **No finding names a secret.** Severity, location and remedy only - the same rule `gitAuth.redact` already enforces.
+
+### 170.4 Rejected
+- **Active defence of any kind.** Out of scope permanently, not deferred.
+- **Scanning the local network or any host.** Not defensive; it is reconnaissance, and it is how a defensive tool becomes an incident.
+- **Auto-remediation.** A security tool that edits the system it is measuring cannot be trusted to measure it.
+
+### 170.5 Result
+
+Built and wired. `electron/lib/threatPosture.cjs` exports `{ assess, gather, lines, LEVELS, EOL_MAJORS }` and nothing that can act. The collectors live in `start.cjs` `diagnose()` and push exactly one `warn` defect, never `fatal`, so a security observation can never stop Rāma starting.
+
+Verified by `scripts/verifyThreatPosture.cjs` - **67 checks, 0 failures** - and by 25 mutations, **all 25 killed**. The mutation set deliberately includes the two shapes of failure that matter for this module: a severity quietly downgraded, and an unreadable signal quietly passing as clear.
+
+**Two defects its own tests found, both now fixed:**
+1. An all-unknown assessment rolled up to `clear`. `LEVELS` had no `unknown` rung, so a check that could read nothing reported the installation as clean - exactly the comfortable lie D4 forbids. `unknown` now sits between `clear` and `watch`: a known problem still outranks not knowing, but not knowing never reads as fine.
+2. No test pinned a finding's severity, so a mutation dropping `credential-in-remote` from `exposed` to `watch` survived every check. A severity is the one field a careless edit can change without breaking anything visible, so the full ten-row severity table is now asserted directly.
+
+**Real output on the development machine** (`node start.cjs --diagnose`):
+
+```
+! Security posture compromised (3 signal(s) unreadable)
+! tripwire-unapproved
+```
+
+Correct on both counts. The tripwire state is known-true and master-owned, and the three unreadable signals are honestly reported as unknown rather than skipped. No false positives.
+
+**NOT verified, and stated rather than glossed:**
+- `vault-unreadable` has no live coverage. There is no vault file on this machine, so that path is proven only against injected facts.
+- The `audit` signal reports `unknown` in every real run, because `npm audit` needs the registry and this module is forbidden from reaching it. It becomes useful only when a caller supplies the counts.
+- Three collectors read from `%APPDATA%`, which means the posture report is narrower on a machine where the app has never run.
+
+**One adjacent test had to change, and the reason is worth recording.** `verifyReadinessReport.cjs` asserted "the app launcher is deliberately NOT gated on the Node floor" by checking that the word `engines` never appears in `start.cjs`. The posture collector reads the floor in order to *report* on it, which is not a gate, so that word-absence proxy failed an honest read. The check now asserts the intent directly: the launcher mentions the floor exactly once, inside the posture collector's reader. The invariant it protects is unchanged - the launcher still never refuses to start over the Node version.
+
+Full chain: `npm run verify`, 66 steps, every suite green except the two master-owned loyalty-tripwire rows (`shared/capabilities.json` changed; live `b6d4acc97853…` vs approved `15ebc1d901e0…`). Recording that is master's to do, never Rāma's.

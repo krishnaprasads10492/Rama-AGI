@@ -568,6 +568,100 @@ function diagnose() {
   const db = loadScenarios();
   add('Scenario memory', true, `${db.scenarios.length} remembered, ${db.scenarios.filter(s => s.resolved).length} with known fixes`);
 
+  // ── Security posture (Section 170) ─────────────────────────────────────────
+  // REPORT ONLY. Findings become report rows and at most ONE summary defect, never a `fatal`, so a
+  // security observation can never stop Rāma starting. The collectors live here rather than in
+  // `threatPosture.cjs`, which is kept unable to read the world or reach the network.
+  try {
+    const tp = require('./electron/lib/threatPosture.cjs');
+    const appData = process.env.APPDATA || '';
+    const vaultDirs = ['rama-agi', 'Rama AGI'].map(n => path.join(appData, n)).filter(() => !!appData);
+
+    const facts = tp.gather({
+      nodeVersion: process.versions.node,
+
+      nodeFloor: () => {
+        const p = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+        return (p.engines || {}).node || null;
+      },
+
+      // The manifest records a sha256 per protected file, so this is a real comparison and not a
+      // second copy of the tripwire's policy. Line endings are normalised exactly as it does.
+      tripwire: () => {
+        const crypto = require('crypto');
+        const m = JSON.parse(fs.readFileSync(path.join(ROOT, 'shared', 'loyalty-tripwire.json'), 'utf8'));
+        const files = m.files || {};
+        if (Object.keys(files).length === 0) return null;
+        for (const [rel, want] of Object.entries(files)) {
+          const text = fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
+          const got = crypto.createHash('sha256').update(text).digest('hex');
+          if (got !== want) return { matches: false };
+        }
+        return { matches: true };
+      },
+
+      // Read from .git/config rather than spawning git: cheaper, and it keeps this path free of
+      // process spawning. Only the NAME of a credentialled remote is ever reported.
+      remotes: () => {
+        const text = fs.readFileSync(path.join(ROOT, '.git', 'config'), 'utf8');
+        const out = [];
+        let current = null;
+        for (const line of text.split(/\r?\n/)) {
+          const head = /^\s*\[remote\s+"([^"]+)"\]/.exec(line);
+          if (head) { current = head[1]; continue; }
+          if (/^\s*\[/.test(line)) { current = null; continue; }
+          const url = /^\s*(?:push)?url\s*=\s*(.+)$/.exec(line);
+          if (current && url) out.push({ name: current, hadCredential: /:\/\/[^/\s]*@/.test(url[1].trim()) });
+        }
+        return out;
+      },
+
+      // The header names the key derivation in the clear (Section 159); nothing is decrypted here.
+      vault: () => {
+        for (const d of vaultDirs) {
+          const p = path.join(d, 'rama_vault.enc');
+          if (!fs.existsSync(p)) continue;
+          const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+          return { weakKdf: raw.kdf === 'scrypt' };
+        }
+        return null;
+      },
+
+      // NAMES only, never values, and only for assignments that actually carry something.
+      envSecrets: () => {
+        const p = path.join(ROOT, '.env');
+        if (!fs.existsSync(p)) return [];
+        const names = [];
+        for (const line of fs.readFileSync(p, 'utf8').split(/\r?\n/)) {
+          const kv = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\S.*)$/.exec(line);
+          if (!kv) continue;
+          const [, name, value] = kv;
+          const looksSecret = /gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}/.test(value)
+            || (/(SECRET|TOKEN|PASSWORD|API_KEY)$/i.test(name) && value.trim().length >= 16 && !/^change-this/i.test(value.trim()));
+          if (looksSecret) names.push(name);
+        }
+        return names;
+      },
+    });
+
+    const posture = tp.assess(facts, Date.now());
+    add('Security posture', posture.level === 'clear', posture.level
+      + (posture.unknowns.length ? ` (${posture.unknowns.length} signal(s) unreadable)` : ''));
+    for (const fnd of posture.findings) {
+      if (fnd.severity === 'unknown') continue;
+      add(`  ${fnd.id}`, false, fnd.what);
+    }
+    if (posture.level === 'exposed' || posture.level === 'compromised') {
+      defects.push({
+        id: 'security-posture', severity: 'warn',
+        detail: `security posture is ${posture.level}: ${posture.findings.filter(x => x.severity === 'exposed' || x.severity === 'compromised').map(x => x.id).join(', ')}`,
+        fix: 'each finding above carries its own remedy — run this with --diagnose to see them in full',
+      });
+    }
+    for (const line of tp.lines(posture)) degraded.push(line);
+  } catch (err) {
+    add('Security posture', false, `could not be assessed: ${err.message}`);
+  }
   return { defects, report, degraded };
 }
 

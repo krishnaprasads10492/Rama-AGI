@@ -266,7 +266,16 @@ const COMFY = b.DISK_COMFY_MB;
   // Found by mutation: asserting that `refuse(floor.message)` EXISTS passes even when the branch
   // around it has been turned off, so the gate itself is asserted as well as its body.
   check('the floor is applied inside the verdict, where it cannot be bypassed', src.includes('const floor = nodeFloorVerdict(f.nodeVersion, f.floor);') && src.includes('if (!floor.ok) reasons.push(floor.message);'));
-  check('the app launcher is deliberately NOT gated on it', !fs.readFileSync(path.join(ROOT, 'start.cjs'), 'utf8').includes('engines'));
+  // This used to assert that the word `engines` never appears in start.cjs. Section 170's posture
+  // collector reads the floor in order to REPORT on it, which is not a gate, so the word-absence
+  // proxy would have failed an honest read. The intent is what matters and is asserted directly:
+  // the launcher may read the floor, and there is exactly one place it does so.
+  check('the app launcher is deliberately NOT gated on it: it may report the floor, never enforce it', (() => {
+    const launcher = fs.readFileSync(path.join(ROOT, 'start.cjs'), 'utf8');
+    const mentions = launcher.split('engines').length - 1;
+    const readsItForTheReport = /nodeFloor: \(\) => \{[\s\S]{0,300}?\(p\.engines \|\| \{\}\)\.node \|\| null;/.test(launcher);
+    return mentions === 1 && readsItForTheReport;
+  })());
   check('an absent 7zip-bin is its own state, and that branch is reachable', (() => {
     const gate = src.indexOf('if (!toolchainBundles7za()) {');
     const probe = src.indexOf('const bundled = bundled7zaPath();');
