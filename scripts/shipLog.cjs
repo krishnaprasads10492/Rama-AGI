@@ -504,4 +504,8 @@ if (require.main === module) {
   }
 }
 
-module.exports = { redact, writeOutbox, BRANCH, DEST_DIR };
+// `commitViaPlumbing` is exported for `scripts/fieldReport.cjs` (Section 171.4 D7). It is the one
+// transport in this project that commits without touching the working tree, index or current
+// branch, and it is already verified by 44 checks. A second copy of it is how the two drift apart,
+// so the field report borrows this one rather than growing its own.
+module.exports = { redact, writeOutbox, commitViaPlumbing, BRANCH, DEST_DIR };

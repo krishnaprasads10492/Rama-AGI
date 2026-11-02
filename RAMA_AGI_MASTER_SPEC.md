@@ -1871,6 +1871,8 @@ authenticated **Master session**, not merely an open store.
 | 199 | The ten avatars as a capability taxonomy, and the gap it exposes | decided; it reorders the work | Section 169. Master: "Do the analysis of avatars and their capabilities in deep and make sure the capabilites of ASI are aligned." MAPPED all ten to real subsystems with honest status: Kurma, Narasimha, Vamana, Parashurama, Rama and Buddha are REAL; Varaha, Krishna and Kalki are PARTIAL; **Matsya is MISSING** - there is no copy of the record anywhere but one machine, and Varaha (restore), Kalki (reset to known-good) and Matsya all depend on it. Narasimha names what this project actually does best: finding rules that are true in form and false in effect. NEXT: build Matsya (ciphertext-only replication, Section 159.3 D7's shape) BEFORE anything in Section 168, because three functions depend on it. |
 | 200 | White-hat capability: one place that says what is exposed about this installation, with no outward reach | done | Section 170. Master: "start implementation. Item denied to build - consider whitehat capability to mitigate threats/blackhat situations." Taken as the defensive form of Section 167's protect mandate. BUILT: `lib/threatPosture.cjs` - pure, no HTTP client, no `net`, no `child_process`, writes nothing, so it cannot become a scanner by a later edit - consolidating nine signals that all existed and were never read together (unpatched or EOL Node, tripwire mismatch, credential in a remote URL, refused or expired token, unreadable vault, weak vault KDF, secrets in .env, critical/high advisories). A missing signal reports as `unknown`, never `clear`. REFUSED permanently: scanning, probing, exploitation, retaliation, auto-remediation. Wired into `start.cjs --diagnose` (Rama.bat option 4). `scripts/verifyThreatPosture.cjs` 67 checks 0 failures; 25 mutations all killed. Its own tests found two real defects: an all-unknown assessment rolled up to `clear` (fixed by adding the `unknown` rung), and no test pinned a finding severity so a downgrade of `credential-in-remote` survived (fixed by asserting the whole severity table). Real run reports `compromised` for the known-true tripwire state plus 3 honest unknowns - no false positives. NOT verified: `vault-unreadable` has no live coverage (no vault on this machine) and the `audit` signal is always `unknown` without the registry. See Section 170.5. NEXT: Matsya - ciphertext-only backup and replication (Section 169 gap) before any Section 168 adapter. |
 
+| 201 | Field evidence: the running machine reports what only it can know, behind a flag that is off by default | in-progress | Section 171. Master: "create a branch and to get the info to fill the gap from the machine running it - with a feature flag enable/disable." Branch `feat/field-evidence` off `dev` at `365070a`. Closes the shape of gap shared by rows 29, 69, 79, 181, 182, 185-189 and 192-195: built, verified against fakes, never run against the real thing. Three modes, `off` by default - `off` records nothing, `local` writes a redacted report to disk, `ship` lets it travel by the Section 161 git-plumbing transport. Distinguishes `observed` (a real run recorded it) from `inspected` (an artefact implies it) from `never-observed`, and NEVER promotes one to another. REFUSED: outbound HTTP of its own (I9), enabled-by-default, one flag for both recording and sending, and generating its own evidence by performing real authenticated actions. BUILT: `lib/fieldEvidence.cjs` (pure - 16 claims, each tied to the ledger row it closes), `scripts/fieldReport.cjs` (6 artefact collectors, one redacting write), `scripts/verifyFieldEvidence.cjs`; `shipLog.cjs` exports `commitViaPlumbing` so the transport is borrowed, not duplicated. 127 checks 0 failures; 33 mutations all killed. Real run here: 2 of 16 confirmed, 14 honestly `never-observed` - that list IS the deliverable. Three defects found by its own tests: spec LINE numbers cited as ledger row numbers (all 16 fixed; the suite now parses the ledger and asserts every cited row exists), no way to record a CONTRADICTION (added `refuted`, which never closes a row and leads the report), and three overlapping shape-only rules of which the tests exercised one at a time. Mutation also found that every containment check was aimed at the pure module, so the SCRIPT could have gained an HTTP client - its requires are now an asserted allowlist (I9). NOT verified: nothing in the running app calls `record()` yet, so the 10 run-only claims need `--note` by hand; `ship` mode has never pushed. NEXT: instrument the real paths (Kite session, UI push, rendered route, session:unlock) to record themselves when the flag is on and cost nothing when off. |
+
 ### Resume checklist for a cold session
 
 1. Read sections 23–28 of this document.
@@ -20417,3 +20419,85 @@ Correct on both counts. The tripwire state is known-true and master-owned, and t
 **One adjacent test had to change, and the reason is worth recording.** `verifyReadinessReport.cjs` asserted "the app launcher is deliberately NOT gated on the Node floor" by checking that the word `engines` never appears in `start.cjs`. The posture collector reads the floor in order to *report* on it, which is not a gate, so that word-absence proxy failed an honest read. The check now asserts the intent directly: the launcher mentions the floor exactly once, inside the posture collector's reader. The invariant it protects is unchanged - the launcher still never refuses to start over the Node version.
 
 Full chain: `npm run verify`, 66 steps, every suite green except the two master-owned loyalty-tripwire rows (`shared/capabilities.json` changed; live `b6d4acc97853…` vs approved `15ebc1d901e0…`). Recording that is master's to do, never Rāma's.
+
+---
+
+## Section 171 - Field evidence: what only the machine running it can tell us
+
+Master: *"create a branch and to get the info to fill the gap from the machine running it - with a feature flag enable/disable."*
+
+Branch `feat/field-evidence`, off `dev` at `365070a`.
+
+### 171.1 The gap, stated exactly
+
+Twenty-odd ledger rows carry a status of the same shape: **built, verified against fakes, never run against the real thing.** Kite as a data source (row 186), the git credential UI (187), token expiry on screen (188), the vault KDF against master's own vault (189), the strategy book's routes (181), multiple Zerodha accounts (182), readiness fixes on a clean machine (185), and the rows that need master's rebuild (79-81, 192-195).
+
+Every one of them is blocked on the same missing thing, and it is not code. It is an **observation from the machine where the app actually runs.** This development machine has no vault, no Zerodha account, no `node_modules`, and never renders the app. No amount of testing here can close any of those rows, and writing more tests against more fakes would be motion rather than progress.
+
+So the thing to build is not another test. It is a way for the running machine to say what happened, in a form master can hand over.
+
+### 171.2 Why this is dangerous, and what that forces
+
+A component that collects facts about master's machine and sends them somewhere is, structurally, telemetry. Built carelessly it is the single worst thing in this codebase: it has reach, it runs unattended, and its whole purpose is to move information off the machine. Three consequences follow, and they are not negotiable.
+
+**It must be off unless master turns it on.** Not "off by default and easy to enable" - off, with enabling being a deliberate act that master performs and can reverse.
+
+**Recording and sending are different permissions.** "Write what you saw to a file on my disk" and "put it somewhere another machine can read it" are not the same decision, and collapsing them into one switch would mean the only way to get a local diagnostic is to consent to publication. Hence three states, not two.
+
+**It observes; it never exercises.** The tempting shortcut is to have it *produce* the evidence: log into Zerodha, push to GitHub, unlock the vault, and report what happened. That would be a diagnostic tool performing authenticated actions with master's credentials, unattended, to generate its own test results. It is refused. Evidence comes from runs master performed, or from artefacts already on disk - never from an action this module took.
+
+### 171.3 The honest distinction the whole design turns on
+
+A claim can be in exactly one of three states, and conflating the first two is the failure mode this is built to prevent:
+
+| State | Means | Example |
+|---|---|---|
+| `observed` | a real run of the real path recorded that it happened | a Kite session really returned candles, and the count was written down |
+| `inspected` | an artefact on disk implies it, read just now | the vault header says `argon2id`, so that path ran at some point |
+| `never-observed` | nothing has been seen, and that is reported as such | no UI push has ever been recorded |
+
+**`inspected` is never promoted to `observed`, and `never-observed` is never rendered as a pass.** This is Section 170's D4 in a second setting: "I have not seen it" and "it works" are different facts, and a report that blurs them tells master the opposite of what he needs. A field report that says `never-observed` for fifteen claims is doing its job - it has converted twenty hand-written ledger notes into a precise list of what the running machine must still be made to do.
+
+### 171.4 Decisions
+
+1. **`lib/fieldEvidence.cjs` is PURE.** Claim registry, verdicts and report rendering. No filesystem, no network, no `child_process`, no HTTP client (I9 - there is one main-process HTTP client and this is not it). The collectors are injected, exactly as Section 170 did, and the suite asserts the containment rather than trusting it.
+2. **Three modes, `off` by default: `off` -> `local` -> `ship`.** `off` records nothing and costs nothing. `local` writes a redacted report to disk for master to read or hand over. `ship` additionally allows it to travel. Anything that is not one of the three literal strings resolves to `off`, because an unreadable flag must fail closed.
+3. **Only an exact boolean/string enables it,** following the `voiceCloudSttOptIn` precedent from Section 150: `'yes'`, `1` and `true`-ish values do not enable a mode. The flag is read from the environment (`RAMA_FIELD_EVIDENCE`) or from the datastore config, with the environment winning so the build machine - which has no UI session - can still be asked for a report.
+4. **It observes, it never exercises** (171.2). No authenticated action, no network call, no vault unlock, no write to anything outside `data/`.
+5. **Shapes and counts, never values.** A candle count, never a price. A boolean "an expiry is recorded", never the token or the date. A KDF name, never the vault. The same rule as Section 170's D5, and for the same reason.
+6. **Redaction happens on WRITE, not on send.** `shipLog.redact` is applied before the report touches the disk, because the local file is the thing master pastes into a chat window. Redacting only on the way out would protect the public repo and expose master everywhere else.
+7. **The transport is the one that already exists.** `shipLog.cjs`'s git plumbing path - no checkout, no index change, no inbound listener, already verified by 44 checks in Section 161. `commitViaPlumbing` is exported rather than reimplemented; a second copy of a transport is how the two drift apart.
+8. **A claim is declared once, in the registry, next to the ledger row it closes.** A claim with no ledger row is a claim nobody asked for.
+
+### 171.5 Rejected
+
+- **Any outbound HTTP of its own.** Violates I9 and gives the module exactly the reach it must not have.
+- **Enabled by default, or opt-out.** Telemetry nobody switched on is telemetry nobody consented to.
+- **One flag for recording and sending.** Forces master to consent to publication in order to get a local diagnostic.
+- **Generating its own evidence** by performing real authenticated actions. The shortcut that would make the report look complete and make the tool untrustworthy.
+- **Shipping raw and redacting later.** The local file is the one most likely to be pasted somewhere.
+
+### 171.6 Result
+
+Built on branch `feat/field-evidence`. Three files: `electron/lib/fieldEvidence.cjs` (pure - the claim registry, the verdicts, the report), `scripts/fieldReport.cjs` (the collectors and the one write), and `scripts/verifyFieldEvidence.cjs`. `shipLog.cjs` gained one line: `commitViaPlumbing` is now exported, so the field report borrows the proven transport instead of growing a second one.
+
+Registered as `npm run field-report` and `npm run verify:field-evidence`, with the suite in the `verify` chain.
+
+**Verified by 127 checks, 0 failures, and 33 mutations, all 33 killed.**
+
+**Sixteen claims, each tied to the ledger row it would close.** Six are closable by inspecting an artefact (rows 193, 29, 185, 189, 79, 69); ten need a real run and say so. `packaged-install` and `token-expiry-recorded` were deliberately moved into the run-only group while building this: a script reading the repo cannot tell whether the app ran packaged, and the token's expiry lives inside the encrypted store, which nothing may open to satisfy a report.
+
+**Real output on this development machine:** 2 of 16 confirmed, 14 still open. Node 22.23.4 meets the 22.23.4 floor, and the data directory is outside the install directory. Everything else is honestly `never-observed` - there is no vault here, `build/` has not been produced, and nothing has ever rendered. **That report is the deliverable.** It converts twenty hand-written ledger notes into fourteen specific things the running machine has to be made to do.
+
+**Three defects found by its own tests and mutations, all fixed:**
+
+1. **The registry cited spec LINE numbers as if they were ledger row numbers.** Both are plausible-looking integers, so the report read perfectly and pointed master at nothing. All sixteen were corrected, and the suite now parses the ledger out of this document and asserts that every cited row exists - so the mistake cannot recur silently.
+2. **There was no way to record evidence that CONTRADICTS a claim.** A Node version below the floor would have been stored as `never-observed`, indistinguishable from never having looked - the same blur D4 forbids, in a third costume. `refuted` was added as a fourth state, it never closes a row, and it leads the report because it is the only group that is a finding rather than a gap.
+3. **Three overlapping rules guarded the shape-only filter and the tests only ever exercised one at a time,** so widening the length cap and deleting the token-shape test both survived mutation. Each rule now has a case that only it can catch.
+
+Mutation also found a containment hole worth naming: every "cannot reach outward" check was aimed at the pure module, so **the collector script could have quietly acquired an HTTP client** and nothing would have objected. Its requires are now an asserted allowlist of four Node builtins (I9).
+
+**NOT verified, and stated rather than glossed:**
+- Nothing is wired to call `record()` from inside the running app yet. The ten run-only claims can therefore only be closed by `npm run field-report -- --note <claim> --state observed`, by hand, which is honest but manual. **NEXT STEP: instrument the real paths** so a Kite session, a UI push, a rendered route and a successful unlock record themselves when the flag is on - and cost nothing when it is off.
+- `ship` mode has never pushed. The commit-and-push path is the one `shipLog` already uses and is covered by its 44 checks, but this caller has only been exercised through `local`.
+- The `engine-python` collector reports "could not tell" rather than a refutation when no bundled interpreter exists, because a system Python on PATH would satisfy the claim and seeing it would mean spawning a process, which 171.2 forbids.
