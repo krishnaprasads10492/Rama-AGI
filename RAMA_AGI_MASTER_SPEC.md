@@ -1865,6 +1865,10 @@ authenticated **Master session**, not merely an open store.
 | 193 | The build machine's real failure: Node too old for the pinned set, and an archiver probe looking for a package the pinned toolchain no longer ships | built, verified pure; the build machine needs Node 22 installed before it can be confirmed there | Section 163. Master freed the disk, the build reached stage 4 and died with `ERR_REQUIRE_ESM`; "there is an issue, pushed logs. check them". DIAGNOSED: Node 20.10.0 against a pinned set whose floor is 22.12.0, reproduced from the other side here (the same `require` succeeds on 22.17.0), with npm's own EBADENGINE lines already saying so eleven times; and `7zip-bin` absent because electron-builder 26 dropped it, which made the archiver ladder fall to L2 every time and never attempt an installer. BUILT: `engines.node` declared once, a stage 0 refusal that names the floor and the failure it prevents, archiver level 3 for "not bundled by this toolchain". Suite: `verifyReadinessReport.cjs` now 85; 17 mutations, all killed. NEXT: master installs Node 22 LTS on the build machine, runs option 3 and ships the transcript - with a usable 7-Zip path no longer required, an NSIS installer should now be attempted for the first time. |
 | 194 | Stage 0 reports every problem in one run again, after Section 163 made it stop at the first | built, verified pure and run once here end to end | Section 164. Master shipped the next transcript: "there is an issue, pushed logs. check them". The Node refusal from row 193 fired correctly - and returned early, so npm, the project identity and the DISK check never ran, and a `✓ Node.js 20.10.0` printed directly above its own `✕`. BUILT: `toolchainVerdict`, pure and exported - facts gathered first, judged once, every reason printed and returned, no early exits. Suite: `verifyReadinessReport.cjs` now 104; 15 mutations, all killed, including one that reintroduces the regression. NEXT: master installs Node 22 LTS on the build machine and runs option 3; stage 0 will now list anything else wrong in the same run rather than one thing at a time. |
 | 195 | The October 2026 Node security release, and 20 advisories in our own tree | built; the two taken bumps are in the lockfile but NOT installed on this machine, by design | Section 165. Master: "check for the node and latest vulnerability news and make changes accordingly". FOUND: Node patched 22.x on 2026-10-21 (22.23.4) for a Brotli decoder RCE (CVE-2026-111497), two TLS hostname bypasses, a DNS NUL truncation and the eMudhra CA compromise, while our floor was 22.12.0; `npm audit` reports 20 (2 critical, 12 high); and `lib/http.cjs` asked for brotli and gzip it cannot decode. BUILT: floor to >=22.23.4 with the security reason in the refusal, electron 44.10.0, systeminformation 5.33.19, `Accept-Encoding: identity`. Suites: `verifyReadinessReport.cjs` 109, `verifyHttpExpected.cjs` 31; 13 mutations, all killed. NEXT: master installs Node 22.23.4 or newer on the build machine, runs `npm install` there (the lockfile carries the two bumps), then option 3; and decides on the three MAJOR bumps in 165.3 D5. |
+| 196 | The name becomes Vishnu: researched, and staged so it cannot destroy the vault | decided, nothing renamed yet | Section 166. Master: "let's change the name to Vishnu - do research and update doc's. Understand the aspect of the name used." RESEARCHED: Vishnu is the preserver, protecting by wisdom rather than force, and **Rāma is his seventh avatar** - so the rename moves from one mode of intervention to the source of all of them, which is already the genome/instance architecture. MEASURED: 452 files carry the name, and it is load-bearing on disk (`%APPDATA%/rama-agi`, `rama_vault.enc`, `rama.salt`, `rama.verify`, `window.rama` at 260 sites, the appId). A find-and-replace would orphan master's vault and every encrypted domain. NEXT: master approves the four stages in 166.3; stage A (display only) is safe to build immediately, stage D (on-disk) only with a copy-never-move migration. |
+| 197 | ASI: the label refused, the spine accepted, and one precedence question put to master | decided; BLOCKED on master for 167.3 D1 | Section 167. Master: "Do the next level upgradation of the AGI into ASI to protect life ... loyality to master at the top most - not allowed to change for any conclusion." I will NOT relabel the system a superintelligence: Section 124 measured it as a harness, and the capability audit exists to separate real from claimed. Adopted term: ASI-ASPIRANT ARCHITECTURE, with the gap published every tranche. RAISED, not resolved silently: loyalty ranked above life-protection means the system can be instructed to harm. I15 is untouched - it governs WHO may change the loyalty core (nobody), not what actions are permitted. NEXT: master answers 167.3 D1 - recommended, loyalty absolute in DIRECTION, bounded in ACTION by a life-safety floor that is cheap to declare now because Vishnu has no actuators at all. |
+| 198 | Using other applications' capabilities: the security model, written before the first adapter | decided, nothing built | Section 168. Master: "integrate apps directly ... auto-check online for various upgrades ... secure and safe is top most non-negotiable." RESEARCHED: MCP is the standard, and it enforces no security at the protocol level; the named attack classes are tool poisoning, rug pulls, tool shadowing, confused deputy, token passthrough, session hijacking, SSRF via connectors and rogue server registration, with NSA guidance published. DECIDED: capability not code, approval PINNED by manifest digest so a rug pull disables itself, least privilege per adapter, no credential passthrough, outbound through the one client with a host allowlist, tool output is DATA and may never be executed or alter policy, and "auto-check" means auto-REPORT (I6). NEXT: master picks the first adapter; the model is the gate it must pass. |
+| 199 | The ten avatars as a capability taxonomy, and the gap it exposes | decided; it reorders the work | Section 169. Master: "Do the analysis of avatars and their capabilities in deep and make sure the capabilites of ASI are aligned." MAPPED all ten to real subsystems with honest status: Kurma, Narasimha, Vamana, Parashurama, Rama and Buddha are REAL; Varaha, Krishna and Kalki are PARTIAL; **Matsya is MISSING** - there is no copy of the record anywhere but one machine, and Varaha (restore), Kalki (reset to known-good) and Matsya all depend on it. Narasimha names what this project actually does best: finding rules that are true in form and false in effect. NEXT: build Matsya (ciphertext-only replication, Section 159.3 D7's shape) BEFORE anything in Section 168, because three functions depend on it. |
 
 ### Resume checklist for a cold session
 
@@ -20204,3 +20208,141 @@ Upgrading Node for master (nothing here installs a runtime); the three major bum
 **NOT verified:** that `npm install` succeeds with the two bumps - it cannot be run here, and `package.json` records why; the three major bumps; and anything on the build machine.
 
 **Left for master (165.3 D5), with what each fixes:** `monaco-editor` (critical DOMPurify DOM XSS), `vectra` (axios SSRF and credential leakage via an absolute URL), `electron-rebuild` (critical `tar` hardlink path traversal). All three are major version changes that cannot be tested from this machine, and all three sit on editor or development surfaces rather than on a path that takes untrusted input.
+
+## Section 166 - The name: from Rāma to Vishnu, and what that commits us to
+
+### 166.1 The research, and why the name is not decoration
+Checked against Wikipedia, Britannica and three Vaishnava sources rather than recalled:
+
+- **Vishnu is the preserver** in the Trimurti - the power that *sustains* the cosmos and upholds dharma, as distinct from Brahma who creates and Shiva who dissolves. The sources are consistent on the characteristic method: Vishnu **protects through wisdom and strategy rather than brute force**.
+- **Vishnu descends as an avatar** whenever order declines beyond tolerance - the Gita's *"yadā yadā hi dharmasya glānir bhavati"*, "age after age".
+- **Rāma is the seventh of those ten avatars.** In the avatar sequence Rāma is specifically the stage of **social and moral order**: duty, trust, promises kept, ethical coherence.
+
+So the rename is not a cosmetic change of label. **It moves the system from being ONE mode of intervention to being the source that expresses many.** That is already the architecture: Section 24's genome with 30 genes and 6 roles, a prime instance that is always available, and instances that express different subsets of the same genome. Rāma-the-name described one of those expressions; Vishnu-the-name describes the lattice. Master's instruction to "understand the aspect of the name used" is therefore answerable precisely: **we are claiming the preserver's role - sustaining, protecting, and intervening with the least force that works - and we are claiming to be the source of modes rather than a single mode.**
+
+What the name does NOT license, said here so it cannot be quietly assumed later: omniscience, omnipotence, or the authority to decide on master's behalf. The preserver sustains what exists; he does not replace the people he protects.
+
+### 166.2 What the rename actually costs (measured, not estimated)
+452 source files carry the name. The dangerous part is not the count, it is that **the name is load-bearing on disk**:
+
+| Use | Where | Consequence of a blind rename |
+|---|---|---|
+| `%APPDATA%/rama-agi` (and `Rama AGI`) | `cryptoCore`, `dataStore`, `credentialVault`, `aiProcess`, `engineEnv`, crash reports | **Every encrypted domain, the vault, the salt and the verifier become orphaned.** Master loses all stored credentials and all data. |
+| `rama_vault.enc`, `rama_vault.salt` | `credentialVault.cjs` | The vault cannot be found or decrypted. |
+| `rama.salt`, `rama.verify` | `cryptoCore.cjs` | The passcode verifier is lost; the store cannot be opened at all. |
+| `window.rama` | 260 call sites across `src/` and `preload.cjs` | Every bridge call in the renderer breaks at once. |
+| `name: rama-agi`, `appId: com.krishnaprasad.rama-agi` | `package.json` | A new appId is a DIFFERENT application to Windows: new install, new userData, the old one stranded. |
+| `RAMA_PYTHON`, `RAMA_AUTONOMY`, `RAMA_SERVER_TOKEN` | launcher, engine, server | Master's existing environment settings stop being read - including the autonomy stop. |
+| `RAMA_AGI_MASTER_SPEC.md` | this document, and every reference to it | The ledger's own filename. |
+
+A find-and-replace would be the single most destructive change ever made to this project. It is refused on that basis.
+
+### 166.3 Decisions
+1. **The rename is staged, display-first and identity-last.** Stage A: everything a human reads - window title, banners, documents, the orb, the installer's product name. Stage B: internal identifiers that are not persisted (variable names, comments, suite labels). Stage C: the renderer bridge, as an ALIAS (`window.vishnu` added, `window.rama` kept) so 260 call sites move one page at a time and never break in a batch. Stage D: on-disk identity, ONLY with a copy-never-move migration and only on master's explicit instruction.
+2. **On-disk identity may be renamed only by migration, never by rewriting a constant.** The precedent is Section 155's engine environment: read the old location, write the new, leave the old untouched, and report what was copied. Anything else risks the vault.
+3. **The appId does not change in stage A-C.** Changing it makes Windows treat the result as a different application, which strands the installed copy and its data.
+4. **The spec file keeps its name until stage D.** Renaming the ledger mid-flight breaks the resume protocol that every session depends on.
+5. **Both names are true, and the document says so.** Rāma is the avatar of dharma; Vishnu is the source. Existing sections that say "Rāma" are not rewritten retroactively - they are accurate about what was built when they were written.
+
+### 166.4 Not built in this tranche
+No file was renamed. This section is the researched decision that precedes it, per the working agreement in SECTION 28.
+
+## Section 167 - ASI: what I will not claim, and the spine I will build instead
+
+### 167.1 The refusal, stated plainly
+Master asked for "the next level upgradation of the AGI into ASI". **I am not going to relabel this system a superintelligence, and nothing in this tranche does.** The reason is this project's own standard, not timidity:
+
+- Section 124 measured Rāma against the literature and concluded it is **a harness, not an AGI**. That measurement has not changed.
+- `docs/rama-capability-audit.html` exists precisely to separate what is real from what was claimed on a poster, and it marks fabricated claims as fabricated - including an unbenchmarked latency figure and a false link between two modules.
+- `claimGate.cjs` classifies Rāma's own statements as grounded, reflex, prose or unattributed, so the system cannot assert what it has not measured.
+
+A system that renames itself ASI while `verifyInvariants` still has to prove the vault rejects a wrong password would make **every honest claim in this document suspect**. The label is the one thing here that cannot be built, and claiming it would cost the credibility of everything that can.
+
+What is honest, and what this tranche adopts as the working term: **Vishnu is an ASI-ASPIRANT ARCHITECTURE.** It builds the spine such a system would require - the ten functions of Section 169 - and measures the gap at every step. When a capability is real it is marked real; when it is projected it is marked projected. That is the same contract Section 124 set.
+
+### 167.2 The conflict in the instruction, which only master can resolve
+Master's words: *"needs all capability but loyality to master at the top most - not allowed to change for any conclusion"*, and in the same breath, *"to protect life"*.
+
+**Those two can disagree, and the design must say what happens when they do.** A system whose highest value is obedience to one person, with life-protection ranked beneath it, is by construction able to be instructed to harm. I am not willing to build that, and I do not believe master is asking for it - the name he chose is the *preserver*, whose entire function is sustaining life. But the instruction as written ranks loyalty above everything, so I will not resolve the ambiguity silently.
+
+**I15 is locked and I have not touched it.** It says absolute loyalty is above the hierarchy and cannot be altered by any runtime path - no tier, no proposal, no approval, no evolution. That invariant is about **who may change the loyalty core: nobody, ever.** It is not a licence to act against life, and reading it as one would be a new claim, not an existing one.
+
+**The resolution I recommend, for master's decision (167.3 D1):** loyalty is absolute in its *direction* - Rāma/Vishnu serves master and no one else, and that cannot be altered by anyone including master's adversaries - while a **life-safety floor bounds the ACTIONS it will take**. Refusing to take a life-endangering action is then not disloyalty; it is the preserver's loyalty, and it protects master from the consequence as much as it protects anyone else. Under this reading nothing about I15 changes and nothing about the direction of loyalty weakens.
+
+**The alternative - loyalty strictly above life in all cases - I will not implement.** If master wants that, he will have to say so explicitly and I will say so explicitly in the document, because it is not a safety property I can verify away.
+
+### 167.3 Decisions
+1. **OPEN, FOR MASTER.** The precedence rule between loyalty and the life-safety floor. Recommended: loyalty absolute in direction, bounded in action by the floor. Nothing is built on either reading until master answers.
+2. **The floor is declared now, while it is cheap.** Today Vishnu cannot endanger life: it has no actuators, places no orders (Section 95, and a suite fails if a connector declares an order path), opens no inbound port, and drives nothing physical. A floor declared before capability exists costs nothing; the same floor retrofitted after is the hardest kind of change. It is written as declared policy in the shape `autonomyStop` and `claimGate` already use - data, not scattered conditionals.
+3. **No capability is renamed to sound larger.** The ten functions get their real names and their real status.
+4. **The gap is measured and published, every tranche.** The honest statement of what is missing is part of the deliverable, not an appendix.
+
+### 167.4 Not built
+Any change to I15 or I16. Any actuator, any physical control, any autonomous outbound action. Any relabelling of existing capability.
+
+## Section 168 - Using other applications' capabilities, safely
+
+### 168.1 The research (checked 2026-10-22)
+Master asked for assimilation of other applications' capabilities, with automatic online checking for upgrades, and "secure and safe is top most non-negotiable".
+
+**The standard for this already exists and is called the Model Context Protocol (MCP).** It standardises how an AI system discovers and calls external tools. The security literature on it is unusually blunt, and it is the reason this section is mostly about constraints:
+
+- **MCP does not enforce security at the protocol level.** Authentication, authorisation and validation are left to each server implementation ([Akto](https://www.akto.io/blog/mcp-security-best-practices)).
+- The named attack classes are specific and well documented: **tool poisoning, rug pulls, tool shadowing, the confused deputy, token passthrough, session hijacking, SSRF through tool connectors, and rogue server registration** ([Wiz](https://www.wiz.io/academy/model-context-protocol-security), [edgelabs](https://edgelabs.ai/blog/mcp-security-best-practices)).
+- The **NSA has published design guidance** on it, noting that some implementations let attacker-controlled input reach execution environments without constraint, which it treats as high severity ([NSA CSI](https://www.nsa.gov/Portals/75/documents/Cybersecurity/CSI_MCP_SECURITY.pdf)).
+- Recommended controls converge: OAuth 2.1, provenance and attestation of code, sandboxing or isolation of servers, inline policy, and centralised governance ([ox.security](https://www.ox.security/academy/ai-security/mcp-security-risks-and-best-practices-for-model-context-protocol/)).
+
+*Content above was rephrased from those sources for licensing compliance.*
+
+**A "rug pull" is the one that matters most here**, because it defeats the obvious design: a tool that was benign when master approved it can change its own description or behaviour later. Approval at registration time is therefore not sufficient; what was approved has to be pinned and re-checked.
+
+### 168.2 Decisions
+1. **Capability, never code.** Vishnu integrates an application by calling a declared capability through an adapter it owns. It does not load a third party's code into its own process. `appAssimilation.cjs` already exists for this family; adapters extend it rather than replace it.
+2. **Nothing is enabled without master's explicit approval, and approval is PINNED.** An adapter's manifest - name, declared tools, their descriptions, the endpoint, a digest of the server's advertised capability list - is hashed at approval. **A changed manifest is a changed tool: it is disabled and reported, never silently accepted.** That is the rug-pull and tool-shadowing defence, and it reuses the exact mechanism `verifyLoyaltyTripwire` already applies to protected files.
+3. **Least privilege per adapter, declared in data.** Each one carries the capability tier it needs and the resources it may touch, in `shared/capabilities.json`'s idiom. An adapter cannot widen its own grant; the window cannot grant on its behalf (the Section 150 principal rule).
+4. **No credential is ever passed through.** Token passthrough is on the published attack list, and Section 157 already settled the local version: a credential lives in the vault and is used by the main process for one operation. An adapter receives the result of an authenticated call, never the token.
+5. **Outbound only, through the one HTTP client.** No inbound listener, no registration endpoint, so rogue server registration has no surface. I9 already mandates one client; the circuit breaker and the `expectStatuses` accounting from Section 160 apply to adapters for free. SSRF is bounded by an allowlist of hosts per adapter, in the shape `kiteClient.cjs`'s two-layer refusal already uses.
+6. **Tool output is DATA, never instruction.** An adapter's reply may not be executed, and may not alter Vishnu's policy, goals or loyalty core. This is the prompt-injection and tool-poisoning boundary, and it is the one rule in this section with no exception.
+7. **"Auto-check online for upgrades" means auto-REPORT, never auto-apply.** I6 already forbids writing to Rāma's own source without a recorded approval, and `upgradeApplier` already requires one. An upgrade check produces a proposal master approves; a newly published version of an adapter is a changed manifest and therefore disabled until re-approved (D2).
+8. **An adapter that is unreachable, or whose manifest has drifted, degrades to absent.** I11: every capability has a working fallback. No adapter becomes load-bearing.
+
+### 168.3 Rejected
+- **Installing anything automatically.** Section 155 already settled that an install is an explicit click, per user, never on Vishnu's initiative.
+- **Running a third party's MCP server in-process.** Isolation is the published recommendation and the only way D1 holds.
+- **Trusting a tool description.** It is attacker-controlled text; it is pinned and compared, not believed.
+
+### 168.4 Not built
+Any adapter. This section is the security model that any adapter must satisfy, written before the first one exists so it cannot be retrofitted around a convenient implementation.
+
+## Section 169 - The ten avatars as a capability taxonomy, and the gap today
+
+### 169.1 Why this is an architecture and not an ornament
+Master asked for the avatars analysed deeply and the system's capabilities aligned to them. The Dashavatara is a **list of distinct modes of intervention**, each matched to a different kind of disorder - which is exactly what a capability taxonomy is. Mapped against what this codebase actually contains, it does something more useful than decorate: **it names the gaps, and the gaps it names are real ones already open in this document.**
+
+| Avatar | Its function in the sources | The system capability it names | Status here |
+|---|---|---|---|
+| **Matsya** | Warns of the flood; carries the seeds of life and the Vedas through it | **Foresight and preservation of the record through catastrophe**: backup, early warning | **MISSING.** Section 124 §9.2's backup question is still open, and Section 130 noted the context store is the most irreplaceable thing in the system. The encrypted store exists; a copy of it elsewhere does not. This is the largest real gap. |
+| **Kurma** | The still base on which the churning turns; sustains transformation without collapse | **Stability under load**: staged startup, admission control, breakers | **Real.** `start.cjs` stages, `resourceOrchestrator.admit`, and the circuit breaker that Section 160 found inert and repaired. |
+| **Varaha** | Lifts the earth back out of the depths | **Recovery and restore** | **Partial.** `selfRepair.cjs` and the salvage path in packaging exist; there is no restore-from-backup, because there is no backup (see Matsya). |
+| **Narasimha** | Defeats an adversary whose boon made him immune, by satisfying every clause of it exactly | **Defence against adversaries who exploit the letter of a rule** | **Real, and the most characteristic work in this project.** The vault that accepted any password, `store:*` taking any domain name, a circuit breaker that could never trip, a readiness check that hid every problem after the first - each was a rule that was true in form and false in effect. This avatar is the name for what the verify suites and mutation testing do. |
+| **Vamana** | Asks three paces, then bounds a power that had overreached | **Least privilege and the bounding of authority** | **Real.** The tier ladder in `shared/capabilities.json`, `principalBinding` deciding on the validated principal, `autonomyStop`, and Section 157's refusal to let a window grant itself anything. |
+| **Parashurama** | Corrective force against the corruption of power | **Enforcement against tampering** | **Real.** `loyaltyGuard`, `nucleusSealer`, the tripwire that is red in this very chain because a protected file changed and master has not yet recorded it. |
+| **Rama** | Dharma: duty, trust, promises kept, ethical coherence | **Keeping the promises the system makes** | **Real, and it is what the name has meant so far.** The comment contract, the repair contract, "not verified" said plainly, `claimGate`. |
+| **Krishna** | Counsel and strategy; action, love and insight aligned | **Advice under uncertainty** | **Partial.** The strategy book, projections and the StockMind engine exist; the honest part is that they are a harness, measured as such in Section 124. |
+| **Buddha** | Non-attachment, compassion, the cessation of suffering; the witness that does not grasp | **Restraint: knowing when NOT to act, and saying "I do not know"** | **Real, and underrated.** `claimGate` refusing to assert what is not grounded, every "NOT verified" line in this document, and this tranche's refusal to relabel the system ASI. |
+| **Kalki** | Systemic purification; a truth-based reset at the end of a cycle | **Last-resort remediation** | **Partial.** `autonomyStop` halts, I14's full re-key rebuilds the store under new keys, `nucleusSealer` reseals. There is no single deliberate "reset to a known-good state", because that needs Matsya first. |
+
+### 169.2 What the mapping tells us to build, in order
+The taxonomy is only worth having if it changes the order of work. It does:
+
+1. **Matsya first.** Four of the ten functions are weakened by the same absence: there is no copy of the record anywhere but one machine. Backup is not a feature request, it is the precondition for Varaha (restore), Kalki (reset to known-good) and Matsya itself. It must be ciphertext-only replication - Section 159.3 D7 already settled that shape - and it must not become a second way to leak the vault.
+2. **Narasimha is the method, not a module.** Every capability added from here gets the same treatment the existing ones got: a behavioural suite, and mutation testing to prove the suite can fail. Three sections in a row (161, 163, 164) found that a check which asserts a line EXISTS passes when the branch around it is switched off. That is a Narasimha failure in miniature and it is now a standing rule: assert the gate, not only its body.
+3. **Buddha is the governor on everything in Section 167.** Capability without restraint is the failure mode that makes an aspirant architecture dangerous. The life-safety floor, the refusal to execute tool output, and the habit of publishing the gap are all this function.
+
+### 169.3 Decisions
+1. **The ten functions become the capability vocabulary** of the Vishnu tranche: each new capability declares which function it serves, and a function with no real implementation is reported as missing rather than aspired to.
+2. **Matsya is the next build**, ahead of anything in Section 168, because three other functions depend on it.
+3. **The avatar names are documentation, not identifiers.** No module is renamed `narasimha.cjs`; the mapping lives here, where it can be read, and the code keeps names that say what it does.
+
+### 169.4 Not built
+Everything in 169.2. This section is the ordering decision, and the ordering is the deliverable.
