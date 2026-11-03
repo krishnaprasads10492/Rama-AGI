@@ -247,8 +247,22 @@ const COMFY = b.DISK_COMFY_MB;
   section('what must not drift');
   const src = fs.readFileSync(path.join(ROOT, 'scripts/buildInstaller.cjs'), 'utf8');
   check('the thresholds are declared once, not inline', /const DISK_FLOOR_MB = 1200;/.test(src) && /const DISK_COMFY_MB = 3000;/.test(src) && !/disk < 1200/.test(src) && !/disk < 3000/.test(src));
-  check('the toolchain check returns one verdict, reasons and all', src.includes('return { ok: verdict.ok, reasons: verdict.reasons };'));
-  check('what is printed and what is returned are the same list', src.includes('for (const r of verdict.reasons) fail(r);') && !src.includes('reasons.push(m)'));
+  // This used to pin the exact literal `return { ok: verdict.ok, reasons: verdict.reasons };`,
+  // which broke the moment a second source of refusals (the dependency tree, Section 176) had to
+  // be folded in. The invariant is that ONE verdict carries ALL the reasons, so that is what is
+  // asserted now rather than one spelling of it.
+  check('the toolchain check returns one verdict, reasons and all',
+    /const reasons = \[\.\.\.verdict\.reasons, \.\.\.treeReasons\];/.test(src)
+    && /return \{ ok: verdict\.ok && treeReasons\.length === 0, reasons \};/.test(src));
+  check('what is printed and what is returned are the same list',
+    src.includes('for (const r of reasons) fail(r);') && !src.includes('reasons.push(m)'));
+  check('and the tree refusal goes through that same loop, not a second description of itself', (() => {
+    const i = src.indexOf('const tree = productionTreeProblems();');
+    const j = src.indexOf('const cfg = builderConfigProblems();', i);
+    const block = i >= 0 && j > i ? src.slice(i, j) : '';
+    // The detail is printed with info(); the refusal itself must NOT be a separate fail() here.
+    return block.length > 0 && !/fail\(/.test(block);
+  })());
   // Found by mutation: the verdict checks above all pass a hand-made toolchain object, so they never
   // notice if checkToolchain itself stops RECORDING a refusal. The disk case is the one that matters,
   // because it is the only blocking item the build machine has ever reported.
@@ -283,6 +297,74 @@ const COMFY = b.DISK_COMFY_MB;
     return two > 0 && three > two;
   })());
   check('it follows the convention the --dir path already set', /stage\(3, 'ARCHIVER — skipped'\)/.test(src));
+
+  // ═══ the dependency tree must be LISTABLE, or electron-builder packages nothing (Section 176) ══
+  section('an unlistable dependency tree is caught before packaging, not after signing');
+  const listing = (status, text) => () => ({ status, stdout: text, stderr: '' });
+  check('a clean listing passes', (() => {
+    const r = b.productionTreeProblems(listing(0, 'rama-agi@1.0.0\n+-- express@4.22.3\n'));
+    return r.ok === true && r.skipped === null && r.extraneous === 0;
+  })());
+  check('the real tree on THIS machine lists cleanly, so the check is not permanently red', (() => {
+    const r = b.productionTreeProblems();
+    return r.skipped !== null || r.ok === true;
+  })(), JSON.stringify(b.productionTreeProblems()).slice(0, 180));
+  // NON-VACUITY: the listing that actually broke master's build must be rejected.
+  check('the listing that broke the build IS rejected', (() => {
+    const r = b.productionTreeProblems(listing(1,
+      'npm error extraneous: tar@6.2.1 C:\\x\\node_modules\\tar\n'
+      + 'npm error extraneous: node-gyp@9.4.1 C:\\x\\node_modules\\node-gyp\n'
+      + 'npm error invalid: "5.33.19" C:\\x\\node_modules\\systeminformation\n'));
+    return r.ok === false && r.extraneous === 2 && r.invalid === 1;
+  })());
+  check('the exit code decides, not the wording', (() => {
+    // A non-zero status with no recognised line is still a failure: the collector keys off the
+    // failure, not off npm's phrasing, which changes between npm versions.
+    const r = b.productionTreeProblems(listing(1, 'something npm has never said before'));
+    return r.ok === false && r.extraneous === 0;
+  })());
+  check('a zero exit is trusted even if the text mentions those words', (() => {
+    const r = b.productionTreeProblems(listing(0, 'nothing is extraneous: really'));
+    return r.ok === true;
+  })());
+  check('npm being unavailable is UNKNOWN, never a pass', (() => {
+    const viaError = b.productionTreeProblems(() => ({ error: new Error('ENOENT'), status: null }));
+    const viaThrow = b.productionTreeProblems(() => { throw new Error('spawn failed'); });
+    return viaError.skipped !== null && viaError.ok === true
+      && viaThrow.skipped !== null && /could not be listed/.test(viaThrow.skipped);
+  })());
+  check('a rejection carries examples, so the problem is identifiable', (() => {
+    const r = b.productionTreeProblems(listing(1, 'npm error extraneous: tar@6.2.1 C:\\x\n'));
+    return r.sample.length > 0 && /tar@6\.2\.1/.test(r.sample[0]);
+  })());
+  check('it is READ-ONLY: it lists, and never installs or prunes', (() => {
+    const i = src.indexOf('function productionTreeProblems(');
+    const j = src.indexOf('\n}', src.indexOf('return out;', i));
+    const body = i >= 0 ? src.slice(i, j) : '';
+    return /'ls', '--omit=dev'/.test(body)
+      && !/'install'|'prune'|'ci'|'update'/.test(body);
+  })());
+  check('an unlistable tree BLOCKS, rather than being a warning', (() => {
+    const i = src.indexOf('const treeReasons =');
+    const j = src.indexOf('return { ok: verdict.ok && treeReasons.length === 0, reasons };', i);
+    return i > 0 && j > i && /npm prune/.test(src.slice(i, j));
+  })());
+  check('and the stage-0 detail explains WHY it blocks, in terms of the real failure', (() => {
+    const i = src.indexOf('const tree = productionTreeProblems();');
+    const j = src.indexOf('const cfg = builderConfigProblems();', i);
+    const block = i >= 0 && j > i ? src.slice(i, j) : '';
+    return /packages/.test(block) && /NOTHING/.test(block)
+      && /Cannot find module express/.test(block);
+  })());
+  check('and the refusal itself names the fix', (() => {
+    const i = src.indexOf('const treeReasons =');
+    const j = src.indexOf('];', i);
+    return i > 0 && /npm prune/.test(src.slice(i, j));
+  })());
+  check('a skipped listing does not block, because unknown is not a failure', (() => {
+    const i = src.indexOf('const treeReasons =');
+    return /tree\.ok \|\| tree\.skipped \? \[\]/.test(src.slice(i, i + 120));
+  })());
 
   // ═══ the build config is checked at stage 0, not discovered at stage 4 (Section 175) ══════════
   section('the build config is validated against electron-builder\u2019s own schema');
@@ -332,14 +414,14 @@ const COMFY = b.DISK_COMFY_MB;
   })());
   check('stage 0 reports the problem and names the fix, rather than leaving it to stage 4', (() => {
     const i = src.indexOf('const cfg = builderConfigProblems();');
-    const j = src.indexOf('for (const r of verdict.reasons) fail(r);', i);
+    const j = src.indexOf('const treeReasons =', i);
     const block = i >= 0 && j > i ? src.slice(i, j) : '';
     return /will refuse the build/.test(block) && /move it there, or remove it/.test(block)
       && /before any work is done/.test(block);
   })());
   check('an unreadable schema is reported, not silently treated as valid', (() => {
     const i = src.indexOf('const cfg = builderConfigProblems();');
-    const j = src.indexOf('for (const r of verdict.reasons) fail(r);', i);
+    const j = src.indexOf('const treeReasons =', i);
     const block = i >= 0 && j > i ? src.slice(i, j) : '';
     return /if \(cfg\.skipped\) info\(cfg\.skipped\)/.test(block);
   })());
@@ -415,7 +497,10 @@ const COMFY = b.DISK_COMFY_MB;
   check('the facts are gathered before anything is judged', src.indexOf('const disk = diskVerdict(freeDiskMB());') < src.indexOf('const verdict = toolchainVerdict({'));
   check('the Node tick is conditional, so it cannot contradict its own refusal', src.includes('if (verdict.nodeOk) ok(`Node.js ${process.versions.node}`);'));
   check('the Vite note is held back when the version is already refused', src.includes('if (verdict.nodeOk && !modernLine) {'));
-  check('every reason is printed as well as returned', src.includes('for (const r of verdict.reasons) fail(r);'));
+  // Anchored on the combined list, not `verdict.reasons`: Section 176 added the dependency-tree
+  // refusal, and the point of the invariant is that EVERY reason is printed, not that one
+  // particular variable name appears.
+  check('every reason is printed as well as returned', src.includes('for (const r of reasons) fail(r);'));
   check('no console.log', !/console\.log/.test(src));
 
   finished = true;

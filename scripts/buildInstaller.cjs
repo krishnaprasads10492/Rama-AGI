@@ -387,6 +387,26 @@ function checkToolchain() {
   // THE BUILD CONFIG ITSELF, checked here rather than discovered at stage 4 (Section 175). A key
   // electron-builder rejects makes packaging impossible, so it belongs with the other things that
   // decide whether this machine can package at all.
+  // THE DEPENDENCY TREE MUST BE LISTABLE, because electron-builder 26 asks the package manager for
+  // it and silently packages nothing when the answer is an error (Section 176).
+  const tree = productionTreeProblems();
+  if (tree.skipped) info(tree.skipped);
+  else if (tree.ok) ok('Production dependency tree lists cleanly — electron-builder can enumerate it');
+  else {
+    const counts = [
+      tree.extraneous ? `${tree.extraneous} extraneous` : null,
+      tree.invalid ? `${tree.invalid} invalid` : null,
+      tree.missing ? `${tree.missing} missing` : null,
+    ].filter(Boolean).join(', ') || 'an unlisted problem';
+    // Only the DETAIL is printed here. The refusal itself goes into `reasons` below and is printed
+    // by the same loop as every other refusal, so what is printed and what is returned stay one
+    // list (Section 162.3 D2) rather than two descriptions of the same fault.
+    info(`  ${counts} — electron-builder 26 asks npm to list production dependencies and packages`);
+    info('  NOTHING when that listing fails. It then builds and signs an installer that dies on');
+    info('  launch with "Cannot find module express", which is why this is checked before packaging.');
+    for (const s of tree.sample) info(`    e.g. ${s}`);
+  }
+
   const cfg = builderConfigProblems();
   if (cfg.skipped) info(cfg.skipped);
   else if (cfg.ok) ok(`Build config valid against electron-builder's own schema (${cfg.checked} section(s))`);
@@ -404,9 +424,17 @@ function checkToolchain() {
     fail('  which names neither the key nor the fix — so it is named here, before any work is done.');
   }
 
+  // An unlistable tree is BLOCKING, not advisory. The alternative is what happened on 2026-11-03:
+  // a signed installer that could not start.
+  const treeReasons = tree.ok || tree.skipped ? [] : [
+    'node_modules does not match package-lock.json, so electron-builder would package no '
+    + 'dependencies at all and the installer would die on launch. Fix it with: npm prune',
+  ];
+
   // Every refusal is PRINTED and RETURNED, so the verdict, the saved JSON and the shipped manifest
   // carry the reasons instead of "see the stage 0 report above" (Section 162.3, D2).
-  for (const r of verdict.reasons) fail(r);
+  const reasons = [...verdict.reasons, ...treeReasons];
+  for (const r of reasons) fail(r);
   if (!verdict.ok) {
     if (verdict.reasons.some((r) => /^Node\.js /.test(r))) {
       fail('Download the current 22.x: https://nodejs.org/en/download — anything older is unpatched, and an end-of-life line is always affected.');
@@ -424,7 +452,7 @@ function checkToolchain() {
     if (disk.state === 'fail') fail('Free up space and run this again — nothing has been changed.');
   }
 
-  return { ok: verdict.ok, reasons: verdict.reasons };
+  return { ok: verdict.ok && treeReasons.length === 0, reasons };
 }
 
 /**
@@ -454,6 +482,66 @@ function canCreateSymlink() {
   } finally {
     if (dir) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* temp dir */ } }
   }
+}
+
+/**
+ * Can the package manager still enumerate the production dependency tree?
+ *
+ * WHY THIS IS A BLOCKING CHECK AND NOT A TIDINESS ONE. electron-builder 26 replaced its own
+ * node_modules walk with a collector that SHELLS OUT to the package manager to list production
+ * dependencies (`collectNodeModulesWithLogging` in `app-builder-lib/out/util/appFileCopier.js`).
+ * When that listing fails it returns nothing, and electron-builder then packages **zero**
+ * dependencies and reports success. The result is an installer that builds, signs, and dies on
+ * launch with "Cannot find module express".
+ *
+ * That is exactly what happened on 2026-11-03: `app.asar` held 241 entries and 0 package
+ * directories, `electron-builder finished` printed a tick, and only `auditPackage.cjs` caught it
+ * afterwards. The cause was 140 EXTRANEOUS packages left in `node_modules` - the orphaned
+ * `electron-rebuild@3.2.9` subtree, stranded when Section 173 removed it from devDependencies and
+ * updated only the lockfile. `npm ls --omit=dev` exits non-zero while they are there.
+ *
+ * So this runs BEFORE packaging: a tree the package manager cannot list is a tree electron-builder
+ * cannot copy, and finding that out after a signed installer exists is finding it out too late.
+ *
+ * READ-ONLY. `npm ls` inspects and changes nothing, which is what lets it run inside readiness.
+ *
+ * @returns {{ok:boolean, extraneous:number, invalid:number, missing:number, skipped:string|null,
+ *            sample:string[]}}
+ */
+function productionTreeProblems(runner = null) {
+  const out = { ok: true, extraneous: 0, invalid: 0, missing: 0, skipped: null, sample: [] };
+  let res;
+  try {
+    // `runner` is injected only by the suite, so the parsing and the verdict can be exercised
+    // against a KNOWN-BROKEN listing. Without it the only testable state is whatever this machine
+    // happens to be in, which is the state that is already fine.
+    //
+    // `shell: true` because on Windows npm is `npm.cmd`, which is not directly executable; the
+    // argument list is fixed and contains no interpolation, so there is nothing to quote.
+    res = runner ? runner() : spawnSync('npm', ['ls', '--omit=dev', '--depth=0'], {
+      cwd: ROOT, encoding: 'utf8', timeout: 120_000, shell: true, windowsHide: true,
+    });
+  } catch (err) {
+    out.skipped = `the production dependency tree could not be listed (${err.message})`;
+    return out;
+  }
+  if (res.error || typeof res.status !== 'number') {
+    out.skipped = 'npm could not be run, so the dependency tree was not checked';
+    return out;
+  }
+  const text = `${res.stdout || ''}\n${res.stderr || ''}`;
+  const count = (re) => (text.match(re) || []).length;
+  out.extraneous = count(/\bextraneous:/g);
+  out.invalid = count(/\binvalid:/g);
+  out.missing = count(/\bmissing:/g);
+  // The EXIT CODE decides, not the counts: npm reports these as errors and the collector keys off
+  // the failure, so a non-zero status with no recognised line is still a failure.
+  out.ok = res.status === 0;
+  if (!out.ok) {
+    out.sample = (text.match(/\b(?:extraneous|invalid|missing):\s*\S+/g) || [])
+      .slice(0, 5).map((s) => s.replace(/\s+/g, ' ').trim());
+  }
+  return out;
 }
 
 /**
@@ -2493,4 +2581,4 @@ const runCli = async () => {
 // why it is needed: a require with no guard started packaging stage 0 and stage 1 immediately.
 if (require.main === module) runCli();
 
-module.exports = { shouldShip, diskVerdict, computeReadiness, nodeFloorVerdict, toolchainVerdict, hasNvm, builderConfigProblems, DISK_FLOOR_MB, DISK_COMFY_MB };
+module.exports = { shouldShip, diskVerdict, computeReadiness, nodeFloorVerdict, toolchainVerdict, hasNvm, builderConfigProblems, productionTreeProblems, DISK_FLOOR_MB, DISK_COMFY_MB };

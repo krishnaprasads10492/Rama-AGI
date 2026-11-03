@@ -10,7 +10,7 @@
  */
 
 const { execSync }   = require('child_process');
-const { existsSync, writeFileSync, mkdirSync } = require('fs');
+const { existsSync, writeFileSync, mkdirSync, readFileSync } = require('fs');
 const path           = require('path');
 
 /**
@@ -80,9 +80,33 @@ module.exports = async function(context) {
   }
 
   // ── Rebuild native modules ──────────────────────────────────────────────────
+  //
+  // RESOLVED LOCALLY, NEVER THROUGH `npx` BY BARE NAME. This used to run
+  // `npx electron-rebuild --force`, and once Section 173 replaced the deprecated
+  // `electron-rebuild` package with its successor `@electron/rebuild`, npx stopped finding a local
+  // match and DOWNLOADED the deprecated one mid-build instead — visible in the 2026-11-03
+  // transcript as "The following package was not found and will be installed:
+  // electron-rebuild@3.2.9", dragging the vulnerable tar@6.2.1 back in over the network.
+  //
+  // A build step that silently reaches the registry for a tool it was told not to use is worse
+  // than one that stops, so the binary is resolved from the installed package and a missing one is
+  // reported rather than fetched. This is also why `@electron/rebuild` stays a direct
+  // devDependency even though electron-builder suggests removing it: we invoke it ourselves here,
+  // and a transitive copy is not reliably resolvable.
   console.log('\n  ⬢ Rebuilding native modules for Electron...');
   try {
-    execSync('npx electron-rebuild --force', { cwd: root, stdio: 'inherit' });
+    // Read the manifest off disk rather than through `require.resolve`: @electron/rebuild declares
+    // an `exports` map that does not expose './package.json', so resolving it that way throws
+    // ERR_PACKAGE_PATH_NOT_EXPORTED. The directory is what we need, not a module specifier.
+    const rebuildDir = path.join(root, 'node_modules', '@electron', 'rebuild');
+    const manifest = path.join(rebuildDir, 'package.json');
+    if (!existsSync(manifest)) {
+      throw new Error(`@electron/rebuild is not installed at ${rebuildDir} — run npm install`);
+    }
+    const binRel = (JSON.parse(readFileSync(manifest, 'utf8')).bin || {})['electron-rebuild'];
+    if (!binRel) throw new Error('@electron/rebuild declares no electron-rebuild binary');
+    const binAbs = path.join(rebuildDir, binRel);
+    execSync(`node "${binAbs}" --force`, { cwd: root, stdio: 'inherit' });
     console.log('  ✓ Native modules rebuilt\n');
   } catch (err) {
     console.warn(`  ⚠ electron-rebuild failed: ${err.message}`);
