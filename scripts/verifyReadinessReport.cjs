@@ -284,6 +284,66 @@ const COMFY = b.DISK_COMFY_MB;
   })());
   check('it follows the convention the --dir path already set', /stage\(3, 'ARCHIVER — skipped'\)/.test(src));
 
+  // ═══ the build config is checked at stage 0, not discovered at stage 4 (Section 175) ══════════
+  section('the build config is validated against electron-builder\u2019s own schema');
+  check('today\u2019s config passes, and real sections were actually examined', (() => {
+    const r = b.builderConfigProblems();
+    return r.ok === true && r.problems.length === 0 && r.checked >= 2 && r.skipped === null;
+  })(), JSON.stringify(b.builderConfigProblems()).slice(0, 160));
+  // NON-VACUITY: the config that really broke the build on master's machine must be caught. Without
+  // this the check above would pass identically if the function returned ok unconditionally.
+  check('the config that actually broke the build IS caught', (() => {
+    const broken = { win: { target: [{ target: 'nsis', arch: ['x64'] }], icon: 'assets/icon.ico',
+      requestedExecutionLevel: 'asInvoker', publisherName: 'Krishna Prasad',
+      verifyUpdateCodeSignature: false } };
+    const r = b.builderConfigProblems(broken);
+    return r.ok === false && r.problems.some((p) => p.key === 'publisherName' && p.path === 'build.win');
+  })());
+  check('and it says where the key went, which electron-builder never does', (() => {
+    const r = b.builderConfigProblems({ win: { publisherName: 'x' } });
+    const p = r.problems.find((x) => x.key === 'publisherName');
+    return !!p && p.moved.includes('WindowsSigntoolConfiguration');
+  })());
+  check('a key in no definition at all is reported as removable', (() => {
+    const r = b.builderConfigProblems({ win: { thisWasNeverAnOption: 1 } });
+    const p = r.problems.find((x) => x.key === 'thisWasNeverAnOption');
+    return !!p && p.moved.length === 0;
+  })());
+  check('a valid nested section is not flagged', (() => {
+    const r = b.builderConfigProblems({ win: { target: [], icon: 'a.ico', verifyUpdateCodeSignature: false } });
+    return r.ok === true;
+  })());
+  check('nested sections are reached, not only the top level', (() => {
+    const r = b.builderConfigProblems({ nsis: { oneClick: false, nonsenseKey: true } });
+    return r.problems.some((p) => p.key === 'nonsenseKey' && /nsis/.test(p.path));
+  })());
+  check('an absent schema is UNKNOWN, never a pass', (() => {
+    const r = b.builderConfigProblems(null, path.join(ROOT, 'no', 'such', 'scheme.json'));
+    return r.skipped !== null && r.problems.length === 0 && /not present/.test(r.skipped);
+  })());
+  check('it never throws on a junk config', (() => {
+    try {
+      b.builderConfigProblems({});
+      b.builderConfigProblems({ win: null });
+      b.builderConfigProblems({ win: 'string' });
+      b.builderConfigProblems({ win: [1, 2] });
+      return true;
+    } catch { return false; }
+  })());
+  check('stage 0 reports the problem and names the fix, rather than leaving it to stage 4', (() => {
+    const i = src.indexOf('const cfg = builderConfigProblems();');
+    const j = src.indexOf('for (const r of verdict.reasons) fail(r);', i);
+    const block = i >= 0 && j > i ? src.slice(i, j) : '';
+    return /will refuse the build/.test(block) && /move it there, or remove it/.test(block)
+      && /before any work is done/.test(block);
+  })());
+  check('an unreadable schema is reported, not silently treated as valid', (() => {
+    const i = src.indexOf('const cfg = builderConfigProblems();');
+    const j = src.indexOf('for (const r of verdict.reasons) fail(r);', i);
+    const block = i >= 0 && j > i ? src.slice(i, j) : '';
+    return /if \(cfg\.skipped\) info\(cfg\.skipped\)/.test(block);
+  })());
+
   section('the Node floor remediation is a command, not advice');
   check('nvm is detected from the environment only, never by spawning it', (() => {
     const i = src.indexOf('function hasNvm()');

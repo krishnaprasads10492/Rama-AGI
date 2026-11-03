@@ -384,6 +384,26 @@ function checkToolchain() {
     warn('  Node 22 LTS fixes it. Harmless otherwise.');
   }
 
+  // THE BUILD CONFIG ITSELF, checked here rather than discovered at stage 4 (Section 175). A key
+  // electron-builder rejects makes packaging impossible, so it belongs with the other things that
+  // decide whether this machine can package at all.
+  const cfg = builderConfigProblems();
+  if (cfg.skipped) info(cfg.skipped);
+  else if (cfg.ok) ok(`Build config valid against electron-builder's own schema (${cfg.checked} section(s))`);
+  else {
+    for (const p of cfg.problems) {
+      fail(`${p.path}.${p.key} is not valid for this electron-builder and will refuse the build.`);
+      if (p.moved.length) {
+        // The thing electron-builder's own error never says: where it went.
+        fail(`  It is declared in ${p.moved.slice(0, 3).join(', ')} — move it there, or remove it.`);
+      } else {
+        fail('  It is not in the schema at all, so remove it.');
+      }
+    }
+    fail('  electron-builder reports this only as "configuration should be one of these: null",');
+    fail('  which names neither the key nor the fix — so it is named here, before any work is done.');
+  }
+
   // Every refusal is PRINTED and RETURNED, so the verdict, the saved JSON and the shipped manifest
   // carry the reasons instead of "see the stage 0 report above" (Section 162.3, D2).
   for (const r of verdict.reasons) fail(r);
@@ -434,6 +454,96 @@ function canCreateSymlink() {
   } finally {
     if (dir) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* temp dir */ } }
   }
+}
+
+/**
+ * Keys in the `build` config that THIS INSTALLED electron-builder's own schema rejects.
+ *
+ * WHY THIS EXISTS. A build spent stage 0, stage 1, a full renderer build and stage 3 before
+ * electron-builder refused at stage 4 with:
+ *
+ *     ⨯ Invalid configuration object ... - configuration.win should be one of these: null
+ *
+ * which names neither the offending key nor what to do. The actual cause was one line -
+ * `win.publisherName`, which electron-builder 26 moved into `win.signtoolOptions` - and the schema
+ * that knows this ships in `node_modules/app-builder-lib/scheme.json`, so the fault was detectable
+ * before any work was done. Finding it cost a schema read; finding it the other way cost a build.
+ *
+ * ERRS TOWARD SILENCE, deliberately. A section whose definition cannot be resolved is SKIPPED
+ * rather than reported, because a false positive here would block a build that would have worked -
+ * strictly worse than the late failure this replaces. It therefore catches the common case (a key
+ * that moved or was dropped between major versions) and makes no claim to completeness.
+ *
+ * @returns {{ok:boolean, problems:Array<{path:string,key:string,moved:string[]}>, checked:number,
+ *            skipped:string|null}} `skipped` is set when no judgement could be made at all.
+ */
+function builderConfigProblems(buildOverride = null, schemaPath = null) {
+  const out = { ok: true, problems: [], checked: 0, skipped: null };
+  let schema;
+  try {
+    schema = JSON.parse(fs.readFileSync(
+      schemaPath || path.join(ROOT, 'node_modules', 'app-builder-lib', 'scheme.json'), 'utf8'));
+  } catch {
+    // No node_modules yet, or a build tool that stopped shipping its schema. Unknown, not clean.
+    out.skipped = 'electron-builder\u2019s schema is not present, so the build config was not checked';
+    return out;
+  }
+  // `buildOverride` exists so the suite can feed the config that ACTUALLY broke the build on
+  // master's machine and prove this would have caught it, rather than only asserting that today's
+  // config is clean — which would pass just as well if the check did nothing.
+  const build = buildOverride || (() => { try { return pkg().build || null; } catch { return null; } })();
+  if (!build || !schema.properties) {
+    out.skipped = 'no build config to check';
+    return out;
+  }
+
+  const deref = (ref) => {
+    const name = String(ref || '').replace('#/definitions/', '');
+    return schema.definitions ? schema.definitions[name] : null;
+  };
+  /** Every property name a schema node permits, following $ref and the combinators. */
+  const allowedOf = (node, depth = 0) => {
+    const names = new Set();
+    let resolvable = false;
+    const visit = (n, d) => {
+      if (!n || d > 6) return;
+      if (n.$ref) { visit(deref(n.$ref), d + 1); return; }
+      for (const key of ['anyOf', 'oneOf', 'allOf']) {
+        if (Array.isArray(n[key])) n[key].forEach((x) => visit(x, d + 1));
+      }
+      // A node that takes arbitrary keys cannot reject anything, so it is not checkable.
+      if (n.additionalProperties && typeof n.additionalProperties === 'object') resolvable = false;
+      if (n.properties) { resolvable = true; for (const k of Object.keys(n.properties)) names.add(k); }
+    };
+    visit(node, depth);
+    return resolvable ? names : null;
+  };
+
+  const check = (obj, node, where) => {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
+    const allowed = allowedOf(node);
+    if (!allowed) return;                       // unresolvable: say nothing rather than guess
+    out.checked += 1;
+    for (const key of Object.keys(obj)) {
+      if (allowed.has(key)) continue;
+      const moved = Object.entries(schema.definitions || {})
+        .filter(([, d]) => d && d.properties && Object.prototype.hasOwnProperty.call(d.properties, key))
+        .map(([n]) => n);
+      out.problems.push({ path: where, key, moved });
+    }
+    // One level down, for the sections that actually carry nested option objects.
+    for (const [key, value] of Object.entries(obj)) {
+      if (!allowed.has(key) || !value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const childNode = node && node.properties ? node.properties[key] : null;
+      if (childNode) check(value, childNode, `${where}.${key}`);
+    }
+  };
+
+  // Resolve the root node once, then walk the sections it declares.
+  const rootNode = { properties: schema.properties };
+  check(build, rootNode, 'build');
+  out.ok = out.problems.length === 0;
+  return out;
 }
 
 /**
@@ -2383,4 +2493,4 @@ const runCli = async () => {
 // why it is needed: a require with no guard started packaging stage 0 and stage 1 immediately.
 if (require.main === module) runCli();
 
-module.exports = { shouldShip, diskVerdict, computeReadiness, nodeFloorVerdict, toolchainVerdict, hasNvm, DISK_FLOOR_MB, DISK_COMFY_MB };
+module.exports = { shouldShip, diskVerdict, computeReadiness, nodeFloorVerdict, toolchainVerdict, hasNvm, builderConfigProblems, DISK_FLOOR_MB, DISK_COMFY_MB };

@@ -241,7 +241,6 @@
       ],
       "icon": "assets/icon.ico",
       "requestedExecutionLevel": "asInvoker",
-      "publisherName": "Krishna Prasad",
       "verifyUpdateCodeSignature": false
     },
     "nsis": {
