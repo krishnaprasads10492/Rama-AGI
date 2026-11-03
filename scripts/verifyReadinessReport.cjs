@@ -262,6 +262,66 @@ const COMFY = b.DISK_COMFY_MB;
   check('the call sites use the object', /const toolchain = checkToolchain\(\);/.test(src) && /if \(!toolchain\.ok && !readinessOnly\) return 1;/.test(src) && !/toolchainOk, deps, archiver/.test(src));
   check('the pending count comes from the value readiness already computed', /pendingInstall: audit\.required\.length/.test(src) && /Number\.isFinite\(deps\?\.pendingInstall\)/.test(src));
   check('requiring this script still does not run a build', /if \(require\.main === module\) runCli\(\)/.test(src));
+
+  // ═══ the shipped transcript must not drop a stage, and the Node fix must be a STEP ═══════════
+  // Both came from reading a real transcript off the build-logs branch (2026-11-03). The run went
+  // STAGE 0, 1, 3 with no mention of 2, which sends a reader of a shipped log hunting for a crash
+  // that never happened; and the Node remediation said "download a newer version", which is advice
+  // rather than something to type.
+  section('a readiness transcript accounts for every stage');
+  check('readiness announces stage 2 as skipped rather than omitting it', (() => {
+    const i = src.indexOf('if (readinessOnly) {');
+    const j = src.indexOf('printReadiness(readiness);', i);
+    const block = i >= 0 && j > i ? src.slice(i, j) : '';
+    return /stage\(2, 'RENDERER — skipped'\)/.test(block);
+  })());
+  check('and says why, so "skipped" is not mistaken for "failed"',
+    /Readiness measures; it does not build/.test(src));
+  check('the skip is stated BEFORE the archiver stage, so the order still reads 0,1,2,3', (() => {
+    const two = src.indexOf("stage(2, 'RENDERER — skipped')");
+    const three = src.indexOf('const archiverProbe = resolveArchiver();');
+    return two > 0 && three > two;
+  })());
+  check('it follows the convention the --dir path already set', /stage\(3, 'ARCHIVER — skipped'\)/.test(src));
+
+  section('the Node floor remediation is a command, not advice');
+  check('nvm is detected from the environment only, never by spawning it', (() => {
+    const i = src.indexOf('function hasNvm()');
+    const j = src.indexOf('\n}', i);
+    const body = i >= 0 ? src.slice(i, j) : '';
+    return /NVM_HOME/.test(body) && /NVM_DIR/.test(body)
+      && !/exec|spawn|which|where/.test(body);
+  })());
+  check('hasNvm reports true when a manager is present and false when it is not', (() => {
+    const realHome = process.env.NVM_HOME;
+    const realDir = process.env.NVM_DIR;
+    try {
+      delete process.env.NVM_HOME; delete process.env.NVM_DIR;
+      if (b.hasNvm() !== false) return false;
+      process.env.NVM_HOME = 'C:\\nvm';
+      if (b.hasNvm() !== true) return false;
+      delete process.env.NVM_HOME; process.env.NVM_DIR = '/home/x/.nvm';
+      return b.hasNvm() === true;
+    } finally {
+      delete process.env.NVM_HOME; delete process.env.NVM_DIR;
+      if (realHome !== undefined) process.env.NVM_HOME = realHome;
+      if (realDir !== undefined) process.env.NVM_DIR = realDir;
+    }
+  })());
+  check('the exact nvm commands are offered, with the pinned floor version', (() => {
+    const m = /nvm install (\d+\.\d+\.\d+)[\s\S]{0,40}?nvm use (\d+\.\d+\.\d+)/.exec(src);
+    if (!m) return false;
+    // The version quoted must BE the declared floor, read from package.json, not a literal here
+    // that could drift away from it. A remediation naming a version the project no longer requires
+    // would be worse than naming none.
+    const engines = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).engines || {};
+    const floor = /^\s*>=\s*(\d+\.\d+\.\d+)/.exec(String(engines.node || ''));
+    return !!floor && m[1] === floor[1] && m[2] === floor[1];
+  })());
+  check('a machine without nvm is told to reopen the terminal instead, not given a command it lacks',
+    /reopen this terminal/.test(src) && /hasNvm\(\)/.test(src));
+  check('and it says node_modules must be reinstalled against the new runtime',
+    /npm install\s+before packaging/.test(src));
   check('the Node floor is read from the declaration, not copied into the check', src.includes('(pkg().engines || {}).node'));
   // Found by mutation: asserting that `refuse(floor.message)` EXISTS passes even when the branch
   // around it has been turned off, so the gate itself is asserted as well as its body.

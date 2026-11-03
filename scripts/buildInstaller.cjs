@@ -388,7 +388,19 @@ function checkToolchain() {
   // carry the reasons instead of "see the stage 0 report above" (Section 162.3, D2).
   for (const r of verdict.reasons) fail(r);
   if (!verdict.ok) {
-    if (verdict.reasons.some((r) => /^Node\.js /.test(r))) fail('Download the current 22.x: https://nodejs.org/en/download — anything older is unpatched, and an end-of-life line is always affected.');
+    if (verdict.reasons.some((r) => /^Node\.js /.test(r))) {
+      fail('Download the current 22.x: https://nodejs.org/en/download — anything older is unpatched, and an end-of-life line is always affected.');
+      // The exact commands, because this is the single item that has blocked packaging on the build
+      // machine across four readiness runs, and "install a newer Node" is advice rather than a step.
+      // `nvm` is checked for rather than assumed: telling master to run a command he does not have
+      // would send him looking for the wrong problem.
+      if (hasNvm()) {
+        fail('  This machine has nvm, so:   nvm install 22.23.4   then   nvm use 22.23.4');
+      } else {
+        fail('  After installing, reopen this terminal — a running shell keeps the old PATH.');
+      }
+      fail('  Then run  npm install  before packaging: node_modules was built against the old runtime.');
+    }
     if (disk.state === 'fail') fail('Free up space and run this again — nothing has been changed.');
   }
 
@@ -422,6 +434,18 @@ function canCreateSymlink() {
   } finally {
     if (dir) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* temp dir */ } }
   }
+}
+
+/**
+ * Is a Node version manager available, so the remediation can name the exact command?
+ *
+ * ENVIRONMENT VARIABLES ONLY, no spawning. Readiness measures what this machine can do as it
+ * stands, and shelling out to `nvm` to find out whether `nvm` exists would be a side effect inside
+ * a measurement. `NVM_HOME` is nvm-windows; `NVM_DIR` is nvm-sh. Either means the short command
+ * works; neither means say nothing rather than send master after a tool he does not have.
+ */
+function hasNvm() {
+  return !!(process.env.NVM_HOME || process.env.NVM_DIR);
 }
 
 /** Does this output carry the winCodeSign symlink-privilege signature? */
@@ -2146,6 +2170,13 @@ async function main() {
   if (!deps.ok && !readinessOnly) return 1;
 
   if (readinessOnly) {
+    // SAY THAT STAGE 2 IS SKIPPED, rather than letting it vanish. The transcript used to run
+    // 0, 1, 3 with no mention of 2, and these transcripts are shipped to be read on another
+    // machine — so a reader hunting a missing stage goes looking for a crash that never happened.
+    // The `--dir` path already announces its skipped stage; this follows that convention.
+    stage(2, 'RENDERER — skipped');
+    info('Readiness measures; it does not build. The table below reports whether a renderer build is');
+    info('  already PRESENT, which is a different fact from whether vite would succeed now.');
     const archiverProbe = resolveArchiver();
     const readiness = computeReadiness({
             toolchain, deps, archiver: archiverProbe, link, nsisNotes,
@@ -2352,4 +2383,4 @@ const runCli = async () => {
 // why it is needed: a require with no guard started packaging stage 0 and stage 1 immediately.
 if (require.main === module) runCli();
 
-module.exports = { shouldShip, diskVerdict, computeReadiness, nodeFloorVerdict, toolchainVerdict, DISK_FLOOR_MB, DISK_COMFY_MB };
+module.exports = { shouldShip, diskVerdict, computeReadiness, nodeFloorVerdict, toolchainVerdict, hasNvm, DISK_FLOOR_MB, DISK_COMFY_MB };
