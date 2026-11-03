@@ -113,10 +113,16 @@ module.exports = async function(context) {
     const binAbs = path.join(rebuildDir, binRel);
     execSync(`node "${binAbs}" --force`, { cwd: root, stdio: 'inherit' });
     console.log('  ✓ Native modules rebuilt\n');
+    // RECORDED ON THE CONTEXT, not only printed. The caller owns this object, so this is how the
+    // outcome reaches the build manifest and the closing report. Swallowing the failure in a
+    // warning was why master could hold an installer whose build never mentioned it again.
+    context.nativeRebuild = { ok: true, error: null };
   } catch (err) {
     console.warn(`  ⚠ electron-rebuild failed: ${err.message}`);
-    console.warn('  ⚠ argon2/node-pty may not work in packaged app');
-    console.warn('  ⚠ Install Visual Studio Build Tools on Windows to fix this\n');
+    console.warn('  ⚠ argon2 falls back to scrypt, node-pty to a piped shell — both work, both weaker');
+    console.warn('  ⚠ On Windows this is usually the missing "MSVC v142 - VS 2019 C++ x64/x86');
+    console.warn('  ⚠   Spectre-mitigated libs" component in the Visual Studio Installer\n');
+    context.nativeRebuild = { ok: false, error: err.message };
   }
 
   // ── MUST RETURN TRUE. Returning false does not mean what it was taken to mean. ───────────────

@@ -298,6 +298,57 @@ const COMFY = b.DISK_COMFY_MB;
   })());
   check('it follows the convention the --dir path already set', /stage\(3, 'ARCHIVER — skipped'\)/.test(src));
 
+  // ═══ a failed native rebuild must reach the build's own account of itself (Section 178) ═══════
+  section('a degraded native module is recorded, not just warned about once');
+  const bb = fs.readFileSync(path.join(ROOT, 'scripts/beforeBuild.cjs'), 'utf8');
+  check('the hook records its rebuild outcome on the context, in BOTH branches', (() => {
+    const okBranch = /context\.nativeRebuild = \{ ok: true, error: null \}/.test(bb);
+    const failBranch = /context\.nativeRebuild = \{ ok: false, error: err\.message \}/.test(bb);
+    return okBranch && failBranch;
+  })());
+  check('and it names the real consequences rather than "may not work"',
+    /falls back to scrypt/.test(bb) && /piped shell/.test(bb));
+  check('the outcome is carried into the build manifest', (() => {
+    const i = src.indexOf('writeBuildManifest(readiness, {');
+    const j = src.indexOf('});', i);
+    const block = i >= 0 && j > i ? src.slice(i, j) : '';
+    return /nativeModules:/.test(block) && /rebuilt: prep\.nativeRebuild\.ok/.test(block)
+      && /degraded:/.test(block) && /consequences:/.test(block);
+  })());
+  check('the hook runs BEFORE the manifest is written, or its outcome could not be in it', (() => {
+    const call = src.indexOf('const prep = await runBeforeBuild();');
+    const write = src.indexOf('writeBuildManifest(readiness, {');
+    return call > 0 && write > call;
+  })());
+  check('there is exactly one call site, so natives are not rebuilt twice on the retry path',
+    (src.match(/await runBeforeBuild\(\)/g) || []).length === 1);
+  check('and it is memoised as well, belt and braces', /if \(beforeBuildOutcome\) return beforeBuildOutcome;/.test(src));
+  check('a hook that reports NOTHING is unknown, never success', (() => {
+    // Anchored on the SUCCESS-path assignment: `fail_` assigns the same variable earlier, so a
+    // plain indexOf found the wrong block and this check passed for the wrong reason.
+    const i = src.indexOf('ran: true,');
+    const j = src.indexOf('return beforeBuildOutcome;', i);
+    const block = i >= 0 && j > i ? src.slice(i, j) : '';
+    return /ok: null/.test(block) && /reported no outcome/.test(block);
+  })());
+  check('an unknown outcome is not reported as a degradation either', (() => {
+    // `ok === false` is the degraded test, so `null` must not trip it.
+    return /prep\.nativeRebuild\.ok === false/.test(src)
+      && /prep\.nativeRebuild\.ok === null/.test(src);
+  })());
+  check('the build says plainly that it is shipping a degraded package', (() => {
+    const i = src.indexOf('if (nativesDegraded) {');
+    const j = src.indexOf('} else if', i);
+    const block = i >= 0 && j > i ? src.slice(i, j) : '';
+    return /ship with DEGRADED native modules/.test(block)
+      && /still produced and will run/.test(block)
+      && /Spectre-mitigated libs/.test(block);
+  })());
+  check('the consequences are declared once and reused, not written twice', (() => (
+    /function nativeDegradations\(\)/.test(src)
+      && (src.match(/nativeDegradations\(\)/g) || []).length >= 3
+  ))());
+
   // ═══ beforeBuild must NOT return false, or nothing from node_modules is packaged (Section 177) ═
   section('the beforeBuild hook does not tell electron-builder to skip node_modules');
   const beforeBuildSrc = fs.readFileSync(path.join(ROOT, 'scripts/beforeBuild.cjs'), 'utf8');

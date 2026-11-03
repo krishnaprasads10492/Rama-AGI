@@ -645,25 +645,55 @@ function builderConfigProblems(buildOverride = null, schemaPath = null) {
  * is reported and the build continues, because a degraded native module is a smaller problem than
  * no package at all.
  */
+let beforeBuildOutcome = null;
 async function runBeforeBuild() {
+  // Memoised: the installer path can call `packageApp` twice (the unbranded retry), and compiling
+  // native modules a second time would be minutes of identical work.
+  if (beforeBuildOutcome) return beforeBuildOutcome;
+
+  const fail_ = (reason) => {
+    beforeBuildOutcome = { ran: false, nativeRebuild: { ok: false, error: reason } };
+    return beforeBuildOutcome;
+  };
   let hook;
   try {
     hook = require(path.join(ROOT, 'scripts', 'beforeBuild.cjs'));
   } catch (err) {
     warn(`Pre-build hook could not be loaded: ${err.message}`);
-    return;
+    return fail_(err.message);
   }
   if (typeof hook !== 'function') {
     warn('scripts/beforeBuild.cjs does not export a function — skipping pre-build preparation.');
-    return;
+    return fail_('the hook does not export a function');
   }
+  // The hook writes its native-rebuild outcome onto this object, which is how that fact reaches
+  // the build manifest instead of scrolling past in a warning.
+  const context = { appDir: ROOT, platform: process.platform, arch: process.arch,
+    electronVersion: null, nativeRebuild: null };
   try {
-    await hook({ appDir: ROOT, platform: process.platform, arch: process.arch,
-      electronVersion: null });
+    await hook(context);
   } catch (err) {
     warn(`Pre-build preparation failed: ${err.message}`);
     warn('  Continuing: native modules may be degraded in the packaged app.');
+    return fail_(err.message);
   }
+  beforeBuildOutcome = {
+    ran: true,
+    // A hook that recorded nothing is reported as unknown rather than as success: "it did not say"
+    // and "it worked" are different facts (Section 170 D4).
+    nativeRebuild: context.nativeRebuild ?? { ok: null, error: 'the hook reported no outcome' },
+  };
+  return beforeBuildOutcome;
+}
+
+/** The degradations a failed native rebuild actually causes, named rather than implied. */
+function nativeDegradations() {
+  return [
+    'argon2 did not compile, so the credential vault derives its key with scrypt instead of '
+    + 'Argon2id. Contents stay AES-256-GCM encrypted; a stolen vault file is cheaper to attack.',
+    'node-pty did not compile, so the terminal is a piped shell rather than a real pty. '
+    + 'Interactive programs that need a tty will misbehave.',
+  ];
 }
 
 /**
@@ -2051,21 +2081,9 @@ async function packageApp(dirOnly, { noSignEdit = false } = {}) {
 
   // electron-builder directly, not `npm run build:win` — that would run
   // `vite build` a second time.
-  // ── The pre-build hook, called HERE rather than by electron-builder (Section 177) ────────────
-  //
-  // `build.npmRebuild` is false, which stops electron-builder running its own native rebuild pass.
-  // That early return happens BEFORE it resolves `beforeBuild`, so the hook would never be called
-  // if we left it to the config — and a hook configured but never invoked is the "registered and
-  // unreachable" defect this project keeps finding. So it is invoked explicitly, from the one place
-  // that owns the build.
-  //
-  // Why not simply let electron-builder do the rebuild: its pass treats a rebuild failure as
-  // FATAL (`failedTask=build`), so a machine without the right C++ toolchain cannot produce
-  // anything at all. Measured, not assumed — that is exactly what happened here when `beforeBuild`
-  // was first changed to return true. Ours warns and continues, which leaves master with a package
-  // whose native modules are degraded rather than with no package.
-  await runBeforeBuild();
-
+  // The pre-build hook runs before the build manifest is written, not here — see the call site
+  // above `writeBuildManifest`. It is memoised, so this path no longer rebuilds natives twice when
+  // the unbranded installer is retried.
   const cmd = `npx electron-builder ${flags.join(' ')}`;
   info(cmd);
   const r = await runTee(cmd);
@@ -2475,13 +2493,45 @@ async function main() {
     info('  Skipping it and building the installer with branding disabled directly.');
   }
 
+  // ── Pre-build preparation: native rebuild, icon check, NSIS include ──────────────────────────
+  //
+  // Called HERE rather than by electron-builder (Section 177): `build.npmRebuild` is false, which
+  // returns before the hook is resolved, so a configured hook would never run — the
+  // "registered and unreachable" defect this project keeps finding. And electron-builder's own
+  // rebuild pass treats a failure as FATAL (`failedTask=build`), so a machine without the right
+  // C++ toolchain would produce nothing at all. Ours warns and continues.
+  //
+  // It runs BEFORE the manifest is written so its outcome can go INTO the manifest. Master asked
+  // "electron rebuild failed but installer is created" — a fair question, because the failure used
+  // to scroll past in a warning and appear nowhere in the build's own account of itself
+  // (Section 178).
+  const prep = await runBeforeBuild();
+  const nativesDegraded = prep.nativeRebuild.ok === false;
+
   // Record what was true at build time, inside the app, before it is packaged.
   writeBuildManifest(readiness, {
     archiver: { level: archiver.level, version: archiver.version ?? null },
     branded: !brandingImpossible && !dirOnly,
     outputs: dirOnly ? ['portable-zip'] : ['nsis-installer', 'portable-exe'],
+    nativeModules: {
+      rebuilt: prep.nativeRebuild.ok,
+      error: prep.nativeRebuild.error,
+      // Named in the manifest so the INSTALLED app can say what it is missing, rather than the
+      // user discovering it at the vault prompt.
+      degraded: nativesDegraded ? ['argon2', 'node-pty'] : [],
+      consequences: nativesDegraded ? nativeDegradations() : [],
+    },
   });
   ok(`Build manifest written — the app will know its own limits at runtime`);
+  if (nativesDegraded) {
+    warn('This package will ship with DEGRADED native modules, and that is recorded in the manifest:');
+    for (const c of nativeDegradations()) warn(`  · ${c}`);
+    warn('  The installer is still produced and will run. To fix it, install the Visual Studio');
+    warn('  component "MSVC v142 - VS 2019 C++ x64/x86 Spectre-mitigated libs" and build again.');
+  } else if (prep.nativeRebuild.ok === null) {
+    info('The native rebuild reported no outcome, so whether argon2 and node-pty match this');
+    info('  Electron build is unknown rather than confirmed.');
+  }
 
   let packaged = await packageApp(dirOnly, { noSignEdit: brandingImpossible });
   let unbranded = brandingImpossible && !dirOnly;
