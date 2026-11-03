@@ -298,6 +298,45 @@ const COMFY = b.DISK_COMFY_MB;
   })());
   check('it follows the convention the --dir path already set', /stage\(3, 'ARCHIVER — skipped'\)/.test(src));
 
+  // ═══ beforeBuild must NOT return false, or nothing from node_modules is packaged (Section 177) ═
+  section('the beforeBuild hook does not tell electron-builder to skip node_modules');
+  const beforeBuildSrc = fs.readFileSync(path.join(ROOT, 'scripts/beforeBuild.cjs'), 'utf8');
+  check('it returns true, and false appears nowhere as a return', (() => {
+    const returns = (beforeBuildSrc.match(/^\s*return (true|false);\s*$/gm) || [])
+      .map((s) => s.trim());
+    return returns.length > 0 && returns.every((r) => r === 'return true;');
+  })(), (beforeBuildSrc.match(/^\s*return (true|false);\s*$/gm) || []).join(' '));
+  check('and WHY is written down, so it is not "optimised" back', (() => (
+    /handling node_modules is done/.test(beforeBuildSrc)
+      && /areNodeModulesHandledExternally/.test(beforeBuildSrc)
+      && /npmRebuild: false` in the build config is NOT an alternative/.test(beforeBuildSrc)
+  ))());
+  // THE UPSTREAM PIN, and the reason this check is not merely restating our own source. Our fix is
+  // only correct while electron-builder keeps these two behaviours. If a future version changes
+  // them, this fails and says to re-read rather than letting the comment quietly become wrong.
+  const abl = (rel) => {
+    try { return fs.readFileSync(path.join(ROOT, 'node_modules/app-builder-lib/out', rel), 'utf8'); }
+    catch { return null; }
+  };
+  const packagerJs = abl('packager.js');
+  const platformJs = abl('platformPackager.js');
+  if (packagerJs === null || platformJs === null) {
+    check('electron-builder internals were not readable, so the upstream pin is skipped rather than guessed', true);
+  } else {
+    check('upstream still maps a false return to "node_modules handled externally"',
+      /_nodeModulesHandledExternally = !performDependenciesInstallOrRebuild/.test(packagerJs));
+    // Measured, not guessed: the gap between the flag and the call is 290 characters in 26.15.3
+    // (one long `getNodeModuleFileMatcher` line sits between them), so the window is 400.
+    check('upstream still gates node_modules collection on that flag',
+      /!this\.info\.areNodeModulesHandledExternally[\s\S]{0,400}computeNodeModuleFileSets/.test(platformJs));
+    check('and npmRebuild: false still returns BEFORE beforeBuild, so it is not a substitute', (() => {
+      const i = packagerJs.indexOf('config.npmRebuild === false');
+      const j = packagerJs.indexOf('config.beforeBuild', i);
+      // The early `return` must sit between the npmRebuild test and the beforeBuild resolution.
+      return i > 0 && j > i && /return;/.test(packagerJs.slice(i, j));
+    })());
+  }
+
   // ═══ the dependency tree must be LISTABLE, or electron-builder packages nothing (Section 176) ══
   section('an unlistable dependency tree is caught before packaging, not after signing');
   const listing = (status, text) => () => ({ status, stdout: text, stderr: '' });

@@ -635,6 +635,38 @@ function builderConfigProblems(buildOverride = null, schemaPath = null) {
 }
 
 /**
+ * Run the pre-build hook ourselves: native rebuild, icon check, NSIS include preparation.
+ *
+ * electron-builder will not call it, because `npmRebuild: false` makes it return before the hook
+ * is resolved — and that setting exists so electron-builder does not run a native rebuild whose
+ * failure is fatal. See the call site for the full reasoning.
+ *
+ * NEVER FATAL. The hook already handles its own failures and warns; anything it throws beyond that
+ * is reported and the build continues, because a degraded native module is a smaller problem than
+ * no package at all.
+ */
+async function runBeforeBuild() {
+  let hook;
+  try {
+    hook = require(path.join(ROOT, 'scripts', 'beforeBuild.cjs'));
+  } catch (err) {
+    warn(`Pre-build hook could not be loaded: ${err.message}`);
+    return;
+  }
+  if (typeof hook !== 'function') {
+    warn('scripts/beforeBuild.cjs does not export a function — skipping pre-build preparation.');
+    return;
+  }
+  try {
+    await hook({ appDir: ROOT, platform: process.platform, arch: process.arch,
+      electronVersion: null });
+  } catch (err) {
+    warn(`Pre-build preparation failed: ${err.message}`);
+    warn('  Continuing: native modules may be degraded in the packaged app.');
+  }
+}
+
+/**
  * Is a Node version manager available, so the remediation can name the exact command?
  *
  * ENVIRONMENT VARIABLES ONLY, no spawning. Readiness measures what this machine can do as it
@@ -2019,6 +2051,21 @@ async function packageApp(dirOnly, { noSignEdit = false } = {}) {
 
   // electron-builder directly, not `npm run build:win` — that would run
   // `vite build` a second time.
+  // ── The pre-build hook, called HERE rather than by electron-builder (Section 177) ────────────
+  //
+  // `build.npmRebuild` is false, which stops electron-builder running its own native rebuild pass.
+  // That early return happens BEFORE it resolves `beforeBuild`, so the hook would never be called
+  // if we left it to the config — and a hook configured but never invoked is the "registered and
+  // unreachable" defect this project keeps finding. So it is invoked explicitly, from the one place
+  // that owns the build.
+  //
+  // Why not simply let electron-builder do the rebuild: its pass treats a rebuild failure as
+  // FATAL (`failedTask=build`), so a machine without the right C++ toolchain cannot produce
+  // anything at all. Measured, not assumed — that is exactly what happened here when `beforeBuild`
+  // was first changed to return true. Ours warns and continues, which leaves master with a package
+  // whose native modules are degraded rather than with no package.
+  await runBeforeBuild();
+
   const cmd = `npx electron-builder ${flags.join(' ')}`;
   info(cmd);
   const r = await runTee(cmd);

@@ -323,7 +323,7 @@
       "repo": "Rama-AGI",
       "private": false
     },
-    "beforeBuild": "scripts/beforeBuild.cjs",
+    "npmRebuild": false,
     "afterPack": "scripts/afterPack.cjs"
   }
 }

@@ -21,9 +21,14 @@ const path           = require('path');
  * root (same thing `packager.projectDir` would have resolved to), so use that.
  * See https://www.electron.build/docs/api/app-builder-lib.Interface.Hooks
  *
- * Returning `false` tells electron-builder "dependency install/rebuild is
- * handled outside of electron-builder" so it does not also try to run its own
- * npmRebuild pass on top of this hook (see packager.js installAppDependencies).
+ * WHO CALLS THIS. `scripts/buildInstaller.cjs`, directly, immediately before it invokes
+ * electron-builder. NOT electron-builder itself: `build.npmRebuild` is false, and that branch
+ * returns before the `beforeBuild` hook is resolved, so a configured hook would never run. The
+ * config entry was removed rather than left in place looking active (Section 177).
+ *
+ * It must NEVER return false. See the note at the end of this function: electron-builder reads a
+ * false return as "node_modules are being copied into the package by someone else" and then
+ * packages none of them.
  */
 module.exports = async function(context) {
   const { appDir, platform } = context;
@@ -114,13 +119,38 @@ module.exports = async function(context) {
     console.warn('  ⚠ Install Visual Studio Build Tools on Windows to fix this\n');
   }
 
-  // Returning false tells electron-builder that native dependencies have been
-  // handled here, so it does not run its own rebuild pass on top of the one
-  // above. This is what the comment at the top of this file always described and
-  // never actually did: without it, argon2 and node-pty can be compiled twice in
-  // a single build, which on a machine with a real C++ toolchain is minutes of
-  // duplicated work for an identical result.
-  return false;
+  // ── MUST RETURN TRUE. Returning false does not mean what it was taken to mean. ───────────────
+  //
+  // This used to `return false`, believing that it only told electron-builder "the native rebuild
+  // is already done, skip yours". It does not. From `app-builder-lib/out/packager.js`:
+  //
+  //     // If beforeBuild resolves to false, it means that handling node_modules is done
+  //     // outside of electron-builder.
+  //     this._nodeModulesHandledExternally = !performDependenciesInstallOrRebuild;
+  //
+  // and `platformPackager.js` then reads that flag to decide whether to COLLECT node_modules AT
+  // ALL:
+  //
+  //     if (!this.info.isPrepackedAppAsar && !this.info.areNodeModulesHandledExternally) {
+  //       result = result.concat(await computeNodeModuleFileSets(this, moduleFileMatcher));
+  //     }
+  //
+  // So `false` meant "I am copying node_modules into the package myself" — which nothing here was
+  // doing. The consequence was an app.asar containing 241 app files and ZERO dependencies, built
+  // and signed successfully, which `auditPackage.cjs` then refused to ship because
+  // electron-updater, express, helmet, cors, express-rate-limit, systeminformation and argon2 were
+  // all absent. Three build attempts were spent on this (Section 177).
+  //
+  // `npmRebuild: false` in the build config is NOT an alternative: that branch returns before
+  // `beforeBuild` is resolved, so this hook — including the native rebuild above and the icon and
+  // NSIS preparation — would not run at all.
+  //
+  // The cost of returning true is that electron-builder runs its own `installOrRebuild` pass after
+  // this one. That is the duplicated work the old comment was trying to avoid, and it is the right
+  // trade: a slower build beats an installer that cannot start. Consolidating onto a single rebuild
+  // is a real improvement, but it is a change to how natives are produced and belongs in its own
+  // tranche with a build to verify it — not bundled into the fix that unblocks packaging.
+  return true;
 };
 
 function generatePlaceholderIcon(iconPath, filename) {
