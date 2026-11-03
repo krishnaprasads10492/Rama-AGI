@@ -1,0 +1,53 @@
+Rāma AGI packaging log
+started  2026-11-03T14:26:43.211Z
+node     v20.10.0 on win32-x64
+root     C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI
+argv     --readiness
+
+
+  ⬢ Rāma AGI — packaging v1.0.0
+
+▸ STAGE 0  TOOLCHAIN — can this machine package at all
+19:56:50 ✓ npm 10.4.0
+19:56:50 ✓ Project rama-agi v1.0.0 at C:\Games\Portifolo_Apps\RAMA_AGI\Rama-AGI
+19:56:50 ✓ Disk space 5524 MB free
+19:56:50 ✕ Node.js 20.10.0 is below the 22.23.4 this project's pinned dependencies require. Packaging fails late and confusingly on it: electron-builder loads the ESM-only @noble/hashes with require(), which Node can only do from 22.12 (or 20.19 on the 20 line), so it dies with ERR_REQUIRE_ESM inside app-builder-lib. That floor is also a SECURITY floor: 22.23.4 is the 2026-10-21 release that patches the Brotli decoder RCE (CVE-2026-111497), two TLS hostname bypasses and the eMudhra CA compromise. Install it and run this again.
+19:56:50 ✕ Download the current 22.x: https://nodejs.org/en/download — anything older is unpatched, and an end-of-life line is always affected.
+19:56:50 ✓ Symlink privilege present — winCodeSign will extract cleanly
+19:56:50 ✓ assets\installer.nsh checks out (ASCII, symbols resolvable, macros balanced)
+
+▸ STAGE 1  DEPENDENCIES — measuring only, installing nothing
+19:56:51 ! 2 of 34 package(s) missing or mismatched:
+      electron — 44.7.0 installed, 44.10.0 pinned
+      systeminformation — 5.33.15 installed, 5.33.19 pinned
+19:56:51 · A build would install these automatically; readiness reports them as-is.
+19:56:51 ✓ argon2 native binary present — prebuilds/win32-x64/argon2.glibc.node
+19:56:51 ✓ node-pty native binary present — prebuilds/win32-x64/conpty.node
+19:57:08 ✓ StockMind runtime (managed venv): Python 3.12.1, all 13 engine packages importable
+19:57:09 ✓ Web research: driving Microsoft Edge (channel)
+      An installed browser is used, so Playwright's ~150 MB Chromium is not needed.
+
+▸ STAGE 3  ARCHIVER — is a usable 7-Zip actually reachable
+19:57:09 ✓ This electron-builder does not bundle a 7-Zip (26 dropped 7zip-bin) — installer targets are still attempted
+19:57:09 ·   If the installer step fails on archiving, the run falls back to the unpacked tree and zips it.
+
+  READINESS  NOT-READY
+  Would produce   nothing — the build cannot complete
+
+    ✕ toolchain            no
+    ✓ dependencies         
+    · dependencies pending 2
+    · archiver level       3
+    · archiver version     null
+    ✓ symlink privilege    
+    ✓ installer script     
+    ✓ renderer present     
+
+  Blocking — a build cannot succeed until these are fixed:
+    ✕ Node.js 20.10.0 is below the 22.23.4 this project's pinned dependencies require. Packaging fails late and confusingly on it: electron-builder loads the ESM-only @noble/hashes with require(), which Node can only do from 22.12 (or 20.19 on the 20 line), so it dies with ERR_REQUIRE_ESM inside app-builder-lib. That floor is also a SECURITY floor: 22.23.4 is the 2026-10-21 release that patches the Brotli decoder RCE (CVE-2026-111497), two TLS hostname bypasses and the eMudhra CA compromise. Install it and run this again.
+
+  Verdict saved to data\system\readiness.json — the build reads it and adapts.
+
+  Full transcript: data\logs\build-2026-11-03T14-26-43-199Z.log
+  Sending it to the build-logs branch — readable from any machine.
+
