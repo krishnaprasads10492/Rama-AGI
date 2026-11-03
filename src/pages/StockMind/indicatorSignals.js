@@ -32,6 +32,7 @@
  */
 
 import { OVERLAY_DEFS, overlayById, resolveParams, needsFor } from './indicators.js';
+import { INTERVALS, SESSION_MINUTES } from './timeframes.js';
 
 /** A bar with no reading yet. Matches `indicator_attribution.ABSTAIN`: absence is not a vote of zero. */
 export const ABSTAIN = null;
@@ -238,10 +239,27 @@ export function forwardReturns(bars) {
  *          `signals[ruleId][i]` aligns with `forwardReturns[i]`, both of length `bars.length - 1`.
  */
 export function signalMatrix(bars, ruleIds = RULE_IDS, opts = {}) {
+  // `interval` is the canonical id from `timeframes.js` and is the preferred input, because it says
+  // WHICH timeframe rather than only whether it is intraday. The older `intradayInterval` boolean is
+  // still honoured so existing callers keep working (I11: upgrades are additive); when both are
+  // given the interval wins, since it is the more specific fact.
+  const meta = intervalMeta(opts.interval);
+  const intraday = meta ? !!meta.intraday : !!opts.intradayInterval;
+  const context = {
+    symbol: opts.symbol ? String(opts.symbol).toUpperCase() : null,
+    exchange: String(opts.exchange || 'NSE').toUpperCase(),
+    interval: meta ? meta.id : null,
+    intraday,
+    barsPerSession: meta ? barsPerSession(meta.id) : null,
+    // Null when the caller named no instrument or interval. A null key is honest: it says this
+    // result cannot be stored and shown later, because there is nothing to check it against.
+    key: opts.symbol && meta ? measurementKey(opts.symbol, opts.exchange, meta.id) : null,
+  };
+
   const src = (Array.isArray(bars) ? bars : []).filter((b) => b && finite(b.close));
   if (src.length < 3) {
     return { ok: false, reason: `${src.length} usable bars; a forward return needs at least 3`,
-      signals: {}, forwardReturns: [], bars: [], abstained: {}, skipped: [] };
+      signals: {}, forwardReturns: [], bars: [], abstained: {}, skipped: [], context };
   }
 
   const fwd = forwardReturns(src);
@@ -256,8 +274,8 @@ export function signalMatrix(bars, ruleIds = RULE_IDS, opts = {}) {
   for (const id of Array.isArray(ruleIds) ? ruleIds : []) {
     const rule = ruleById(id);
     if (!rule) { skipped.push({ id, why: 'no such rule' }); continue; }
-    if (rule.intradayOnly && !opts.intradayInterval) {
-      skipped.push({ id, why: 'the study it reads is intraday-only and these are not intraday bars' });
+    if (rule.intradayOnly && !intraday) {
+      skipped.push({ id, why: `the study it reads is intraday-only and ${context.interval || 'these'} bars are not intraday` });
       continue;
     }
     const def = overlayById(rule.overlay);
@@ -300,6 +318,9 @@ export function signalMatrix(bars, ruleIds = RULE_IDS, opts = {}) {
     bars: judged,
     abstained,
     skipped,
+    // Travels with the result so a weighting can never be rendered against a different instrument
+    // or timeframe than the one it was measured on.
+    context,
   };
 }
 
@@ -327,4 +348,148 @@ export function gridSize(ruleIds = RULE_IDS, points = GRID_POINTS) {
 /** Every rule that can be built on this interval, so a caller does not offer one that must abstain. */
 export function rulesFor(intradayInterval) {
   return SIGNAL_RULES.filter((r) => !r.intradayOnly || intradayInterval);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// DYNAMIC BY TIMEFRAME AND INSTRUMENT
+//
+// Master: *"It needs to be dynamic based on time-frame and item selected."*
+//
+// Two different obligations hide in that sentence, and only one of them is about parameters.
+//
+// 1. WHAT IS MEASURABLE CHANGES WITH THE TIMEFRAME. VWAP means nothing on daily bars. A 200-period
+//    average needs 200 bars, and a day of 5-minute bars supplies 75. Which rules can even be built,
+//    and over what parameter range, is a function of the interval and the history actually held —
+//    so it is computed per request rather than fixed in the catalogue.
+//
+// 2. A MEASUREMENT BELONGS TO ONE (INSTRUMENT, INTERVAL) PAIR AND MUST NEVER BE SHOWN FOR ANOTHER.
+//    This is the more important half, and it is not hypothetical: Section 117 is in this document
+//    because a 30-minute chart was shown a cone measured on DAILY bars. A weighting measured on
+//    RELIANCE daily says nothing about TCS on 5-minute bars. So every result carries a `key`, and
+//    the key is checked rather than trusted.
+//
+// WHAT IS DELIBERATELY *NOT* RESCALED: the conventional periods. RSI 14 and SMA 20/50/200 are stated
+// in BARS, and practitioners apply the same bar counts on every timeframe — that is what the
+// literature measured. Silently turning RSI 14 into RSI 1050 on 5-minute bars to preserve a
+// wall-clock window would be imposing a theory nobody asked for and would make the defaults
+// incomparable with every published result. The GRID moves with the timeframe; the CENTRE does not.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** The canonical interval record, or null. Read from `timeframes.js` so there is one such list. */
+export function intervalMeta(id) {
+  return INTERVALS.find((i) => i.id === String(id)) || null;
+}
+
+/**
+ * Bars in one trading session at this interval: 1 for daily, 75 for 5-minute, 0.2 for weekly.
+ *
+ * `span` is in SESSION minutes, which is why one division works for every interval — the reason
+ * `timeframes.js` chose that unit rather than wall-clock.
+ */
+export function barsPerSession(id) {
+  const meta = intervalMeta(id);
+  if (!meta || !(meta.span > 0)) return null;
+  return SESSION_MINUTES / meta.span;
+}
+
+/**
+ * The identity of a measurement: instrument, venue and interval.
+ *
+ * EXISTS SO A RESULT CANNOT BE SHOWN AGAINST THE WRONG THING. Returned with every matrix and
+ * intended to be stored beside any weighting, so a panel can refuse to render a stale one instead
+ * of quietly relabelling it (Section 117's defect, in a new place).
+ */
+export function measurementKey(symbol, exchange = 'NSE', interval = '1d') {
+  const sym = String(symbol || '').trim().toUpperCase();
+  const exc = String(exchange || 'NSE').trim().toUpperCase();
+  const int = String(interval || '').trim();
+  if (!sym || !int) return null;
+  return `${exc}:${sym}@${int}`;
+}
+
+/** Whether a stored result may be shown for this request. Equality, stated as a function so the */
+/** comparison lives in one place rather than being re-derived by every caller. */
+export function keyMatches(storedKey, symbol, exchange, interval) {
+  const want = measurementKey(symbol, exchange, interval);
+  return !!want && String(storedKey || '') === want;
+}
+
+/**
+ * What can actually be measured for this instrument, on this timeframe, with this much history.
+ *
+ * @returns `{ok, key, interval, intraday, barsPerSession, usable[], unusable[], trials, warnings[]}`
+ *          `usable` carries each rule's grid AT THIS BAR COUNT, so the candidate list a search will
+ *          enumerate is the one the data can support rather than the one the catalogue declares.
+ */
+export function plan({ symbol, exchange = 'NSE', interval = '1d', barCount = 0, points = GRID_POINTS } = {}) {
+  const meta = intervalMeta(interval);
+  const key = measurementKey(symbol, exchange, interval);
+  const out = {
+    ok: false, key, interval: String(interval || ''), intraday: !!meta?.intraday,
+    barsPerSession: barsPerSession(interval), barCount: Math.max(0, Math.floor(barCount) || 0),
+    usable: [], unusable: [], trials: 0, warnings: [],
+  };
+  if (!meta) { out.unusable.push({ id: '*', why: `unknown interval ${String(interval)}` }); return out; }
+  if (!key) { out.unusable.push({ id: '*', why: 'no instrument selected' }); return out; }
+
+  const perSession = out.barsPerSession;
+
+  for (const rule of SIGNAL_RULES) {
+    if (rule.intradayOnly && !meta.intraday) {
+      out.unusable.push({ id: rule.id, why: `${rule.label} is intraday-only and ${interval} bars are not intraday` });
+      continue;
+    }
+    const def = overlayById(rule.overlay);
+    if (!def) { out.unusable.push({ id: rule.id, why: `no study ${rule.overlay}` }); continue; }
+
+    // The grid is filtered to candidates THIS history can support. A 200-period average on 120 bars
+    // is not a weak candidate, it is an empty series, and offering it would spend a trial on nothing.
+    const fields = [...(def.params || []), ...(rule.thresholds || [])];
+    const grid = {};
+    let combos = 1;
+    for (const f of fields) {
+      const isStudyParam = (def.params || []).some((p) => p.key === f.key);
+      const candidates = gridFor(f, points).filter((v) => {
+        if (!isStudyParam) return true;
+        const need = needsFor(rule.overlay, { ...resolveParams(rule.overlay, {}), [f.key]: v });
+        return !need || out.barCount >= need;
+      });
+      grid[f.key] = candidates;
+      combos *= Math.max(0, candidates.length);
+    }
+    if (combos === 0) {
+      const need = needsFor(rule.overlay, resolveParams(rule.overlay, {}));
+      out.unusable.push({ id: rule.id,
+        why: `${rule.label} needs about ${need} bars at every candidate setting and there are ${out.barCount}` });
+      continue;
+    }
+
+    const notes = [];
+    // On intraday bars a window longer than one session reaches across the overnight gap, where the
+    // price jumps for reasons the study cannot see. Reported rather than prevented: it is a real
+    // choice, and master may want it.
+    if (meta.intraday && perSession) {
+      const longest = Math.max(...Object.entries(grid)
+        .filter(([k]) => (def.params || []).some((p) => p.key === k))
+        .flatMap(([, v]) => (v.length ? [Math.max(...v)] : [0])), 0);
+      if (longest > perSession) {
+        notes.push(`its longest candidate spans ${(longest / perSession).toFixed(1)} sessions, so it `
+          + 'reaches across overnight gaps');
+      }
+    }
+    out.usable.push({ id: rule.id, label: rule.label, kind: rule.kind, overlay: rule.overlay, grid, combinations: combos, notes });
+    out.trials += combos;
+  }
+
+  if (meta.intraday && perSession && out.barCount > 0 && out.barCount < perSession) {
+    out.warnings.push(`${out.barCount} bars is under one session at ${interval} `
+      + `(${Math.round(perSession)} bars), so every result here describes part of a single day`);
+  }
+  if (out.trials > 0 && out.barCount > 0 && out.trials > out.barCount) {
+    out.warnings.push(`the grid would try ${out.trials} candidates against ${out.barCount} bars; `
+      + 'more candidates than observations is a search that finds noise, so narrow the rules or widen the history');
+  }
+  out.ok = out.usable.length > 0;
+  if (!out.ok) out.warnings.push('nothing is measurable on this instrument at this interval with this history');
+  return out;
 }

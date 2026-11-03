@@ -137,13 +137,16 @@
     "wait-on": "8.0.1",
     "zustand": "5.0.15"
   },
+  "overrides": {
+    "dompurify": "3.4.17"
+  },
   "devDependencies": {
     "@babel/parser": "7.29.9",
     "@babel/traverse": "7.29.10",
     "@vitejs/plugin-react": "4.3.4",
     "electron": "44.10.0",
     "electron-builder": "26.15.3",
-    "electron-rebuild": "3.2.9",
+    "@electron/rebuild": "4.2.1",
     "png-to-ico": "2.1.8",
     "png2icons": "2.0.1",
     "sharp": "0.35.5",

@@ -686,6 +686,20 @@ const INVARIANTS = [
       });
       r.check('no other shipped module requires http/https directly',
         offenders.length === 0, offenders.join(', '));
+      // A DEPENDENCY can carry a second HTTP client too, and `vectra` does: its OpenAIEmbeddings
+      // class pulls openai@3 and axios@0.x, which between them carry an SSRF-with-credential-leak
+      // and a CSRF advisory. `ipc/vectorMemory.cjs` uses only the LocalIndex and takes embeddings
+      // from Ollama on localhost, so that path is unreachable today — and this check is what keeps
+      // it unreachable, rather than leaving the claim to be true by accident. Fixing it properly
+      // needs vectra 0.9 -> 0.15, a prod-dependency jump that wants a real install and a test
+      // (Section 173).
+      const openAiEmbeddings = /OpenAIEmbeddings|vectra\/lib\/OpenAI/;
+      const vectraHttp = walkShipped(root).filter((f) => {
+        const fv = viewOf(root, f);
+        return fv && openAiEmbeddings.test(fv.nc);
+      });
+      r.check('nothing reaches vectra\u2019s OpenAI embeddings path, so its axios advisories stay unreachable',
+        vectraHttp.length === 0, vectraHttp.join(', '));
       // The allow-list is asserted so an addition to it is a visible, reviewed act.
       for (const [f, why] of Object.entries(RAW_HTTP_ALLOWED)) {
         r.check(`the one exception ${f} still exists (${why})`,

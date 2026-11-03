@@ -254,16 +254,120 @@ check('the whole catalogue is a searchable size, not millions', (() => {
 check('rulesFor withholds intraday-only rules on daily bars',
   sig.rulesFor(false).every((r) => !r.intradayOnly) && sig.rulesFor(true).length > sig.rulesFor(false).length);
 
+// ─── dynamic by timeframe and instrument ───────────────────────────────────────────────────────────
+section('DYNAMIC: the interval and the instrument decide what is measurable');
+check('the interval list is read from timeframes.js, not re-declared here',
+  !!sig.intervalMeta('30m') && sig.intervalMeta('30m').intraday === true
+  && sig.intervalMeta('1d').intraday === false && sig.intervalMeta('nope') === null);
+check('bars per session is derived from the session-minutes span', (() => {
+  // 375 session minutes: daily is 1 bar, 5m is 75, weekly is a fifth of a session-equivalent.
+  return sig.barsPerSession('1d') === 1 && sig.barsPerSession('5m') === 75
+    && sig.barsPerSession('60m') === 6.25 && sig.barsPerSession('nope') === null;
+})(), `1d=${sig.barsPerSession('1d')} 5m=${sig.barsPerSession('5m')} 60m=${sig.barsPerSession('60m')}`);
+
+section('a measurement carries the instrument and timeframe it belongs to');
+check('the key names venue, instrument and interval',
+  sig.measurementKey('reliance', 'nse', '30m') === 'NSE:RELIANCE@30m');
+check('an absent instrument or interval yields no key, rather than a misleading one',
+  sig.measurementKey('', 'NSE', '1d') === null && sig.measurementKey('TCS', 'NSE', '') === null);
+check('a key matches only its own instrument, venue and interval', (() => {
+  const k = sig.measurementKey('RELIANCE', 'NSE', '30m');
+  return sig.keyMatches(k, 'RELIANCE', 'NSE', '30m') === true
+    && sig.keyMatches(k, 'TCS', 'NSE', '30m') === false          // different instrument
+    && sig.keyMatches(k, 'RELIANCE', 'NSE', '1d') === false      // Section 117's defect exactly
+    && sig.keyMatches(k, 'RELIANCE', 'BSE', '30m') === false     // different venue
+    && sig.keyMatches(null, 'RELIANCE', 'NSE', '30m') === false;
+})());
+check('the matrix returns the key, so a stored weighting can be checked against it', (() => {
+  const r = sig.signalMatrix(dailyBars(300), ['sma20-trend'], { symbol: 'RELIANCE', interval: '1d' });
+  return r.context.key === 'NSE:RELIANCE@1d' && r.context.intraday === false;
+})());
+check('and a null key when no instrument was named, rather than a fabricated one',
+  sig.signalMatrix(dailyBars(300), ['sma20-trend'], { interval: '1d' }).context.key === null);
+check('the interval id supersedes the older boolean, and the boolean still works', (() => {
+  const byId = sig.signalMatrix(intradayBars(300), ['vwap-side'], { interval: '5m' });
+  const byBool = sig.signalMatrix(intradayBars(300), ['vwap-side'], { intradayInterval: true });
+  const daily = sig.signalMatrix(intradayBars(300), ['vwap-side'], { interval: '1d' });
+  return !!byId.signals['vwap-side'] && !!byBool.signals['vwap-side']
+    && !daily.signals['vwap-side'];     // the id says daily, so the intraday-only rule is withheld
+})());
+
+section('plan: what this instrument, timeframe and history can actually support');
+check('a daily plan withholds the intraday-only rule and says which interval caused it', (() => {
+  const p = sig.plan({ symbol: 'RELIANCE', interval: '1d', barCount: 500 });
+  return p.ok && p.unusable.some((u) => u.id === 'vwap-side' && /1d bars are not intraday/.test(u.why));
+})());
+check('an intraday plan admits it', (() => {
+  const p = sig.plan({ symbol: 'RELIANCE', interval: '5m', barCount: 500 });
+  return p.usable.some((u) => u.id === 'vwap-side');
+})());
+check('a short history removes the long-window rules, naming the numbers', (() => {
+  const p = sig.plan({ symbol: 'RELIANCE', interval: '1d', barCount: 120 });
+  return p.unusable.some((u) => u.id === 'sma200-trend' && /there are 120/.test(u.why));
+})());
+check('and a long history admits them, so that branch is not dead', (() => {
+  const p = sig.plan({ symbol: 'RELIANCE', interval: '1d', barCount: 900 });
+  return p.usable.some((u) => u.id === 'sma200-trend');
+})());
+check('the grid is filtered to candidates the history supports, not merely the rule declared', (() => {
+  const small = sig.plan({ symbol: 'X', interval: '1d', barCount: 150 });
+  const big = sig.plan({ symbol: 'X', interval: '1d', barCount: 900 });
+  const g = (p, id) => (p.usable.find((u) => u.id === id)?.grid?.period || []);
+  // At 150 bars an SMA 50 cannot try its longest candidates; at 900 it can.
+  return g(small, 'sma50-trend').length > 0 && g(big, 'sma50-trend').length >= g(small, 'sma50-trend').length
+    && Math.max(...g(big, 'sma50-trend')) >= Math.max(...g(small, 'sma50-trend'));
+})());
+check('the declared trial count is the sum of the surviving grids', (() => {
+  const p = sig.plan({ symbol: 'X', interval: '1d', barCount: 900 });
+  return p.trials === p.usable.reduce((n, u) => n + u.combinations, 0) && p.trials > 0;
+})());
+check('a longer history can only widen the search, never narrow it', (() => {
+  const a = sig.plan({ symbol: 'X', interval: '1d', barCount: 150 }).trials;
+  const b = sig.plan({ symbol: 'X', interval: '1d', barCount: 900 }).trials;
+  return b >= a;
+})());
+check('an intraday window shorter than one session is warned about', (() => {
+  const p = sig.plan({ symbol: 'X', interval: '5m', barCount: 40 });
+  return p.warnings.some((w) => /under one session/.test(w));
+})());
+check('more candidates than observations is called out as a search that finds noise', (() => {
+  const p = sig.plan({ symbol: 'X', interval: '1d', barCount: 40 });
+  return p.warnings.some((w) => /more candidates than observations/.test(w));
+})());
+check('a window crossing the overnight gap is reported rather than silently allowed', (() => {
+  const p = sig.plan({ symbol: 'X', interval: '5m', barCount: 4000 });
+  return p.usable.some((u) => (u.notes || []).some((n) => /overnight gaps/.test(n)));
+})());
+check('an unknown interval plans nothing and says so',
+  sig.plan({ symbol: 'X', interval: '7h', barCount: 500 }).ok === false);
+check('no instrument plans nothing, because a result could not be attributed to anything', (() => {
+  const p = sig.plan({ interval: '1d', barCount: 500 });
+  return p.ok === false && p.unusable.some((u) => /no instrument selected/.test(u.why));
+})());
+check('plan never throws on junk', (() => {
+  try { sig.plan(); sig.plan({}); sig.plan({ symbol: 'X', interval: null, barCount: -5 }); return true; }
+  catch { return false; }
+})());
+check('the conventional period is still the centre of the grid, on every timeframe', (() => {
+  // STATED AS A TEST because it is a deliberate decision: RSI 14 means fourteen BARS on 5m exactly
+  // as on 1d. Rescaling to hold a wall-clock window would make the defaults incomparable with every
+  // published result, so the grid moves with the timeframe and the centre does not.
+  const day = sig.plan({ symbol: 'X', interval: '1d', barCount: 900 }).usable.find((u) => u.id === 'rsi-reversion');
+  const min5 = sig.plan({ symbol: 'X', interval: '5m', barCount: 900 }).usable.find((u) => u.id === 'rsi-reversion');
+  return day.grid.period.includes(14) && min5.grid.period.includes(14);
+})());
+
 // ─── no shipped-code violations ────────────────────────────────────────────────────────────────────
 section('shipped-code rules');
 const src = await (await import('node:fs/promises')).readFile(
   new URL('../src/pages/StockMind/indicatorSignals.js', import.meta.url), 'utf8');
 check('no console.log', !/console\.log/.test(src));
 check('no TODO or placeholder', !/\bTODO\b|\bFIXME\b|placeholder/i.test(src));
-check('it imports only from the existing indicator module', (() => {
-  const imports = [...src.matchAll(/^import .*?from '([^']+)'/gm)].map((x) => x[1]);
-  return imports.length === 1 && imports[0] === './indicators.js';
+check('it adds no indicator maths and no second interval list: both are imported', (() => {
+  const imports = [...src.matchAll(/^import .*?from '([^']+)'/gm)].map((x) => x[1]).sort();
+  return imports.length === 2 && imports[0] === './indicators.js' && imports[1] === './timeframes.js';
 })(), [...src.matchAll(/^import .*?from '([^']+)'/gm)].map((x) => x[1]).join());
+check('no interval id is hardcoded here: the list lives in timeframes.js', !/'(1m|2m|15m|30m|60m|1wk|1mo)'/.test(src));
 
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILURES'} — ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);
