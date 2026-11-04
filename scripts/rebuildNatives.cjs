@@ -99,6 +99,16 @@ if (require.main === module) {
   console.warn(`  ⚠ ${BIN} failed: ${res.error}`);
   for (const line of facts.consequences()) console.warn(`  ⚠ ${line}`);
   for (const line of facts.remedyLines()) console.warn(`  ⚠ ${line}`);
+  // THEN THE MACHINE-SPECIFIC DIAGNOSIS (Section 186). The remedy above is generic advice; this
+  // says which of its four failure modes actually applies here, because master ran the command and
+  // the build failed again, and at that point generic advice sends him round the same loop twice.
+  try {
+    const probe = require('./toolchainProbe.cjs');
+    console.warn('');
+    for (const line of probe.lines(probe.probeNow())) console.warn(`  ${line}`);
+  } catch (err) {
+    console.warn(`  (the toolchain probe could not run: ${err.message})`);
+  }
   console.warn('');
   process.exit(1);
 }

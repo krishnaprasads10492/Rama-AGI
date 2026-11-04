@@ -299,6 +299,122 @@ section('the diagnosis reports it, and the build manifest changes how it reads')
     /nativeModules\?\.degraded/.test(dsrc));
 }
 
+// ─── Which of the four reasons the rebuild failed (Section 186) ──────────────────────────────────
+section('the failure diagnoses itself instead of repeating generic advice');
+{
+  const tp = require('../scripts/toolchainProbe.cjs');
+
+  // EVERY VERDICT IS DRIVEN, because this machine can only produce one of them and the other four
+  // are the ones that matter on master's. `exec`, `exists` and `readdir` are parameters for exactly
+  // this reason; mocking the module system to reach them would prove less and break more.
+  const io = ({ files = [], dirs = {}, out = '[]', throws = null, platform = 'win32' }) => ({
+    platform,
+    exec: () => { if (throws) throw new Error(throws); return out; },
+    exists: (p) => files.includes(p),
+    readdir: (p) => dirs[p] || [],
+  });
+  const VSW = tp.VSWHERE;
+  const VS = 'C:\\VS\\BuildTools';
+  const MSVC = `${VS}\\VC\\Tools\\MSVC`;
+
+  check('not Windows is answered as inapplicable, not as a fault',
+    tp.probe(io({ platform: 'linux' })).verdict === 'not-windows');
+
+  const noVswhere = tp.probe(io({ files: [] }));
+  check('a missing vswhere is UNKNOWN, never "no Visual Studio"',
+    noVswhere.verdict === 'unknown' && /vswhere\.exe was not found/.test(noVswhere.reason));
+  check('and the unknown case admits the Spectre advice is then a guess',
+    /a guess rather than a diagnosis/.test(tp.lines(noVswhere).join(' ')));
+
+  check('a vswhere that throws is UNKNOWN with the reason carried',
+    (() => { const f = tp.probe(io({ files: [VSW], throws: 'access denied' }));
+      return f.verdict === 'unknown' && /access denied/.test(f.reason); })());
+  check('output that is not JSON is UNKNOWN rather than parsed hopefully',
+    tp.probe(io({ files: [VSW], out: 'not json' })).verdict === 'unknown');
+  check('a JSON shape that is not an array is UNKNOWN',
+    tp.probe(io({ files: [VSW], out: '{"installationPath":"x"}' })).verdict === 'unknown');
+
+  const none = tp.probe(io({ files: [VSW], out: '[]' }));
+  check('zero instances is reported as no Visual Studio at all', none.verdict === 'no-visual-studio');
+  check('and that advice says install the C++ workload FIRST, not the Spectre component',
+    /Spectre\n?\s*component is an addition/.test(tp.lines(none).join('\n'))
+    || /must already exist/.test(tp.lines(none).join('\n')));
+
+  // THE CASE THE FIRST REAL RUN OF THIS PROBE EXPOSED: an instance with no MSVC toolset at all.
+  // The verdict used to be `spectre-missing`, and the advice told the reader to tick the entry
+  // matching "one listed above" when nothing was listed.
+  const bare = tp.probe(io({ files: [VSW], out: JSON.stringify([{ installationPath: VS, displayName: 'BT', installationVersion: '17.0' }]) }));
+  check('an instance with NO MSVC toolset is its own verdict', bare.verdict === 'no-cpp-toolset',
+    bare.verdict);
+  check('and its advice does not tell the reader to match an empty list',
+    !/matches\s+one listed above/.test(tp.lines(bare).join(' ')));
+  check('it says the Spectre component alone will not help',
+    /Spectre component alone will not help/.test(tp.lines(bare).join(' ')));
+
+  // Toolsets present, no Spectre libs — the case master is probably in.
+  const missing = tp.probe(io({
+    files: [VSW, MSVC],
+    dirs: { [MSVC]: ['14.29.30133'] },
+    out: JSON.stringify([{ installationPath: VS, displayName: 'BT 2019', installationVersion: '16.11' }]),
+  }));
+  check('toolsets present but no spectre libs is spectre-missing', missing.verdict === 'spectre-missing');
+  check('the toolset is listed with its lack stated', (() => {
+    const t = tp.lines(missing).join('\n');
+    return /14\.29\.30133 \(no spectre libs\)/.test(t);
+  })(), tp.lines(missing).join(' | '));
+  check('and the advice names the silent-no-op trap rather than repeating the command',
+    /unknown id installs/.test(tp.lines(missing).join('\n')));
+
+  // Spectre libs PRESENT and the build still failed — the loop this module exists to break.
+  const present = tp.probe(io({
+    files: [VSW, MSVC, `${MSVC}\\14.29.30133\\lib\\spectre`],
+    dirs: { [MSVC]: ['14.29.30133'] },
+    out: JSON.stringify([{ installationPath: VS, displayName: 'BT 2019', installationVersion: '16.11' }]),
+  }));
+  check('spectre libs on disk are detected', present.verdict === 'spectre-present'
+    && present.spectreFound.length === 1, JSON.stringify(present.spectreFound));
+  const ptext = tp.lines(present).join('\n');
+  check('and the advice STOPS saying install the component', !/Individual components/.test(ptext), ptext);
+  check('it names the instance-selection cause and how to pin it', /GYP_MSVS_VERSION/.test(ptext));
+  check('it names the architecture cause', /different ARCHITECTURE/.test(ptext));
+  check('and it says the error may no longer be MSB8040 at all', /no longer MSB8040/.test(ptext));
+
+  // The VS2015 layout, which produces the identical error from a different directory.
+  const legacy = tp.probe(io({
+    files: [VSW, `${VS}\\VC\\lib\\spectre`],
+    out: JSON.stringify([{ installationPath: VS, displayName: 'VS2015', installationVersion: '14.0' }]),
+  }));
+  check('the VS2015 lib layout is recognised too', legacy.verdict === 'spectre-present');
+
+  // IT MUST NOT ACT. A probe that installs something is no longer a probe.
+  const src = read('scripts/toolchainProbe.cjs');
+  const code = codeOnly(src);
+  // BANNED IN WHAT IT RUNS, NOT IN WHAT IT SAYS. The first draft banned the strings `vs_installer`
+  // and `npm install` outright and failed on the probe's own ADVICE, which has to name them — the
+  // same mistake as the "piped shell" ban firing on the comment that records it. What must be true
+  // is that the probe never executes them.
+  check('the probe writes nothing to disk',
+    !/writeFileSync|mkdirSync|rmSync|unlinkSync|appendFileSync|copyFileSync/.test(code),
+    (code.match(/\w+Sync\(/g) || []).join(','));
+  check('and the ONLY thing it executes is vswhere', (() => {
+    const calls = code.match(/exec(?:Sync)?\(\s*[^)]*/g) || [];
+    // Two sites: the injected `exec(...)` in `probe`, and `execSync` inside `probeNow`'s adapter.
+    return calls.length > 0 && calls.every((c) => /vswhere|cmd,/.test(c));
+  })(), (code.match(/exec(?:Sync)?\(\s*[^)]*/g) || []).join(' | '));
+  check('it never shells out to the installer it recommends',
+    !/exec\w*\([^)]*vs_installer/.test(code));
+  check('and reaches no network', !/https?:\/\/|http\.cjs|fetch\(/.test(code),
+    (code.match(/https?:\/\/[^\s'"]*/g) || []).join(','));
+  check('the real I/O is a separate function from the judgement, so the judgement is testable',
+    /function probe\(/.test(code) && /function probeNow\(/.test(code));
+  check('it is wired into the rebuild failure path', (() => {
+    const r = read('scripts/rebuildNatives.cjs');
+    return /toolchainProbe\.cjs/.test(r) && /probe\.lines\(probe\.probeNow\(\)\)/.test(r);
+  })());
+  check('and a probe that throws does not take the rebuild report down with it',
+    /the toolchain probe could not run/.test(read('scripts/rebuildNatives.cjs')));
+}
+
 // ─── An npm script that cannot run (Section 185) ─────────────────────────────────────────────────
 section('every npm script names something that exists');
 {
@@ -350,10 +466,16 @@ section('every npm script names something that exists');
   })());
   check('and the hook no longer resolves the binary itself',
     !/node_modules', '@electron', 'rebuild'/.test(read('scripts/beforeBuild.cjs')));
-  check('the module requires only Node builtins, so beforeBuild still runs with no node_modules',
-    (read('scripts/rebuildNatives.cjs').match(/require\('([^']+)'\)/g) || [])
-      .every((r) => /'(child_process|fs|path)'/.test(r) || /nativeModuleFacts/.test(r)),
-    (read('scripts/rebuildNatives.cjs').match(/require\('([^']+)'\)/g) || []).join(','));
+  // TRANSITIVELY builtin-only. `beforeBuild.cjs` requires this chain and must still run on a
+  // checkout with no `node_modules`, so every link in it is checked, not just the first.
+  const builtinOnly = (rel) => (read(rel).match(/require\('([^']+)'\)/g) || [])
+    .every((r) => /'(child_process|fs|os|path)'/.test(r)
+      || /nativeModuleFacts\.cjs|toolchainProbe\.cjs|rebuildNatives\.cjs/.test(r));
+  for (const rel of ['scripts/rebuildNatives.cjs', 'scripts/toolchainProbe.cjs',
+    'shared/nativeModuleFacts.cjs']) {
+    check(`${rel} requires only Node builtins and its siblings`, builtinOnly(rel),
+      (read(rel).match(/require\('([^']+)'\)/g) || []).join(','));
+  }
 
   // RESOLVED FROM THE PACKAGE, NOT FROM PATH — and reported, never fetched.
   const found = rebuild.resolveBin(ROOT);
