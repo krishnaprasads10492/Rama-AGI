@@ -118,8 +118,16 @@ section('a remedy is a command where a command exists (Section 176\u2019s ruling
     `${runnable.length} runnable of ${facts.SPECTRE.componentIds.length} ids`);
   check('and each id appears in exactly one of them',
     facts.SPECTRE.componentIds.every((id) => runnable.filter((l) => l.includes(`--add ${id} `)).length === 1));
-  check('BOTH catalogue component ids are offered', facts.SPECTRE.componentIds.length === 2
-    && /VC\.v142\.x86\.x64\.Spectre/.test(text) && /VC\.14\.29\.16\.11\.x86\.x64\.Spectre/.test(text));
+  // ONLY PUBLISHED IDS (Section 186.6). `…VC.v142.x86.x64.Spectre` led this list and is in
+  // Microsoft's component list for NEITHER catalogue — I constructed it. Master ran it against a
+  // machine whose toolset is 14.29.30133, nothing installed, and `vs_installer` exited 0, so the
+  // failure was silent and cost a round trip. An id that cannot be cited is not offered.
+  check('every offered component id is version-pinned, which is the published form',
+    facts.SPECTRE.componentIds.every((id) => /^Microsoft\.VisualStudio\.Component\.VC\.\d+\.\d+\.\d+\.\d+\.x86\.x64\.Spectre$/.test(id)),
+    facts.SPECTRE.componentIds.join(', '));
+  check('the constructed v142 alias is gone', !/VC\.v142\.x86\.x64\.Spectre/.test(text));
+  check('the published 14.29 id is present, since that is the toolset on the build machine',
+    /VC\.14\.29\.16\.11\.x86\.x64\.Spectre/.test(text));
   // THE TRAP THIS AVOIDS: `vs_installer --add` with an id the catalogue does not know installs
   // nothing and still reports success, so a single guessed id would be worse than no command.
   check('it warns that an unknown id installs nothing without failing',
@@ -132,6 +140,23 @@ section('a remedy is a command where a command exists (Section 176\u2019s ruling
     /learn\.microsoft\.com.*msb8040/i.test(facts.SPECTRE.docs));
   check('nothing in the remedy tells master to npm install a native module',
     !/npm install/i.test(text), text);
+
+  // ── The id is LOOKED UP per toolset, never constructed (Section 186.6) ──
+  const got = facts.spectreComponentFor('14.29.30133');
+  check('the toolset actually on the build machine maps to a confirmed id',
+    !!got && got.id === 'Microsoft.VisualStudio.Component.VC.14.29.16.11.x86.x64.Spectre',
+    JSON.stringify(got));
+  check('and it carries the human name the GUI shows, so the checkbox can be found',
+    !!got && /Spectre-mitigated libs \(v14\.29-16\.11\)/.test(got.name));
+  check('an UNKNOWN toolset returns null rather than a constructed id',
+    facts.spectreComponentFor('14.44.99') === null
+    && facts.spectreComponentFor('') === null
+    && facts.spectreComponentFor(undefined) === null);
+  check('every entry in the table is version-pinned and x64/x86',
+    Object.values(facts.SPECTRE_BY_TOOLSET).every((e) => /\.\d+\.\d+\.\d+\.\d+\.x86\.x64\.Spectre$/.test(e.id)),
+    JSON.stringify(facts.SPECTRE_BY_TOOLSET));
+  check('the table cites where the ids came from, so the next reader can check them',
+    /workload-component-id-vs-build-tools/.test(read(FACTS_FILE)));
 }
 
 // ─── Said once ───────────────────────────────────────────────────────────────────────────────────
@@ -364,6 +389,51 @@ section('the failure diagnoses itself instead of repeating generic advice');
   })(), tp.lines(missing).join(' | '));
   check('and the advice names the silent-no-op trap rather than repeating the command',
     /unknown id installs/.test(tp.lines(missing).join('\n')));
+
+  // THE EXACT COMMAND FOR THE TOOLSET FOUND — master's case, reproduced from the probe output he
+  // sent: Build Tools 2019 with toolset 14.29.30133 and no spectre libs, beside an SSMS instance
+  // that vswhere also reports and that must not affect the verdict.
+  const real = tp.probe(io({
+    files: [VSW, MSVC],
+    dirs: { [MSVC]: ['14.29.30133'] },
+    out: JSON.stringify([
+      { installationPath: VS, displayName: 'Visual Studio Build Tools 2019', installationVersion: '16.11.36227.6' },
+      { installationPath: 'C:\\SSMS\\Release', displayName: 'SQL Server Management Studio 21', installationVersion: '21.4' },
+    ]),
+  }));
+  const rtext = tp.lines(real).join('\n');
+  check('an unrelated VS-shell instance does not change the verdict',
+    real.verdict === 'spectre-missing', real.verdict);
+  check('the advice emits ONE ready-to-run command, not a choice of two',
+    (rtext.match(/vs_installer\.exe" modify/g) || []).length === 1,
+    (rtext.match(/vs_installer\.exe" modify/g) || []).length);
+  check('and it carries the id matching the toolset that is actually installed',
+    /--add Microsoft\.VisualStudio\.Component\.VC\.14\.29\.16\.11\.x86\.x64\.Spectre/.test(rtext));
+  check('aimed at the instance that has the toolset, not the other one',
+    /--installPath "C:\\VS\\BuildTools"/.test(rtext) && !/SSMS/.test(rtext.split('RUN THIS')[1] || ''));
+  // COUNTED, not just "at least one". The command list must be exactly the (instance, toolset)
+  // pairs with a confirmed id — a mutation that handed every instance a line survived a check that
+  // only counted `=== 1`, because the lookup happened to reject the extra one. Counting the pairs
+  // makes the assertion about the selection rather than about a coincidence.
+  const pairs = real.instances.flatMap((i) => i.toolsets
+    .filter((t) => facts.spectreComponentFor(t.version)).map((t) => `${i.path}|${t.version}`));
+  check('one command per instance-and-toolset pair with a confirmed id, and no others',
+    (rtext.match(/vs_installer\.exe" modify/g) || []).length === pairs.length && pairs.length === 1,
+    `${pairs.length} pair(s): ${pairs.join(', ')}`);
+  check('it names the toolset so the GUI checkbox can be matched', /14\.29\.30133 ->/.test(rtext));
+  check('and the GUI is still named as the authority if the command changes nothing',
+    /GUI is authoritative/.test(rtext));
+
+  // An unknown toolset must NOT produce a constructed command.
+  const odd = tp.probe(io({
+    files: [VSW, MSVC],
+    dirs: { [MSVC]: ['14.99.12345'] },
+    out: JSON.stringify([{ installationPath: VS, displayName: 'BT', installationVersion: '99' }]),
+  }));
+  const otext = tp.lines(odd).join('\n');
+  check('an unknown toolset yields NO command rather than an invented id',
+    !/--add Microsoft/.test(otext), otext);
+  check('and says why the id cannot be constructed', /cannot be/.test(otext) && /guessed id installs nothing/.test(otext));
 
   // Spectre libs PRESENT and the build still failed — the loop this module exists to break.
   const present = tp.probe(io({

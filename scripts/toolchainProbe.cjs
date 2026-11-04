@@ -182,9 +182,42 @@ function lines(findings) {
     out.push('  VERDICT: the Spectre-mitigated libraries are NOT on disk in any instance.');
     out.push('  The vs_installer command above either targeted the wrong --installPath, or used a');
     out.push('  component id this installer\u2019s catalogue does not know — an unknown id installs');
-    out.push('  nothing and still exits 0. Use the GUI: Visual Studio Installer -> Modify ->');
-    out.push('  Individual components -> search "Spectre" -> tick the entry whose toolset matches');
-    out.push('  one listed above -> Modify.');
+    out.push('  nothing and still exits 0.');
+
+    // THE EXACT COMMAND FOR THE TOOLSET THAT IS ACTUALLY INSTALLED (Section 186.6). The probe knows
+    // the instance path AND the toolset version, so it can name the one id that applies instead of
+    // offering a choice the reader has no way to make. Master lost a round trip picking the wrong
+    // one of two.
+    const facts = require('../shared/nativeModuleFacts.cjs');
+    // No `if (t.spectre) continue` here: reaching this branch already means `spectreFound` is
+    // empty, so no toolset has the libraries. A mutation removing that guard survived the suite,
+    // which is how a redundant line is identified rather than argued about — it was dead, so it is
+    // gone, and the verdict gate above is the single reason this list is install-only.
+    const exact = [];
+    for (const i of findings.instances) {
+      for (const t of i.toolsets) {
+        const comp = facts.spectreComponentFor(t.version);
+        if (comp) exact.push({ path: i.path, toolset: t.version, comp });
+      }
+    }
+    if (exact.length > 0) {
+      out.push('  RUN THIS — the id below is the one that matches the toolset you have installed:');
+      for (const e of exact) {
+        out.push(`    (toolset ${e.toolset} -> ${e.comp.name})`);
+        out.push(`    "${facts.SPECTRE.installerPath}" modify --installPath "${e.path}" `
+          + `--add ${e.comp.id} --passive --norestart`);
+      }
+      out.push('  If that still changes nothing, the GUI is authoritative: Visual Studio Installer');
+      out.push('  -> Modify -> Individual components -> search "Spectre".');
+    } else {
+      // NO INVENTED ID. The component id embeds both the toolset and the VS release that shipped
+      // it, so it cannot be constructed — and a constructed one installs nothing silently.
+      out.push('  No confirmed component id is known for the toolset(s) above, and the id cannot be');
+      out.push('  constructed — it embeds the Visual Studio release that shipped the toolset, and a');
+      out.push('  guessed id installs nothing while still exiting 0. Use the GUI: Visual Studio');
+      out.push('  Installer -> Modify -> Individual components -> search "Spectre" -> tick the entry');
+      out.push('  naming a toolset listed above -> Modify.');
+    }
     return out;
   }
 

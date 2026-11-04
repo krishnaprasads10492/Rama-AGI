@@ -50,13 +50,43 @@
  * loudly - it installs nothing and reports success - so a single guessed id would be worse than
  * useless. Both are offered, and the GUI is named as the authority.
  */
+/**
+ * Toolset directory prefix -> the EXACT component id for that toolset's x64/x86 Spectre libs.
+ *
+ * WHY A TABLE AND NOT A PATTERN (spec Section 186.6). The id is not derivable: it embeds both the
+ * MSVC toolset version and the Visual Studio release that shipped it — `14.29` pairs with `16.11`,
+ * `14.30` with `17.0` — so a constructed id would be a guess, and `vs_installer --add` with an id
+ * the catalogue does not know installs nothing while exiting 0. Master lost a round trip to exactly
+ * that. So this holds only entries confirmed against Microsoft's published component list, and
+ * anything absent is answered with the GUI rather than an invented id.
+ *
+ * Source: https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-build-tools
+ */
+const SPECTRE_BY_TOOLSET = Object.freeze({
+  '14.29': Object.freeze({
+    id: 'Microsoft.VisualStudio.Component.VC.14.29.16.11.x86.x64.Spectre',
+    name: 'MSVC v142 - VS 2019 C++ x64/x86 Spectre-mitigated libs (v14.29-16.11)',
+  }),
+});
+
+/** The confirmed component id for an installed toolset version, or null to mean "use the GUI". */
+function spectreComponentFor(toolsetVersion) {
+  const m = /^(\d+\.\d+)\./.exec(String(toolsetVersion || ''));
+  return (m && SPECTRE_BY_TOOLSET[m[1]]) || null;
+}
+
 const SPECTRE = Object.freeze({
   error: 'MSB8040',
   componentName: 'MSVC v142 - VS 2019 C++ x64/x86 Spectre-mitigated libs',
+  // CONFIRMED FIRST, per Section 186.6. `…VC.v142.x86.x64.Spectre` used to lead this list and is
+  // NOT in Microsoft's published component list for either catalogue — it was my construction, and
+  // it is the id master ran against a machine whose toolset is 14.29.30133, which is why nothing
+  // installed and nothing complained. The version-pinned ids are the ones that are published.
   componentIds: Object.freeze([
-    'Microsoft.VisualStudio.Component.VC.v142.x86.x64.Spectre',
     'Microsoft.VisualStudio.Component.VC.14.29.16.11.x86.x64.Spectre',
   ]),
+  installerPath: `${process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'}`
+    + '\\Microsoft Visual Studio\\Installer\\vs_installer.exe',
   docs: 'https://learn.microsoft.com/en-us/visualstudio/msbuild/errors/msb8040',
 });
 
@@ -150,6 +180,8 @@ function remedyLines(installPath) {
 
 module.exports = {
   SPECTRE,
+  SPECTRE_BY_TOOLSET,
+  spectreComponentFor,
   NATIVE_MODULES,
   NATIVE_MODULE_NAMES,
   consequences,
