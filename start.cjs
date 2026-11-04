@@ -111,7 +111,14 @@ const BOOT_LOG      = path.join(SYS_DIR, 'boot-history.json');
  */
 function ensureUtf8Console() {
   if (!isWin) return;
-  try { spawnSync('chcp', ['65001'], { stdio: 'ignore', shell: true }); } catch { /* cosmetic only */ }
+  // ONE COMMAND STRING, NOT AN ARGS ARRAY WITH `shell: true` (Section 179).
+  //
+  // `spawnSync(cmd, args, { shell: true })` is deprecated as DEP0190: with a shell, the args are
+  // concatenated rather than escaped, so the array creates the impression of safety without
+  // providing it. Node 24 warns on every call, which on this path meant a deprecation notice at
+  // every single launch. The supported form under a shell is a command string, and `chcp 65001` is
+  // a fixed literal with nothing interpolated into it, so there is nothing to quote.
+  try { spawnSync('chcp 65001', { stdio: 'ignore', shell: true }); } catch { /* cosmetic only */ }
   try { process.stdout.setDefaultEncoding?.('utf8'); } catch { /* cosmetic only */ }
 }
 

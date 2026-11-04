@@ -778,6 +778,39 @@ const INVARIANTS = [
       const jsx = shipped.filter((f) => f.endsWith('.jsx'));
       r.check('including .jsx, which the scanner must survive', jsx.length > 0, jsx.length);
 
+      // ── DEP0190: an args array with `shell: true` (Section 179) ────────────────────────────────
+      //
+      // Under a shell the arguments are CONCATENATED, not escaped, so the array form looks safe
+      // while providing none of the safety. Node 24 deprecates it; before that it was silently the
+      // same hazard. `start.cjs` had one on the launch path, so master saw a deprecation notice on
+      // every single start. The supported form under a shell is one command string.
+      //
+      // Scanned across shipped code AND scripts, because the build scripts run on master's machine
+      // and the hazard is identical there. The check is syntactic and deliberately narrow: it looks
+      // for `spawn(x, [` / `spawnSync(x, [` / `execFile(x, [` within a few lines of `shell: true`.
+      const shellArgsOffenders = [];
+      const scanForShellArgs = (rel, text) => {
+        if (!text) return;
+        const lines = text.split('\n');
+        lines.forEach((line, i) => {
+          if (!/\b(?:spawn|spawnSync|execFile|execFileSync)\s*\(\s*[^,)]+,\s*\[/.test(line)) return;
+          // The options object may sit on the same line or the next few.
+          const window = lines.slice(i, i + 5).join(' ');
+          if (/shell:\s*true/.test(window)) shellArgsOffenders.push(`${rel}:${i + 1}`);
+        });
+      };
+      for (const f of shipped) {
+        const fv = viewOf(root, f);
+        scanForShellArgs(f, fv && fv.code);
+      }
+      for (const rel of ['scripts/buildInstaller.cjs', 'scripts/beforeBuild.cjs',
+        'scripts/renderCheckTypeScale.mjs', 'scripts/shipLog.cjs', 'start.cjs']) {
+        try { scanForShellArgs(rel, fs.readFileSync(path.join(root, rel), 'utf8')); }
+        catch { /* a script that is not present cannot offend */ }
+      }
+      r.check('no child process is spawned with an args array AND shell: true (DEP0190)',
+        shellArgsOffenders.length === 0, shellArgsOffenders.join(', '));
+
       const loggers = [];
       for (const f of shipped) {
         const fv = viewOf(root, f);

@@ -431,8 +431,17 @@ const COMFY = b.DISK_COMFY_MB;
     const i = src.indexOf('function productionTreeProblems(');
     const j = src.indexOf('\n}', src.indexOf('return out;', i));
     const body = i >= 0 ? src.slice(i, j) : '';
-    return /'ls', '--omit=dev'/.test(body)
-      && !/'install'|'prune'|'ci'|'update'/.test(body);
+    // Matches the command whichever way it is spelled. It was an args array until Section 179
+    // moved it to a single string to clear DEP0190, and the intent being asserted is the verb,
+    // not the call shape.
+    return /npm ls --omit=dev|'ls', '--omit=dev'/.test(body)
+      && !/\bnpm (install|prune|ci|update)\b|'install'|'prune'|'ci'|'update'/.test(body);
+  })());
+  check('and it is spawned the DEP0190-safe way: a command string, not args plus a shell', (() => {
+    const i = src.indexOf('function productionTreeProblems(');
+    const j = src.indexOf('\n}', src.indexOf('return out;', i));
+    const body = i >= 0 ? src.slice(i, j) : '';
+    return /spawnSync\('npm ls [^']*',\s*\{/.test(body) && !/spawnSync\('npm',\s*\[/.test(body);
   })());
   check('an unlistable tree BLOCKS, rather than being a warning', (() => {
     const i = src.indexOf('const treeReasons =');

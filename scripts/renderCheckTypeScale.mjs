@@ -114,8 +114,11 @@ async function startDevServer() {
   }
   /* `shell: true` is required, not stylistic: since Node 18.20 spawning a `.cmd` directly fails with
      EINVAL (CVE-2024-27980), and npm on Windows IS a .cmd shim. The shell is also why teardown has
-     to kill the whole tree below. */
-  const proc = spawn('npm.cmd', ['run', 'dev:renderer'], {
+     to kill the whole tree below.
+
+     Passed as ONE COMMAND STRING, not an args array: under a shell the args are concatenated rather
+     than escaped, which Node 24 deprecates as DEP0190. Both tokens here are fixed literals. */
+  const proc = spawn('npm run dev:renderer', {
     cwd: ROOT, stdio: 'ignore', windowsHide: true, shell: true,
   });
   proc.on('error', (err) => console.error(`  dev server spawn failed: ${err.message}`));

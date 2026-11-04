@@ -516,9 +516,12 @@ function productionTreeProblems(runner = null) {
     // against a KNOWN-BROKEN listing. Without it the only testable state is whatever this machine
     // happens to be in, which is the state that is already fine.
     //
-    // `shell: true` because on Windows npm is `npm.cmd`, which is not directly executable; the
-    // argument list is fixed and contains no interpolation, so there is nothing to quote.
-    res = runner ? runner() : spawnSync('npm', ['ls', '--omit=dev', '--depth=0'], {
+    // `shell: true` because on Windows npm is `npm.cmd`, and since Node 18.20 spawning a `.cmd`
+    // directly fails with EINVAL (CVE-2024-27980). Given a shell, the command is passed as ONE
+    // STRING rather than as an args array: `spawnSync(cmd, args, { shell: true })` is deprecated as
+    // DEP0190 because the args are concatenated instead of escaped, which looks safe and is not.
+    // Every token here is a fixed literal, so there is nothing to quote.
+    res = runner ? runner() : spawnSync('npm ls --omit=dev --depth=0', {
       cwd: ROOT, encoding: 'utf8', timeout: 120_000, shell: true, windowsHide: true,
     });
   } catch (err) {
