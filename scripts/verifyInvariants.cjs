@@ -1135,6 +1135,63 @@ const INVARIANTS = [
         + 'covers the runtime half, by asserting a dummy key appears exactly once in a whole run');
     },
   },
+  {
+    // A RATCHET, NOT A REFACTOR (spec Section 184.2).
+    //
+    // `main.cjs` holds 46 IPC handlers — more than any dedicated module, against modelRouter's 21
+    // and authEngine's 20 — on top of being the bootstrap, the refresh scheduler, the self-model,
+    // the workspace registry, local update, appearance and health. That size is not a tidiness
+    // complaint: it CAUSED Section 182.0. A handler added there collided with one in
+    // `ipc/system.cjs`, `ipcMain.handle` threw, the per-subsystem catch swallowed it, and the
+    // `sched.start()` that followed never ran — so every daily background task stopped for four
+    // tranches and nothing noticed.
+    //
+    // Restructuring the file is REFUSED here (184.2): a thousand-line move with no behavioural test
+    // for most of it, in a repository where `vite build` cannot be run, is the condition under which
+    // this project has already produced four wrong diagnoses. What is cheap and sufficient is to
+    // stop the growth. The existing 46 are grandfathered; the 47th must go to
+    // `electron/ipc/<domain>.cjs` like every other handler.
+    //
+    // The number may go DOWN and not UP — the same shape as verifyCommentCensus's comment ceiling
+    // and verifyReachability's "no NEW preload member without a caller", so a ratchet costs nothing
+    // on a tranche that does not touch the file and refuses only the change that makes it worse.
+    //
+    // Unnumbered and RAISED FOR MASTER, on the I-SECRETS precedent: promotion to a numbered
+    // invariant in Section 28 is his call, so the id cannot be mistaken for one.
+    id: 'I-MAIN-SIZE',
+    title: 'no NEW IPC handler in main.cjs — handlers live in electron/ipc/<domain>.cjs',
+    files: ['electron/main.cjs'],
+    check(root, r) {
+      // FROZEN AT THE MEASURED VALUE on 2026-11-06, not at a round number: a ceiling chosen for
+      // neatness would leave slack, and slack is where the 47th handler goes.
+      const BASELINE = 46;
+      const fv = viewOf(root, 'electron/main.cjs');
+      r.check('main.cjs is readable', !!fv);
+      if (!fv) return;
+
+      // The comment-stripped view, because a registration quoted in prose is not a registration —
+      // this file documents several, and counting them would redden a correct tree.
+      const found = (fv.nc.match(/\.handle(?:Once)?\(\s*'[^']+'/g) || []);
+      r.check(`main.cjs holds no more than its ${BASELINE} grandfathered handlers (found ${found.length})`,
+        found.length <= BASELINE,
+        found.length > BASELINE
+          ? `${found.length - BASELINE} new handler(s) in main.cjs. Register them in `
+            + 'electron/ipc/<domain>.cjs and add the module to REGISTRATIONS instead — a handler '
+            + 'here is how Section 182.0 silenced every background task.'
+          : '');
+
+      // AND IT MUST BE REACHABLE AS A RATCHET. A baseline far above the real count can never go
+      // red, which is the quiet way a ceiling becomes decoration (the lesson from Section 183.4's
+      // comment stripper that stripped nothing).
+      r.check('the baseline is not slack — it equals what is actually there',
+        found.length === BASELINE,
+        `baseline ${BASELINE}, actual ${found.length}: lower the baseline to ${found.length}`);
+
+      r.residual('this bounds GROWTH, not size. main.cjs remains 2121 lines across seven '
+        + 'subsystems, and whether splitting it is safe is untested — 184.2 declines to claim it. '
+        + 'Extraction happens when a tranche already has reason to touch the part it moves');
+    },
+  },
 ];
 
 // ─── Self-test: plant a breach, require the named row to go red ────────────────
@@ -1270,6 +1327,19 @@ const MUTATIONS = [
     // literal here would make this suite's own source a hit for the scan it installs — the same
     // self-referential trap as a false positive, from the other direction. Do not "tidy" this.
     mutate: (src) => `const apiKey = '${`sk${'-'}A1b2C3d4E5f6G7h8I9j0`}';\n${src}`,
+  },
+  {
+    id: 'I-MAIN-SIZE-47th',
+    expect: 'I-MAIN-SIZE',
+    why: 'a 47th IPC handler added to main.cjs, which is the shape that caused Section 182.0',
+    pick: () => 'electron/main.cjs',
+    // Anchored on a handler that is unambiguously code rather than appended to the file: a
+    // registration after `module.exports` would still be counted, and would prove less — the
+    // breach being guarded is one more handler among the others, where nobody notices it.
+    mutate: (src) => src.replace(
+      /ipcMain\.handle\(\s*'health:startup'/,
+      "ipcMain.handle('planted:channel', async () => ({ ok: true }));\n  ipcMain.handle('health:startup'",
+    ),
   },
 ];
 
