@@ -278,6 +278,34 @@ function register(ipcMain) {
       });
 
       const review = advisor.review(rows);
+
+      // ── COVERAGE, STATED. This scan cannot report "clean" and must not be read that way ───────
+      //
+      // MEASURED on 2026-11-04, not estimated: `npm audit` found 20 advisories while this pipeline
+      // found 0. Two independent reasons, and both are properties of the design rather than bugs:
+      //
+      //   1. It asks only about DIRECT dependencies — 24 names against 402+ installed packages. Of
+      //      the 20 packages npm flagged, 3 were direct and 17 were transitive, so most advisories
+      //      are outside the question being asked.
+      //   2. OSV answers per PACKAGE. `vectra@0.9.0` has no advisory of its own; the exposure is in
+      //      the `openai`/`axios` chain beneath it. So even a direct dependency can come back clean
+      //      while being the route to a high-severity finding.
+      //
+      // A security report whose zero means "I did not look there" is the comfortable lie Section
+      // 170 D4 forbids, so the coverage travels WITH the verdict and `clean` is never claimed.
+      // Fixing this needs the installed tree rather than the manifest — see Section 180.5.
+      const coverage = {
+        askedAbout: rows.length,
+        directDependencies: Object.keys(pinned).length,
+        installedTreeCovered: false,
+        transitiveCovered: false,
+        meaning: 'Only direct dependencies were asked about, and OSV answers per package rather '
+          + 'than per dependency chain. A transitive advisory, or one reached THROUGH a direct '
+          + 'dependency, is outside what this scan can see.',
+        soZeroMeans: 'No advisory was found for the names asked about. It does NOT mean the '
+          + 'installed tree is clean — run npm audit for that until Section 180.5 lands.',
+      };
+
       return {
         ok: true,
         data: {
@@ -287,6 +315,9 @@ function register(ipcMain) {
           failures,
           scanned: rows.length,
           includedDev: !!includeDev,
+          coverage,
+          // Deliberately NOT a boolean "clean" field. There is no honest value for it here, and a
+          // caller that wants one would have to read `coverage` to see why it is absent.
           at: new Date().toISOString(),
         },
       };
