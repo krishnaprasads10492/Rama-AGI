@@ -302,9 +302,16 @@ const COMFY = b.DISK_COMFY_MB;
   section('a degraded native module is recorded, not just warned about once');
   const bb = fs.readFileSync(path.join(ROOT, 'scripts/beforeBuild.cjs'), 'utf8');
   check('the hook records its rebuild outcome on the context, in BOTH branches', (() => {
+    // The PROPERTY, not the variable spelling. This pinned `error: err.message`, which broke when
+    // Section 185 moved the invocation into `rebuildNatives.cjs` and the failure arrived as
+    // `outcome.error` instead — the check was testing an identifier rather than the fact that both
+    // branches record something, which is the same over-tight pinning that defended the false
+    // "piped shell" claim in 183.1.
     const okBranch = /context\.nativeRebuild = \{ ok: true, error: null \}/.test(bb);
-    const failBranch = /context\.nativeRebuild = \{ ok: false, error: err\.message \}/.test(bb);
-    return okBranch && failBranch;
+    const failBranch = /context\.nativeRebuild = \{ ok: false, error: [^}]+\}/.test(bb);
+    // And the failure branch must carry a REASON, not a bare false.
+    const reasoned = !/context\.nativeRebuild = \{ ok: false, error: (null|''|"")\s*\}/.test(bb);
+    return okBranch && failBranch && reasoned;
   })());
   // THIS CHECK USED TO PIN A FALSE CLAIM (Section 183). It asserted `/piped shell/` in
   // `beforeBuild.cjs`, and there is no piped shell anywhere in this codebase — a failed node-pty

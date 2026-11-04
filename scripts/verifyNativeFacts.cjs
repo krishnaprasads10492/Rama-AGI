@@ -25,6 +25,7 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
@@ -296,6 +297,81 @@ section('the diagnosis reports it, and the build manifest changes how it reads')
     !!bare && bare.expected !== true && !/known at build time/.test(bare.detail));
   check('the known-set reads BOTH manifest sources, not just readiness.degraded',
     /nativeModules\?\.degraded/.test(dsrc));
+}
+
+// ─── An npm script that cannot run (Section 185) ─────────────────────────────────────────────────
+section('every npm script names something that exists');
+{
+  // THE DEFECT: `"rebuild": "electron-rebuild"` — a bare binary name, which failed on master's
+  // machine with "electron-rebuild is not recognized as an internal or external command". Section
+  // 173 replaced the deprecated `electron-rebuild` package with `@electron/rebuild` in a
+  // lockfile-only change, so no `node_modules/.bin/electron-rebuild` shim was ever linked. 45 other
+  // shims exist; this was the only script naming one that does not. `beforeBuild.cjs` had already
+  // solved it privately by reading the installed package's manifest, so the project held a correct
+  // copy and a broken one — which is the whole argument for one implementation.
+  const pkg = require(path.join(ROOT, 'package.json'));
+  const rebuild = require('../scripts/rebuildNatives.cjs');
+
+  check('the rebuild script invokes a file, not a bare binary name',
+    /^node scripts\/rebuildNatives\.cjs$/.test(pkg.scripts.rebuild || ''), pkg.scripts.rebuild);
+  check('and nothing anywhere still invokes a bare electron-rebuild',
+    !Object.values(pkg.scripts).some((c) => /(^|[&|;]\s*)electron-rebuild\b/.test(String(c))),
+    Object.entries(pkg.scripts).filter(([, c]) => /electron-rebuild/.test(String(c))).join(' | '));
+
+  // THE GENERALISATION, which is the part worth keeping: ANY script naming a binary with no shim.
+  // Scoped to what can be checked — if `.bin` is absent or nearly empty this is a fresh checkout
+  // rather than a broken script, and the check says so instead of failing everything.
+  const binDir = path.join(ROOT, 'node_modules', '.bin');
+  const have = fs.existsSync(binDir)
+    ? new Set(fs.readdirSync(binDir).map((f) => f.replace(/\.(cmd|ps1)$/, '')))
+    : new Set();
+  const KNOWN_ON_PATH = new Set(['node', 'npm', 'npx', 'cd', 'echo', 'set', 'python', 'electron']);
+  if (have.size < 10) {
+    check('node_modules/.bin was populated enough to check script binaries', false,
+      `${have.size} shims — run npm install; this check cannot tell a broken script from a fresh checkout`);
+  } else {
+    const missing = new Set();
+    for (const [name, cmd] of Object.entries(pkg.scripts || {})) {
+      for (const seg of String(cmd).split(/&&|\|\||;/)) {
+        const tok = seg.trim().split(/\s+/)[0];
+        if (!tok || KNOWN_ON_PATH.has(tok)) continue;
+        if (tok.startsWith('"') || tok.includes('/') || tok.includes('\\')) continue;
+        if (!have.has(tok)) missing.add(`${name} -> ${tok}`);
+      }
+    }
+    check(`no npm script names a binary with no shim (${have.size} shims checked)`,
+      missing.size === 0, [...missing].join(', '));
+  }
+
+  // ONE IMPLEMENTATION, TWO CALLERS.
+  check('the build hook delegates rather than carrying its own copy', (() => {
+    const bb = read('scripts/beforeBuild.cjs');
+    return /require\('\.\/rebuildNatives\.cjs'\)/.test(bb) && /rebuildNatives\(\{ root \}\)/.test(bb);
+  })());
+  check('and the hook no longer resolves the binary itself',
+    !/node_modules', '@electron', 'rebuild'/.test(read('scripts/beforeBuild.cjs')));
+  check('the module requires only Node builtins, so beforeBuild still runs with no node_modules',
+    (read('scripts/rebuildNatives.cjs').match(/require\('([^']+)'\)/g) || [])
+      .every((r) => /'(child_process|fs|path)'/.test(r) || /nativeModuleFacts/.test(r)),
+    (read('scripts/rebuildNatives.cjs').match(/require\('([^']+)'\)/g) || []).join(','));
+
+  // RESOLVED FROM THE PACKAGE, NOT FROM PATH — and reported, never fetched.
+  const found = rebuild.resolveBin(ROOT);
+  check('the binary resolves from the installed package manifest',
+    found.ok === true && found.bin.includes(path.join('@electron', 'rebuild')),
+    JSON.stringify(found));
+  const absent = rebuild.rebuildNatives({ root: os.tmpdir(), stdio: 'pipe' });
+  check('a missing package is REPORTED, not downloaded',
+    absent.ok === false && /run npm install/.test(absent.error), JSON.stringify(absent));
+  check('and nothing in the rebuild path reaches for npx',
+    !/npx/.test(read('scripts/rebuildNatives.cjs').replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '')));
+
+  // The CLI must not compile on require, or importing it for a test would start a long build.
+  check('the CLI is behind a require.main guard',
+    /if \(require\.main === module\)/.test(read('scripts/rebuildNatives.cjs')));
+  check('and when it fails by hand it prints the same consequences and remedy the build does',
+    /facts\.consequences\(\)/.test(read('scripts/rebuildNatives.cjs'))
+    && /facts\.remedyLines\(\)/.test(read('scripts/rebuildNatives.cjs')));
 }
 
 // ─── A fetch cannot supply a compiler (Section 183.6) ───────────────────────────────────────────

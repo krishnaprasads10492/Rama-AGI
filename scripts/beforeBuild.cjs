@@ -10,11 +10,16 @@
  */
 
 const { execSync }   = require('child_process');
-const { existsSync, writeFileSync, mkdirSync, readFileSync } = require('fs');
+// `readFileSync` was dropped with the rebuild-resolution logic that moved to rebuildNatives.cjs —
+// an import with no call site is the start of the next reader's wrong assumption.
+const { existsSync, writeFileSync, mkdirSync } = require('fs');
 const path           = require('path');
 // Node builtins and ONE sibling that is itself builtin-free, so this still runs on a checkout with
 // no node_modules — the property that lets the dependency installer have dependencies of its own.
 const facts          = require('../shared/nativeModuleFacts.cjs');
+// The ONE native-rebuild invocation, shared with `npm run rebuild` so a correct copy and a broken
+// one cannot coexist — Section 185.
+const { rebuildNatives } = require('./rebuildNatives.cjs');
 
 /**
  * electron-builder's `beforeBuild` hook (unlike `afterPack`) is called BEFORE
@@ -102,26 +107,18 @@ module.exports = async function(context) {
   // devDependency even though electron-builder suggests removing it: we invoke it ourselves here,
   // and a transitive copy is not reliably resolvable.
   console.log('\n  ⬢ Rebuilding native modules for Electron...');
-  try {
-    // Read the manifest off disk rather than through `require.resolve`: @electron/rebuild declares
-    // an `exports` map that does not expose './package.json', so resolving it that way throws
-    // ERR_PACKAGE_PATH_NOT_EXPORTED. The directory is what we need, not a module specifier.
-    const rebuildDir = path.join(root, 'node_modules', '@electron', 'rebuild');
-    const manifest = path.join(rebuildDir, 'package.json');
-    if (!existsSync(manifest)) {
-      throw new Error(`@electron/rebuild is not installed at ${rebuildDir} — run npm install`);
-    }
-    const binRel = (JSON.parse(readFileSync(manifest, 'utf8')).bin || {})['electron-rebuild'];
-    if (!binRel) throw new Error('@electron/rebuild declares no electron-rebuild binary');
-    const binAbs = path.join(rebuildDir, binRel);
-    execSync(`node "${binAbs}" --force`, { cwd: root, stdio: 'inherit' });
+  // DELEGATED to `scripts/rebuildNatives.cjs`, which is also what `npm run rebuild` calls
+  // (Section 185). The resolution logic used to live here and only here, so the npm script carried
+  // a bare `electron-rebuild` that could not run at all once Section 173 renamed the package.
+  const outcome = rebuildNatives({ root });
+  if (outcome.ok) {
     console.log('  ✓ Native modules rebuilt\n');
     // RECORDED ON THE CONTEXT, not only printed. The caller owns this object, so this is how the
     // outcome reaches the build manifest and the closing report. Swallowing the failure in a
     // warning was why master could hold an installer whose build never mentioned it again.
     context.nativeRebuild = { ok: true, error: null };
-  } catch (err) {
-    console.warn(`  ⚠ electron-rebuild failed: ${err.message}`);
+  } else {
+    console.warn(`  ⚠ electron-rebuild failed: ${outcome.error}`);
     // READ FROM `shared/nativeModuleFacts.cjs`, NOT WRITTEN HERE. This used to print "argon2 falls
     // back to scrypt, node-pty to a piped shell — both work, both weaker". "Both work" was false:
     // there is no piped shell, and a failed node-pty means no terminal at all. The claim was
@@ -129,8 +126,9 @@ module.exports = async function(context) {
     for (const line of facts.consequences()) console.warn(`  ⚠ ${line}`);
     for (const line of facts.remedyLines()) console.warn(`  ⚠ ${line}`);
     console.warn('');
-    context.nativeRebuild = { ok: false, error: err.message };
+    context.nativeRebuild = { ok: false, error: outcome.error };
   }
+
 
   // ── MUST RETURN TRUE. Returning false does not mean what it was taken to mean. ───────────────
   //
