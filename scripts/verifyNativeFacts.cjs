@@ -298,6 +298,77 @@ section('the diagnosis reports it, and the build manifest changes how it reads')
     /nativeModules\?\.degraded/.test(dsrc));
 }
 
+// ─── A fetch cannot supply a compiler (Section 183.6) ───────────────────────────────────────────
+//
+// In a function because `repair()` is async and this is a .cjs file, so there is no top-level
+// await. Called at the bottom, before the summary.
+async function repairSection() {
+  section('repair does not try to download its way out of a missing compiler');
+  // THE REGRESSION THIS GUARDS, and it was mine. Before 183.2 a present-but-unbuilt native module
+  // produced no degradation at all, because `require.resolve` succeeded — so `repair()` never saw
+  // it. Reporting it honestly put it in front of a repair pass that fetches the lockfile tarball,
+  // and that tarball carries no binding for Electron's ABI. On a build with no manifest to mark it
+  // expected, every launch would have spent a network round trip failing to fix it, and a
+  // "successful" extraction would leave resolve passing while require still threw.
+  const unbuilt = doctor.diagnose({
+    safeRequireFailures: [], crashReports: [],
+    probeNative: () => ({ ok: false, kind: 'not-built', error: 'pty.node could not be found' }),
+  });
+  check('a native degradation is marked as not fetchable',
+    unbuilt.degraded.filter((d) => /^native-/.test(d.id)).every((d) => d.fetchable === false),
+    JSON.stringify(unbuilt.degraded.map((d) => [d.id, d.fetchable])));
+
+  const r = await doctor.repair(unbuilt, { safeRequireFailures: [], crashReports: [] });
+  check('so repair attempts NOTHING for it', r.attempted.length === 0, JSON.stringify(r.attempted));
+  check('and says why, rather than silently skipping it',
+    r.notes.some((n) => /needs a compiler, not a download|needs a C\+\+ toolchain/.test(n)),
+    JSON.stringify(r.notes));
+  check('it does not claim to have repaired anything', r.repaired.length === 0);
+
+  // THE FLAG ON ITS OWN, tested with a module that is NOT in `NATIVE`. Two guards cover these two
+  // packages — the row's flag and the sweep over `NATIVE` — so a mutation to either one survives
+  // while the other still holds. That is fine as defence, useless as evidence: without this case
+  // the suite could not say whether `fetchable: false` is honoured at all, which is what any
+  // FUTURE unfixable-by-download entry will depend on.
+  const flagged = await doctor.repair(
+    { fatal: [], degraded: [{ id: 'dep-sharp', module: 'sharp', detail: 'sharp did not load', fetchable: false }] },
+    { safeRequireFailures: [], crashReports: [] },
+  );
+  check('`fetchable: false` alone is enough to skip a module outside the NATIVE list',
+    !flagged.attempted.includes('sharp'), JSON.stringify(flagged.attempted));
+  check('and it is explained rather than dropped',
+    flagged.notes.some((n) => /sharp/.test(n) && /not a download/.test(n)), JSON.stringify(flagged.notes));
+  // Mirror: the SAME entry without the flag is attempted, so the check above is about the flag.
+  const unflagged = await doctor.repair(
+    { fatal: [], degraded: [{ id: 'dep-sharp', module: 'sharp', detail: 'sharp did not load' }] },
+    { safeRequireFailures: [], crashReports: [] },
+  );
+  check('while the same entry WITHOUT the flag is attempted',
+    unflagged.attempted.includes('sharp'), JSON.stringify(unflagged.attempted));
+
+  // The OTHER route in: a safeRequire failure naming the same module by its error text.
+  const viaReason = await doctor.repair(
+    { fatal: [], degraded: [] },
+    { safeRequireFailures: [{ name: 'terminal', reason: "Cannot find module 'node-pty'" }], crashReports: [] },
+  );
+  check('a native named through a "Cannot find module" reason is dropped too',
+    !viaReason.attempted.includes('node-pty'), JSON.stringify(viaReason.attempted));
+  check('and that path explains itself as well',
+    viaReason.notes.some((n) => /node-pty/.test(n) && /toolchain|compiler/.test(n)),
+    JSON.stringify(viaReason.notes));
+
+  // NON-VACUOUS: a pure-JS module must still be attempted, or the guard above would be proving
+  // nothing more than "repair does nothing".
+  const js = await doctor.repair(
+    { fatal: [], degraded: [] },
+    { safeRequireFailures: [{ name: 'sysinfo', reason: "Cannot find module 'debug'" }], crashReports: [] },
+  );
+  check('a pure-JS module IS still attempted — the exclusion is narrow',
+    js.attempted.includes('debug'), JSON.stringify(js.attempted));
+  check('the banner\u2019s claim that a native module is out of reach is now enforced in code',
+    /for \(const name of NATIVE\) \{\s*\n\s*if \(wanted\.delete\(name\)\)/.test(read('electron/lib/startupDoctor.cjs')));
+}
+
 // ─── The message master actually meets ──────────────────────────────────────────────────────────
 section('the terminal says which fault it is');
 {
@@ -314,9 +385,34 @@ section('the terminal says which fault it is');
     /the terminal is `\s*\n?\s*\+ 'DISABLED|DISABLED: no command will run/.test(t), 'console.warn wording');
   check('one helper, called from the handler, rather than a copy per handler',
     /function ptyUnavailable\(\)/.test(t) && /if \(!pty\) return ptyUnavailable\(\);/.test(t));
+
+  // ── AND THE SCREEN SHOWS IT, which it never did (Section 183.6) ──
+  //
+  // `Terminal.jsx` tested `res.error.includes('may not')` and otherwise printed a sentence written
+  // in the component. No handler has ever produced a message containing "may not", so the
+  // component's own fallback is what master always saw — the handler's diagnosis, old or new,
+  // reached the screen exactly never.
+  const ui = read('src/pages/Terminal/Terminal.jsx');
+  // Comment-stripped, for the same reason as the "piped shell" ban: the comment above the fix
+  // quotes the sniff it replaced, and a check that cannot tell code from its own history would
+  // force the history to be deleted.
+  check('the page no longer sniffs the error text for a string nothing produces',
+    !/includes\('may not'\)/.test(codeOnly(ui)),
+    (codeOnly(ui).match(/.*may not.*/) || []).join(' | '));
+  check('it renders the handler\u2019s own error', /text: `⚠ \$\{res\.error/.test(codeOnly(ui)),
+    'res.error not rendered');
+  check('it renders the remedy that travels with it', /res\.remedy/.test(ui));
+  check('an error with no text still produces a sentence rather than a bare warning sign',
+    /no reason was reported/i.test(ui));
+  check('and the simulated session no longer implies commands run',
+    /commands are echoed, not executed/i.test(ui));
 }
 
-console.log(`\n${'='.repeat(62)}`);
-console.log(`  ${pass} passed, ${fail} failed`);
-console.log('='.repeat(62));
-process.exit(fail === 0 ? 0 : 1);
+repairSection()
+  .catch((err) => { check('the repair section ran without throwing', false, err.message); })
+  .then(() => {
+    console.log(`\n${'='.repeat(62)}`);
+    console.log(`  ${pass} passed, ${fail} failed`);
+    console.log('='.repeat(62));
+    process.exit(fail === 0 ? 0 : 1);
+  });

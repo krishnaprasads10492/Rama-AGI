@@ -15,19 +15,16 @@
  * third of its own dependencies.
  *
  * WHAT THIS CHECKS, and why each one is here rather than assumed:
- *   - declared production dependencies actually resolve. `genome.verify()` looks
- *     impressive but only resolves *first-party* engine paths, so a missing npm
- *     package never registered as a dead gene. This is the check that would have
- *     caught the `debug` crash before it became a crash.
- *   - the renderer bundle exists. Checked already in `loadRenderer`, but only
- *     after the whole require chain succeeded, so it could never report on a
- *     startup that died earlier.
- *   - the capability matrix is readable. `capability.can()` fails closed on an
- *     unknown capability, so a missing matrix silently denies everything —
- *     an app that appears to work and refuses every action.
+ *   - declared production dependencies actually resolve. `genome.verify()` resolves only
+ *     *first-party* engine paths, so a missing npm package never registered as a dead gene —
+ *     this is the check that would have caught the `debug` crash before it became one.
+ *   - the renderer bundle exists. `loadRenderer` checks it only after the whole require chain
+ *     succeeded, so it could never report on a startup that died earlier.
+ *   - the capability matrix is readable. `capability.can()` fails closed, so a missing matrix
+ *     silently denies everything: an app that appears to work and refuses every action.
  *   - subsystems that degraded on load, from safeRequire's record.
- *   - crash reports from previous runs, so a fault that killed the last launch is
- *     visible on this one instead of being forgotten.
+ *   - crash reports from previous runs, so a fault that killed the last launch is visible on
+ *     this one instead of being forgotten.
  *
  * WHAT IT DOES ABOUT IT: `diagnose()` reports and `repair()` acts — a missing package named in the
  * lockfile is fetched, checksum-verified and made resolvable, then the failed loads are retried.
@@ -137,6 +134,8 @@ function diagnose(ctx = {}) {
       degraded.push({
         id: `native-${name}`,
         module: name,
+        // A download cannot supply a binding for Electron's ABI — spec Section 183.6.
+        fetchable: false,
         detail: `${name} ${r.kind === 'not-built' ? 'did not compile' : 'is not installed'} — `
           + (fact ? fact.whenMissing : `${name} is unavailable`),
         remedy: r.kind === 'not-built' && nativeFacts
@@ -284,6 +283,10 @@ async function repair(result, ctx = {}) {
 
   for (const entry of [...(result.fatal ?? []), ...(result.degraded ?? [])]) {
     if (entry.expected) continue;            // a build-time trade-off, not damage
+    if (entry.fetchable === false) {
+      notes.push(`${entry.module ?? entry.id}: needs a compiler, not a download — skipped`);
+      continue;
+    }
     if (entry.module) { wanted.add(entry.module); continue; }
     const fromReason = missingModuleFrom(entry.detail);
     if (fromReason) wanted.add(fromReason);
@@ -294,8 +297,17 @@ async function repair(result, ctx = {}) {
     if (name) wanted.add(name);
   }
 
+  // The banner's "out of reach is a native module needing a compiler", enforced — Section 183.6.
+  for (const name of NATIVE) {
+    if (wanted.delete(name)) {
+      notes.push(`${name} needs a C++ toolchain, which a package download cannot supply — skipped`);
+    }
+  }
+
   if (wanted.size === 0) {
-    return { attempted: [], repaired: [], stillMissing: [], recoveredSubsystems: [], rediagnosed: null, notes: ['nothing to repair'] };
+    // The notes TRAVEL: "nothing wrong" and "something I cannot fix this way" are different facts.
+    return { attempted: [], repaired: [], stillMissing: [], recoveredSubsystems: [], rediagnosed: null,
+      notes: notes.length ? notes : ['nothing to repair'] };
   }
 
   let selfRepair;

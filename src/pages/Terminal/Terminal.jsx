@@ -37,9 +37,15 @@ export default function Terminal() {
       setSessions(s => [...s, {
         id,
         title:  'Shell (Simulated)',
+        // THE HANDLER'S OWN DIAGNOSIS, SHOWN. This used to test `res.error.includes('may not')`
+        // and fall back to a sentence written here — and NO handler has ever produced a message
+        // containing "may not", so the fallback was what master always saw. The real reason
+        // ("installed but its native binding was never built", which npm cannot fix) and the
+        // remedy that comes with it never reached the screen. Spec Section 183.6.
         lines:  [
-          { type: 'sys', text: res.error?.includes('may not') ? `⚠ ${res.error}` : '⚠ node-pty not available. Install it and rebuild to enable full PTY.' },
-          { type: 'sys', text: 'Simulated terminal mode active.' },
+          { type: 'sys', text: `⚠ ${res.error || 'The terminal could not start, and no reason was reported.'}` },
+          ...(Array.isArray(res.remedy) ? res.remedy.map((r) => ({ type: 'sys', text: `  ${r}` })) : []),
+          { type: 'sys', text: 'Simulated mode: commands are echoed, not executed.' },
         ],
       }]);
       setActiveId(id);
