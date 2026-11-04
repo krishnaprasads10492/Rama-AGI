@@ -12,6 +12,9 @@
 const { execSync }   = require('child_process');
 const { existsSync, writeFileSync, mkdirSync, readFileSync } = require('fs');
 const path           = require('path');
+// Node builtins and ONE sibling that is itself builtin-free, so this still runs on a checkout with
+// no node_modules — the property that lets the dependency installer have dependencies of its own.
+const facts          = require('../shared/nativeModuleFacts.cjs');
 
 /**
  * electron-builder's `beforeBuild` hook (unlike `afterPack`) is called BEFORE
@@ -119,9 +122,13 @@ module.exports = async function(context) {
     context.nativeRebuild = { ok: true, error: null };
   } catch (err) {
     console.warn(`  ⚠ electron-rebuild failed: ${err.message}`);
-    console.warn('  ⚠ argon2 falls back to scrypt, node-pty to a piped shell — both work, both weaker');
-    console.warn('  ⚠ On Windows this is usually the missing "MSVC v142 - VS 2019 C++ x64/x86');
-    console.warn('  ⚠   Spectre-mitigated libs" component in the Visual Studio Installer\n');
+    // READ FROM `shared/nativeModuleFacts.cjs`, NOT WRITTEN HERE. This used to print "argon2 falls
+    // back to scrypt, node-pty to a piped shell — both work, both weaker". "Both work" was false:
+    // there is no piped shell, and a failed node-pty means no terminal at all. The claim was
+    // duplicated in three files and wrong in all three, so there is now one copy (Section 183).
+    for (const line of facts.consequences()) console.warn(`  ⚠ ${line}`);
+    for (const line of facts.remedyLines()) console.warn(`  ⚠ ${line}`);
+    console.warn('');
     context.nativeRebuild = { ok: false, error: err.message };
   }
 

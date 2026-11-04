@@ -36,6 +36,11 @@ const fs   = require('fs');
 const os   = require('os');
 const path = require('path');
 
+// The ONE declaration of what a failed native rebuild costs, shared with `beforeBuild.cjs` and with
+// the shipped `startupDoctor.cjs` so the build and the installed app cannot tell master two
+// different stories about the same module (Section 183).
+const nativeFacts = require('../shared/nativeModuleFacts.cjs');
+
 const ROOT  = path.join(__dirname, '..');
 const isWin = process.platform === 'win32';
 
@@ -689,14 +694,22 @@ async function runBeforeBuild() {
   return beforeBuildOutcome;
 }
 
-/** The degradations a failed native rebuild actually causes, named rather than implied. */
+/**
+ * The degradations a failed native rebuild actually causes, named rather than implied.
+ *
+ * DELEGATED, NOT WRITTEN HERE (Section 183). This function used to hold its own copy of the
+ * sentences, and its node-pty line — "the terminal is a piped shell rather than a real pty" — was
+ * false: there is no piped shell, so the terminal is disabled outright. Two other files carried
+ * their own copies of the same wrong claim. `shared/nativeModuleFacts.cjs` is now the one
+ * declaration, and it ships, so the installed app says what the build recorded.
+ */
 function nativeDegradations() {
-  return [
-    'argon2 did not compile, so the credential vault derives its key with scrypt instead of '
-    + 'Argon2id. Contents stay AES-256-GCM encrypted; a stolen vault file is cheaper to attack.',
-    'node-pty did not compile, so the terminal is a piped shell rather than a real pty. '
-    + 'Interactive programs that need a tty will misbehave.',
-  ];
+  return nativeFacts.consequences();
+}
+
+/** What master can actually run about it. A remedy that is prose is a remedy he cannot execute. */
+function nativeRemedy() {
+  return nativeFacts.remedyLines();
 }
 
 /**
@@ -2527,10 +2540,13 @@ async function main() {
   });
   ok(`Build manifest written — the app will know its own limits at runtime`);
   if (nativesDegraded) {
-    warn('This package will ship with DEGRADED native modules, and that is recorded in the manifest:');
+    warn('This package will ship with BROKEN or degraded native modules, recorded in the manifest:');
     for (const c of nativeDegradations()) warn(`  · ${c}`);
-    warn('  The installer is still produced and will run. To fix it, install the Visual Studio');
-    warn('  component "MSVC v142 - VS 2019 C++ x64/x86 Spectre-mitigated libs" and build again.');
+    warn('  The installer is still produced and will run.');
+    // A COMMAND, not "install the Visual Studio component" (Section 183, following Section 176's
+    // ruling on the Node-version advice). The component id differs between installer catalogues and
+    // a wrong id installs nothing without failing, which is why the GUI path is named too.
+    for (const r of nativeRemedy()) warn(`  ${r}`);
   } else if (prep.nativeRebuild.ok === null) {
     info('The native rebuild reported no outcome, so whether argon2 and node-pty match this');
     info('  Electron build is unknown rather than confirmed.');

@@ -8,12 +8,60 @@ const capability = require('../lib/capability.cjs');
 const sessions = {};
 let sessionCounter = 0;
 
+// ─── Loading node-pty, and saying the right thing when it does not load ──────
+//
+// THE MESSAGE THIS REPLACES SENT MASTER AT THE WRONG FAULT (Section 183). It was
+// "node-pty not installed. Run: npm install node-pty" for every failure. On the
+// machine that actually hit this, node-pty WAS installed — it failed to COMPILE,
+// because the build machine lacks the MSVC v142 Spectre-mitigated libs, so
+// `npm install node-pty` either does nothing or fails the same way. The two
+// cases need different answers, and only the require error can tell them apart:
+// MODULE_NOT_FOUND for the package itself means absent, anything else (a missing
+// .node binding, a wrong NODE_MODULE_VERSION) means present but not built.
 let pty;
+let ptyFailure = null;
 try {
   pty = require('node-pty');
-} catch {
+} catch (err) {
   pty = null;
-  console.warn('[terminal.cjs] node-pty not available — terminal will be disabled');
+  let resolvable = false;
+  try { require.resolve('node-pty'); resolvable = true; } catch { /* genuinely absent */ }
+  ptyFailure = {
+    // `require.resolve` succeeding while `require` throws is the exact signature of a native module
+    // whose JavaScript is present and whose binding is not — and it is why the startup diagnosis
+    // could report node-pty as healthy on a machine where the terminal does not work at all.
+    kind: resolvable ? 'not-built' : 'not-installed',
+    error: err && err.message ? err.message : String(err),
+  };
+  console.warn(`[terminal.cjs] node-pty did not load (${ptyFailure.kind}) — the terminal is `
+    + 'DISABLED: no command will run. ' + ptyFailure.error);
+}
+
+/**
+ * Why the terminal is unavailable, in words master can act on.
+ *
+ * Kept beside the load rather than inlined at the call site because three handlers need it and a
+ * copy in each is how the last wrong version of this message survived two tranches.
+ */
+function ptyUnavailable() {
+  const facts = require('../../shared/nativeModuleFacts.cjs');
+  if (ptyFailure && ptyFailure.kind === 'not-built') {
+    return {
+      ok: false,
+      error: 'The terminal is unavailable: node-pty is installed but its native binding was never '
+        + 'built, so no command can run. This is a build-machine issue, not a missing package — '
+        + '`npm install node-pty` will not fix it.',
+      // The command, not advice. Section 176's ruling, applied to the one place master meets this.
+      remedy: facts.remedyLines(),
+      detail: ptyFailure.error,
+    };
+  }
+  return {
+    ok: false,
+    error: 'The terminal is unavailable: node-pty is not installed, so no command can run.',
+    remedy: ['npm install node-pty', 'Then restart Rāma.'],
+    detail: ptyFailure ? ptyFailure.error : null,
+  };
 }
 
 // ─── Register all terminal IPC handlers ──────────────────────────────────────
@@ -27,9 +75,7 @@ function register(ipcMain) {
   ipcMain.handle('terminal:create', async (event, { user, ...opts } = {}) => {
     const denied = capability.deny(user, 'terminal.open');
     if (denied) return denied;
-    if (!pty) {
-      return { ok: false, error: 'node-pty not installed. Run: npm install node-pty' };
-    }
+    if (!pty) return ptyUnavailable();
 
     const id   = ++sessionCounter;
     const cols  = opts.cols  || 120;

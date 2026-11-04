@@ -306,8 +306,16 @@ const COMFY = b.DISK_COMFY_MB;
     const failBranch = /context\.nativeRebuild = \{ ok: false, error: err\.message \}/.test(bb);
     return okBranch && failBranch;
   })());
-  check('and it names the real consequences rather than "may not work"',
-    /falls back to scrypt/.test(bb) && /piped shell/.test(bb));
+  // THIS CHECK USED TO PIN A FALSE CLAIM (Section 183). It asserted `/piped shell/` in
+  // `beforeBuild.cjs`, and there is no piped shell anywhere in this codebase — a failed node-pty
+  // disables the terminal outright. So the suite was defending the wrong sentence against its own
+  // correction, which is worse than not checking: a test that pins a claim makes it expensive to
+  // fix. It now asserts the hook reads the ONE declaration and prints no sentence of its own.
+  check('and it names the real consequences, from the one place they are declared',
+    /nativeModuleFacts\.cjs/.test(bb) && /facts\.consequences\(\)/.test(bb));
+  check('the false "piped shell" claim is gone from the hook\u2019s output',
+    !/console\.warn\([^)]*piped shell/i.test(bb));
+  check('and the hook prints a remedy master can run, not advice', /facts\.remedyLines\(\)/.test(bb));
   check('the outcome is carried into the build manifest', (() => {
     const i = src.indexOf('writeBuildManifest(readiness, {');
     const j = src.indexOf('});', i);
@@ -340,9 +348,15 @@ const COMFY = b.DISK_COMFY_MB;
     const i = src.indexOf('if (nativesDegraded) {');
     const j = src.indexOf('} else if', i);
     const block = i >= 0 && j > i ? src.slice(i, j) : '';
-    return /ship with DEGRADED native modules/.test(block)
+    return /BROKEN or degraded native modules/.test(block)
       && /still produced and will run/.test(block)
-      && /Spectre-mitigated libs/.test(block);
+      // The remedy is now a list of commands rather than a sentence naming the component, so the
+      // assertion follows it to where it lives (Section 183).
+      && /nativeRemedy\(\)/.test(block);
+  })());
+  check('and the remedy it prints contains an executable command', (() => {
+    const f = require(path.join(ROOT, 'shared/nativeModuleFacts.cjs'));
+    return f.remedyLines().some((l) => /vs_installer\.exe" modify .*--add /.test(l));
   })());
   check('the consequences are declared once and reused, not written twice', (() => (
     /function nativeDegradations\(\)/.test(src)

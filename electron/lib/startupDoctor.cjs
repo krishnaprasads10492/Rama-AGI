@@ -29,20 +29,11 @@
  *   - crash reports from previous runs, so a fault that killed the last launch is
  *     visible on this one instead of being forgotten.
  *
- * WHAT IT DOES ABOUT IT — and a correction. This block previously said repair was
- * impossible in an install, because "an install cannot npm-install into its own
- * read-only archive". That sentence is true; the conclusion drawn from it was not.
- * It answers whether the asar can be rewritten in place. It does not answer
- * whether a missing module can be obtained, which it can — `userData` is writable
- * and Node's module resolution can be pointed at it. Diagnosing a fault and then
- * asking master to reinstall is not self-healing, it is delegation with extra
- * steps. See `selfRepair.cjs` and spec Section 53.
- *
- * So `diagnose()` reports, and `repair()` acts: any missing package named in the
- * lockfile is fetched, checksum-verified, and made resolvable, then the failed
- * loads are retried and the diagnosis re-run. What genuinely remains beyond reach
- * is narrow and stated plainly — a native module needing a compiler, and a corrupt
- * asar, which is the auto-updater's job.
+ * WHAT IT DOES ABOUT IT: `diagnose()` reports and `repair()` acts — a missing package named in the
+ * lockfile is fetched, checksum-verified and made resolvable, then the failed loads are retried.
+ * The correction that made that possible (a read-only asar answers nothing about whether a module
+ * can be OBTAINED, since `userData` is writable) is in `selfRepair.cjs` and spec Section 53. What
+ * remains out of reach is a native module needing a compiler, and a corrupt asar.
  */
 
 const path = require('path');
@@ -60,8 +51,7 @@ const RUNTIME_CRITICAL = [
 const RUNTIME_OPTIONAL = [
   { name: 'systeminformation', gives: 'CPU/RAM/thermal detail (falls back to Node os)' },
   { name: 'simple-git',        gives: 'git operations and timeline flashbacks' },
-  { name: 'argon2',            gives: 'Argon2id hashing (falls back to scrypt)' },
-  { name: 'node-pty',          gives: 'a real terminal (falls back to a piped shell)' },
+  // argon2 and node-pty moved to `NATIVE`: resolving cannot see a missing binding — Section 183.2.
   { name: 'playwright',        gives: 'browser automation (HTTP fetch still works)' },
   { name: 'vectra',            gives: 'vector memory (falls back to keyword search)' },
   { name: 'axios',             gives: 'some outbound HTTP paths' },
@@ -72,15 +62,30 @@ const RUNTIME_OPTIONAL = [
 ];
 
 /**
- * Can this module be resolved from the app's own context?
- *
- * `require.resolve` rather than `require`: resolution is the question, and
- * executing a module to test whether it loads has side effects — a check that
- * changes the thing it measures is not a check.
+ * Can this module be resolved from the app's own context? `require.resolve` rather than `require`,
+ * because executing a module to test it has side effects — a check that changes the thing it
+ * measures is not a check. For a compiled module that is not enough: see `loads()`.
  */
 function resolves(name) {
   try { require.resolve(name); return true; }
   catch { return false; }
+}
+
+/** Modules with a compiled binding. A missing binding resolves fine — spec Section 183.2. */
+const NATIVE = ['argon2', 'node-pty'];
+
+/**
+ * Load it, and tell absent from present-but-unbuilt. Executes where `resolves()` will not, because
+ * for a binding the load is the only measurement; `req`/`res` inject so all three outcomes can be
+ * driven. Spec Section 183.2.
+ */
+function loads(name, { req = require, res = resolves } = {}) {
+  try { req(name); return { ok: true, kind: 'loaded', error: null }; }
+  catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    // `resolve` succeeding while `require` throws is the signature of a missing binding.
+    return { ok: false, kind: res(name) ? 'not-built' : 'not-installed', error: msg };
+  }
 }
 
 /**
@@ -113,6 +118,31 @@ function diagnose(ctx = {}) {
     add(dep.name, present, present ? '' : 'absent — running on the fallback');
     if (!present) {
       degraded.push({ id: `dep-${dep.name}`, module: dep.name, detail: `${dep.name} absent — ${dep.gives}` });
+    }
+  }
+
+  // Native modules, probed by LOADING — spec Section 183.2.
+  let nativeFacts = null;
+  try { nativeFacts = require('../../shared/nativeModuleFacts.cjs'); }
+  catch { /* the facts are a nicety here; the probe result is the finding */ }
+  const probeNative = ctx.probeNative ?? loads;
+  for (const name of NATIVE) {
+    const r = probeNative(name);
+    add(name, r.ok, r.ok ? '' : (r.kind === 'not-built'
+      ? 'installed but its native binding was never built'
+      : 'not installed'));
+    if (!r.ok) {
+      const fact = nativeFacts
+        && nativeFacts.NATIVE_MODULES.find((m) => m.name === name);
+      degraded.push({
+        id: `native-${name}`,
+        module: name,
+        detail: `${name} ${r.kind === 'not-built' ? 'did not compile' : 'is not installed'} — `
+          + (fact ? fact.whenMissing : `${name} is unavailable`),
+        remedy: r.kind === 'not-built' && nativeFacts
+          ? nativeFacts.remedyLines().join(' ')
+          : `npm install ${name}, then restart.`,
+      });
     }
   }
 
@@ -165,8 +195,8 @@ function diagnose(ctx = {}) {
   // Rāma say "node-pty was not compiled into this build" — an accepted trade-off
   // recorded at build time — rather than "node-pty is missing", which reads as a
   // broken installation and sends master looking for a fault that is not there.
-  let buildManifest = null;
-  try { buildManifest = require('../../shared/buildManifest.json'); }
+  let buildManifest = ctx.buildManifest ?? null;
+  try { if (!buildManifest) buildManifest = require('../../shared/buildManifest.json'); }
   catch { /* built before manifests existed, or built by the raw build:win path */ }
 
   if (buildManifest) {
@@ -176,9 +206,12 @@ function diagnose(ctx = {}) {
     add('build manifest', false, 'absent — build-time limits unknown');
   }
 
-  const known = new Set(
-    (buildManifest?.readiness?.degraded ?? []).map(d => String(d).split(' ')[0]),
-  );
+  // TWO sources. `nativeModules.degraded` was recorded by the build and read by nothing until
+  // spec Section 183.3 — without it a module the build knew it could not compile reads as damage.
+  const known = new Set([
+    ...(buildManifest?.readiness?.degraded ?? []).map(d => String(d).split(' ')[0]),
+    ...(buildManifest?.nativeModules?.degraded ?? []).map(d => String(d)),
+  ]);
 
   // Re-label anything the build already knew about, so it reads as expected rather
   // than as a new fault.
@@ -298,4 +331,5 @@ async function repair(result, ctx = {}) {
   return { attempted: [...wanted], repaired, stillMissing, recoveredSubsystems, rediagnosed, notes };
 }
 
-module.exports = { diagnose, repair, summarise, missingModuleFrom, RUNTIME_CRITICAL, RUNTIME_OPTIONAL };
+module.exports = { diagnose, repair, summarise, missingModuleFrom, loads, NATIVE,
+  RUNTIME_CRITICAL, RUNTIME_OPTIONAL };
