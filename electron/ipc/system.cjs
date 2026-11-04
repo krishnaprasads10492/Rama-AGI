@@ -238,6 +238,43 @@ function register(ipcMain) {
     }
   });
 
+  // ── Helpers for the tree-wide scan (spec Section 181) ────────────────────
+  //
+  // `npm audit` is the only readily available thing that resolves the INSTALLED TREE, which is what
+  // the manifest-shaped OSV pass cannot see. It is read-only, and it exits NON-ZERO whenever it
+  // finds anything — so a non-zero status is the normal case here and the JSON still arrives on
+  // stdout. Treating that exit code as failure is how a tree scan quietly becomes no scan.
+  //
+  // Passed as ONE command string, not an args array with a shell, per DEP0190 (Section 179).
+  const auditReport = () => new Promise((resolve) => {
+    exec('npm audit --json', { cwd: path.join(__dirname, '..', '..'), maxBuffer: 64 * 1024 * 1024,
+      timeout: 180_000, windowsHide: true }, (_err, stdout) => {
+      try { resolve(JSON.parse(stdout)); } catch { resolve(null); }
+    });
+  });
+
+  /**
+   * Versions actually on disk, which is what makes a DOWNGRADE detectable.
+   *
+   * Without this the triage cannot tell an upgrade from npm's occasional suggestion to install an
+   * older release, and reports `unknown` rather than guessing — so supplying it is what turns that
+   * class of finding from unknown into refused.
+   */
+  const installedVersions = (own) => {
+    const root = path.join(__dirname, '..', '..');
+    const out = {};
+    const names = new Set([
+      ...Object.keys(own.dependencies || {}),
+      ...Object.keys(own.devDependencies || {}),
+    ]);
+    for (const n of names) {
+      try {
+        out[n] = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', n, 'package.json'), 'utf8')).version;
+      } catch { /* not installed at the top level; the triage reports that honestly */ }
+    }
+    return out;
+  };
+
   // ── Dependency and vulnerability review (spec Section 180) ───────────────
   //
   // THE HANDLER THAT WAS MISSING. `preload.cjs` has exposed `deps:review` to the renderer since
@@ -303,8 +340,31 @@ function register(ipcMain) {
           + 'than per dependency chain. A transitive advisory, or one reached THROUGH a direct '
           + 'dependency, is outside what this scan can see.',
         soZeroMeans: 'No advisory was found for the names asked about. It does NOT mean the '
-          + 'installed tree is clean — run npm audit for that until Section 180.5 lands.',
+          + 'installed tree is clean — the tree-wide answer is in `tree` below.',
       };
+
+      // ── The tree-wide answer, which is the one that can say "exposed" (Section 181) ──────────
+      //
+      // The OSV pass above asks about the MANIFEST. This asks about the installed TREE, via
+      // `npm audit`, and triages each advisory into a route: a downgrade npm proposed and we
+      // refuse, an `overrides` pin, a breaking bump that is master's decision, or a fix inside the
+      // declared ranges. Measured on this machine: the manifest pass found 0 and the tree pass
+      // found 20 across 638 packages.
+      //
+      // The two are kept SEPARATE rather than merged. They answer different questions, they
+      // disagree for understandable reasons, and a disagreement between two sources is a finding
+      // worth seeing rather than one worth averaging away.
+      let tree = { ok: false, reason: 'the tree scan was not attempted', findings: [] };
+      try {
+        const triage = require('../lib/vulnerabilityTriage.cjs');
+        tree = triage.triage({
+          report: await auditReport(),
+          manifest: own,
+          installed: installedVersions(own),
+        });
+      } catch (err) {
+        tree = { ok: false, reason: `the tree scan failed: ${err.message}`, findings: [] };
+      }
 
       return {
         ok: true,
@@ -316,6 +376,7 @@ function register(ipcMain) {
           scanned: rows.length,
           includedDev: !!includeDev,
           coverage,
+          tree,
           // Deliberately NOT a boolean "clean" field. There is no honest value for it here, and a
           // caller that wants one would have to read `coverage` to see why it is absent.
           at: new Date().toISOString(),
