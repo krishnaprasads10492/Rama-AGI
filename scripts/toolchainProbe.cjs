@@ -142,7 +142,10 @@ function probe({ exec, exists, readdir, platform = process.platform, vswhere = V
  * advice must stop repeating "install the component" — that is the loop this module exists to end.
  */
 function lines(findings) {
-  const out = ['TOOLCHAIN PROBE — why the native rebuild failed'];
+  // A HEADING THAT IS TRUE IN BOTH CONTEXTS. It read "why the native rebuild failed", which is a
+  // lie when `npm run doctor:toolchain` runs it as a check and nothing has failed. The caller that
+  // IS reporting a failure says so itself, immediately above.
+  const out = ['TOOLCHAIN PROBE — Visual Studio instances, MSVC toolsets, and Spectre libraries'];
   if (findings.verdict === 'not-windows') {
     out.push('  Not Windows; MSB8040 does not apply here.');
     return out;
@@ -247,3 +250,21 @@ function probeNow() {
 }
 
 module.exports = { probe, lines, probeNow, VSWHERE };
+
+// ── CLI: answer the question without paying for a compile ────────────────────────────────────────
+//
+// WHY (spec Section 186.7). The probe only printed when a rebuild FAILED, so the only way to learn
+// whether the Spectre component had landed was to spend a minute on a build that fails again.
+// Master ran `vs_installer --add`, PowerShell exited 0, and that proves nothing: an unrecognised id
+// installs nothing and still exits 0, and `--passive` can return while the installer is still
+// working. The filesystem is the authority, and reading it takes a second.
+//
+// `require.main` guards it on the Section 161 precedent, so requiring this module for a test does
+// not print a report.
+if (require.main === module) {
+  const findings = probeNow();
+  for (const line of lines(findings)) console.log(line);
+  // EXIT CODE IS THE ANSWER TO ONE QUESTION ONLY: are the libraries there. `unknown` is NOT
+  // success — a check that cannot tell must not report green (Section 170 D4).
+  process.exit(findings.verdict === 'spectre-present' ? 0 : 1);
+}

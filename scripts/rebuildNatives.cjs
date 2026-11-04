@@ -105,6 +105,9 @@ if (require.main === module) {
   try {
     const probe = require('./toolchainProbe.cjs');
     console.warn('');
+    // The framing belongs to the caller that knows a build failed; the probe's own heading has to
+    // stay true when `npm run doctor:toolchain` runs it with nothing broken.
+    console.warn('  WHY IT FAILED — read this before acting on the generic advice above:');
     for (const line of probe.lines(probe.probeNow())) console.warn(`  ${line}`);
   } catch (err) {
     console.warn(`  (the toolchain probe could not run: ${err.message})`);

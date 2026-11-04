@@ -481,6 +481,26 @@ section('the failure diagnoses itself instead of repeating generic advice');
     const r = read('scripts/rebuildNatives.cjs');
     return /toolchainProbe\.cjs/.test(r) && /probe\.lines\(probe\.probeNow\(\)\)/.test(r);
   })());
+
+  // ── RUNNABLE ON ITS OWN, because checking cost a failed compile (Section 186.7) ──
+  const pkgScripts = require(path.join(ROOT, 'package.json')).scripts;
+  check('there is a standalone command to ask the question',
+    pkgScripts['doctor:toolchain'] === 'node scripts/toolchainProbe.cjs', pkgScripts['doctor:toolchain']);
+  check('the probe has its own CLI behind a require.main guard',
+    /if \(require\.main === module\)/.test(src));
+  check('and its exit code answers exactly one question — are the libraries there',
+    /findings\.verdict === 'spectre-present' \? 0 : 1/.test(src));
+  check('so UNKNOWN is not reported as success', (() => {
+    // A check that cannot tell must not exit 0, or a script could read "fine" from "I don't know".
+    const m = /process\.exit\(([^)]+)\)/.exec(src.split('require.main === module')[1] || '');
+    return !!m && !/unknown/.test(m[1]);
+  })());
+  // THE HEADING MUST BE TRUE IN BOTH CONTEXTS. It said "why the native rebuild failed", which is
+  // false when the standalone check runs and nothing has failed.
+  check('the probe heading does not claim a failure that may not have happened',
+    !/why the native rebuild failed/.test(tp.lines({ verdict: 'not-windows' }).join(' ')));
+  check('and the rebuild path supplies that framing itself',
+    /WHY IT FAILED/.test(read('scripts/rebuildNatives.cjs')));
   check('and a probe that throws does not take the rebuild report down with it',
     /the toolchain probe could not run/.test(read('scripts/rebuildNatives.cjs')));
 }

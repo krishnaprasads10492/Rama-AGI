@@ -21504,3 +21504,21 @@ The SSMS instance is worth noting: it is built on the VS shell, so `vswhere` rep
 **Verified:** `verifyNativeFacts` **129 → 145 checks, 0 failures**. 8 of 10 new mutations caught; the other two are worth naming rather than hiding. One was a **no-op** after the code changed under it. The other — handing every instance a command line — **has no observable effect**, because the lookup rejects the synthesised toolset name, so the guard is the table rather than the loop. That is a flawed mutation, not an uncovered path, and it also identified a genuinely dead line (`if (t.spectre) continue` under a verdict that already means no toolset has them), which is now removed.
 
 **Still not verified:** `spectre-present` and `no-visual-studio` remain injection-only, and whether the corrected command actually installs the component on master's machine is unknown until he runs it.
+
+\
+
+### 186.7 "Seeing success in PowerShell" is not evidence
+
+Master: *"run the cmd, seeing success in powershell"*.
+
+**A clean exit from `vs_installer` proves nothing**, and this document already said why in 183.1: `--add` with an id the catalogue does not recognise installs nothing and exits 0. `--passive` can also return while the installer is still working. The only authority is whether `…\VC\Tools\MSVC\14.29.30133\lib\spectre` now exists.
+
+**The problem: checking cost a failed compile.** The probe printed only on a rebuild failure, so the only way to learn whether the component had landed was to spend a minute on a build that would fail again — and then read the verdict. That is a diagnostic locked behind the symptom it diagnoses.
+
+**DONE: `npm run doctor:toolchain`.** The probe gains a `require.main` CLI (Section 161 precedent, so requiring it for a test prints nothing) and answers in about a second. Its exit code answers exactly one question — are the libraries there — and **`unknown` exits non-zero**, because a check that cannot tell must not report green (Section 170 D4), and a script reading "fine" from "I don't know" is the failure this project keeps finding.
+
+**And a false heading, fixed.** `lines()` opened with "TOOLCHAIN PROBE — why the native rebuild failed", which is a lie the moment the standalone check runs with nothing broken. The heading is now a true description of what follows, and `rebuildNatives.cjs` supplies the "WHY IT FAILED" framing itself, because the caller is the one that knows a build failed.
+
+**Verified:** `verifyNativeFacts` **145 → 151 checks, 0 failures**, including that the heading does not claim a failure and that `unknown` cannot exit 0. Run live here: the standalone command reports this machine's `no-cpp-toolset` verdict and exits 1.
+
+**Not verified:** whether the component is now installed on master's machine. That is what the command is for.
