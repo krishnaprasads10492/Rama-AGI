@@ -21353,3 +21353,25 @@ Master, after the SOLID assessment: *"try to implement as and when necessary?"*
 The ISP violation stands. Narrowing `window.rama` means touching every renderer call site, and `verifyReachability` already refuses *new* unreached members, so the surface cannot quietly grow while the fix waits. `PriceChart.jsx` (2755) and `StockMind.jsx` (1551) carry no ratchet yet; adding one for every large file would be noise, and neither has caused a defect that a ratchet would have prevented.
 
 **Not verified:** no restructuring was performed, so nothing is claimed about whether splitting `main.cjs` would be safe — only that nothing new may be added to it.
+
+### 184.4 STANDING REQUIREMENT: SOLID, in the idiom this codebase actually has
+
+Master, after 184.3: *"remember always code development should inherit to SOLID principles"*.
+
+Recorded as a **standing requirement on every tranche**, not a review finding. It outranks convenience and it is not re-decided per task.
+
+**THE DANGEROUS READING, REFUSED.** Taken literally in a codebase with 202 files and 6 classes — all of them extending `Error`, `EventEmitter` or `React.Component` — "follow SOLID" invites interfaces, abstract bases, a DI container and a class hierarchy. That would make this code **worse**: it would add indirection with no second implementation behind it, and it would break the three patterns that make the existing suites able to drive real failure states. A principle imported with its original ceremony is cargo cult; the obligation is to the property each principle protects.
+
+So the requirement is discharged as follows, and a future session should be held to **this** table rather than to a textbook:
+
+| | The property that must hold | How a tranche satisfies it here | Enforced by |
+|---|---|---|---|
+| **S** | one reason to change per unit | a pure judgement core, separate from I/O: every sentence a panel can say lives in a `<thing>Model.js`; a main-process module takes its report, manifest and versions as arguments. A new IPC handler goes in `electron/ipc/<domain>.cjs` | `I-MAIN-SIZE`; the model/panel split asserted per feature (`verifyUiSecurity`, `verifyEvolve`) |
+| **O** | extension without editing logic | a new model, broker, route, page or native module is a new **row** in a declared-data table | the tables themselves; a suite that iterates the table rather than the cases |
+| **L** | substitutability, where hierarchy exists | **nothing to do** — no domain hierarchy exists. Do not invent one to have something to honour, and do not claim credit for it | n/a, stated rather than implied |
+| **I** | no consumer forced to depend on what it does not use | components take a per-domain client from `src/services/ipcClient.js`, not the whole `window.rama` | `verifyReachability` refuses a NEW preload member with no caller |
+| **D** | depend on an abstraction, not a concretion | collaborators as parameters with real defaults; everything network-bound through the one HTTP client | invariant I9; the 13 injection seams, each exercised by a suite |
+
+**What this does not license.** It is not a mandate to refactor working code: 184.2 stands, and structural debt is still paid down touch-locally rather than in a pass. It is a mandate on **new** code — what a tranche adds must arrive in this shape, so that the debt table in 184.1 can only shrink.
+
+**The honest limit.** Four of the five are partly machine-checked; none is fully. "One reason to change" is a judgement a suite cannot make, so this requirement is held by the design review in each tranche and by the ratchets, not by a green line. An invariant that cannot go red is decoration (Section 183.4), so SOLID is deliberately **not** added to Section 28's numbered invariants — it is a standard, recorded here, with the checkable parts named above.
