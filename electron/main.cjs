@@ -594,8 +594,11 @@ function registerRefresh(ipcMain) {
   /**
    * Gather registry facts, assess them, and file ONE proposal when there is anything to say.
    *
-   * `file: false` is used by the on-demand handler so master can look without adding to his approval
-   * queue — a review that always filed would make the queue grow every time he glanced at it.
+   * SCHEDULED PATH ONLY. The on-demand reader master clicks lives in `ipc/system.cjs` now
+   * (Section 182.0) — it adds the tree-wide scan and the triage this one has no access to. `file`
+   * stays a parameter because a review that filed on every glance would make the approval queue
+   * grow every time master looked at it, and the distinction is the reason the split is safe:
+   * nothing reachable from a screen can add to the queue.
    */
   async function runDependencyReview({ file = false } = {}) {
     const net = require('./lib/http.cjs');
@@ -658,14 +661,19 @@ function registerRefresh(ipcMain) {
     return sched.runNow(name);
   });
 
-  /** Look at the upgrade picture without filing anything. */
-  ipcMain.handle('deps:review', async (_e, { user } = {}) => {
-    if (!capability.can(user, 'self-modify.view')) {
-      return { ok: false, error: 'Access denied: "self-modify.view" required' };
-    }
-    try { return await runDependencyReview({ file: false }); }
-    catch (err) { return { ok: false, error: err.message }; }
-  });
+  // `deps:review` WAS REGISTERED HERE, AND THAT IS WHY THE DAILY SCHEDULE STOPPED (Section 182.0).
+  //
+  // Section 180 added a second, richer handler for the same channel in `ipc/system.cjs`, on the
+  // false premise that nothing answered it. `ipcMain.handle` THROWS on a duplicate channel, and
+  // 'System sensing' registers before 'Refresh schedule', so this line threw — and the throw landed
+  // in the REGISTRATIONS catch, which abandoned the rest of this function. The rest of this
+  // function is `sched.start()`. So from that commit until this one, no background task ran at all:
+  // not the Ollama catalogue refresh, not the daily dependency review. The handler was the visible
+  // change; the silent schedule was the cost, and nothing was positioned to notice it.
+  //
+  // The reader now lives in `ipc/system.cjs` (one channel, one handler), and the recorder in
+  // `startApp` reports a collision by name instead of letting it cost a subsystem its remaining
+  // registrations.
 
   // Started after registration so the first pass sees every task and can spread them.
   sched.start();
@@ -1812,9 +1820,27 @@ app.whenReady().then(async () => {
   // Every module receives this instead of `ipcMain`, so channel creation is
   // observable. It forwards to the real ipcMain and only records names — it is not
   // a policy layer and must not become one.
+  // A SECOND HANDLER FOR THE SAME CHANNEL IS A THROW, and the throw is the expensive part.
+  // Measured (Section 182.0): `deps:review` was registered in two subsystems, the later one threw,
+  // and the catch below cost `registerRefresh` the `sched.start()` that followed it — every daily
+  // background task, silently, for the price of one duplicated line. So a collision is recorded and
+  // NAMED here, the first registration keeps the channel, and the subsystem keeps its remaining
+  // ones. Same rule as `safeRequire` and as this loop itself: degraded and visible, never
+  // unregistered and quiet (I11).
+  const channelCollisions = [];
+  const recordChannel = (ch, register) => {
+    if (registeredChannels.has(ch)) {
+      channelCollisions.push(ch);
+      console.error(`[main] IPC channel "${ch}" is already registered — the second registration was `
+        + 'IGNORED. Two subsystems claim this channel; the first one wins. Remove the duplicate.');
+      return undefined;
+    }
+    registeredChannels.add(ch);
+    return register();
+  };
   const ipcRec = {
-    handle: (ch, fn) => { registeredChannels.add(ch); return ipcMain.handle(ch, fn); },
-    handleOnce: (ch, fn) => { registeredChannels.add(ch); return ipcMain.handleOnce(ch, fn); },
+    handle: (ch, fn) => recordChannel(ch, () => ipcMain.handle(ch, fn)),
+    handleOnce: (ch, fn) => recordChannel(ch, () => ipcMain.handleOnce(ch, fn)),
     removeHandler: (ch) => { registeredChannels.delete(ch); return ipcMain.removeHandler(ch); },
     on: (...a) => ipcMain.on(...a),
     once: (...a) => ipcMain.once(...a),
@@ -1923,6 +1949,13 @@ app.whenReady().then(async () => {
 
   if (registrationFailures.length > 0) {
     console.error(`[main] ${registrationFailures.length} subsystem(s) did not register their IPC channels — features depending on them will report "No handler registered"`);
+  }
+
+  // Said once, plainly, after the loop: a collision means master is reaching a DIFFERENT handler
+  // than whichever one he last read, which is worse to debug than an absent channel.
+  if (channelCollisions.length > 0) {
+    console.error(`[main] ${channelCollisions.length} IPC channel(s) were claimed twice and the `
+      + `later registration ignored: ${channelCollisions.join(', ')}`);
   }
 
   // ── Did the channels the first screen needs actually appear? ────────────────

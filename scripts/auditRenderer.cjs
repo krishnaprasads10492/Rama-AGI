@@ -281,11 +281,17 @@ function auditUndefined(files) {
  * than guessed at, on the same rule the globals allowlist follows — a false positive here would
  * block a commit over working code.
  */
-function findIpcMismatches(preloadCode, mainCodes = []) {
+function findIpcMismatches(preloadCode, mainCodes = [], mainNames = []) {
   // Registered sets. The `ipcMain` object is often a parameter of a register(ipcMain) function, and
   // sometimes a recorder wrapper, so match on the method rather than the receiver name.
   const handled = new Set();
   const listened = new Set();
+  // WHERE each channel was registered, which a Set cannot hold — and the omission was the gap.
+  // Section 182.0: `deps:review` was registered in two subsystems; `ipcMain.handle` throws on the
+  // second, the throw abandoned the rest of that subsystem's registrations, and the cost was every
+  // daily background task in the app. This check saw none of it, because a duplicate `add()` to a
+  // Set is indistinguishable from the first one.
+  const sites = new Map();
 
   // A quoted, channel-shaped literal, e.g. 'market:ohlcv'.
   //
@@ -298,10 +304,26 @@ function findIpcMismatches(preloadCode, mainCodes = []) {
   // the match self-contained and immune to that drift.
   const CHANNEL_LITERAL = /'([a-z][\w-]*:[\w-]+)'/gi;
 
-  for (const code of mainCodes) {
+  // A commented-out or quoted-in-prose registration is not a registration. `upgradeApplier.cjs`
+  // documents `ipcMain.handle('proposals:apply', ...)` inside a comment to explain what it wraps,
+  // and counting that as a second site would report a duplicate in correct code — the false
+  // positive this file's own rules forbid. So lines that begin a comment are dropped before
+  // counting SITES. The sets above keep scanning everything, since a name found in a comment only
+  // ever makes the parity check more forgiving, never less.
+  const uncommented = (code) => code.split('\n')
+    .filter((l) => !/^\s*(?:\/\/|\*|\/\*)/.test(l))
+    .join('\n');
+
+  mainCodes.forEach((code, i) => {
+    const where = mainNames[i] || `main code #${i + 1}`;
     for (const m of code.matchAll(/\.handle\(\s*'([^']+)'/g)) handled.add(m[1]);
     for (const m of code.matchAll(/\.handleOnce\(\s*'([^']+)'/g)) handled.add(m[1]);
     for (const m of code.matchAll(/\.on\(\s*'([^']+)'/g)) listened.add(m[1]);
+
+    for (const m of uncommented(code).matchAll(/\.handle(?:Once)?\(\s*'([^']+)'/g)) {
+      if (!sites.has(m[1])) sites.set(m[1], []);
+      sites.get(m[1]).push(where);
+    }
 
     // DYNAMIC REGISTRATION. `marketIntel.cjs` builds a map and registers it in a loop:
     //   for (const [channel, fn] of Object.entries(readOnly)) ipcMain.handle(channel, ...)
@@ -319,10 +341,28 @@ function findIpcMismatches(preloadCode, mainCodes = []) {
     if (/\.on\(\s*[A-Za-z_$]/.test(code)) {
       for (const m of code.matchAll(CHANNEL_LITERAL)) listened.add(m[1]);
     }
-  }
+  });
 
   const problemsFound = [];
   let checked = 0;
+
+  // ── Two handlers, one channel ───────────────────────────────────────────────────────────────────
+  // Reported before the parity checks because it is the louder failure: a missing handler is one
+  // dead button, while a duplicate takes out whatever registration happens to follow it.
+  // `checked` is deliberately NOT incremented here. It counts preload CALL SITES — it is printed as
+  // "ipc channels matched" and `verifyAudit.cjs` asserts an exact value against a two-call fixture.
+  // Folding a second population into it made that number mean two different things at once, which
+  // is the kind of quiet redefinition that turns a verified count into decoration.
+  for (const [ch, where] of sites) {
+    if (where.length < 2) continue;
+    problemsFound.push({
+      channel: ch,
+      kind: 'duplicate-handler',
+      msg: `channel "${ch}" is registered ${where.length} times (${where.join(', ')}). `
+        + 'ipcMain.handle THROWS on the second one, so the subsystem registering it loses every '
+        + 'line that follows — delete all but one.',
+    });
+  }
 
   for (const m of preloadCode.matchAll(/ipcRenderer\.invoke\(\s*'([^']+)'/g)) {
     checked += 1;
@@ -354,27 +394,33 @@ function findIpcMismatches(preloadCode, mainCodes = []) {
     });
   }
 
-  return { checked, problems: problemsFound };
+  return { checked, registrations: sites.size, problems: problemsFound };
 }
 
 /** Read the real files and report. The pure checker above is what the test drives. */
 function auditIpcParity() {
   const ELECTRON = path.join(ROOT, 'electron');
   const preloadPath = path.join(ELECTRON, 'preload.cjs');
-  if (!fs.existsSync(preloadPath)) return 0;
+  if (!fs.existsSync(preloadPath)) return { checked: 0, registrations: 0 };
 
   const codes = [];
+  // Names travel alongside the code so a duplicate can say WHICH two files claim the channel.
+  // "registered twice" without the pair is a message that still leaves the reader grepping.
+  const names = [];
   (function collect(dir) {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) { if (e.name !== 'node_modules') collect(p); }
-      else if (e.name.endsWith('.cjs')) codes.push(fs.readFileSync(p, 'utf8'));
+      else if (e.name.endsWith('.cjs')) {
+        codes.push(fs.readFileSync(p, 'utf8'));
+        names.push(path.relative(ROOT, p).replace(/\\/g, '/'));
+      }
     }
   })(ELECTRON);
 
-  const res = findIpcMismatches(fs.readFileSync(preloadPath, 'utf8'), codes);
+  const res = findIpcMismatches(fs.readFileSync(preloadPath, 'utf8'), codes, names);
   for (const p of res.problems) report(preloadPath, p.msg);
-  return res.checked;
+  return { checked: res.checked, registrations: res.registrations };
 }
 
 // ─── Run ──────────────────────────────────────────────────────────────────────
@@ -391,7 +437,8 @@ function main() {
   process.stdout.write(`  ${C.dim}store destructures checked${C.reset}  ${storeSites}\n`);
   process.stdout.write(`  ${C.dim}bridge calls checked${C.reset}        ${bridgeSites}\n`);
   process.stdout.write(`  ${C.dim}files scope-checked${C.reset}         ${scopeFiles}\n`);
-  process.stdout.write(`  ${C.dim}ipc channels matched${C.reset}        ${ipcChannels}\n\n`);
+  process.stdout.write(`  ${C.dim}ipc channels matched${C.reset}        ${ipcChannels.checked}\n`);
+  process.stdout.write(`  ${C.dim}channels registered once${C.reset}    ${ipcChannels.registrations}\n\n`);
 
   if (problems.length === 0) {
     process.stdout.write(`  ${C.green}✓ stores, bridge calls, identifiers and IPC channels all resolve${C.reset}\n\n`);

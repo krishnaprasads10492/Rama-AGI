@@ -3,6 +3,7 @@ import { systemClient }  from '@services/ipcClient.js';
 import { formatBytes }   from '@services/ramaClient.js';
 import { useUserStore }  from '@store/userStore.js';
 import { FS, LH } from '@config/type.js';
+import SecurityPanel from './SecurityPanel.jsx';
 
 // ─── Gauge bar ────────────────────────────────────────────────────────────────
 function GaugeBar({ value, max = 100, color = 'var(--accent)', height = 6 }) {
@@ -398,6 +399,13 @@ export default function System() {
             </div>
 
             <RamaFootprintPanel />
+
+            {/* What the installed dependency tree contains — Section 182. Beside the footprint
+                rather than on a route of its own: Section 105 settled that a capability earns a
+                top-level route only when master goes looking for it on purpose, and this belongs
+                with the other facts about the machine Rāma is running on. It scans only when
+                asked, so placing it here costs nothing on load. */}
+            <SecurityPanel />
 
             {/* CPU cores */}
             {Array.isArray(m.cpu.cores) && m.cpu.cores.length > 0 && (

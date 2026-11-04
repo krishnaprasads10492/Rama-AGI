@@ -275,13 +275,27 @@ function register(ipcMain) {
     return out;
   };
 
-  // ── Dependency and vulnerability review (spec Section 180) ───────────────
+  // ── Dependency and vulnerability review (spec Section 180, corrected in 182.0) ───────────────
   //
-  // THE HANDLER THAT WAS MISSING. `preload.cjs` has exposed `deps:review` to the renderer since
-  // Section 96, and nothing ever answered it: `registrySources.collect` (the OSV advisory lookup)
-  // and `dependencyAdvisor.review` (the judgement) were both called only by their test suites. The
-  // search and the assessment were built, verified, and unreachable — the same defect as
-  // `models:roles` in Section 145 and `functionTracking`'s three sections with no call sites.
+  // CORRECTION, RECORDED RATHER THAN QUIETLY FIXED. Section 180 claimed this channel had no handler
+  // and that `registrySources.collect` and `dependencyAdvisor.review` were called only by their
+  // test suites. THAT WAS WRONG: `registerRefresh` in `main.cjs` has answered `deps:review` since
+  // Section 96 and calls both, from the handler and from a daily scheduled task. Adding a second
+  // handler for a channel that already had one made `ipcMain.handle` throw, which cost that
+  // function the `sched.start()` at its end — so the real effect of "wiring up" the scan was to
+  // stop every background task in the app. The duplicate is gone from `main.cjs` and this is now
+  // the one handler.
+  //
+  // WHAT WAS ACTUALLY TRUE, and still worth this handler existing: the OSV pass was reachable but
+  // its answer was never DISPLAYED anywhere, it stated no coverage, and it could not see the
+  // installed tree — Section 180.5 measured it reporting 0 while the tree held 20.
+  //
+  // THE GATE IS THE OLD ONE, DELIBERATELY. The previous handler admitted `self-modify.view`
+  // (tier 1), so gating this on `system.self-update` (tier 0) would have REMOVED an ability a
+  // Superadmin had — upgrades here are additive. So tier 1 still gets the summary and the coverage,
+  // exactly the shape of answer it used to get, and the tree detail — package names, dependency
+  // chains, remedies, the map of Rāma's own attack surface — is withheld below tier 0. Withheld and
+  // SAID to be withheld, per Section 107: a redacted section reports why, it never reports zero.
   //
   // IT PROPOSES AND NEVER UPGRADES. I12 pins every dependency deliberately, so this reports what is
   // vulnerable, what a fix would cost and what could go wrong, and leaves the decision in the
@@ -293,8 +307,9 @@ function register(ipcMain) {
   // Both fetchers come from `lib/http.cjs` — the ONE main-process client (I9) — so this inherits its
   // circuit breaker, size cap and timeouts rather than opening a second way out of the process.
   ipcMain.handle('deps:review', async (_e, { user, includeDev = false } = {}) => {
-    const denied = capability.deny(user, 'system.self-update');
+    const denied = capability.deny(user, 'self-modify.view');
     if (denied) return denied;
+    const maySeeDetail = capability.can(user, 'system.self-update');
     try {
       const http = require('../lib/http.cjs');
       const sources = require('../lib/registrySources.cjs');
@@ -354,22 +369,45 @@ function register(ipcMain) {
       // The two are kept SEPARATE rather than merged. They answer different questions, they
       // disagree for understandable reasons, and a disagreement between two sources is a finding
       // worth seeing rather than one worth averaging away.
-      let tree = { ok: false, reason: 'the tree scan was not attempted', findings: [] };
-      try {
-        const triage = require('../lib/vulnerabilityTriage.cjs');
-        tree = triage.triage({
-          report: await auditReport(),
-          manifest: own,
-          installed: installedVersions(own),
-        });
-      } catch (err) {
-        tree = { ok: false, reason: `the tree scan failed: ${err.message}`, findings: [] };
+      //
+      // Not even ATTEMPTED below tier 0. The scan is a minute of `npm audit` whose only output is
+      // the part that gets withheld, so running it would spend the time to throw the answer away.
+      let tree = maySeeDetail
+        ? { ok: false, reason: 'the tree scan was not attempted', findings: [] }
+        : {
+          ok: false,
+          // A POLICY WITHHOLDING IS NOT A FAILED SCAN, and a reader must be able to tell which.
+          // `withheld` is what the UI reads to say "you may not see this" rather than "this broke".
+          withheld: true,
+          requires: 'system.self-update',
+          reason: 'the tree-wide detail names Rāma\u2019s own attack surface package by package, '
+            + 'so it requires system.self-update (tier 0). The summary above is not withheld.',
+          findings: [],
+        };
+      if (maySeeDetail) {
+        try {
+          const triage = require('../lib/vulnerabilityTriage.cjs');
+          tree = triage.triage({
+            report: await auditReport(),
+            manifest: own,
+            installed: installedVersions(own),
+          });
+        } catch (err) {
+          tree = { ok: false, reason: `the tree scan failed: ${err.message}`, findings: [] };
+        }
       }
 
       return {
         ok: true,
         data: {
-          ...review,
+          // `rows` — every direct dependency with its version jump and advisory state — is tier-0
+          // only, for the same reason as the tree. `summary`, `actionable` as a COUNT and the
+          // lookup failures are what the pre-182.0 handler returned to tier 1, so they stay.
+          ...(maySeeDetail ? review : {
+            summary: review.summary,
+            actionable: review.actionable.length,
+            detailWithheld: 'system.self-update',
+          }),
           // Carried, not swallowed: a package whose lookup failed is not a package that is fine,
           // and the caller needs to be able to say which ones were not really checked.
           failures,

@@ -17,7 +17,11 @@
  * Run: node scripts/verifyAudit.cjs   (or npm run verify:audit)
  */
 
+const fs = require('fs');
+const path = require('path');
 const { findUndefinedIdentifiers, findIpcMismatches } = require('./auditRenderer.cjs');
+
+const ROOT = path.join(__dirname, '..');
 
 let pass = 0;
 let fail = 0;
@@ -260,6 +264,82 @@ console.log('\n--- FIXTURE D: invoke/send against the wrong registration ---');
   const apos = findIpcMismatches("o: () => ipcRenderer.invoke('market:ohlcv'),", [withApostrophe]);
   check('an apostrophe in a comment does not hide a registered channel',
     apos.problems.length === 0, JSON.stringify(apos.problems));
+}
+
+// ─── FIXTURE E: two subsystems, one channel (Section 182.0) ──────────────────────────────────────
+//
+// THE REAL BUG, REPRODUCED. `deps:review` was registered in `main.cjs` and again in
+// `ipc/system.cjs`. `ipcMain.handle` throws on the second registration, the throw landed in
+// `main.cjs`'s per-subsystem catch, and what followed the throwing line was `sched.start()` — so
+// the duplicate did not cost a channel, it cost every background task in the app, silently.
+//
+// This check saw nothing, because registrations were accumulated into a Set where a second `add()`
+// of the same name is indistinguishable from the first. The parity check answers "does this channel
+// have A handler"; nothing answered "does it have exactly one".
+{
+  console.log('\n--- FIXTURE E: the same channel registered by two subsystems ---');
+
+  const first  = "ipcMain.handle('deps:review', async () => ({ ok: true }));";
+  const second = "ipcMain.handle('deps:review', async () => ({ ok: true }));\n"
+    + "ipcMain.handle('refresh:status', async () => ({}));";
+  const dupe = findIpcMismatches(
+    "d: () => ipcRenderer.invoke('deps:review'), s: () => ipcRenderer.invoke('refresh:status'),",
+    [first, second],
+    ['electron/main.cjs', 'electron/ipc/system.cjs'],
+  );
+  const dups = dupe.problems.filter(p => p.kind === 'duplicate-handler');
+  check('a channel registered twice IS caught', dups.length === 1, JSON.stringify(dupe.problems));
+  check('it names the channel', dups[0] && dups[0].channel === 'deps:review');
+  check('it names BOTH files, so the reader does not have to grep for the pair',
+    !!dups[0] && /electron\/main\.cjs/.test(dups[0].msg) && /electron\/ipc\/system\.cjs/.test(dups[0].msg),
+    dups[0] && dups[0].msg);
+  check('the message says what a duplicate actually costs — the registrations that follow it',
+    !!dups[0] && /THROWS/.test(dups[0].msg) && /every\s+line\s+that\s+follows/.test(dups[0].msg));
+  check('and the duplicate is the ONLY thing reported — both channels still resolve',
+    dupe.problems.length === 1, JSON.stringify(dupe.problems));
+  check('the channel count is unaffected: `checked` still counts preload call sites, not registrations',
+    dupe.checked === 2, String(dupe.checked));
+  check('registrations are reported separately', dupe.registrations === 2, String(dupe.registrations));
+
+  // `handleOnce` is the same claim on the same channel and collides identically.
+  const once = findIpcMismatches("x: () => ipcRenderer.invoke('x:y'),",
+    ["ipcMain.handle('x:y', () => 1);", "ipcMain.handleOnce('x:y', () => 1);"], ['a.cjs', 'b.cjs']);
+  check('handle + handleOnce on one channel is also a collision',
+    once.problems.filter(p => p.kind === 'duplicate-handler').length === 1, JSON.stringify(once.problems));
+
+  // NOT A DUPLICATE: a registration quoted inside a comment. `upgradeApplier.cjs` documents
+  // `proposals.cjs`'s registration in prose to explain what it wraps, and reporting that would be
+  // a false positive against correct code — the one failure mode this file refuses outright.
+  const documented = "// `proposals.cjs` registers `ipcMain.handle('proposals:apply', (_e, id) => apply(id))`\n"
+    + 'const wraps = true;';
+  const quoted = findIpcMismatches("a: () => ipcRenderer.invoke('proposals:apply'),",
+    ["ipcMain.handle('proposals:apply', (_e, id) => apply(id));", documented],
+    ['electron/lib/proposals.cjs', 'electron/lib/upgradeApplier.cjs']);
+  check('a registration QUOTED IN A COMMENT is not counted as a second site',
+    quoted.problems.length === 0, JSON.stringify(quoted.problems));
+
+  const solo = findIpcMismatches("a: () => ipcRenderer.invoke('x:y'),", ["ipcMain.handle('x:y', () => 1);"], ['a.cjs']);
+  check('a channel registered exactly once is reported as nothing at all',
+    solo.problems.length === 0, JSON.stringify(solo.problems));
+
+  // And the live tree, which is the assertion that keeps the fix from regressing.
+  const ELECTRON = path.join(ROOT, 'electron');
+  const codes = [];
+  const names = [];
+  (function collect(dir) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { if (e.name !== 'node_modules') collect(p); }
+      else if (e.name.endsWith('.cjs')) {
+        codes.push(fs.readFileSync(p, 'utf8'));
+        names.push(path.relative(ROOT, p).replace(/\\/g, '/'));
+      }
+    }
+  })(ELECTRON);
+  const live = findIpcMismatches(fs.readFileSync(path.join(ELECTRON, 'preload.cjs'), 'utf8'), codes, names);
+  const liveDups = live.problems.filter(p => p.kind === 'duplicate-handler');
+  check('NO channel in the real main process is registered twice today',
+    liveDups.length === 0, liveDups.map(p => p.msg).join(' | '));
 }
 
 console.log(`\n${'='.repeat(62)}`);
