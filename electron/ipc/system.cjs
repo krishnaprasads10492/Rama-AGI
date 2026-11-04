@@ -238,6 +238,63 @@ function register(ipcMain) {
     }
   });
 
+  // ── Dependency and vulnerability review (spec Section 180) ───────────────
+  //
+  // THE HANDLER THAT WAS MISSING. `preload.cjs` has exposed `deps:review` to the renderer since
+  // Section 96, and nothing ever answered it: `registrySources.collect` (the OSV advisory lookup)
+  // and `dependencyAdvisor.review` (the judgement) were both called only by their test suites. The
+  // search and the assessment were built, verified, and unreachable — the same defect as
+  // `models:roles` in Section 145 and `functionTracking`'s three sections with no call sites.
+  //
+  // IT PROPOSES AND NEVER UPGRADES. I12 pins every dependency deliberately, so this reports what is
+  // vulnerable, what a fix would cost and what could go wrong, and leaves the decision in the
+  // approval ledger. Section 168.2's ruling applies verbatim: "auto-check" means auto-REPORT.
+  //
+  // Tier 0 only (`system.self-update`): the output names Rāma's own attack surface, which is not a
+  // thing to hand to a guest.
+  //
+  // Both fetchers come from `lib/http.cjs` — the ONE main-process client (I9) — so this inherits its
+  // circuit breaker, size cap and timeouts rather than opening a second way out of the process.
+  ipcMain.handle('deps:review', async (_e, { user, includeDev = false } = {}) => {
+    const denied = capability.deny(user, 'system.self-update');
+    if (denied) return denied;
+    try {
+      const http = require('../lib/http.cjs');
+      const sources = require('../lib/registrySources.cjs');
+      const advisor = require('../lib/dependencyAdvisor.cjs');
+
+      const own = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8'));
+      // devDependencies are opt-in: they do not ship, so their advisories are a build-machine
+      // risk rather than an installed-app one, and mixing the two would overstate the exposure.
+      const pinned = { ...(own.dependencies || {}) };
+      if (includeDev) Object.assign(pinned, own.devDependencies || {});
+
+      const { rows, failures } = await sources.collect({
+        pinned,
+        getJson: http.getJson,
+        // Supplied, so advisories are genuinely CHECKED. Without it `registrySources` leaves them
+        // `unchecked`, which the advisor correctly refuses to read as "clean".
+        postJson: http.postJson,
+      });
+
+      const review = advisor.review(rows);
+      return {
+        ok: true,
+        data: {
+          ...review,
+          // Carried, not swallowed: a package whose lookup failed is not a package that is fine,
+          // and the caller needs to be able to say which ones were not really checked.
+          failures,
+          scanned: rows.length,
+          includedDev: !!includeDev,
+          at: new Date().toISOString(),
+        },
+      };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   // ── Kill process ─────────────────────────────────────────────────────────
   ipcMain.handle('system:kill-process', async (_e, { user, pid } = {}) => {
     const denied = capability.deny(user, 'os.process-kill');
