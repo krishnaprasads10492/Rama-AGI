@@ -19,7 +19,7 @@ const path           = require('path');
 const facts          = require('../shared/nativeModuleFacts.cjs');
 // The ONE native-rebuild invocation, shared with `npm run rebuild` so a correct copy and a broken
 // one cannot coexist — Section 185.
-const { rebuildNatives } = require('./rebuildNatives.cjs');
+const { rebuildNatives, reportFailure } = require('./rebuildNatives.cjs');
 
 /**
  * electron-builder's `beforeBuild` hook (unlike `afterPack`) is called BEFORE
@@ -118,14 +118,12 @@ module.exports = async function(context) {
     // warning was why master could hold an installer whose build never mentioned it again.
     context.nativeRebuild = { ok: true, error: null };
   } else {
-    console.warn(`  ⚠ electron-rebuild failed: ${outcome.error}`);
-    // READ FROM `shared/nativeModuleFacts.cjs`, NOT WRITTEN HERE. This used to print "argon2 falls
-    // back to scrypt, node-pty to a piped shell — both work, both weaker". "Both work" was false:
-    // there is no piped shell, and a failed node-pty means no terminal at all. The claim was
-    // duplicated in three files and wrong in all three, so there is now one copy (Section 183).
-    for (const line of facts.consequences()) console.warn(`  ⚠ ${line}`);
-    for (const line of facts.remedyLines()) console.warn(`  ⚠ ${line}`);
-    console.warn('');
+    // ONE REPORT, SHARED WITH `npm run rebuild` (Section 188). This printed the consequences and
+    // the remedy but NOT the toolchain probe, so a real build gave master generic advice while the
+    // hand-run command on the same machine would have named which of the four causes applied.
+    // The sentences themselves come from `shared/nativeModuleFacts.cjs` — one declaration, since
+    // the claim about node-pty was duplicated in three files and wrong in all three (Section 183).
+    reportFailure(outcome.error);
     context.nativeRebuild = { ok: false, error: outcome.error };
   }
 

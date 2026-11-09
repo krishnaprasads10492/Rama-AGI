@@ -318,11 +318,23 @@ const COMFY = b.DISK_COMFY_MB;
   // disables the terminal outright. So the suite was defending the wrong sentence against its own
   // correction, which is worse than not checking: a test that pins a claim makes it expensive to
   // fix. It now asserts the hook reads the ONE declaration and prints no sentence of its own.
-  check('and it names the real consequences, from the one place they are declared',
-    /nativeModuleFacts\.cjs/.test(bb) && /facts\.consequences\(\)/.test(bb));
+  // THE PROPERTY, NOT THE CALL SITE. These asserted that the hook itself contained
+  // `facts.consequences()` and `facts.remedyLines()`, which broke when Section 188 moved both into
+  // the shared `reportFailure()` so a real build and a hand-run could not report differently. The
+  // hook must REPORT the consequences and a runnable remedy; whether it loops over them itself is
+  // an implementation detail, and pinning it is the same mistake as pinning `err.message` (185).
+  check('and it reports the real consequences and remedy through the one shared reporter',
+    /reportFailure\(outcome\.error\)/.test(bb)
+    && /require\('\.\/rebuildNatives\.cjs'\)/.test(bb));
   check('the false "piped shell" claim is gone from the hook\u2019s output',
     !/console\.warn\([^)]*piped shell/i.test(bb));
-  check('and the hook prints a remedy master can run, not advice', /facts\.remedyLines\(\)/.test(bb));
+  check('and what that reporter prints is a command, not advice', (() => {
+    const rn = require(path.join(ROOT, 'scripts/rebuildNatives.cjs'));
+    const out = [];
+    rn.reportFailure('readiness probe', (l) => out.push(l));
+    return out.some((l) => /vs_installer\.exe" modify .*--add /.test(l))
+      && out.some((l) => /terminal is DISABLED/.test(l));
+  })());
   check('the outcome is carried into the build manifest', (() => {
     const i = src.indexOf('writeBuildManifest(readiness, {');
     const j = src.indexOf('});', i);

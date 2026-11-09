@@ -97,10 +97,14 @@ const SPECTRE = Object.freeze({
  * be added to the install that node-gyp actually used, and a machine can hold several.
  */
 function spectreCommands(installPath = 'C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\BuildTools') {
-  const vsInstaller = 'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vs_installer.exe';
+  const vsInstaller = SPECTRE.installerPath;
+  // DERIVED FROM THE LIST, NOT FROM FIXED INDICES (spec Section 188). This read
+  // `componentIds[0]` and `componentIds[1]`, and when Section 186.6 cut the list to the one
+  // PUBLISHED id, the second line kept rendering and emitted `--add undefined`. Master's build log
+  // printed that command to him. One index outliving its array is the whole defect.
   return Object.freeze([
-    `"${vsInstaller}" modify --installPath "${installPath}" --add ${SPECTRE.componentIds[0]} --passive --norestart`,
-    `"${vsInstaller}" modify --installPath "${installPath}" --add ${SPECTRE.componentIds[1]} --passive --norestart`,
+    ...SPECTRE.componentIds.map((id) => `"${vsInstaller}" modify --installPath "${installPath}" `
+      + `--add ${id} --passive --norestart`),
     // THE AUTHORITATIVE PATH, said last because it is the one that cannot silently do nothing.
     'Or: open Visual Studio Installer -> Modify -> Individual components -> search "Spectre" -> '
     + `tick "${SPECTRE.componentName}" -> Modify.`,
@@ -173,8 +177,12 @@ function remedyLines(installPath) {
     `On Windows this is almost always the missing "${SPECTRE.componentName}" component `
     + `(node-gyp reports ${SPECTRE.error}). Add it with:`,
     ...spectreCommands(installPath),
-    'Then rebuild. The id differs between the 2019 and 2022 installer catalogues and an unknown id '
-    + 'installs nothing without failing, so if neither command changes anything, use the GUI.',
+    // Phrased for however many commands there are. It said "if NEITHER command changes anything",
+    // which stopped being true the moment the list held one id — and prose that counts its own
+    // subject is prose that goes wrong silently (Section 188).
+    `Then rebuild. An unrecognised component id installs nothing without failing, so if ${
+      SPECTRE.componentIds.length === 1 ? 'that command does' : 'none of those commands do'
+    } not change anything, use the GUI.`,
   ];
 }
 

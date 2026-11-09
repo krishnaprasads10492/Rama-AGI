@@ -116,6 +116,22 @@ section('a remedy is a command where a command exists (Section 176\u2019s ruling
   check('every component id comes as a complete, runnable command',
     runnable.length === facts.SPECTRE.componentIds.length,
     `${runnable.length} runnable of ${facts.SPECTRE.componentIds.length} ids`);
+
+  // ── AND NO OTHERS. THE DEFECT THIS CATCHES SHIPPED (Section 188) ──
+  //
+  // `spectreCommands()` built its two lines from `componentIds[0]` and `componentIds[1]`. Section
+  // 186.6 cut the list to the one published id, the second line kept rendering, and the remedy
+  // printed `--add undefined` into master's build log. The check above counted the WELL-FORMED
+  // lines and found 1 of 1 — it never counted the total, so a malformed extra line was invisible.
+  // Counting the good ones is not the same as asserting there are no bad ones.
+  const allCommands = lines.filter((l) => /vs_installer\.exe" modify/.test(l));
+  check('and there are NO command lines beyond those, malformed or otherwise',
+    allCommands.length === runnable.length,
+    allCommands.filter((l) => !runnable.includes(l)).join(' | '));
+  check('the trailing prose agrees with how many commands there actually are', (() => {
+    const tail = lines[lines.length - 1];
+    return allCommands.length === 1 ? /that command does not/.test(tail) : /none of those commands/.test(tail);
+  })(), lines[lines.length - 1]);
   check('and each id appears in exactly one of them',
     facts.SPECTRE.componentIds.every((id) => runnable.filter((l) => l.includes(`--add ${id} `)).length === 1));
   // ONLY PUBLISHED IDS (Section 186.6). `…VC.v142.x86.x64.Spectre` led this list and is in
@@ -157,6 +173,75 @@ section('a remedy is a command where a command exists (Section 176\u2019s ruling
     JSON.stringify(facts.SPECTRE_BY_TOOLSET));
   check('the table cites where the ids came from, so the next reader can check them',
     /workload-component-id-vs-build-tools/.test(read(FACTS_FILE)));
+}
+
+// ─── Nothing printed to master contains a failed interpolation (Section 188) ────────────────────
+section('no "undefined" reaches a sentence master reads');
+{
+  // THE GENERAL FORM OF THE DEFECT, which is what makes this worth a section of its own. An index
+  // outliving its array printed `--add undefined` as a COMMAND master was told to run. Every
+  // string this module and the probe can emit is swept, because the next one will come from a
+  // different interpolation and a check aimed only at `--add` would miss it.
+  const everything = [
+    ...facts.consequences(),
+    ...facts.remedyLines(),
+    ...facts.spectreCommands(),
+    ...facts.spectreCommands('D:\\Custom\\Path'),
+    facts.summaryLine(),
+    ...Object.values(facts.SPECTRE_BY_TOOLSET).flatMap((e) => [e.id, e.name]),
+    ...Object.values(facts.SPECTRE).flatMap((v) => (Array.isArray(v) ? v : [String(v)])),
+  ].map(String);
+
+  for (const bad of ['undefined', 'null', 'NaN', '\\[object Object\\]']) {
+    const hits = everything.filter((s) => new RegExp(bad).test(s));
+    check(`nothing emitted contains "${bad.replace(/\\/g, '')}"`, hits.length === 0, hits.join(' | '));
+  }
+  check('every emitted line is a non-empty string',
+    everything.every((s) => typeof s === 'string' && s.trim().length > 0));
+
+  // The probe's output, across every verdict, swept the same way.
+  const tp2 = require('../scripts/toolchainProbe.cjs');
+  const verdicts = [
+    { verdict: 'not-windows', instances: [], spectreFound: [], reason: 'x' },
+    { verdict: 'unknown', instances: [], spectreFound: [], reason: 'x' },
+    { verdict: 'no-visual-studio', instances: [], spectreFound: [], reason: null },
+    { verdict: 'no-cpp-toolset', instances: [{ path: 'C:\\A', name: 'BT', version: '1', toolsets: [] }], spectreFound: [], reason: null },
+    { verdict: 'spectre-missing', instances: [{ path: 'C:\\A', name: 'BT', version: '1', toolsets: [{ version: '14.29.1', spectre: false }] }], spectreFound: [], reason: null },
+    { verdict: 'spectre-present', instances: [{ path: 'C:\\A', name: 'BT', version: '1', toolsets: [{ version: '14.29.1', spectre: true }] }], spectreFound: [{ path: 'C:\\A', toolset: '14.29.1' }], reason: null },
+  ];
+  for (const v of verdicts) {
+    const text = tp2.lines(v).join('\n');
+    check(`the ${v.verdict} report contains no failed interpolation`,
+      !/undefined|\[object Object\]|NaN/.test(text),
+      (text.match(/.*(undefined|\[object Object\]|NaN).*/g) || []).join(' | '));
+  }
+}
+
+// ─── One failure report, shared by both paths (Section 188) ─────────────────────────────────────
+section('a real build and a hand-run say the same thing');
+{
+  const rn = require('../scripts/rebuildNatives.cjs');
+  check('the failure report is a shared export, not a copy per caller',
+    typeof rn.reportFailure === 'function');
+
+  const out = [];
+  rn.reportFailure('simulated', (l) => out.push(l));
+  check('it names the failure', out.some((l) => /failed: simulated/.test(l)));
+  check('it carries the consequences', out.some((l) => /terminal is DISABLED/.test(l)));
+  check('it carries the remedy command', out.some((l) => /vs_installer\.exe" modify/.test(l)));
+  // THE GAP MASTER'S BUILD LOG SHOWED: the probe reached the hand-run path only.
+  check('and it carries the machine-specific probe, which the build path lacked',
+    out.some((l) => /TOOLCHAIN PROBE/.test(l)) && out.some((l) => /VERDICT/.test(l)));
+  check('nothing in the report contains a failed interpolation',
+    !out.some((l) => /undefined|\[object Object\]/.test(l)), out.filter((l) => /undefined/.test(l)).join(' | '));
+
+  const bb2 = codeOnly(read('scripts/beforeBuild.cjs'));
+  check('the build hook calls the shared report rather than printing its own lines',
+    /reportFailure\(outcome\.error\)/.test(bb2));
+  check('and no longer loops over the facts itself',
+    !/for \(const line of facts\.(consequences|remedyLines)\(\)\)/.test(bb2));
+  check('the CLI calls it too, so there is exactly one reporting path',
+    /reportFailure\(res\.error\)/.test(codeOnly(read('scripts/rebuildNatives.cjs'))));
 }
 
 // ─── Said once ───────────────────────────────────────────────────────────────────────────────────

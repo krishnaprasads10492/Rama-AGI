@@ -81,7 +81,36 @@ function rebuildNatives({ root = path.join(__dirname, '..'), stdio = 'inherit' }
   }
 }
 
-module.exports = { rebuildNatives, resolveBin, PACKAGE, BIN };
+/**
+ * Everything a reader needs when the rebuild fails, in one place.
+ *
+ * WHY SHARED (spec Section 188). The CLI printed the consequences, the remedy AND the toolchain
+ * probe; `beforeBuild.cjs` — the path a real build takes — printed only the first two. So master's
+ * build log carried generic advice and no diagnosis, while `npm run rebuild` on the same machine
+ * would have told him which of the four causes applied. Two callers reporting the same failure
+ * differently is how one of them ends up worse, which is the Section 185 lesson repeated.
+ *
+ * @param {(line:string)=>void} write  where the lines go (console.warn in both callers)
+ */
+function reportFailure(error, write = console.warn) {
+  const facts = require('../shared/nativeModuleFacts.cjs');
+  write(`  ⚠ ${BIN} failed: ${error}`);
+  for (const line of facts.consequences()) write(`  ⚠ ${line}`);
+  for (const line of facts.remedyLines()) write(`  ⚠ ${line}`);
+  // The machine-specific half. Guarded, because a probe that throws must not cost the report the
+  // sentences above it.
+  try {
+    const probe = require('./toolchainProbe.cjs');
+    write('');
+    write('  WHY IT FAILED — read this before acting on the generic advice above:');
+    for (const line of probe.lines(probe.probeNow())) write(`  ${line}`);
+  } catch (err) {
+    write(`  (the toolchain probe could not run: ${err.message})`);
+  }
+  write('');
+}
+
+module.exports = { rebuildNatives, resolveBin, reportFailure, PACKAGE, BIN };
 
 // ── CLI, so `npm run rebuild` has something real to call ─────────────────────────────────────────
 // Guarded by `require.main` on the Section 161 precedent: requiring this module must not start a
@@ -94,24 +123,7 @@ if (require.main === module) {
     console.log('  ✓ Native modules rebuilt\n');
     process.exit(0);
   }
-  // The same sentences the build prints, from the same declaration, so the two cannot drift
-  // (Section 183.1). A reader who runs this by hand gets the consequences and the command.
-  console.warn(`  ⚠ ${BIN} failed: ${res.error}`);
-  for (const line of facts.consequences()) console.warn(`  ⚠ ${line}`);
-  for (const line of facts.remedyLines()) console.warn(`  ⚠ ${line}`);
-  // THEN THE MACHINE-SPECIFIC DIAGNOSIS (Section 186). The remedy above is generic advice; this
-  // says which of its four failure modes actually applies here, because master ran the command and
-  // the build failed again, and at that point generic advice sends him round the same loop twice.
-  try {
-    const probe = require('./toolchainProbe.cjs');
-    console.warn('');
-    // The framing belongs to the caller that knows a build failed; the probe's own heading has to
-    // stay true when `npm run doctor:toolchain` runs it with nothing broken.
-    console.warn('  WHY IT FAILED — read this before acting on the generic advice above:');
-    for (const line of probe.lines(probe.probeNow())) console.warn(`  ${line}`);
-  } catch (err) {
-    console.warn(`  (the toolchain probe could not run: ${err.message})`);
-  }
-  console.warn('');
+  // One report, shared with `beforeBuild.cjs` so a hand-run and a real build say the same thing.
+  reportFailure(res.error);
   process.exit(1);
 }
