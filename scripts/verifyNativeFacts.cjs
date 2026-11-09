@@ -193,6 +193,87 @@ section('a remedy is a command where a command exists (Section 176\u2019s ruling
     /workload-component-id-vs-build-tools/.test(read(FACTS_FILE)));
 }
 
+// ─── Nothing needs compiling, so nothing needs a toolchain (Section 190) ────────────────────────
+section('a module that already loads is not compiled again');
+{
+  const rn = require('../scripts/rebuildNatives.cjs');
+
+  // MEASURED ON THIS MACHINE, which has no MSVC toolset at all: both native modules ship prebuilt
+  // Node-API binaries and load as they are. `node_modules/node-pty/build` holds no `.node` file and
+  // `require('node-pty')` still succeeds, because `lib/utils.js` falls back to `prebuilds/`.
+  const p = rn.plan();
+  check('both declared native modules are inspected',
+    p.modules.length === facts.NATIVE_MODULE_NAMES.length);
+  check('each is reported as Node-API or not, and loading or not',
+    p.modules.every((m) => typeof m.napi === 'boolean' && typeof m.loads === 'boolean'));
+  // BOTH conditions required. A module that loads under Node but is not Node-API could still be
+  // wrong for Electron's ABI, so loading alone must never excuse it from a rebuild.
+  check('skippable requires Node-API AND loading, never loading alone',
+    p.modules.every((m) => m.skippable === (m.napi && m.loads)));
+  check('and on this toolchain-free machine nothing needs compiling',
+    p.needed.length === 0, `needs: ${p.needed.join(', ')}`);
+
+  const res = rn.rebuildNatives({ stdio: 'pipe' });
+  check('so the rebuild succeeds without invoking a compiler', res.ok === true, JSON.stringify(res));
+  check('it compiled nothing', res.rebuilt.length === 0);
+  check('it names what it skipped and why, rather than passing silently',
+    res.skipped.length === 2 && /already loads from a shipped Node-API binary/.test(res.reason || ''),
+    JSON.stringify(res));
+
+  const src = codeOnly(read('scripts/rebuildNatives.cjs'));
+  // `--force` IS WHY FOUR TRANCHES WENT INTO A VISUAL STUDIO COMPONENT THIS PROJECT DOES NOT NEED.
+  // It compelled a from-source compile of modules shipping working binaries, and node-pty's own
+  // binding.gyp asks for Spectre-mitigated libs, so that forced compile produced MSB8040.
+  check('the default invocation no longer forces a from-source compile',
+    !/execSync\(`node "\$\{found\.bin\}" --force`/.test(src));
+  check('and it scopes the rebuild to the modules that need it',
+    /--only \$\{needed\.join\(','\)\}/.test(src));
+  check('the load check runs in a CHILD process, so testing does not load the addon here',
+    /execSync\(`node -e "require\(/.test(src));
+  check('a forced rebuild is still possible for when it is genuinely wanted',
+    /force = false/.test(src) && /force \? ' --force'/.test(src));
+
+  // The override that lets a genuine compile succeed without the component, if one is ever needed.
+  const targets = path.join(ROOT, 'Directory.Build.targets');
+  check('an MSBuild override exists so a real compile does not need the Spectre libs',
+    fs.existsSync(targets));
+  const t = fs.existsSync(targets) ? fs.readFileSync(targets, 'utf8') : '';
+  check('it disables the mitigation node-pty asks for', /<SpectreMitigation>false<\/SpectreMitigation>/.test(t));
+  check('and it is .targets, not .props, or the project would overwrite it',
+    /Directory\.Build\.props BEFORE the project body/.test(t));
+  check('the trade-off is stated rather than implied',
+    /unhardened terminal versus NO TERMINAL/.test(t));
+}
+
+// ─── A consequence is claimed only for a module that actually fails (Section 190) ───────────────
+section('a failed compile of a working module has no consequence');
+{
+  // THE THIRD FALSE CLAIM IN THIS AREA, after the piped shell (183.1) and `--add undefined` (188).
+  // `consequences()` returned BOTH sentences whenever the rebuild failed, and master's transcript
+  // named only node-pty — so he was told his credential vault had fallen back to scrypt while
+  // argon2 was loading perfectly from its prebuilt binary.
+  check('scoped to one module, only that module is described',
+    facts.consequences(['node-pty']).length === 1
+    && /node-pty/.test(facts.consequences(['node-pty'])[0]));
+  check('and the other module is not implicated',
+    !/argon2/.test(facts.consequences(['node-pty']).join(' ')));
+  check('an empty list is treated as "do not know", keeping the old whole-set behaviour',
+    facts.consequences([]).length === facts.NATIVE_MODULES.length
+    && facts.consequences(null).length === facts.NATIVE_MODULES.length);
+  check('the wording is about LOADING, not compiling, since loading is what matters',
+    facts.consequences(['argon2'])[0].startsWith('argon2 did not load.'),
+    facts.consequences(['argon2'])[0]);
+
+  // And the report refuses to list any consequence when everything loads.
+  const out = [];
+  require('../scripts/rebuildNatives.cjs').reportFailure('simulated', (l) => out.push(l));
+  const text = out.join('\n');
+  check('a failure with every module still loading says nothing is degraded',
+    /every native module still LOADS/.test(text) && /nothing is degraded/.test(text), text);
+  check('and does not claim the terminal is disabled when it is not',
+    !/terminal is DISABLED/.test(text), text);
+}
+
 // ─── Nothing printed to master contains a failed interpolation (Section 188) ────────────────────
 section('no "undefined" reaches a sentence master reads');
 {
@@ -245,13 +326,24 @@ section('a real build and a hand-run say the same thing');
   const out = [];
   rn.reportFailure('simulated', (l) => out.push(l));
   check('it names the failure', out.some((l) => /failed: simulated/.test(l)));
-  check('it carries the consequences', out.some((l) => /terminal is DISABLED/.test(l)));
-  check('it carries the remedy command', out.some((l) => /vs_installer\.exe" modify/.test(l)));
+  // ON THIS TREE EVERYTHING LOADS, so the correct report is that nothing is degraded — asserting
+  // the consequences here would be asserting a falsehood (Section 190).
+  check('and with every module loading it reports no degradation',
+    out.some((l) => /every native module still LOADS/.test(l)), out.join(' | '));
+
+  // THE DEGRADED PATH, driven by pointing the load probe at a root with no node_modules.
+  const broken = [];
+  rn.reportFailure('simulated', (l) => broken.push(l), { root: os.tmpdir() });
+  const btext = broken.join('\n');
+  check('when a module genuinely does not load, the consequence IS carried',
+    /did not load/.test(btext), btext.slice(0, 200));
+  check('with the remedy command', /vs_installer\.exe" modify/.test(btext));
   // THE GAP MASTER'S BUILD LOG SHOWED: the probe reached the hand-run path only.
-  check('and it carries the machine-specific probe, which the build path lacked',
-    out.some((l) => /TOOLCHAIN PROBE/.test(l)) && out.some((l) => /VERDICT/.test(l)));
-  check('nothing in the report contains a failed interpolation',
-    !out.some((l) => /undefined|\[object Object\]/.test(l)), out.filter((l) => /undefined/.test(l)).join(' | '));
+  check('and the machine-specific probe, which the build path lacked',
+    /TOOLCHAIN PROBE/.test(btext) && /VERDICT/.test(btext));
+  check('nothing in either report contains a failed interpolation',
+    !/undefined|\[object Object\]/.test(`${out.join('\n')}\n${btext}`),
+    [...out, ...broken].filter((l) => /undefined/.test(l)).join(' | '));
 
   const bb2 = codeOnly(read('scripts/beforeBuild.cjs'));
   check('the build hook calls the shared report rather than printing its own lines',
@@ -668,7 +760,20 @@ section('every npm script names something that exists');
     !/node_modules', '@electron', 'rebuild'/.test(read('scripts/beforeBuild.cjs')));
   // TRANSITIVELY builtin-only. `beforeBuild.cjs` requires this chain and must still run on a
   // checkout with no `node_modules`, so every link in it is checked, not just the first.
-  const builtinOnly = (rel) => (read(rel).match(/require\('([^']+)'\)/g) || [])
+  // A `require` INSIDE A COMMAND STRING IS NOT AN IMPORT. `rebuildNatives.cjs` runs
+  // `node -e "require('<name>')"` in a child process to test whether a module loads, and a textual
+  // scan reads that as this file importing node-pty (Section 190). Lines that hand a command to a
+  // child process are dropped before the scan.
+  // Comments stripped FIRST — the explanation of why node-pty loads from a prebuild naturally
+  // contains the words `require('node-pty')`, and a textual scan reads prose as an import. Fifth
+  // time this project has paid for that, after the piped-shell ban, the `may not` sniff, the
+  // `member:` phantom and the duplicate-handler comment.
+  const realRequires = (rel) => codeOnly(read(rel))
+    .split('\n')
+    .filter((l) => !/node -e|execSync\(|spawnSync\(/.test(l))
+    .join('\n')
+    .match(/require\('([^']+)'\)/g) || [];
+  const builtinOnly = (rel) => realRequires(rel)
     .every((r) => /'(child_process|fs|os|path)'/.test(r)
       || /nativeModuleFacts\.cjs|toolchainProbe\.cjs|rebuildNatives\.cjs/.test(r));
   for (const rel of ['scripts/rebuildNatives.cjs', 'scripts/toolchainProbe.cjs',
@@ -692,7 +797,8 @@ section('every npm script names something that exists');
   check('the CLI is behind a require.main guard',
     /if \(require\.main === module\)/.test(read('scripts/rebuildNatives.cjs')));
   check('and when it fails by hand it prints the same consequences and remedy the build does',
-    /facts\.consequences\(\)/.test(read('scripts/rebuildNatives.cjs'))
+    // `consequences(broken)` now takes the failing modules, so the parens are no longer empty.
+    /facts\.consequences\([\w]*\)/.test(read('scripts/rebuildNatives.cjs'))
     && /facts\.remedyLines\(\)/.test(read('scripts/rebuildNatives.cjs')));
 }
 

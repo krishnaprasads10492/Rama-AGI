@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Directory.Build.targets — stop node-pty demanding libraries we do not have (spec Section 190)
+
+  WHY THIS FILE EXISTS, measured rather than guessed:
+
+    node_modules/node-pty/binding.gyp, line 9:   'SpectreMitigation': 'Spectre'
+
+  node-pty ASKS for Spectre-mitigated libraries. node-gyp 9.x ignored that attribute; node-gyp
+  12.4.0 — which @electron/rebuild 4.2.1 bundles — writes it into the generated .vcxproj, and
+  MSBuild then fails with MSB8040 because the Spectre variant of the v142 libraries is not
+  installed. That is the whole of "this has been happening ever since we upgraded": the upgrade in
+  Section 173 did not break the compiler, it started honouring a request node-pty always made.
+
+  WHY OVERRIDE RATHER THAN INSTALL THE COMPONENT. Four rounds went into installing it and it is
+  still not on disk; the component id is catalogue-specific, vs_installer exits 0 without doing the
+  work, and the machine already has a perfectly good v142 toolset (14.29.30133). Disabling the
+  requirement is Microsoft's own documented alternative for MSB8040 — "if you don't want to use
+  Spectre mitigation, disable the option" — and it needs nothing downloaded.
+
+  WHAT IT COSTS, honestly. Spectre mitigation is a compiler hardening against a speculative-
+  execution side channel: /Qspectre inserts barriers on code paths where an attacker-controlled
+  index could be used to train a branch predictor. Without it, node-pty's addon is compiled the way
+  the overwhelming majority of npm native modules are. The trade is NOT "hardened versus
+  unhardened" — it is "an unhardened terminal versus NO TERMINAL", because today the module does
+  not build at all and `terminal:create` refuses every call. Worth stating plainly rather than
+  leaving as an implication.
+
+  WHY .targets AND NOT .props. MSBuild imports Directory.Build.props BEFORE the project body, so
+  the .vcxproj's own <SpectreMitigation>Spectre</SpectreMitigation> would simply overwrite it.
+  Directory.Build.targets is imported AFTER, which is what makes this override win.
+
+  SCOPE. MSBuild walks up from the project directory to the first Directory.Build.targets it finds.
+  node-gyp generates its projects under node_modules/<pkg>/build/, so this file at the repository
+  root covers every native module built inside this checkout and nothing outside it.
+-->
+<Project>
+  <PropertyGroup>
+    <SpectreMitigation>false</SpectreMitigation>
+  </PropertyGroup>
+</Project>

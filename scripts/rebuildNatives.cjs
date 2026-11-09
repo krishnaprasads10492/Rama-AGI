@@ -70,14 +70,86 @@ function resolveBin(root) {
  *
  * @returns {{ok:boolean, error:string|null}}
  */
-function rebuildNatives({ root = path.join(__dirname, '..'), stdio = 'inherit' } = {}) {
-  const found = resolveBin(root);
-  if (!found.ok) return { ok: false, error: found.error };
+/**
+ * Does this module already load, and is it Node-API?
+ *
+ * MEASURED, AND IT IS THE WHOLE OF SECTION 190. Both of this project's native modules ship prebuilt
+ * Node-API binaries:
+ *   - `argon2` is built with `prebuildify --napi` and installed by `node-gyp-build`, with
+ *     `prebuilds/win32-x64/argon2.glibc.node` present in the package;
+ *   - `node-pty` ships `prebuilds/win32-x64/{pty,conpty,conpty_console_list}.node` plus winpty, and
+ *     `lib/utils.js` resolves `['build/Release', 'build/Debug', 'prebuilds/<platform>-<arch>']` —
+ *     so it loads the shipped binary when nothing was compiled.
+ * Proven on the development machine, which has NO MSVC toolset at all: `node_modules/node-pty/build`
+ * contains no `.node` file and `require('node-pty')` still succeeds.
+ *
+ * Node-API is ABI-stable across Node AND Electron, which is what makes a Node-side load a sound
+ * basis for skipping an Electron rebuild. BOTH conditions are required: a module that loads but is
+ * NOT Node-API could still be wrong for Electron's ABI, so it is rebuilt rather than trusted.
+ *
+ * The load runs in a CHILD PROCESS. Requiring a native addon into this process to test it would
+ * leave it loaded for the rest of the build, and a check that changes the thing it measures is not
+ * a check (the rule `startupDoctor`'s `resolves()` already follows).
+ */
+function inspect(name, root) {
+  let napi = false;
   try {
-    execSync(`node "${found.bin}" --force`, { cwd: root, stdio });
-    return { ok: true, error: null };
+    const pkg = JSON.parse(readFileSync(path.join(root, 'node_modules', name, 'package.json'), 'utf8'));
+    const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+    napi = !!(deps['node-addon-api'] || deps['node-gyp-build'] || deps.prebuildify
+      || Array.isArray(pkg.binary && pkg.binary.napi_versions));
+  } catch { /* not installed; `loads` below will say so */ }
+
+  let loads = false;
+  let error = null;
+  try {
+    execSync(`node -e "require('${name}')"`, { cwd: root, stdio: 'pipe', timeout: 60_000 });
+    loads = true;
   } catch (err) {
-    return { ok: false, error: err.message };
+    error = (err.stderr && err.stderr.toString().trim().split('\n').pop()) || err.message;
+  }
+  return { name, napi, loads, error, skippable: napi && loads };
+}
+
+/** Which modules actually need compiling, and why the others do not. */
+function plan({ root = path.join(__dirname, '..') } = {}) {
+  const names = require('../shared/nativeModuleFacts.cjs').NATIVE_MODULE_NAMES;
+  const modules = names.map((n) => inspect(n, root));
+  return { modules, needed: modules.filter((m) => !m.skippable).map((m) => m.name) };
+}
+
+/**
+ * Rebuild the native modules that need it.
+ *
+ * NOT `--force` ANY MORE, and that flag is why four tranches went into a Visual Studio component
+ * this project does not need. `--force` compels a from-source compile of every native module,
+ * including ones shipping working prebuilt binaries — and `node-pty`'s own `binding.gyp` asks for
+ * Spectre-mitigated libraries, so that forced compile is what produced MSB8040. Nothing was broken
+ * by the absence of those libraries except a build step that did not have to run.
+ *
+ * @returns {{ok:boolean, error:string|null, skipped:string[], rebuilt:string[]}}
+ */
+function rebuildNatives({ root = path.join(__dirname, '..'), stdio = 'inherit', force = false } = {}) {
+  const { modules, needed } = plan({ root });
+  const skipped = modules.filter((m) => m.skippable).map((m) => m.name);
+
+  if (!force && needed.length === 0) {
+    // NOTHING TO DO IS AN OUTCOME, not a silence. Said out loud so a reader does not conclude the
+    // step was skipped by accident.
+    return { ok: true, error: null, skipped, rebuilt: [], reason: 'every native module already '
+      + `loads from a shipped Node-API binary (${skipped.join(', ')}), so no compile is required` };
+  }
+
+  const found = resolveBin(root);
+  if (!found.ok) return { ok: false, error: found.error, skipped, rebuilt: [] };
+  // Scoped to what needs it. `--only` keeps a module that already works out of a compile that can
+  // only fail, which is the difference between a degraded build and a clean one.
+  const only = force ? '' : ` --only ${needed.join(',')}`;
+  try {
+    execSync(`node "${found.bin}"${force ? ' --force' : only}`, { cwd: root, stdio });
+    return { ok: true, error: null, skipped, rebuilt: force ? modules.map((m) => m.name) : needed };
+  } catch (err) {
+    return { ok: false, error: err.message, skipped, rebuilt: [] };
   }
 }
 
@@ -92,10 +164,21 @@ function rebuildNatives({ root = path.join(__dirname, '..'), stdio = 'inherit' }
  *
  * @param {(line:string)=>void} write  where the lines go (console.warn in both callers)
  */
-function reportFailure(error, write = console.warn) {
+function reportFailure(error, write = console.warn, { root = path.join(__dirname, '..') } = {}) {
   const facts = require('../shared/nativeModuleFacts.cjs');
   write(`  ⚠ ${BIN} failed: ${error}`);
-  for (const line of facts.consequences()) write(`  ⚠ ${line}`);
+  // ONLY THE MODULES THAT ACTUALLY FAIL TO LOAD (Section 190). A failed compile of a module whose
+  // prebuilt binary loads anyway has NO consequence, and claiming one told master his vault had
+  // dropped to scrypt when argon2 was working.
+  let broken = null;
+  try { broken = plan({ root }).modules.filter((m) => !m.loads).map((m) => m.name); }
+  catch { /* fall back to the whole set below */ }
+  if (broken && broken.length === 0) {
+    write('  ⚠ ...but every native module still LOADS from a shipped binary, so nothing is degraded.');
+    write('');
+    return;
+  }
+  for (const line of facts.consequences(broken)) write(`  ⚠ ${line}`);
   for (const line of facts.remedyLines()) write(`  ⚠ ${line}`);
   // The machine-specific half. Guarded, because a probe that throws must not cost the report the
   // sentences above it.
@@ -110,7 +193,7 @@ function reportFailure(error, write = console.warn) {
   write('');
 }
 
-module.exports = { rebuildNatives, resolveBin, reportFailure, PACKAGE, BIN };
+module.exports = { rebuildNatives, resolveBin, reportFailure, inspect, plan, PACKAGE, BIN };
 
 // ── CLI, so `npm run rebuild` has something real to call ─────────────────────────────────────────
 // Guarded by `require.main` on the Section 161 precedent: requiring this module must not start a
@@ -120,7 +203,10 @@ if (require.main === module) {
   console.log(`\n  ⬢ Rebuilding native modules (${facts.NATIVE_MODULE_NAMES.join(', ')}) for Electron...`);
   const res = rebuildNatives();
   if (res.ok) {
-    console.log('  ✓ Native modules rebuilt\n');
+    // Says which it was. "Rebuilt" when nothing was compiled is a small lie that would send the
+    // next reader looking for build output that does not exist (Section 190).
+    if (res.reason) console.log(`  ✓ No rebuild needed — ${res.reason}\n`);
+    else console.log(`  ✓ Rebuilt: ${res.rebuilt.join(', ') || '(nothing)'}\n`);
     process.exit(0);
   }
   // One report, shared with `beforeBuild.cjs` so a hand-run and a real build say the same thing.

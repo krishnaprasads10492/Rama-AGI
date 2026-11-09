@@ -112,7 +112,11 @@ module.exports = async function(context) {
   // a bare `electron-rebuild` that could not run at all once Section 173 renamed the package.
   const outcome = rebuildNatives({ root });
   if (outcome.ok) {
-    console.log('  ✓ Native modules rebuilt\n');
+    // A SKIP IS REPORTED, NOT IMPLIED (Section 190). Most runs now compile nothing at all, because
+    // both native modules ship Node-API binaries that already load — and "nothing happened" must
+    // read as a decision rather than as a step that quietly did not run.
+    if (outcome.reason) console.log(`  ✓ No rebuild needed — ${outcome.reason}\n`);
+    else console.log(`  ✓ Native modules rebuilt${outcome.rebuilt && outcome.rebuilt.length ? `: ${outcome.rebuilt.join(', ')}` : ''}\n`);
     // RECORDED ON THE CONTEXT, not only printed. The caller owns this object, so this is how the
     // outcome reaches the build manifest and the closing report. Swallowing the failure in a
     // warning was why master could hold an installer whose build never mentioned it again.

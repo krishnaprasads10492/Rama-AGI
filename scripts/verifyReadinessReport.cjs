@@ -330,10 +330,20 @@ const COMFY = b.DISK_COMFY_MB;
     !/console\.warn\([^)]*piped shell/i.test(bb));
   check('and what that reporter prints is a command, not advice', (() => {
     const rn = require(path.join(ROOT, 'scripts/rebuildNatives.cjs'));
+    // DRIVEN AGAINST A ROOT WITH NO MODULES, because on a healthy tree the reporter correctly says
+    // nothing is degraded — every native module loads from its shipped Node-API binary, so there is
+    // no consequence to print (Section 190). Asserting the remedy here would require the reporter
+    // to claim a degradation that does not exist.
     const out = [];
-    rn.reportFailure('readiness probe', (l) => out.push(l));
+    rn.reportFailure('readiness probe', (l) => out.push(l), { root: require('os').tmpdir() });
     return out.some((l) => /vs_installer\.exe" modify .*--add /.test(l))
       && out.some((l) => /terminal is DISABLED/.test(l));
+  })());
+  check('while on a tree where everything loads it reports no degradation at all', (() => {
+    const rn = require(path.join(ROOT, 'scripts/rebuildNatives.cjs'));
+    const out = [];
+    rn.reportFailure('readiness probe', (l) => out.push(l));
+    return out.some((l) => /every native module still LOADS/.test(l));
   })());
   check('the outcome is carried into the build manifest', (() => {
     const i = src.indexOf('writeBuildManifest(readiness, {');

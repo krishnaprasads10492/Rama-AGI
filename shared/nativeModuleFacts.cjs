@@ -161,11 +161,20 @@ const NATIVE_MODULE_NAMES = Object.freeze(NATIVE_MODULES.map((m) => m.name));
  * A module that stops working entirely is listed before one that falls back, because a reader who
  * stops after the first line should have been told the bigger thing.
  */
-function consequences() {
-  return NATIVE_MODULES
-    .slice()
+function consequences(names = null) {
+  // SCOPED TO THE MODULES THAT ACTUALLY FAILED (spec Section 190). This returned BOTH consequences
+  // whenever the rebuild step failed as a whole, and master's transcript named only `node-pty` —
+  // so he was told his credential vault had fallen back to scrypt when argon2 had loaded fine from
+  // its prebuilt Node-API binary all along. A consequence asserted from a build step's exit code
+  // rather than from the module's own state is the third false claim in this area after the piped
+  // shell (183.1) and `--add undefined` (188). `null` keeps the old whole-set behaviour for callers
+  // that genuinely do not know which module failed.
+  const wanted = Array.isArray(names) && names.length
+    ? NATIVE_MODULES.filter((m) => names.includes(m.name))
+    : NATIVE_MODULES.slice();
+  return wanted
     .sort((a, b) => Number(a.degrades) - Number(b.degrades))
-    .map((m) => `${m.name} did not compile. ${m.whenMissing}`);
+    .map((m) => `${m.name} did not load. ${m.whenMissing}`);
 }
 
 /** The one-line form for a warning stream, which must not claim that anything still works. */
