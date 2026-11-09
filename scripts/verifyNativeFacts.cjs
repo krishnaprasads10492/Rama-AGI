@@ -112,7 +112,9 @@ section('a remedy is a command where a command exists (Section 176\u2019s ruling
   // ONE RUNNABLE COMMAND PER COMPONENT ID, not "at least one". A `some()` here let a mutation that
   // broke the first of the two commands pass, because the second still matched — and a reader given
   // one good command and one mangled one is worse off than one given a single command.
-  const runnable = lines.filter((l) => /vs_installer\.exe" modify --installPath "[^"]+" --add Microsoft\.VisualStudio\.Component\.VC\.[\w.]+ --passive --norestart$/.test(l));
+  // The tail is `--passive --norestart --wait` since Section 189. Asserted as a whole rather than
+  // loosely, because this regex is what proves no malformed line slipped in beside the good one.
+  const runnable = lines.filter((l) => /vs_installer\.exe" modify --installPath "[^"]+" --add Microsoft\.VisualStudio\.Component\.VC\.[\w.]+ --passive --norestart --wait$/.test(l));
   check('every component id comes as a complete, runnable command',
     runnable.length === facts.SPECTRE.componentIds.length,
     `${runnable.length} runnable of ${facts.SPECTRE.componentIds.length} ids`);
@@ -156,6 +158,22 @@ section('a remedy is a command where a command exists (Section 176\u2019s ruling
     /learn\.microsoft\.com.*msb8040/i.test(facts.SPECTRE.docs));
   check('nothing in the remedy tells master to npm install a native module',
     !/npm install/i.test(text), text);
+
+  // ── A LAUNCHER'S EXIT CODE IS NOT EVIDENCE (Section 189) ──
+  //
+  // `vs_installer.exe` hands the request to the setup engine and exits, so the shell reports
+  // success before anything is installed. Master ran the command, saw PowerShell exit cleanly, and
+  // the libraries were still absent — twice. `--wait` makes the exit code belong to the operation.
+  check('every install command waits for the operation it started',
+    facts.spectreCommands().every((l) => !/vs_installer/.test(l) || /--wait\b/.test(l)),
+    facts.spectreCommands().filter((l) => /vs_installer/.test(l) && !/--wait/.test(l)).join(' | '));
+  check('and the remedy says it needs elevation', /ELEVATED prompt/.test(text));
+  check('it names where the installer records what it actually did',
+    /%TEMP%\\dd_installer_\*\.log/.test(text) && /search for "error"/.test(text));
+  check('and points at the on-disk check rather than the exit code',
+    /doctor:toolchain/.test(text) && /rather than trusting the exit code/.test(text));
+  check('the log location is declared once, beside the installer path',
+    typeof facts.SPECTRE.logs === 'string' && /dd_installer/.test(facts.SPECTRE.logs));
 
   // ── The id is LOOKED UP per toolset, never constructed (Section 186.6) ──
   const got = facts.spectreComponentFor('14.29.30133');
@@ -474,6 +492,13 @@ section('the failure diagnoses itself instead of repeating generic advice');
   })(), tp.lines(missing).join(' | '));
   check('and the advice names the silent-no-op trap rather than repeating the command',
     /unknown id installs/.test(tp.lines(missing).join('\n')));
+  // The same launcher lesson, in the probe's own advice.
+  check('the probe says a clean exit code is not evidence', (() => {
+    const t = tp.lines(missing).join('\n');
+    return /ELEVATED prompt/.test(t) && /exits before the/.test(t) && /not evidence/.test(t);
+  })(), tp.lines(missing).join(' | '));
+  check('and names the installer log as where the reason is',
+    /dd_installer/.test(tp.lines(missing).join('\n')));
 
   // THE EXACT COMMAND FOR THE TOOLSET FOUND — master's case, reproduced from the probe output he
   // sent: Build Tools 2019 with toolset 14.29.30133 and no spectre libs, beside an SSMS instance

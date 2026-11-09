@@ -87,6 +87,10 @@ const SPECTRE = Object.freeze({
   ]),
   installerPath: `${process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'}`
     + '\\Microsoft Visual Studio\\Installer\\vs_installer.exe',
+  // The Visual Studio installer writes every run here, prefixed `dd_`. This is the only place that
+  // records WHY a modify request installed nothing, and it is where to look when the launcher's
+  // exit code says success and the disk says otherwise.
+  logs: '%TEMP%\\dd_installer_*.log',
   docs: 'https://learn.microsoft.com/en-us/visualstudio/msbuild/errors/msb8040',
 });
 
@@ -102,9 +106,14 @@ function spectreCommands(installPath = 'C:\\Program Files (x86)\\Microsoft Visua
   // `componentIds[0]` and `componentIds[1]`, and when Section 186.6 cut the list to the one
   // PUBLISHED id, the second line kept rendering and emitted `--add undefined`. Master's build log
   // printed that command to him. One index outliving its array is the whole defect.
+  // `--wait` IS NOT OPTIONAL, and its absence cost two rounds (spec Section 189). `vs_installer.exe`
+  // is a LAUNCHER: it hands the request to the setup engine and exits, so the shell reports success
+  // before anything has been installed. Master ran the command, saw PowerShell exit cleanly, and
+  // the libraries were still absent — the command was telling him about itself, not about the
+  // install. With `--wait` the exit code belongs to the actual operation.
   return Object.freeze([
     ...SPECTRE.componentIds.map((id) => `"${vsInstaller}" modify --installPath "${installPath}" `
-      + `--add ${id} --passive --norestart`),
+      + `--add ${id} --passive --norestart --wait`),
     // THE AUTHORITATIVE PATH, said last because it is the one that cannot silently do nothing.
     'Or: open Visual Studio Installer -> Modify -> Individual components -> search "Spectre" -> '
     + `tick "${SPECTRE.componentName}" -> Modify.`,
@@ -175,8 +184,13 @@ function summaryLine() {
 function remedyLines(installPath) {
   return [
     `On Windows this is almost always the missing "${SPECTRE.componentName}" component `
-    + `(node-gyp reports ${SPECTRE.error}). Add it with:`,
+    + `(node-gyp reports ${SPECTRE.error}). From an ELEVATED prompt:`,
     ...spectreCommands(installPath),
+    // WHERE THE ANSWER IS WHEN IT STILL DOES NOTHING. Without this the only evidence available is
+    // an exit code that the launcher produces before the work happens.
+    `If it reports success and the libraries are still absent, the installer said why in ${SPECTRE.logs} `
+    + '— open the newest one and search for "error". Run `npm run doctor:toolchain` to check the '
+    + 'libraries on disk rather than trusting the exit code.',
     // Phrased for however many commands there are. It said "if NEITHER command changes anything",
     // which stopped being true the moment the list held one id — and prose that counts its own
     // subject is prose that goes wrong silently (Section 188).

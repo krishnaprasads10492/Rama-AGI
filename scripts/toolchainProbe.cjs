@@ -210,8 +210,12 @@ function lines(findings) {
         out.push(`    "${facts.SPECTRE.installerPath}" modify --installPath "${e.path}" `
           + `--add ${e.comp.id} --passive --norestart`);
       }
-      out.push('  If that still changes nothing, the GUI is authoritative: Visual Studio Installer');
-      out.push('  -> Modify -> Individual components -> search "Spectre".');
+      out.push('  Run it from an ELEVATED prompt — vs_installer is a launcher and exits before the');
+      out.push('  install finishes, so a clean exit code is not evidence. `--wait` makes the exit');
+      out.push('  code belong to the actual operation.');
+      out.push(`  If it still changes nothing, the installer logged why in ${facts.SPECTRE.logs} —`);
+      out.push('  open the newest and search for "error". The GUI is authoritative: Visual Studio');
+      out.push('  Installer -> Modify -> Individual components -> search "Spectre".');
     } else {
       // NO INVENTED ID. The component id embeds both the toolset and the VS release that shipped
       // it, so it cannot be constructed — and a constructed one installs nothing silently.
