@@ -21615,3 +21615,35 @@ So on the same machine, `npm run rebuild` would have told master which of the fo
 Proven by running it: the remedy now emits one command and no `undefined`; `reportFailure` produces 19 lines including the `TOOLCHAIN PROBE` block and a `VERDICT`.
 
 **Not verified:** master's machine still reports `MSB8040`, so the component is still not installed. Nothing here changes that — it corrects what the build *tells* him about it.
+
+---
+
+## Section 189 - A launcher's exit code is not evidence
+
+Master: *"fix it or tell me how"*, with a transcript confirming both Section 188 fixes are live — `--add undefined` gone, one correct command, and the probe now printing inside the build path with verdict `spectre-missing`.
+
+So the code is right and the component is still not installed. Two rounds were lost to the same misreading, and **the command this project printed was party to it**.
+
+### 189.1 What the command failed to say
+
+`vs_installer.exe` is a **launcher**. It hands the request to the setup engine and exits, so the shell reports success before anything has been installed. Master ran it, saw PowerShell exit cleanly, reported *"seeing success in powershell"* — and the libraries were still absent. The exit code was telling him about the launcher, not about the install.
+
+Three omissions, all fixed:
+
+- **`--wait`** is now on every emitted command, so the exit code belongs to the actual operation rather than to the hand-off.
+- **Elevation is stated.** The remedy says "From an ELEVATED prompt"; without it the modify can fail or do nothing.
+- **The installer log is named**: `%TEMP%\dd_installer_*.log`, the only place that records *why* a modify request installed nothing. The remedy and the probe both point at it, and both point at `npm run doctor:toolchain` as the on-disk check rather than the exit code.
+
+This is the same defect class as Section 186.7's `unknown` exit: a check whose green means less than a reader assumes. There it was ours; here it is a third party's, and the fix is to stop quoting it as proof.
+
+### 189.2 Verified
+
+`verifyNativeFacts` **173 → 180 checks, 0 failures**; **6 of 6 mutations caught** — `--wait` dropped, the elevation note removed, the log pointer removed, the "do not trust the exit code" line removed, and the probe's two equivalents.
+
+Three of the suite's own checks failed first, because the `runnable` regex pinned the command's old tail (`--passive --norestart$`). Correct behaviour, stale assertion — the same over-tight pinning as 185's `err.message` and 183.1's `piped shell`, and the third time this exact shape has appeared. The regex now asserts the whole tail including `--wait`, which is what proves no malformed line slipped in beside the good one.
+
+**Not verified:** whether the component installs on master's machine with `--wait` and elevation. That is the one thing that cannot be established from here.
+
+### 189.3 The route that avoids the 2019 catalogue
+
+Recorded because it may be the faster answer and is not obvious: node-gyp can be pointed at a **different** Visual Studio. Installing VS 2022 Build Tools with "Desktop development with C++" plus its own Spectre libs, then `npm config set msvs_version 2022`, sidesteps the 2019 installer catalogue entirely. Not adopted as the project's advice, because it changes which toolchain every future build uses and that is master's call, not a default this file should make for him.
