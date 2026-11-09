@@ -264,16 +264,30 @@ console.log(`        ${namespaces.length} namespaces, ${leaves.length} leaf memb
 // renderer names `.<name>(` on a value taken from that namespace. The looser second form is
 // deliberate: a false "reached" is better here than a false orphan, because the register's job is to
 // catch NEW gaps, and a noisy list stops being read.
+/**
+ * OPTIONAL CHAINING NORMALISED, and this was a measured defect in both directions (Section 187.1).
+ *
+ * The patterns below accept `rama.ns.name` and `rama?.ns.name`, but a panel that guards the whole
+ * chain writes `rama?.health?.startup?.()` — optional on EVERY link — which matches neither. So:
+ *   - `health.repair` read as UNREACHED while `HealthPanel.jsx` calls it, and
+ *   - `health.startup` read as reached only because that file's docblock names the API in prose,
+ *     which is the comment hazard this suite already lists as held by hand.
+ * The register was therefore wrong in both directions at once for the same namespace. Collapsing
+ * `?.` to `.` before matching catches the form the newest panels actually use, and it can only
+ * INCREASE what counts as reached — so the debt register can only shrink, never redden on arrival.
+ */
+const rendererCode = rendererSrc.replace(/\?\./g, '.');
+
 function isReached(leaf) {
   const { ns, name, path: full } = leaf;
-  if (rendererSrc.includes(`rama.${full}`) || rendererSrc.includes(`rama?.${full}`)) return true;
-  if (!ns) return rendererSrc.includes(`rama.${name}`) || rendererSrc.includes(`rama?.${name}`);
+  if (rendererCode.includes(`rama.${full}`)) return true;
+  if (!ns) return rendererCode.includes(`rama.${name}`);
   // `const { x } = window.rama.ns` then `x(...)`
-  const destructure = new RegExp(`\\{[^}]*\\b${name}\\b[^}]*\\}\\s*=\\s*window\\.rama\\??\\.${ns}`);
-  if (destructure.test(rendererSrc)) return true;
+  const destructure = new RegExp(`\\{[^}]*\\b${name}\\b[^}]*\\}\\s*=\\s*window\\.rama\\.${ns}`);
+  if (destructure.test(rendererCode)) return true;
   // `const api = window.rama.ns` then `api.x(`
-  const alias = new RegExp(`=\\s*window\\.rama\\??\\.${ns}\\b`);
-  if (alias.test(rendererSrc) && new RegExp(`\\.${name}\\s*\\(`).test(rendererSrc)) return true;
+  const alias = new RegExp(`=\\s*window\\.rama\\.${ns}\\b`);
+  if (alias.test(rendererCode) && new RegExp(`\\.${name}\\s*\\(`).test(rendererCode)) return true;
   return false;
 }
 

@@ -4,6 +4,7 @@ import { formatBytes }   from '@services/ramaClient.js';
 import { useUserStore }  from '@store/userStore.js';
 import { FS, LH } from '@config/type.js';
 import SecurityPanel from './SecurityPanel.jsx';
+import HealthPanel from './HealthPanel.jsx';
 
 // ─── Gauge bar ────────────────────────────────────────────────────────────────
 function GaugeBar({ value, max = 100, color = 'var(--accent)', height = 6 }) {
@@ -405,6 +406,11 @@ export default function System() {
                 top-level route only when master goes looking for it on purpose, and this belongs
                 with the other facts about the machine Rāma is running on. It scans only when
                 asked, so placing it here costs nothing on load. */}
+            {/* What the app found wrong with ITSELF at startup — Section 187. Placed before the
+                dependency scan because a fault in this installation is more urgent to master than
+                an advisory in a package, and because this one is free to read. */}
+            <HealthPanel />
+
             <SecurityPanel />
 
             {/* CPU cores */}
