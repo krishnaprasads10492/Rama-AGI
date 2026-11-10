@@ -110,6 +110,18 @@ function requiresIn(source) {
   while ((m = re.exec(stripped)) !== null) {
     const spec = m[2];
     if (!spec || spec.startsWith('node:')) continue;
+    // NOT A SPECIFIER — AN ERROR MESSAGE (spec Section 191). `autonomyPolicy.cjs` throws
+    //     new Error(`policy.require("${classId}") needs an explicit level ...`)
+    // and inside that TEMPLATE LITERAL the text `require("${classId}")` matches the pattern above
+    // exactly: `require(`, a double quote, content, the same quote, `)`. So every packaged build
+    // reported `${classId}` as a package that could not be found, in a report whose whole purpose
+    // is to say which packages are genuinely missing. Noted in Section 177 as cosmetic and left;
+    // it is still a shipped audit naming something that does not exist.
+    //
+    // A real specifier never contains `${`. Rejecting on that is narrower and safer than stripping
+    // template literals wholesale, because `${ require('x') }` inside a literal IS a real require
+    // and must keep being followed.
+    if (spec.includes('${')) continue;
     // Cheap guard detection: is there an unclosed `try {` before this point?
     const before = stripped.slice(0, m.index);
     const tries = (before.match(/\btry\s*\{/g) ?? []).length;
@@ -371,9 +383,17 @@ function main() {
   return 1;
 }
 
-try {
-  process.exitCode = main();
-} catch (e) {
-  bad(`audit aborted: ${e.message ?? String(e)}`);
-  process.exitCode = 1;
+// GUARDED, so requiring this file to test it does not run an audit (spec Section 191, on the
+// Section 161 precedent). It ran `main()` unconditionally, which is why `requiresIn` — the part
+// that misread an error message as a package name — had no test: reaching it meant auditing.
+if (require.main === module) {
+  try {
+    process.exitCode = main();
+  } catch (e) {
+    bad(`audit aborted: ${e.message ?? String(e)}`);
+    process.exitCode = 1;
+  }
 }
+
+// The specifier scanner is exported because it is the part that can be quietly wrong, and was.
+module.exports = { requiresIn, packageNameOf: typeof packageNameOf === 'function' ? packageNameOf : undefined };

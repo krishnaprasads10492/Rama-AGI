@@ -203,6 +203,46 @@ console.log('\n--- release() refuses before it can do damage ---');
   check('release is exported', typeof pipeline.release === 'function');
   check('bumpVersion is exported', typeof pipeline.bumpVersion === 'function');
 
+  // ─── The packaged-dependency audit's specifier scanner (Section 191) ──────────────────────────
+  //
+  // THE DEFECT, VISIBLE IN EVERY SHIPPED BUILD LOG. `autonomyPolicy.cjs` throws
+  //     new Error(`policy.require("${classId}") needs an explicit level`)
+  // and inside that template literal the text `require("${classId}")` matches the scanner's
+  // pattern exactly — `require(`, a quote, content, the same quote, `)`. So the audit reported
+  // `${classId}` as a package it could not find, in the one report whose job is to say which
+  // packages are genuinely missing. Section 177 noted it as cosmetic and left it; a report naming
+  // something that does not exist is the defect this project has spent four sections removing.
+  // Locally scoped: this file imports only the pipeline, and widening its top-level imports for
+  // one section would change what every other check sees.
+  const fs = require('fs');
+  const path = require('path');
+  const ROOT = path.join(__dirname, '..');
+  const audit = require('./auditPackage.cjs');
+  check('the specifier scanner is exported, so it can be tested without running an audit',
+    typeof audit.requiresIn === 'function');
+  const specs = (s) => audit.requiresIn(s).map((r) => r.spec);
+
+  check('an error message mentioning require() yields NO specifier',
+    specs('throw new Error(`policy.require("${classId}") needs a level`);').length === 0,
+    JSON.stringify(specs('throw new Error(`policy.require("${classId}") needs a level`);')));
+  check('and the live autonomyPolicy.cjs no longer produces a bogus one', (() => {
+    const pol = fs.readFileSync(path.join(ROOT, 'electron', 'lib', 'autonomyPolicy.cjs'), 'utf8');
+    return !specs(pol).some((s) => s.includes('${'));
+  })(), 'a ${...} specifier survived');
+  // NON-VACUOUS: the scanner must still find what it is for.
+  check('a plain require is still found', specs("require('debug')").join() === 'debug');
+  check('a guarded require is still found, and marked guarded', (() => {
+    const r = audit.requiresIn("try { require('systeminformation'); } catch {}");
+    return r.length === 1 && r[0].spec === 'systeminformation' && r[0].guarded === true;
+  })());
+  // THE CASE THAT RULES OUT THE LAZIER FIX. Stripping template literals wholesale would lose this,
+  // because `${ require('x') }` inside a literal is a REAL require on a real load path.
+  check('a real require inside a template interpolation is still followed',
+    specs('const s = `${require("chalk").red}`;').join() === 'chalk');
+  check('node: builtins are still skipped', specs("require('node:fs')").length === 0);
+  check('requiring the audit does not run it',
+    /if \(require\.main === module\)/.test(fs.readFileSync(path.join(ROOT, 'scripts', 'auditPackage.cjs'), 'utf8')));
+
   console.log(`\n${'='.repeat(62)}`);
   console.log(`  ${pass} passed, ${fail} failed  (including release composition)`);
   console.log('='.repeat(62));
