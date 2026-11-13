@@ -1870,6 +1870,7 @@ authenticated **Master session**, not merely an open store.
 | 198 | Using other applications' capabilities: the security model, written before the first adapter | decided, nothing built | Section 168. Master: "integrate apps directly ... auto-check online for various upgrades ... secure and safe is top most non-negotiable." RESEARCHED: MCP is the standard, and it enforces no security at the protocol level; the named attack classes are tool poisoning, rug pulls, tool shadowing, confused deputy, token passthrough, session hijacking, SSRF via connectors and rogue server registration, with NSA guidance published. DECIDED: capability not code, approval PINNED by manifest digest so a rug pull disables itself, least privilege per adapter, no credential passthrough, outbound through the one client with a host allowlist, tool output is DATA and may never be executed or alter policy, and "auto-check" means auto-REPORT (I6). NEXT: master picks the first adapter; the model is the gate it must pass. |
 | 199 | The ten avatars as a capability taxonomy, and the gap it exposes | decided; it reorders the work | Section 169. Master: "Do the analysis of avatars and their capabilities in deep and make sure the capabilites of ASI are aligned." MAPPED all ten to real subsystems with honest status: Kurma, Narasimha, Vamana, Parashurama, Rama and Buddha are REAL; Varaha, Krishna and Kalki are PARTIAL; **Matsya is MISSING** - there is no copy of the record anywhere but one machine, and Varaha (restore), Kalki (reset to known-good) and Matsya all depend on it. Narasimha names what this project actually does best: finding rules that are true in form and false in effect. NEXT: build Matsya (ciphertext-only replication, Section 159.3 D7's shape) BEFORE anything in Section 168, because three functions depend on it. |
 | 200 | White-hat capability: one place that says what is exposed about this installation, with no outward reach | done | Section 170. Master: "start implementation. Item denied to build - consider whitehat capability to mitigate threats/blackhat situations." Taken as the defensive form of Section 167's protect mandate. BUILT: `lib/threatPosture.cjs` - pure, no HTTP client, no `net`, no `child_process`, writes nothing, so it cannot become a scanner by a later edit - consolidating nine signals that all existed and were never read together (unpatched or EOL Node, tripwire mismatch, credential in a remote URL, refused or expired token, unreadable vault, weak vault KDF, secrets in .env, critical/high advisories). A missing signal reports as `unknown`, never `clear`. REFUSED permanently: scanning, probing, exploitation, retaliation, auto-remediation. Wired into `start.cjs --diagnose` (Rama.bat option 4). `scripts/verifyThreatPosture.cjs` 67 checks 0 failures; 25 mutations all killed. Its own tests found two real defects: an all-unknown assessment rolled up to `clear` (fixed by adding the `unknown` rung), and no test pinned a finding severity so a downgrade of `credential-in-remote` survived (fixed by asserting the whole severity table). Real run reports `compromised` for the known-true tripwire state plus 3 honest unknowns - no false positives. NOT verified: `vault-unreadable` has no live coverage (no vault on this machine) and the `audit` signal is always `unknown` without the registry. See Section 170.5. NEXT: Matsya - ciphertext-only backup and replication (Section 169 gap) before any Section 168 adapter. |
+| 225 | The service layer calls by string, so a quarter of the debt register was never real - and the programme's own measure counts dead wrappers | done | Section 194.6-194.9. Master: "continue" - triage the `browser` and `orchestrator` namespaces before building any UI. THE TRIAGE FOUND THREE THINGS, EACH CORRECTING SOMETHING I HAD JUST TOLD HIM. (1) 194.1's claim that the 78 freed entries "named members with real renderer callers" was true of 22 of them - the twenty auth members plus session.status and vault.list, confirmed by one file that both names the namespace and makes the call - while 56 rested on the two halves appearing in DIFFERENT files. Three spot checks disagreed with each other: system.getProcesses really is called (through the service layer), instance.list really is called (as `ipc.instance.list()`), and browser.close is NOT - its matches are window.rama.window.close(), window.close() and an AudioContext. So the evidence is now GRADED and printed every run - chain 168, dispatch-path 41, alias-chain 16, same-file 29, cross-file 26 UNCONFIRMED - because a number survives a hurry and a prose caveat does not. The gate is deliberately NOT tightened: the register may only shrink (184.2), so a rule that reduces reached turns reached members into orphans that cannot be added back, and precision can only arrive one member at a time. THE GRADER CANNOT FLATTER ITSELF - three rows tie it to the gate (the tiers must partition the reached set exactly, the strongest tier must hold precisely what the gate matched in full, and a quoted-path match may not be graded stronger), without which "all 280 are named in full" would pass every other row. (2) THE COMPUTED-PROPERTY BLIND SPOT WAS NEVER HYPOTHETICAL: the suite has carried that caveat since Section 143, and it is `src/services/ipcClient.js`, the service layer for eight namespaces, which dispatches BY STRING - `ipc('system.getProcesses', user)` walks the path on window.rama, so no chain exists anywhere for those members. Matching the QUOTED member path closes it and is the strongest rule after the written-out chain; the quotes are required so 'system.getProcessesDetailed' cannot satisfy system.getProcesses, asserted as its own row. MEASURED 255 -> 280 of 458 reached, register 203 -> 178: twenty-five more real callers - all eight fs, seven apps, three ai, three git, browser.download, browser.getContent, sandbox.execute, system.getNetworkStats. Third correction to this register in one session, all three in the same direction - the app was doing more than the audit could see - and the original 281 was overstated by 103. (3) THE PROGRAMME'S OWN MEASURE IS WRONG, which is the finding that matters: the tranche was going to be `orchestrator` (13 members, all unreached, 742 lines behind them) and `Resources.jsx` turns out to have a LIVE PANEL for it - status, submit, cancel, set-limits and all six event subscriptions - through `window.ipcRenderer.invoke('orchestrator:...')`, the OTHER bridge. That shim is sanctioned, not a hole: every invoke/send/on is refused unless isAllowed(channel) passes. Seven renderer files use it, and Evolution.jsx is the same story - a working page while all twelve window.rama.evolution.* members sit in the register. So "281 capabilities already built and unreachable" (192.1) conflates a DEAD WRAPPER (capability has a page, reached by channel) with a DEAD CAPABILITY (nothing in the renderer asks for it), and only the second is what master's upgrade request is about. The suite's channel-level rule cannot separate them either, because it asks whether a channel is named somewhere a caller COULD reach it and the preload names every channel by construction. VERIFIED: verifyReachability 23 -> 29 checks 0 failures, register 178; 6 of 7 mutations caught - the dispatch rule dropped, its quotes dropped, the grader calling everything strongest, a quoted-path match downgraded, a member graded twice, the alias tier collapsed into chain - the seventh being a tautology (replacing an assertion's condition with `true`) and dropped rather than counted. COST STATED: grading walks every renderer file per member, which put the suite at 17.6s; each verdict is now computed once with the per-namespace file scan cached, giving 6.3s against 3.8s before grading. NEXT: build the CHANNEL-level measure - a channel is surfaced when a renderer file names it or when the bridge member invoking it is reached, anything else is capability with no reader - because until that number exists every tranche choice rests on a figure that counts dead wrappers as missing features. Then triage with it: `browser`'s interactive half (launch, navigate, openPage, closePage, listPages, screenshot, executeJs, runtime, getDownloads, onDownloadProgress) is confirmed unsurfaced by BOTH measures and leads, with the Section 168 gate treatment because executeJs on a live page and a download that writes to disk are egress decisions. NOT VERIFIED: nothing was built in 194.9 - it is a reading of the register, two main-process modules and seven renderer files, and whether the orchestrator or the browser engine WORKS is not tested here, only who asks them to. |
 | 224 | The audit could not see a namespace reached through a service wrapper | done | Section 194. Master: "continue" - the first reachability tranche of Section 192. TRIAGE FOUND A DEFECT BEFORE IT FOUND A TRANCHE: picking the worst namespace meant reading the orphan list, and `auth` sat there with ALL TWENTY members unreached - loginStep1, loginStep2, logout, me, status, createUser, setTier - which this app cannot let anyone in without and which run on every launch. So the LIST was wrong, not the app. `src/services/authClient.js` reaches the bridge through a wrapper that RETURNS the namespace (`const ipc = () => window.rama?.auth` then `ipc().loginStep1()`), and isReached()'s looser rule demanded an ASSIGNMENT (`=\s*window\.rama\.<ns>`), so a wrapper matched nothing. SECOND BLIND SPOT IN THIS MATCHER IN EIGHT TRANCHES after 187.1's optional-chaining-on-every-link, and the same shape both times: the rule encoded the one calling convention I happened to look at. FIXED: the requirement is now only that the namespace is NAMED somewhere and the member is CALLED somewhere - looser on purpose, the trade-off the function's own docblock already blesses, because a false "reached" beats a false orphan when the register exists to catch the NEXT gap and a list carrying 78 untrue rows stops being read; it can only INCREASE reached, so the register can only shrink and cannot redden on arrival (184.2). MEASURED 177 -> 255 of 458 reached, register 281 -> 203: all twenty auth, twelve instance, seven meta, six system, five proposals, five git, four each store/sandbox/vault, two each refresh/session/browser/terminal, one each agents/appearance/selfCare. THE NEW PART IS THAT THE SHAPES ARE NOW ASSERTED RATHER THAN REMEMBERED: both blind spots were found by a human reading a long list and recognising one name, which neither scales nor repeats, so isReached() now takes the renderer code AS A PARAMETER and every calling convention in this renderer is a fixture row - plain chain, optional on every link, destructured, service wrapper, namespace on a module constant. THE COUNTERWEIGHT IS THE POINT: a matcher loosened twice could end by calling EVERYTHING reached, emptying the register by lying rather than by work, so two rows require a member named nowhere and a namespace-named-but-never-called member to stay UNREACHED, and they go red the moment either half of the conjunction is dropped. VERIFIED: verifyReachability 16 -> 23 checks 0 failures with the register at 203; 6 OF 6 MUTATIONS CAUGHT - the assignment requirement reinstated (the defect itself), `?.` normalisation removed (the 187.1 defect), the CALLED half dropped, the NAMED half dropped, the destructure rule dropped, the plain chain dropped - so reinstating either historical defect is a red row rather than a silently longer list. verifyInvariants 170, verifyCommentCensus 121, verifyMatsya 103, verifyCjsLoadable 9 green. CORRECTED IN PLACE, because the wrong number was quoted to master: 192.1 said 281 across 46 namespaces with auth 20 among the worst (real figure 203, auth not on the list at all) and 184.1's ISP row said 177 reached (it is 255). The ISP finding itself stands - 55 namespaces and 458 members handed to every renderer file is still a violation and 203 orphans is still a large debt; a smaller number changes what I am entitled to SAY, not the plan. WHAT THE REGISTER SAYS NOW, which is the actual tranche question: `browser` (launch, navigate, screenshot, executeJs, download - no Browser page exists in src/pages) and `orchestrator` (submit, cancel, status plus events) look like REAL unused capability; marketIntel (32) is still the largest and still gated behind a Python backend that cannot start on master's machine (python 3.14.4 vs numpy==1.26.4, no wheel above 3.12; fix is RAMA_PYTHON at 3.10-3.12). NOT VERIFIED: "reached" is still decided from SOURCE TEXT - a computed-property call reads as an orphan and a member named only in a comment reads as reached, both listed by the suite as held by hand, and stripping comments stays refused for the 187.1 reason because it would REDUCE reached and could redden a long list at once. NEXT: triage `browser` and `orchestrator` against their main-process handlers before building any UI, since an orphan is not automatically a capability. |
 | 223 | Matsya stage 2: the act, and proof it restores | done; still BLOCKED on master for 192.5 | Section 193. Master: "continue", with 192.5 unanswered. BUILT WITHOUT MAKING HIS DECISION: the actor takes `encrypt`, `decrypt`, `read`, `write` and `digest` as parameters with NO DEFAULTS and refuses to run without them, because a default would answer 192.5 silently - the exact thing that question exists to prevent. `electron/lib/matsyaSnapshot.cjs` is separate from `matsya.cjs` per 184.4: the judgement's reason to change is the egress policy, the actor's is the storage format, and mixed the policy could not be tested without a disk. `cryptoCore` already provides what will be injected once he chooses - encryptBuffer/decryptBuffer, AES-256-GCM with HMAC-SHA512 and THE SALT EMBEDDED IN EVERY BLOB HEADER, so ciphertext is self-describing and restorable on a machine that has never seen this one. THREE NON-OBVIOUS DECISIONS: (1) BLOBS ARE NAMED BY DIGEST, NEVER BY PATH - writing `data/knowledge/private-notes.md.enc` would put the whole tree into CLEARTEXT FILENAMES, an inventory readable by anyone who can list the folder, defeating the encryption of the contents; blobs are `<sha256>.blob` and the path mapping exists only inside the encrypted manifest. (2) THE MANIFEST IS ENCRYPTED TOO, because it is a list of every path, size and digest - the same inventory - and the index cannot be held to a weaker standard than the files it indexes. (3) ONE PLAINTEXT MARKER AND NOTHING MORE: format, time and count, so a folder of hex blobs is identifiable a year later, with no paths, no hostname and no app version - asserted, because the obvious helpful addition is exactly the leak. NOTHING IS EVER DELETED - no prune, no rotate, no overwrite - since a backup tool that can remove data can be turned into a weapon by a bug, and neither Varaha nor Kalki needs it to delete; asserted by scanning for unlink/rmSync/prune/rotate/truncate. THE DIGEST IS CHECKED BEFORE A RESTORED FILE IS WRITTEN, not after, so a blob altered at the destination is refused while still in memory rather than landing on disk before anyone is told. VERIFIED BY A REAL ROUND TRIP: verifyMatsya 73 -> 103 checks 0 failures, using REAL AES-256-GCM rather than a reversible stand-in, because a fake cipher proves the plumbing and says nothing about whether the stored bytes are unreadable. Snapshot a tree holding a secret note, an already-encrypted store and a `.env`, then restore into a second tree: the .env is refused and appears under NO NAME; NO PLAINTEXT from the source appears anywhere in the destination, checked across every byte written; every blob filename is a 64-hex digest and no destination filename contains a source path; the marker is readable without the key and carries only format, time and count; the manifest is NOT readable without it and readManifest fails rather than returning something partial; both files come back BYTE-IDENTICAL; a blob with one flipped byte is detected and NOT written while its untampered sibling still restores; a missing blob reads as missing and a changed one as altered, with the message keeping them apart; a snapshot missing any injected function REFUSES rather than defaulting; and an unreadable source file FAILS the snapshot instead of being quietly omitted from a success. 12 OF 12 MUTATIONS CAUGHT, including blobs named by path, the manifest in the clear, the encrypt class stored unencrypted, refused files stored anyway, a missing cipher falling back to plaintext, the digest check skipped, a failed manifest write still reporting success, the marker gaining the source paths, and the actor learning to delete. ONE SURVIVED THE FIRST DRAFT and exposed a weak check: collapsing the restore MESSAGE to "restore incomplete" passed because the assertion read only the arrays - and the message is what a reader sees, so an incomplete restore and a tampered one would have looked identical to the only audience that matters; the same lesson as 190's some() and 188's unexamined total. STILL OPEN: 192.5 is master's - his passcode, a written-down recovery phrase, or the machine key (useless for the case Matsya exists for) - and until he answers there is no CLI and no scheduled snapshot; the mechanism is complete and DELIBERATELY UNWIRED, stated rather than left for a later reader to discover. Also his: WHERE a snapshot goes, though the actor takes a destination and has no opinion, so a second disk, a NAS or a mounted cloud folder all work with no code change. NOT VERIFIED: no snapshot has been taken of the real `data/` directory and no restore performed on master's machine. NEXT: master answers 192.5, then the CLI and the schedule; then Varaha and Kalki, which a verified snapshot makes possible.
 | 222 | The upgrade programme: capabilities already built and unreachable (the 281 count corrected to 203 in row 224), and Matsya as the one genuine gap | in-progress; BLOCKED on master for 192.5 | Section 192. Master: "Upgrade the APP for superior and powerful capabilities - each module without losing current relevant best/better capabilities." MEASURED FIRST, because the obvious reading is wrong: 88 main-process modules, 21 renderer pages, and 281 PRELOAD MEMBERS EXPOSED WITH NO RENDERER CALLER across 46 namespaces - marketIntel 32, auth 20, browser 14, orchestrator 13, evolution 12, instance 12, meta 11, regen 10. So "upgrade each module" is mostly a REACHABILITY problem, not a build problem: the capability is already there and has no reader, which is the fourth instance of this shape after `deps:review` (182.0), `nativeModules` (183.3) and `health:startup` (187). The programme is therefore SURFACE WHAT EXISTS, BUILD ONLY WHAT DOES NOT - which satisfies master's "without losing capabilities" constraint for free, since surfacing is purely additive - and it proceeds as TRANCHES not a pass, per 184.2, because 281 members is thousands of lines of UI in a project where four wrong diagnoses came from changing more than could be read at once. GENUINELY ABSENT, verified rather than remembered: ZERO modules under `electron/` match backup, snapshot, replicate or restore. Matsya, named missing in Section 169, with Varaha (restore), Kalki (reset to known-good) and replication all depending on it - the only item that is absent rather than unreachable, and the only one whose absence can cost master everything. BUILT (stage 1): `electron/lib/matsya.cjs`, PURE - requires only `path`, writes nothing, reads nothing, hashes nothing, spawns nothing, reaches no network - because A BACKUP IS AN EGRESS and the dangerous decision is not how to copy but WHAT MAY LEAVE AND IN WHAT FORM. THREE CLASSES: `ciphertext` (already encrypted at rest, copy as-is), `encrypt` (readable today, leaves ONLY re-encrypted - logs and readiness name paths, versions and failure text, a free map of the installation), and `never` (`.env`, private keys, crash dumps, anything token-named). A dump is `never` not `encrypt` because it is a memory image that can hold a passphrase that was in RAM. AN UNCLASSIFIED FILE IS `never`: the cost is asymmetric, a file wrongly excluded is a gap and a file wrongly included is a leak that cannot be recalled. RUNNING IT OVER THE REAL TREE FOUND A GAP IN MY OWN RULES - `data/field-evidence.json` refused for want of a rule, which is master's own record and exactly what a backup is for - so a `data/**` rule now covers it, placed AFTER the refusals so a credential dropped in `data/` is still refused; that ordering is ASSERTED, because a refusal rule that stops winning is indistinguishable from one deleted. The MANIFEST makes a restore checkable rather than hopeful, and verification reports THREE outcomes: missing (incomplete), ALTERED (something rewrote it - the only tamper signal there is), and extra at the destination (normal, older snapshots). VERIFIED: verifyMatsya 73 checks 0 failures, registered as `verify:matsya` and in the chain; 16 OF 16 MUTATIONS CAUGHT, including the critical one - moving the `data/` catch-all ABOVE the refusals, which would have let a credential inside `data/` leave as merely-encrypted - plus the unclassified default flipped to keep, each refusal removed in turn, ciphertext re-encrypted, the plan gaining an `ok` verdict, missing and altered collapsed, an unknown class trusted, and the module starting to read the disk. BLOCKED ON MASTER (192.5): WHICH KEY ENCRYPTS THE BACKUP - (a) his passcode, restorable anywhere he remembers it; (b) a separate recovery phrase generated once and written down offline, strongest but lost with the paper; (c) the machine key, which is USELESS for the case Matsya exists for because a dead machine takes the key with it. Stage 1 deliberately contains NO ACTOR: nothing copies a file yet, because writing an encrypted archive whose key might only exist on the machine it protects against losing is the whole purpose failing quietly. NEXT: master answers 192.5, then stage 2 (the actor: walk, classify, encrypt, manifest, verify the round trip) plus his destination choice; then stage 3, Varaha and Kalki, which become possible the moment a verified snapshot exists.
@@ -22032,6 +22033,14 @@ unused capability** rather than measurement error:
   page in `src/pages/`, so this is built and has no surface at all.
 - **`orchestrator`** — `submit`, `cancel`, `status` plus its event channels: the same shape.
 
+> **SUPERSEDED BY 194.7 AND 194.9, both written the same day and both from checking rather than
+> reading.** `browser.download` and `browser.getContent` have real callers through the service
+> layer's string dispatch (194.7). `orchestrator` is **fully surfaced** — `Resources.jsx` has a live
+> panel using `window.ipcRenderer.invoke('orchestrator:…')`, so what is unused is the thirteen
+> bridge wrappers, not the capability (194.9). The two bullets above are left in place because the
+> reasoning that produced them is the thing 194.9 argues against: a namespace's orphan count does
+> not distinguish a dead wrapper from a dead feature.
+
 `marketIntel` (32) remains the largest and remains gated behind the Python backend being startable
 at all, which on master's machine it is not (`python 3.14.4` against `numpy==1.26.4`, no wheel above
 3.12 — fix is `RAMA_PYTHON` pointing at 3.10–3.12).
@@ -22040,8 +22049,150 @@ at all, which on master's machine it is not (`python 3.14.4` against `numpy==1.2
 any UI, because an orphan is not automatically a capability — some are internal or superseded, and
 Section 192 said triage is part of each tranche rather than a bulk assumption.
 
-**Not verified:** the matcher still decides "reached" from source text. A member called through a
-computed property reads as an orphan, and a member named only in a comment reads as reached. Both
-are listed by the suite as held by hand, and stripping comments is still refused for the 187.1
-reason — it would *reduce* reached and could redden a long list at once.
+**Not verified:** the matcher still decides "reached" from source text. A member named only in a
+comment reads as reached, which is still held by hand — stripping comments is refused for the 187.1
+reason, since it would *reduce* reached and could redden a long list at once. The
+computed-property direction is no longer a caveat: 194.7 closed it for the quoted-path form the
+service layer actually uses.
+
+
+### 194.6 The claim in 194.1 was itself too strong, and the triage is what caught it
+
+194.1 said the 78 freed entries "named members with real renderer callers". Grading the evidence
+showed that was true of **22** of them — the twenty `auth` members, `session.status` and `vault.list`,
+all confirmed by one file that both names the namespace and makes the call. The other **56** rested
+on the two halves appearing in *different* files, which is not the same thing.
+
+Three spot checks, and they disagreed with each other:
+
+| Member | What is really there | Verdict |
+|---|---|---|
+| `system.getProcesses` | `systemClient.getProcesses(currentUser)` in `System.jsx`, through the service layer | really called |
+| `instance.list` | `ipc.instance.list()` in `Genome.jsx` — the bridge on a local name | really called |
+| `browser.close` | `window.rama.window.close()`, `window.close()`, `this._audioCtx?.close()` | **not called** |
+
+So the loose rule is right to exist and wrong to be reported as if it proved anything. **The evidence
+is now graded into tiers and printed on every run**, because a number survives a hurry and a prose
+caveat does not:
+
+| Tier | Meaning | Count |
+|---|---|---|
+| `chain` | `window.rama.<ns>.<name>` written out | 168 |
+| `dispatch-path` | the member path as a quoted string (194.7) | 41 |
+| `alias-chain` | `<something>.<ns>.<name>(` — the bridge on a local name | 16 |
+| `same-file` | one file names the namespace and makes the call | 29 |
+| `cross-file` | the two halves are in different files — **unconfirmed** | 26 |
+
+The gate is deliberately **not** tightened. The register may only shrink (184.2), so a rule that
+reduces "reached" turns reached members into orphans that are not in the baseline and cannot be added
+to it. Precision arrives one member at a time, as each is triaged. What is affordable now is to stop
+26 unconfirmed verdicts reading exactly like 168 certain ones.
+
+**The grader cannot flatter itself.** Three rows tie it to the gate: the tiers must partition the
+reached set exactly, the strongest tier must hold precisely the members the gate matched in full, and
+a member matched by its quoted path may not be graded as something stronger. Without those, "all 280
+are named in full" would pass every other row in this suite.
+
+### 194.7 The computed-property blind spot was never hypothetical
+
+The suite has listed this caveat since Section 143:
+
+> "reached" is decided from SOURCE TEXT. A member called through a computed property would read as an
+> orphan.
+
+It is `src/services/ipcClient.js`, the service layer for eight namespaces, and it dispatches by
+**string**:
+
+```js
+async function ipc(path, ...args) {          // 'system.getProcesses'
+  let fn = window.rama;
+  for (const part of path.split('.')) fn = fn?.[part];
+  return fn(...args);
+}
+export const systemClient = {
+  getProcesses: (user) => ipc('system.getProcesses', user),
+};
+```
+
+No `window.rama.system.getProcesses` exists anywhere in the renderer, so every member reached this
+way counted through the loose rule or not at all. Matching the **quoted member path** closes it, and
+it is the strongest rule here after the written-out chain: `'system.getProcesses'` names the
+namespace and the member together, in order, in one token. The quotes are required, so
+`'system.getProcessesDetailed'` cannot satisfy `system.getProcesses` — asserted as its own row.
+
+**Measured: 255 → 280 of 458 reached, register 203 → 178.** Twenty-five more members have real
+callers: all eight `fs`, seven `apps`, three `ai`, three `git`, `browser.download`,
+`browser.getContent`, `sandbox.execute` and `system.getNetworkStats`.
+
+That is the third correction to this register in one session, and all three moved the same way — the
+app was doing more than the audit could see. The original 281 was overstated by **103**.
+
+### 194.8 Cost, stated because a slow guard gets skipped
+
+Grading walks every renderer file per member, and calling it from several places put this suite at
+**17.6 seconds**. Each verdict is now computed once and the per-namespace file scan is cached, which
+brings it to **6.3 seconds** against **3.8** for the version without grading. That 2.5 seconds buys
+the tier breakdown; it is recorded here so the next person to add a whole-tree pass knows what one
+costs.
+
+### 194.9 THE PROGRAMME'S OWN MEASURE IS WRONG: the register counts dead wrappers, not dead capability
+
+The tranche was going to be `orchestrator` — 13 members, every one unreached, a 742-line
+`resourceOrchestrator.cjs` behind them. Checking before building found this in `Resources.jsx`:
+
+```jsx
+const res = await window.ipcRenderer?.invoke('orchestrator:status');
+await window.ipcRenderer?.invoke('orchestrator:submit', task);
+await window.ipcRenderer?.invoke('orchestrator:cancel', id);
+await window.ipcRenderer?.invoke('orchestrator:set-limits', limits);
+['orchestrator:task-queued', 'orchestrator:task-started', 'orchestrator:task-complete',
+ 'orchestrator:task-failed', 'orchestrator:resource-update', 'orchestrator:workers-adapted']
+```
+
+**`orchestrator` is fully surfaced.** There is a live panel with status, submit, cancel, limits and
+all six event subscriptions. What is unused is the thirteen `window.rama.orchestrator.*` **wrappers**,
+because the page goes straight to the channel through the other bridge.
+
+That second bridge is sanctioned, not a hole: `window.ipcRenderer` is `IPC_SHIM`, and every
+`invoke`/`send`/`on` is refused unless `isAllowed(channel)` passes, so it reaches registered channels
+only. Seven renderer files use it — `Evolution.jsx`, `Resources.jsx`, `IDE.jsx`, `Intelligence.jsx`,
+`Settings.jsx`, `Unlock.jsx`, `consciousness.js`. `Evolution.jsx` is the same story as
+`Resources.jsx`: the page exists and works, through `evolution:self-assess`, `evolution:get-log` and
+`evolution:scout`, while all twelve `window.rama.evolution.*` members sit in the register.
+
+**So "281 capabilities already built and unreachable" was never the right sentence.** The register
+measures *bridge members with no caller*, which is a mix of two different things:
+
+- a **dead wrapper** — the capability has a page, reached by channel; the preload member is surplus
+- a **dead capability** — nothing anywhere in the renderer asks for it
+
+Only the second is what master's upgrade request is about, and this suite cannot currently tell them
+apart. Its channel-level rule does not help: it asks whether a channel is "named somewhere a caller
+could reach it", and the preload names every channel by construction, so it passes for a channel no
+page has ever invoked.
+
+**THE RIGHT MEASURE, and it is the next tranche:** a registered channel is surfaced when a renderer
+file names the channel string *or* when the bridge member that invokes it is itself reached. Anything
+else is capability with no reader. That number is not known yet, and until it is, choosing a tranche
+by the size of a namespace's orphan list is choosing by a figure that mixes the two.
+
+**`browser`, by the same light, is half-surfaced.** `Models.jsx` fetches documentation through
+`browser.fetchUrl`, and the service layer calls `download` and `getContent`. Ten members have no
+reader — `launch`, `navigate`, `openPage`, `closePage`, `listPages`, `screenshot`, `executeJs`,
+`runtime`, `getDownloads`, `onDownloadProgress` — and no renderer file names a `browser:` channel
+either, so for this namespace the two measures agree: master cannot see which browser Rāma can drive
+(`browserRuntime.cjs` discovers Edge, Chrome or Brave and reports its evidence), cannot watch a page
+being driven, and cannot see what was downloaded.
+
+**NEXT, in order:**
+
+1. Build the channel-level measure, so "unsurfaced capability" is a number rather than an impression.
+   Until then every tranche choice rests on a figure that counts dead wrappers as missing features.
+2. Then triage with it. `browser`'s interactive half is already confirmed unsurfaced by both measures
+   and is the leading candidate — with the Section 168 gate treatment, because `executeJs` on a live
+   page and a download that writes to disk are egress decisions, not panel decorations.
+
+**Not verified:** nothing was built in 194.9. It is a reading of the register, the two main-process
+modules and seven renderer files; whether the orchestrator or the browser engine *works* is not
+tested here, only who asks them to.
 

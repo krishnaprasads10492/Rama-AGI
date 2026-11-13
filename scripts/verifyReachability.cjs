@@ -78,7 +78,8 @@ const preloadSrc = fs.readFileSync(PRELOAD, 'utf8');
 const preloadFiles = electronFiles.filter((f) => /preload\.cjs$/i.test(path.basename(f)));
 const allPreloadSrc = preloadFiles.map((f) => fs.readFileSync(f, 'utf8')).join('\n');
 
-const rendererSrc = rendererFiles.map((f) => fs.readFileSync(f, 'utf8')).join('\n');
+const rendererByFile = rendererFiles.map((f) => fs.readFileSync(f, 'utf8'));
+const rendererSrc = rendererByFile.join('\n');
 // Preloads are excluded from "main process" text so a channel named only in a preload is not
 // mistaken for one registered there.
 const mainSrc = electronFiles
@@ -277,6 +278,12 @@ console.log(`        ${namespaces.length} namespaces, ${leaves.length} leaf memb
  * INCREASE what counts as reached — so the debt register can only shrink, never redden on arrival.
  */
 const ALL_RENDERER_CODE = normalise(rendererSrc);
+// Per-file, for grading evidence (194.6). The concatenation above can only say that both halves of a
+// weak match exist SOMEWHERE; these say whether one file contains both.
+const RENDERER_BY_FILE = rendererByFile.map(normalise);
+// Declared here rather than beside `filesNaming()` below, because the grading pass runs before that
+// point in the file and a `const` does not hoist the way its function does.
+const _filesNaming = new Map();
 
 function normalise(code) {
   return code.replace(/\?\./g, '.');
@@ -288,13 +295,36 @@ function normalise(code) {
  * long orphan list and recognising one name; the fixtures below turn each one into a row that fails
  * if the rule is ever tightened back.
  */
-function isReached(leaf, rendererCode = ALL_RENDERER_CODE) {
+function reachedBy(leaf, rendererCode = ALL_RENDERER_CODE) {
   const { ns, name, path: full } = leaf;
-  if (rendererCode.includes(`rama.${full}`)) return true;
-  if (!ns) return rendererCode.includes(`rama.${name}`);
+  if (rendererCode.includes(`rama.${full}`)) return 'chain';
+  if (!ns) return rendererCode.includes(`rama.${name}`) ? 'chain' : null;
   // `const { x } = window.rama.ns` then `x(...)`
   const destructure = new RegExp(`\\{[^}]*\\b${name}\\b[^}]*\\}\\s*=\\s*window\\.rama\\.${ns}`);
-  if (destructure.test(rendererCode)) return true;
+  if (destructure.test(rendererCode)) return 'destructure';
+
+  /*
+   * THE MEMBER PATH AS A QUOTED STRING, which closes the blind spot this suite has been declaring as
+   * "held by hand" since Section 143 — a member called through a computed property.
+   *
+   * It is not hypothetical. `src/services/ipcClient.js` is the service layer for eight namespaces and
+   * it dispatches by STRING:
+   *
+   *     async function ipc(path, ...args) {        // 'system.getProcesses'
+   *       let fn = window.rama;
+   *       for (const part of path.split('.')) fn = fn?.[part];
+   *       return fn(...args);
+   *     }
+   *     export const systemClient = { getProcesses: (user) => ipc('system.getProcesses', user) };
+   *
+   * No `window.rama.system.getProcesses` appears anywhere, so every member reached this way counted
+   * only through the loose rule — real callers resting on coincidental evidence.
+   *
+   * This is the STRONGEST rule here after the written-out chain: `'system.getProcesses'` names the
+   * namespace and the member together, in order, in one token. The quotes are required so that
+   * `'system.getProcessesDetailed'` cannot satisfy `system.getProcesses`.
+   */
+  if (new RegExp(`['"\`]${ns}\\.${name}['"\`]`).test(rendererCode)) return 'dispatch-path';
   // A NAMESPACE CAPTURED IN ANY FORM, then the member called on it.
   //
   // THE SECOND BLIND SPOT (Section 194). This required an ASSIGNMENT — `= window.rama.ns` — and
@@ -311,8 +341,25 @@ function isReached(leaf, rendererCode = ALL_RENDERER_CODE) {
   // list with false entries stops being read. It can only INCREASE what counts as reached, so the
   // register can only shrink.
   if (new RegExp(`window\\.rama\\.${ns}\\b`).test(rendererCode)
-      && new RegExp(`\\.${name}\\s*\\(`).test(rendererCode)) return true;
-  return false;
+      && new RegExp(`\\.${name}\\s*\\(`).test(rendererCode)) return 'namespace+call';
+  return null;
+}
+
+/**
+ * WHICH RULE MATCHED IS REPORTED, because the loosest rule is the one that can be WRONG and a prose
+ * caveat does not survive contact with a hurry (194.6).
+ *
+ * `namespace+call` proves only that the namespace appears somewhere in the renderer and that
+ * SOMETHING is called `.<name>(` somewhere — not that they are the same object. `browser.close` is
+ * the live example: the whole `browser` namespace has ONE renderer call site, `browser.fetchUrl` in
+ * `Models.jsx`, and `.close(` appears in unrelated modal code, so `browser.close` counts as reached
+ * on evidence that would not convince anyone who read it.
+ *
+ * The trade-off still stands — a false orphan is worse, because it hides the next real gap — but the
+ * count of weak matches is now a NUMBER printed on every run rather than a sentence in a docblock.
+ */
+function isReached(leaf, rendererCode = ALL_RENDERER_CODE) {
+  return reachedBy(leaf, rendererCode) !== null;
 }
 
 // ── The shapes the matcher must see, asserted against fixtures ──────────────
@@ -325,39 +372,163 @@ function isReached(leaf, rendererCode = ALL_RENDERER_CODE) {
 // The last two rows are the counterweight. A matcher loosened twice could end by calling everything
 // reached, which would empty the debt register by lying rather than by work — so a member named
 // nowhere, and a member whose namespace is named but which is never called, must both stay UNREACHED.
+//
+// EACH ROW ASSERTS WHICH RULE MATCHED, not merely that something did. A fixture that only checks the
+// boolean passes when a strong rule quietly degrades into the weakest one, which is precisely the
+// drift that makes a loosened matcher untrustworthy.
 console.log('\n  the matcher sees every shape this renderer uses to call the bridge');
 const SHAPES = [
   ['the plain chain, window.rama.ns.name(...)',
     { ns: 'auth', name: 'loginStep1', path: 'auth.loginStep1' },
-    'await window.rama.auth.loginStep1(user);', true],
+    'await window.rama.auth.loginStep1(user);', 'chain'],
   ['optional on every link, rama?.ns?.name?.()  (Section 187)',
     { ns: 'health', name: 'repair', path: 'health.repair' },
-    'const r = await window.rama?.health?.repair?.();', true],
+    'const r = await window.rama?.health?.repair?.();', 'chain'],
   ['destructured off the namespace',
     { ns: 'git', name: 'status', path: 'git.status' },
-    'const { status } = window.rama.git;\nconst s = await status();', true],
+    'const { status } = window.rama.git;\nconst s = await status();', 'destructure'],
   ['a service wrapper that RETURNS the namespace  (Section 194)',
     { ns: 'auth', name: 'changePassword', path: 'auth.changePassword' },
     'const ipc = () => (typeof window !== "undefined" ? window.rama?.auth : null);\n'
       + 'export async function changePassword(a, b) { const api = ipc(); return api.changePassword(a, b); }',
-    true],
+    'namespace+call'],
   ['a namespace held on a module-level constant',
     { ns: 'vault', name: 'list', path: 'vault.list' },
-    'const vault = window.rama.vault;\nvault.list().then(render);', true],
+    'const vault = window.rama.vault;\nvault.list().then(render);', 'namespace+call'],
+  ['the member path dispatched as a STRING, ipc("ns.name", ...)  (194.7)',
+    { ns: 'system', name: 'getProcesses', path: 'system.getProcesses' },
+    "export const systemClient = { getProcesses: (user) => ipc('system.getProcesses', user) };",
+    'dispatch-path'],
+  ['a LONGER member name does not satisfy the shorter one it starts with',
+    { ns: 'system', name: 'getProcesses', path: 'system.getProcesses' },
+    "const r = ipc('system.getProcessesDetailed', user);", null],
   ['a member named nowhere is still UNREACHED',
     { ns: 'browser', name: 'screenshot', path: 'browser.screenshot' },
-    'const ipc = () => window.rama?.auth;\nipc().loginStep1();', false],
+    'const ipc = () => window.rama?.auth;\nipc().loginStep1();', null],
   ['a namespace named but the member never called is still UNREACHED',
     { ns: 'browser', name: 'download', path: 'browser.download' },
-    'const b = window.rama.browser;\nb.launch();', false],
+    'const b = window.rama.browser;\nb.launch();', null],
 ];
 for (const [label, leaf, fixture, want] of SHAPES) {
-  eq(label, isReached(leaf, normalise(fixture)), want);
+  eq(label, reachedBy(leaf, normalise(fixture)), want);
 }
 
-const orphanMembers = leaves.filter((l) => !isReached(l)).map((l) => l.path).sort();
+// EACH VERDICT IS COMPUTED ONCE. Grading walks 104 files per member, so calling it from several
+// places put this suite at 17 seconds — slow enough that a developer starts skipping it, which is how
+// a guard stops guarding. One pass, then everything below reads the answer.
+const liveRule = new Map(leaves.map((l) => [l, reachedBy(l)]));
+const liveTier = new Map(leaves.map((l) => [l, liveRule.get(l) ? evidenceTier(l) : null]));
+
+const orphanMembers = leaves.filter((l) => !liveRule.get(l)).map((l) => l.path).sort();
 console.log(`        ${leaves.length - orphanMembers.length} of ${leaves.length} leaf members reached `
   + `(${orphanMembers.length} not)`);
+
+/**
+ * GRADES THE EVIDENCE. Separate from `reachedBy` on purpose: that one decides the register's gate
+ * and must not move, this one only describes how convincing each "reached" verdict is.
+ *
+ * `reachedBy` matches against every renderer file CONCATENATED, so the namespace may be named in one
+ * file and `.<name>(` called in a completely different one. Grading per file separates:
+ *
+ *   `chain`          `window.rama.<ns>.<name>` written out — not in doubt
+ *   `dispatch-path`  the member path as a quoted string, `ipc('system.getProcesses', user)`
+ *   `alias-chain`    `<something>.<ns>.<name>(` — the bridge held on a local name, e.g. `ipc`
+ *   `same-file`      one file both names the namespace and makes the call — the wrapper shape
+ *   `cross-file`     the two halves are in different files with nothing linking them — UNCONFIRMED
+ *
+ * THE TIERS EXIST BECAUSE THREE SPOT CHECKS DISAGREED WITH EACH OTHER (194.7). With only
+ * `cross-file` to fall into, `system.getProcesses` (really called, through a string-dispatching
+ * service module), `instance.list` (really called, as `ipc.instance.list()`) and `browser.close`
+ * (NOT called — the matches are `window.rama.window.close()`, `window.close()` and an AudioContext)
+ * all read alike. Grading them apart is what makes the rest worth triaging instead of worth ignoring.
+ *
+ * This does NOT tighten the gate, and that is deliberate rather than timid: the register may only
+ * SHRINK (184.2), so a rule change that reduces "reached" turns currently-reached members into
+ * orphans that are not in the baseline and cannot be added to it. Precision can therefore only
+ * arrive one member at a time, as each is triaged by hand. What is affordable today is to say how
+ * strong the evidence is instead of letting every verdict read alike.
+ */
+/**
+ * Which renderer files name `window.rama.<ns>` — cached per NAMESPACE, not per member, because 55
+ * namespaces scanned once beats 458 members scanning 104 files each.
+ */
+function filesNaming(ns) {
+  if (!_filesNaming.has(ns)) {
+    const re = new RegExp(`window\\.rama\\.${ns}\\b`);
+    _filesNaming.set(ns, RENDERER_BY_FILE.filter((code) => re.test(code)));
+  }
+  return _filesNaming.get(ns);
+}
+
+function evidenceTier(leaf) {
+  const { ns, name, path: full } = leaf;
+  if (ALL_RENDERER_CODE.includes(`rama.${full}`)) return 'chain';
+  if (!ns) return 'chain';
+
+  if (new RegExp(`['"\`]${ns}\\.${name}['"\`]`).test(ALL_RENDERER_CODE)) return 'dispatch-path';
+
+  // `ipc.instance.list()` — the whole bridge on a local name. The member and its namespace are still
+  // written in the right order next to each other, which is what makes this nearly as good as `chain`.
+  if (new RegExp(`\\b[A-Za-z_$][\\w$]*\\.${ns}\\.${name}\\s*\\(`).test(ALL_RENDERER_CODE)) {
+    return 'alias-chain';
+  }
+
+  const callsIt = new RegExp(`\\.${name}\\s*\\(`);
+  for (const code of filesNaming(ns)) {
+    if (callsIt.test(code)) return 'same-file';
+  }
+
+  return 'cross-file';
+}
+
+// ── How strong is the evidence for "reached"? (194.6) ───────────────────────
+//
+// WHY THIS IS PRINTED. Section 194 freed 78 members from the debt register and the tranche note said
+// they "have real renderer callers". Triaging `browser` for the next tranche showed that is not true
+// of all of them: the whole namespace has ONE renderer call site, `browser.fetchUrl` in `Models.jsx`,
+// yet `browser.close` and `browser.search` counted as reached because `.close(` and `.search(` occur
+// in unrelated renderer code. The rule is still the right trade-off — a false orphan hides the next
+// real gap, which is worse — but the claim attached to it was stronger than the evidence.
+//
+// So the weak matches are COUNTED on every run. A number cannot be forgotten the way a caveat can.
+const tiers = { chain: [], 'dispatch-path': [], 'alias-chain': [], 'same-file': [], 'cross-file': [] };
+for (const l of leaves) {
+  if (liveRule.get(l)) tiers[liveTier.get(l)].push(l.path);
+}
+console.log(`        evidence for the ${leaves.length - orphanMembers.length} reached:`);
+for (const [tier, list] of Object.entries(tiers)) {
+  console.log(`          ${tier.padEnd(15)} ${String(list.length).padStart(3)}`);
+}
+if (tiers['cross-file'].length) {
+  console.log(`        UNCONFIRMED (nothing links the two halves): ${tiers['cross-file'].join(', ')}`);
+}
+
+// REDBY: let the weak tier stop being reported, or let it grow past the members named in full. This
+// row does not fix the imprecision — the ratchet forbids tightening, see `evidenceTier` — it refuses
+// to let it go unstated, the same treatment 187.1 gave the comment hazard it could not safely remove.
+check('the weakest evidence tier is reported and is still a minority of what counts as reached',
+  tiers['cross-file'].length < tiers.chain.length,
+  `cross-file ${tiers['cross-file'].length} vs named-in-full ${tiers.chain.length}`);
+
+// THE GRADING CANNOT FLATTER ITSELF. A grader is a second opinion on the same text, so nothing stops
+// it drifting into agreeing with everything — and "all 280 are named in full" would be a comfortable
+// lie that no other row here would catch. These two tie it to the gate's own reasoning: the strongest
+// tier must be exactly the members the gate matched on the written-out chain, and a member the gate
+// matched by quoted path cannot be graded as something stronger.
+const gradedTotal = Object.values(tiers).reduce((n, l) => n + l.length, 0);
+eq('every reached member is graded exactly once', gradedTotal, leaves.length - orphanMembers.length);
+
+const strongestDisagrees = leaves.filter((l) => liveRule.get(l)
+  && (liveRule.get(l) === 'chain') !== (liveTier.get(l) === 'chain'));
+check('the strongest tier holds exactly the members the gate matched in full',
+  strongestDisagrees.length === 0,
+  strongestDisagrees.map((l) => l.path).join(', '));
+
+const pathMisgraded = leaves.filter((l) => liveRule.get(l) === 'dispatch-path'
+  && liveTier.get(l) !== 'dispatch-path');
+check('a member matched by its quoted path is graded as such, not as something stronger',
+  pathMisgraded.length === 0,
+  pathMisgraded.map((l) => l.path).join(', '));
 
 if (KNOWN_ORPHAN_MEMBERS.length === 0) {
   // FIRST RUN: write the baseline rather than failing with hundreds of rows. Stated loudly, because a
