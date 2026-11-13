@@ -276,19 +276,83 @@ console.log(`        ${namespaces.length} namespaces, ${leaves.length} leaf memb
  * `?.` to `.` before matching catches the form the newest panels actually use, and it can only
  * INCREASE what counts as reached — so the debt register can only shrink, never redden on arrival.
  */
-const rendererCode = rendererSrc.replace(/\?\./g, '.');
+const ALL_RENDERER_CODE = normalise(rendererSrc);
 
-function isReached(leaf) {
+function normalise(code) {
+  return code.replace(/\?\./g, '.');
+}
+
+/**
+ * `code` IS A PARAMETER so that the shapes this matcher must recognise can be asserted against
+ * fixtures rather than against the live tree. Every blind spot so far was found by a human reading a
+ * long orphan list and recognising one name; the fixtures below turn each one into a row that fails
+ * if the rule is ever tightened back.
+ */
+function isReached(leaf, rendererCode = ALL_RENDERER_CODE) {
   const { ns, name, path: full } = leaf;
   if (rendererCode.includes(`rama.${full}`)) return true;
   if (!ns) return rendererCode.includes(`rama.${name}`);
   // `const { x } = window.rama.ns` then `x(...)`
   const destructure = new RegExp(`\\{[^}]*\\b${name}\\b[^}]*\\}\\s*=\\s*window\\.rama\\.${ns}`);
   if (destructure.test(rendererCode)) return true;
-  // `const api = window.rama.ns` then `api.x(`
-  const alias = new RegExp(`=\\s*window\\.rama\\.${ns}\\b`);
-  if (alias.test(rendererCode) && new RegExp(`\\.${name}\\s*\\(`).test(rendererCode)) return true;
+  // A NAMESPACE CAPTURED IN ANY FORM, then the member called on it.
+  //
+  // THE SECOND BLIND SPOT (Section 194). This required an ASSIGNMENT — `= window.rama.ns` — and
+  // the service wrappers do not assign, they return:
+  //
+  //     const ipc = () => (typeof window !== 'undefined' ? window.rama?.auth : null);
+  //     const api = ipc();   api.loginStep1(...)
+  //
+  // So all twenty `auth` members read as unreached while the app plainly cannot log anyone in
+  // without them. `auth`, `evolution`, `meta` and others are reached through exactly this shape.
+  // The requirement is now only that the namespace is NAMED somewhere and the member is CALLED
+  // somewhere, which is the looser form this function's own comment already blesses: a false
+  // "reached" is better than a false orphan, because the register exists to catch NEW gaps and a
+  // list with false entries stops being read. It can only INCREASE what counts as reached, so the
+  // register can only shrink.
+  if (new RegExp(`window\\.rama\\.${ns}\\b`).test(rendererCode)
+      && new RegExp(`\\.${name}\\s*\\(`).test(rendererCode)) return true;
   return false;
+}
+
+// ── The shapes the matcher must see, asserted against fixtures ──────────────
+//
+// Both blind spots in this matcher were found the same way: a human read a long orphan list and
+// recognised one name on it as a feature that plainly works. That does not scale and it does not
+// repeat. Each shape below is a real calling convention in this renderer, written out as the smallest
+// code that exhibits it, and each is a row that fails if the rule is narrowed again.
+//
+// The last two rows are the counterweight. A matcher loosened twice could end by calling everything
+// reached, which would empty the debt register by lying rather than by work — so a member named
+// nowhere, and a member whose namespace is named but which is never called, must both stay UNREACHED.
+console.log('\n  the matcher sees every shape this renderer uses to call the bridge');
+const SHAPES = [
+  ['the plain chain, window.rama.ns.name(...)',
+    { ns: 'auth', name: 'loginStep1', path: 'auth.loginStep1' },
+    'await window.rama.auth.loginStep1(user);', true],
+  ['optional on every link, rama?.ns?.name?.()  (Section 187)',
+    { ns: 'health', name: 'repair', path: 'health.repair' },
+    'const r = await window.rama?.health?.repair?.();', true],
+  ['destructured off the namespace',
+    { ns: 'git', name: 'status', path: 'git.status' },
+    'const { status } = window.rama.git;\nconst s = await status();', true],
+  ['a service wrapper that RETURNS the namespace  (Section 194)',
+    { ns: 'auth', name: 'changePassword', path: 'auth.changePassword' },
+    'const ipc = () => (typeof window !== "undefined" ? window.rama?.auth : null);\n'
+      + 'export async function changePassword(a, b) { const api = ipc(); return api.changePassword(a, b); }',
+    true],
+  ['a namespace held on a module-level constant',
+    { ns: 'vault', name: 'list', path: 'vault.list' },
+    'const vault = window.rama.vault;\nvault.list().then(render);', true],
+  ['a member named nowhere is still UNREACHED',
+    { ns: 'browser', name: 'screenshot', path: 'browser.screenshot' },
+    'const ipc = () => window.rama?.auth;\nipc().loginStep1();', false],
+  ['a namespace named but the member never called is still UNREACHED',
+    { ns: 'browser', name: 'download', path: 'browser.download' },
+    'const b = window.rama.browser;\nb.launch();', false],
+];
+for (const [label, leaf, fixture, want] of SHAPES) {
+  eq(label, isReached(leaf, normalise(fixture)), want);
 }
 
 const orphanMembers = leaves.filter((l) => !isReached(l)).map((l) => l.path).sort();
