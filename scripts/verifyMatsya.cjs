@@ -215,6 +215,154 @@ section('the module stays a judgement, not an actor');
     !/destination|upload|remote|s3|azure|dropbox/i.test(code));
 }
 
+// ─── Stage 2: the actor, proven by a real round trip (spec Section 193) ─────────────────────────
+section('a snapshot restores, byte for byte, and refuses what it must');
+{
+  const crypto = require('crypto');
+  const S = require('../electron/lib/matsyaSnapshot.cjs');
+
+  // REAL AES-256-GCM, not a fake cipher. A reversible stand-in would prove the plumbing and say
+  // nothing about whether the stored bytes are actually unreadable, which is the claim that
+  // matters for an egress.
+  const KEY = crypto.scryptSync('a passphrase master would type', 'matsya-suite-salt', 32);
+  const encrypt = (buf) => {
+    const iv = crypto.randomBytes(12);
+    const c = crypto.createCipheriv('aes-256-gcm', KEY, iv);
+    const body = Buffer.concat([c.update(buf), c.final()]);
+    return Buffer.concat([iv, c.getAuthTag(), body]);
+  };
+  const decrypt = (buf) => {
+    const d = crypto.createDecipheriv('aes-256-gcm', KEY, buf.subarray(0, 12));
+    d.setAuthTag(buf.subarray(12, 28));
+    return Buffer.concat([d.update(buf.subarray(28)), d.final()]);
+  };
+  const digest = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+
+  // In-memory source and destination: deterministic, and it cannot leave litter behind.
+  const SECRET = 'master private notes — the sort of thing a backup must never expose';
+  const TOKEN = 'GITHUB_TOKEN=should_never_leave';
+  const source = new Map([
+    ['data/knowledge/notes.md', Buffer.from(SECRET)],
+    ['data/system/store.enc', Buffer.from([1, 2, 3, 4, 5])],
+    ['.env', Buffer.from(TOKEN)],
+  ]);
+  const store = new Map();
+  const read = (p) => {
+    if (source.has(p)) return source.get(p);
+    if (store.has(p)) return store.get(p);
+    throw new Error(`no such file: ${p}`);
+  };
+  const write = (p, b) => { store.set(p, Buffer.from(b)); };
+
+  const res = S.snapshot({ files: [...source.keys()], read, write, encrypt, digest, out: 'dst' });
+  check('the snapshot succeeds', res.ok === true, res.error);
+  check('it stores the two permitted files and no more', res.written === 2, String(res.written));
+  check('and refuses the .env', res.refused.length === 1 && res.refused[0].path === '.env');
+
+  // THE EGRESS ASSERTION: nothing readable may appear anywhere in the destination.
+  const all = Buffer.concat([...store.values()]);
+  check('no plaintext from the source appears anywhere in the destination',
+    !all.includes(SECRET) && !all.includes(TOKEN));
+  check('and the refused file is not stored under any name',
+    ![...store.keys()].some((k) => /\.env/.test(k)));
+
+  // BLOB NAMES ARE DIGESTS. A path used as a filename would leak the tree in cleartext.
+  const blobs = [...store.keys()].filter((k) => k.startsWith('dst/blobs/'));
+  check('every blob is named by its digest, so no path leaks into a filename',
+    blobs.length === 2 && blobs.every((b) => /^dst\/blobs\/[0-9a-f]{64}\.blob$/.test(b)), blobs.join(','));
+  check('no destination filename contains a source path',
+    ![...store.keys()].some((k) => /knowledge|notes|store\.enc/.test(k)), [...store.keys()].join(','));
+
+  // The marker is the only readable thing, and only identifies the format.
+  const marker = JSON.parse(store.get('dst/SNAPSHOT.json').toString('utf8'));
+  check('the marker identifies the snapshot without the key',
+    marker.format === S.FORMAT && marker.count === 2 && marker.encrypted === true);
+  check('and carries no paths, no hostname and no app version',
+    !/path|host|version"\s*:\s*"/i.test(JSON.stringify(marker).replace(/"format"/, '')),
+    JSON.stringify(marker));
+  check('the index itself is encrypted, since a list of paths is the same inventory',
+    !store.get('dst/MANIFEST.enc').includes('knowledge'));
+
+  // Read the index back — which requires the key, and that is the point.
+  const idx = S.readManifest({ read, decrypt, from: 'dst' });
+  check('the manifest reads back with the key', idx.ok === true && idx.manifest.count === 2, idx.error);
+  check('and without the key it fails rather than returning something partial',
+    S.readManifest({ read, decrypt: () => { throw new Error('bad key'); }, from: 'dst' }).ok === false);
+
+  // THE ONLY CHECK THAT ANSWERS "WOULD THIS BRING MASTER'S DATA BACK".
+  const back = new Map();
+  const r = S.restore({
+    manifest: idx.manifest, read, write: (p, b) => back.set(p, Buffer.from(b)),
+    decrypt, digest, from: 'dst', into: 'out',
+  });
+  check('the restore succeeds', r.ok === true && r.restored === 2, r.error);
+  check('an encrypted file comes back byte-identical',
+    back.get('out/data/knowledge/notes.md').toString('utf8') === SECRET);
+  check('a ciphertext passthrough comes back byte-identical',
+    Buffer.compare(back.get('out/data/system/store.enc'), Buffer.from([1, 2, 3, 4, 5])) === 0);
+  check('and the refused file is absent from the restore, because it never left',
+    ![...back.keys()].some((k) => /\.env/.test(k)));
+
+  // TAMPER. A blob altered at the destination must be refused BEFORE it is written.
+  const victim = blobs[0];
+  const bad = Buffer.from(store.get(victim)); bad[bad.length - 1] ^= 0xff;
+  const tampered = new Map(store); tampered.set(victim, bad);
+  const back2 = new Map();
+  const r2 = S.restore({
+    manifest: idx.manifest,
+    read: (p) => { if (tampered.has(p)) return tampered.get(p); throw new Error('missing'); },
+    write: (p, b) => back2.set(p, Buffer.from(b)),
+    decrypt, digest, from: 'dst', into: 'out',
+  });
+  check('a tampered blob is detected', r2.ok === false && r2.altered.length === 1);
+  check('and the tampered file is NOT written into the restore target',
+    ![...back2.keys()].some((k) => k.endsWith(r2.altered[0].path)), [...back2.keys()].join(','));
+  check('while its untampered sibling is still restored', r2.restored === 1);
+  const r3 = S.restore({
+    manifest: idx.manifest, read: () => { throw new Error('gone'); },
+    write: () => {}, decrypt, digest, from: 'dst', into: 'out',
+  });
+  check('a missing blob is reported as missing, not altered',
+    r3.missing.length === 2 && r3.altered.length === 0);
+  // THE MESSAGE MUST SAY IT TOO, not just the arrays. A mutation that collapsed the restore's
+  // wording to "restore incomplete" survived a check that only read the arrays — and the message
+  // is what a reader sees, so an incomplete restore and a tampered one would look identical to
+  // the only audience that matters.
+  check('and the restore MESSAGE keeps the two apart, not only the arrays',
+    /2 missing, 0 altered/.test(r3.error || '') && /0 missing, 1 altered/.test(r2.error || ''),
+    `${r3.error} | ${r2.error}`);
+
+  // NO CIPHER, NO SNAPSHOT. The one failure mode this module must make impossible is writing in
+  // the clear because a key was not supplied.
+  for (const missing of ['read', 'write', 'encrypt', 'digest']) {
+    const args = { files: ['data/x.json'], read, write, encrypt, digest, out: 'dst' };
+    delete args[missing];
+    const r4 = S.snapshot(args);
+    check(`a snapshot without ${missing} refuses rather than defaulting`,
+      r4.ok === false && new RegExp(missing).test(r4.error || ''), r4.error);
+  }
+  check('a restore with no manifest refuses',
+    S.restore({ read, write, decrypt, digest }).ok === false);
+
+  // An unreadable source file must be carried as a failure, not silently omitted from a "success".
+  const partial = S.snapshot({
+    files: ['data/knowledge/notes.md', 'data/gone.json'],
+    read: (p) => { if (p === 'data/gone.json') throw new Error('EACCES'); return read(p); },
+    write, encrypt, digest, out: 'dst2',
+  });
+  check('an unreadable file fails the snapshot rather than being quietly skipped',
+    partial.ok === false && partial.failures.length === 1 && /EACCES/.test(partial.failures[0].error));
+
+  // It must not be able to delete anything.
+  const code = fs.readFileSync(path.join(ROOT, 'electron', 'lib', 'matsyaSnapshot.cjs'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').split('\n').map((l) => l.replace(/(^|\s)\/\/.*/, '')).join('\n');
+  check('the actor can delete nothing — no prune, no rotate, no unlink',
+    !/unlink|rmSync|rmdir|prune|rotate|truncate/i.test(code));
+  check('and it reaches no network', !/https?:\/\/|net\.|fetch\(/.test(code));
+  check('it takes no default key, destination or data directory',
+    !/getDataDir|process\.env|os\.homedir/.test(code));
+}
+
 console.log(`\n${'='.repeat(62)}`);
 console.log(`  ${pass} passed, ${fail} failed`);
 console.log('='.repeat(62));
