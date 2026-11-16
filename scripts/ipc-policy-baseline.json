@@ -1,0 +1,5 @@
+{
+  "writtenAt": "2026-11-16",
+  "why": "Ceiling for the number of IPC channels with no authorisation check (spec Section 196). It may only go DOWN. Raising it means a new channel was added that trusts whoever calls it, which is the thing this register exists to stop happening quietly.",
+  "maxObserve": 192
+}

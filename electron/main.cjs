@@ -29,6 +29,35 @@ const fs   = require('fs');
 const principalBinding = require('./lib/principalBinding.cjs');
 principalBinding.install(ipcMain);
 
+/*
+ * AND THE POLICY GATE ON TOP OF IT (Section 196.4).
+ *
+ * `principalBinding` answers "who is calling". This answers "may they". They are separate because
+ * the first is an identity question with one correct answer and the second is a policy question with
+ * a declared table, and Section 184.4's reading of SRP is that a module's reason to change is what
+ * defines it: the binding changes when authentication changes, the policy changes when a capability
+ * is tightened.
+ *
+ * ORDER MATTERS AND IT IS NOT ARBITRARY. `principalBinding` is installed first, so its wrapper sits
+ * OUTSIDE this one and has already replaced any renderer-supplied `user` by the time a handler runs.
+ * This gate never reads the payload anyway — it is handed `principalBinding.getPrincipal` and
+ * refuses to install without it — so neither order could let the renderer decide its own tier. The
+ * ordering is recorded because a later reader would otherwise have to re-derive it.
+ *
+ * Day one this enforces the SENDER check and nothing else: every channel is `self`, `bootstrap`,
+ * `public` or `observe`, so the app behaves exactly as before. See lib/ipcPolicy.cjs.
+ */
+const ipcGuard = require('./lib/ipcGuard.cjs');
+const ipcPolicyTable = require('./lib/ipcPolicy.cjs');
+const externalUrl = require('./lib/externalUrl.cjs');
+const ipcGate = ipcGuard.install({
+  ipcMain,
+  policy: ipcPolicyTable.POLICY,
+  can: require('./lib/capability.cjs').can,
+  isOurSender: ipcGuard.senderCheck({ BrowserWindow }),
+  principal: (event) => principalBinding.getPrincipal(event),
+});
+
 // electron-updater is NOT required here. It was, at module scope, and its
 // dependency chain (builder-util-runtime -> debug) is what killed the installed
 // app. setupAutoUpdater() guards its *invocation* with `if (isDev) return`, but
@@ -377,6 +406,39 @@ function applyPermissions() {
     contents.setWindowOpenHandler(({ url }) => {
       shell.openExternal(url).catch(() => {});
       return { action: 'deny' };
+    });
+
+    /*
+     * AND NEVER LET THE EXISTING WINDOW NAVIGATE AWAY (Section 196.3).
+     *
+     * `setWindowOpenHandler` covers `window.open`. It does NOT cover `location =`, a form post or a
+     * link that replaces the current document — and a renderer that navigates to a remote origin
+     * keeps this preload, so every IPC channel would then be reachable from that page. Nothing in
+     * this app navigates away from its own document: the UI is a single React tree under `file://`
+     * in production and the Vite origin in development. So denying it costs no functionality and
+     * removes the one way a renderer could change what "our own window" means.
+     *
+     * The allowed origins are derived from what the window was actually loaded with rather than
+     * listed again here, because a second list is a second thing to forget to update.
+     */
+    contents.on('will-navigate', (event, url) => {
+      const current = contents.getURL();
+      const sameDocument = (a, b) => {
+        try { return new URL(a).origin === new URL(b).origin; } catch { return false; }
+      };
+      // `file://` has a null origin in the URL sense, so compare by scheme for it.
+      const bothFile = url.startsWith('file://') && String(current).startsWith('file://');
+      if (bothFile || sameDocument(url, current)) return;
+      event.preventDefault();
+      console.warn(`[main] Blocked navigation to ${url}`);
+      shell.openExternal(url).catch(() => {});
+    });
+
+    // No <webview> is used anywhere in this app, so an attempt to attach one is either a mistake or
+    // someone else's idea. Refusing it is free.
+    contents.on('will-attach-webview', (event) => {
+      event.preventDefault();
+      console.warn('[main] Blocked <webview> attachment');
     });
   });
 }
@@ -1695,9 +1757,14 @@ ipcMain.handle('window:popouts', async () => ({
 
 // ─── IPC: Open external links safely ─────────────────────────────────────────
 ipcMain.handle('shell:open-external', async (_e, url) => {
-  const safe = url.startsWith('https://') || url.startsWith('http://');
-  if (!safe) return { error: 'Blocked non-http URL' };
-  await shell.openExternal(url);
+  // THE JUDGEMENT IS IN `lib/externalUrl.cjs`, not here (Section 196.3). It used to be three lines
+  // of prefix matching inline, which a suite could only check by looking for the right words — and
+  // mutation testing showed that a prefix test passed every one of those checks. Moving the decision
+  // somewhere callable is what makes it testable with hostile input; this is the act, and the act
+  // should be too short to hide anything.
+  const verdict = externalUrl.judge(url);
+  if (!verdict.ok) return verdict;
+  await shell.openExternal(verdict.url);
   return { ok: true };
 });
 
@@ -2034,6 +2101,20 @@ app.whenReady().then(async () => {
     } catch { /* dialog unavailable */ }
   } else {
     console.warn(`[main] boot path ready — ${registeredChannels.size} IPC channels registered`);
+  }
+
+  /*
+   * WHAT THE POLICY GATE SAW, reported where the channel count already is.
+   *
+   * A channel with no row in `lib/ipcPolicy.cjs` runs — the gate reports rather than blocks, because
+   * a control that kills the app on an unclassified channel gets reverted (196.4). The consequence
+   * is that the only way anyone learns a row is missing is if it is SAID, so it is said here, beside
+   * the number it belongs next to, rather than left in a counter nobody reads.
+   */
+  if (ipcGate) {
+    const missing = ipcGate.unclassified();
+    console.warn(`[main] IPC policy gate active — ${Object.keys(ipcPolicyTable.POLICY).length} channels `
+      + `classified${missing.length ? `, ${missing.length} with NO policy row: ${missing.join(', ')}` : ''}`);
   }
 
   // CSP and permission policy must be installed before the window makes requests

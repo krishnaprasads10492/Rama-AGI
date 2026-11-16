@@ -1870,6 +1870,7 @@ authenticated **Master session**, not merely an open store.
 | 198 | Using other applications' capabilities: the security model, written before the first adapter | decided, nothing built | Section 168. Master: "integrate apps directly ... auto-check online for various upgrades ... secure and safe is top most non-negotiable." RESEARCHED: MCP is the standard, and it enforces no security at the protocol level; the named attack classes are tool poisoning, rug pulls, tool shadowing, confused deputy, token passthrough, session hijacking, SSRF via connectors and rogue server registration, with NSA guidance published. DECIDED: capability not code, approval PINNED by manifest digest so a rug pull disables itself, least privilege per adapter, no credential passthrough, outbound through the one client with a host allowlist, tool output is DATA and may never be executed or alter policy, and "auto-check" means auto-REPORT (I6). NEXT: master picks the first adapter; the model is the gate it must pass. |
 | 199 | The ten avatars as a capability taxonomy, and the gap it exposes | decided; it reorders the work | Section 169. Master: "Do the analysis of avatars and their capabilities in deep and make sure the capabilites of ASI are aligned." MAPPED all ten to real subsystems with honest status: Kurma, Narasimha, Vamana, Parashurama, Rama and Buddha are REAL; Varaha, Krishna and Kalki are PARTIAL; **Matsya is MISSING** - there is no copy of the record anywhere but one machine, and Varaha (restore), Kalki (reset to known-good) and Matsya all depend on it. Narasimha names what this project actually does best: finding rules that are true in form and false in effect. NEXT: build Matsya (ciphertext-only replication, Section 159.3 D7's shape) BEFORE anything in Section 168, because three functions depend on it. |
 | 200 | White-hat capability: one place that says what is exposed about this installation, with no outward reach | done | Section 170. Master: "start implementation. Item denied to build - consider whitehat capability to mitigate threats/blackhat situations." Taken as the defensive form of Section 167's protect mandate. BUILT: `lib/threatPosture.cjs` - pure, no HTTP client, no `net`, no `child_process`, writes nothing, so it cannot become a scanner by a later edit - consolidating nine signals that all existed and were never read together (unpatched or EOL Node, tripwire mismatch, credential in a remote URL, refused or expired token, unreadable vault, weak vault KDF, secrets in .env, critical/high advisories). A missing signal reports as `unknown`, never `clear`. REFUSED permanently: scanning, probing, exploitation, retaliation, auto-remediation. Wired into `start.cjs --diagnose` (Rama.bat option 4). `scripts/verifyThreatPosture.cjs` 67 checks 0 failures; 25 mutations all killed. Its own tests found two real defects: an all-unknown assessment rolled up to `clear` (fixed by adding the `unknown` rung), and no test pinned a finding severity so a downgrade of `credential-in-remote` survived (fixed by asserting the whole severity table). Real run reports `compromised` for the known-true tripwire state plus 3 honest unknowns - no false positives. NOT verified: `vault-unreadable` has no live coverage (no vault on this machine) and the `audit` signal is always `unknown` without the registry. See Section 170.5. NEXT: Matsya - ciphertext-only backup and replication (Section 169 gap) before any Section 168 adapter. |
+| 227 | Securing the architecture and the API: a declared policy at the IPC boundary | done (tranche 1); 192 channels still unenforced, and the enforcement choices are master's | Section 196. Master: "secure the entire Architechture and API for all potential threats without losing functionality." WHAT I REFUSED TO CLAIM FIRST (196.0): "all potential threats" is not a promise anyone can keep, and saying it would be the most dangerous sentence in the document - 417 channels, 1,100 dependencies, and no audit closes what has not been invented. Deliverable is COVERAGE, not immunity: enumerate the surface, measure who checks callers, close what is real, and make the policy explicit so the next gap fails a suite instead of waiting to be remembered. MEASURED, AND MY FIRST NUMBER WAS WRONG: 370 literal ipcMain registrations, 151 check a capability, 219 do not. The first pass said 254 because the pattern looked for `capability.*` and missed `denyUnless(...)` and a local `deny(user, cap)` - fifth time in this build a measurement was wrong before it was right, which is why the method is quoted with the figure. Of the 219, privileged ones group as: 35 touch secrets, 35 modify this app, 3 spawn processes, 1 writes files, 1 reaches the network - but auth:login-step1, session:unlock and their kin MUST be callable before anyone signs in, so counting them as holes would repeat 194.9's dead-wrapper error. GENUINE GAPS NAMED: proposals:approve/apply/reject, evolution:apply/approve, regen:apply/approve (the self-modification path - the highest-privilege act this app has, requiring nothing), gitAuth:set/remove/scrub, the eight store:* channels, and terminal:write/resize/destroy where create requires terminal.open and the three that follow require nothing. ARCHITECTURE GAPS: no sender validation anywhere, no will-navigate guard (setWindowOpenHandler covers window.open but not a navigation that keeps this preload), no will-attach-webview guard, and shell:open-external accepted any http(s) URL including one carrying credentials. WHAT WAS ALREADY THERE CHANGED THE DESIGN (196.6): `lib/principalBinding.cjs` from Section 150.1 already replaces any renderer-claimed `user` with the account resolved from main's session table, so the gate must NEVER read the payload - install() REFUSES to start without a principal(event) resolver rather than falling back to args[0].user, because a gate reading the claim would reintroduce that defect one layer higher while looking like a control. REJECTED: retrofitting 219 handlers (most take no user argument, so each change also changes its preload member and every call site - a very large diff in a project where four wrong diagnoses came from changing more than could be read at once, and the failure mode is denying a legitimate user, which is the functionality master said not to lose). REJECTED: default-deny switched on now - correct, and it breaks the app on the first unclassified channel, and a security control that has to be reverted teaches everyone to revert security controls. ADOPTED: policy as DECLARED DATA at one chokepoint, observing first. BUILT: lib/ipcPolicy.cjs (369 rows - self 151, observe 192, bootstrap 16, public 10), lib/ipcGuard.cjs (sender check then policy, everything injected so it is drivable with no Electron), lib/externalUrl.cjs (pure judgement), scripts/verifyIpcPolicy.cjs, scripts/ipc-policy-baseline.json (ceiling 192, may only fall, asserted to EQUAL the real count so there is no slack to hide in). THE SENDER CHECK IS ENFORCED FROM DAY ONE and that is safe to say because it was CHECKED: the app creates exactly three BrowserWindows and no BrowserView, WebContentsView or offscreen contents, so there is no legitimate caller it can refuse. LISTENER IDENTITY IS PRESERVED - wrapping `on` silently breaks removeListener(channel, fn), which is why principalBinding left `on` alone; this gate needs it (terminal:write is a listener) so removeListener/off translate through a map. EVERYTHING ELSE BEHAVES AS BEFORE: no channel is centrally enforced yet. TWO OF MY OWN CHECKS PROVED NOTHING (196.8): the external-URL rows were POSITIONAL - they looked for `new URL(` and the words username/password, and a mutation replacing the parse with a prefix test left all three in place and passed every one - so the judgement moved into a callable module and is driven with file:, javascript:, data:, ms-msdt:, vscode:, a credential-bearing https URL, nonsense, empty and null; and ONE ROW PASSED BECAUSE THE THING IT GUARDS WAS DELETED - `indexOf(principalBinding.install) < gateAt` returns -1 when the line is gone, and -1 is less than any position, so removing the defence against a renderer claiming tier 0 SATISFIED the check protecting it (third instance of this shape after 190's some() and 188's index). VERIFIED: verifyIpcPolicy 66 checks 0 failures, in the chain; full chain green but for the two master-owned tripwire rows; 26 OF 26 MUTATIONS CAUGHT across two passes, each applied to a real file and restored, including the gate reading the payload, contextIsolation turned off, a self row kept while its handler loses its check, the ceiling given slack, the install call disabled while its text remains, and the judgement learning to act. NOT VERIFIED: NOTHING HERE RAN INSIDE ELECTRON - the gate is driven by a fake ipcMain under bare Node, which proves the decision and the wrapping but NOT that the app still starts, and the risk concentrates in one place since every IPC call now passes through one more function; `self` proves a check is PRESENT, not that it names the right capability; `observe` is 192 channels enforcing nothing, an honest starting position rather than an achievement; and the sender check trusts Electron's own event.sender. NEXT, AND IT NEEDS MASTER (196.10): flipping a channel from observe to cap:<name> changes who may do a thing. The self-modification path is first and is also the one that could lock him out of approving a proposal if the capability is wrong, so for each group the question is his: master-only, or may a Superadmin do it too? Order after that: credentials, the store, the terminal listeners, the rest. |
 | 226 | Capability with no reader, as a number: the channel-level measure | done | Section 195. Master: "continue" - the step 194.9 named. DECIDED BEFORE CODING (195.1): measure at the CHANNEL, because that is what a capability is. A registered channel is surfaced when either route is live - a renderer file names the channel string (the shim) or a bridge member that invokes it is itself reached (the bridge) - and anything else is a handler no page can reach. RULE 1 WAS KEPT, NOT REPLACED: it asks whether a channel is named by ANY caller surface, preload included, which is the blindness 194.9 found, but it still catches a wrapper deleted or misspelled, so replacing it would trade a live guard for a new one - forbidden by Section 192's own no-capability-lost constraint. BUILT: the parser records each member's position so its value text is sliced exactly between it and the next member - parsing the file it already walks rather than a second regex over nested braces, the shape Section 145 paid for - and channelsOf() reads what that member invokes. MEASURED: 278 OF 417 REGISTERED CHANNELS HAVE A READER, 137 DO NOT (16 by the shim only, 242 by the bridge only, 20 by both), and 25 of the 178 members in the member register are DEAD WRAPPERS rather than dead capability - exactly orchestrator 13 and evolution 12, the two namespaces 194.9 named by hand. The 137 by namespace: market 32, browser 9, models 8, regen 8, selfcare 7, timeline 7, genome 6, ipc-enc 6, nucleus 6, graph 5, agents 4, then a tail. THREE DEFECTS IN MY OWN RULE, FOUND BY RUNNING IT (195.3): (1) it counted PRELOAD PLUMBING as capability with no reader - app:preload-error, sent when contextBridge refuses a value, and badge:clicked, sent from the badge window's own preload - which would have sent someone looking for a page to build for an error report; now a separate class decided POSITIONALLY (named in a preload, invoked by no RAMA_API member) so a new one is classified without being listed. (2) it ENUMERATED ipcRenderer method names and so missed sendSync('window:is-maximized'), which the titlebar calls on every window, reported as unreachable because `send` must be followed by `(` and `sendSync` is not. (3) WORSE THAN THE DEFECT, THE PLUMBING CLASS HID IT: mutation-testing put the enumerated list back and the suite stayed GREEN, because with its channel undetected the member invoked nothing and was filed as plumbing - an escape hatch had become somewhere for extraction failures to hide. The extraction is now checked against itself: a member reaching for ipcRenderer with a LITERAL channel must yield one. That is the lesson - both classes in this suite exist to stop a guard being red on arrival and both can absorb a real failure silently, so the fix is to assert their boundary, not remove them. AND ONE IN ANOTHER SUITE, SURFACED BY THE CHAIN (195.4): verifyFieldEvidence's "running it with the flag off changes nothing on disk" FAILED IN THE CHAIN AND PASSED STANDALONE - its snapshot listed data/logs, which fieldReport.cjs only READS (its single write is the ledger), a sibling suite added a file there mid-chain, and the row reported a write that never happened; the chain stopped there so every suite after it never ran. Narrowed to the one file the script can write, watched by BOTH mtime AND content digest - content alone would accept a load-then-save-unchanged, which is how a sloppy off path leaks a write, and mtime alone would accept a same-millisecond rewrite - and proven non-vacuous by making the off path do exactly that. A guard that watches more than its subject does not catch more, it reports things that are not true. VERIFIED: verifyReachability 29 -> 34 checks 0 failures, capability register at 137; verifyFieldEvidence 127 checks 0 failures; full chain green but for the two master-owned tripwire rows. 7 OF 7 MUTATIONS CAUGHT - a channel counted as read because the preload names it, the shim route dropped, the bridge route dropped, the bridge route counting a member with no caller, the method list re-enumerated, the plumbing class unbounded, the value text no longer bounded - plus the runtime-channel exemption widened. TWO MUTATIONS DROPPED RATHER THAN COUNTED because both were tautologies of mine (replacing an assertion's own condition with `true` always survives), and ONE ROW REMOVED for the same reason: it asserted that no unsurfaced channel has a reached bridge member, true by construction. COST 6.3s -> ~10s, stated because a slow guard gets skipped. NOT VERIFIED: that any surfaced channel works or that an unsurfaced one is a defect; seven members take their channel at RUNTIME (invoke, on, removeListener, terminal.onData/onExit, instance.on, proposals.on) so channels reached only through them are invisible to this measure - the exemption is printed every run and bounded. NEXT: master asked to secure the architecture and API, which this inventory is the right basis for - every channel is now enumerated with its route. |
 | 225 | The service layer calls by string, so a quarter of the debt register was never real - and the programme's own measure counts dead wrappers | done | Section 194.6-194.9. Master: "continue" - triage the `browser` and `orchestrator` namespaces before building any UI. THE TRIAGE FOUND THREE THINGS, EACH CORRECTING SOMETHING I HAD JUST TOLD HIM. (1) 194.1's claim that the 78 freed entries "named members with real renderer callers" was true of 22 of them - the twenty auth members plus session.status and vault.list, confirmed by one file that both names the namespace and makes the call - while 56 rested on the two halves appearing in DIFFERENT files. Three spot checks disagreed with each other: system.getProcesses really is called (through the service layer), instance.list really is called (as `ipc.instance.list()`), and browser.close is NOT - its matches are window.rama.window.close(), window.close() and an AudioContext. So the evidence is now GRADED and printed every run - chain 168, dispatch-path 41, alias-chain 16, same-file 29, cross-file 26 UNCONFIRMED - because a number survives a hurry and a prose caveat does not. The gate is deliberately NOT tightened: the register may only shrink (184.2), so a rule that reduces reached turns reached members into orphans that cannot be added back, and precision can only arrive one member at a time. THE GRADER CANNOT FLATTER ITSELF - three rows tie it to the gate (the tiers must partition the reached set exactly, the strongest tier must hold precisely what the gate matched in full, and a quoted-path match may not be graded stronger), without which "all 280 are named in full" would pass every other row. (2) THE COMPUTED-PROPERTY BLIND SPOT WAS NEVER HYPOTHETICAL: the suite has carried that caveat since Section 143, and it is `src/services/ipcClient.js`, the service layer for eight namespaces, which dispatches BY STRING - `ipc('system.getProcesses', user)` walks the path on window.rama, so no chain exists anywhere for those members. Matching the QUOTED member path closes it and is the strongest rule after the written-out chain; the quotes are required so 'system.getProcessesDetailed' cannot satisfy system.getProcesses, asserted as its own row. MEASURED 255 -> 280 of 458 reached, register 203 -> 178: twenty-five more real callers - all eight fs, seven apps, three ai, three git, browser.download, browser.getContent, sandbox.execute, system.getNetworkStats. Third correction to this register in one session, all three in the same direction - the app was doing more than the audit could see - and the original 281 was overstated by 103. (3) THE PROGRAMME'S OWN MEASURE IS WRONG, which is the finding that matters: the tranche was going to be `orchestrator` (13 members, all unreached, 742 lines behind them) and `Resources.jsx` turns out to have a LIVE PANEL for it - status, submit, cancel, set-limits and all six event subscriptions - through `window.ipcRenderer.invoke('orchestrator:...')`, the OTHER bridge. That shim is sanctioned, not a hole: every invoke/send/on is refused unless isAllowed(channel) passes. Seven renderer files use it, and Evolution.jsx is the same story - a working page while all twelve window.rama.evolution.* members sit in the register. So "281 capabilities already built and unreachable" (192.1) conflates a DEAD WRAPPER (capability has a page, reached by channel) with a DEAD CAPABILITY (nothing in the renderer asks for it), and only the second is what master's upgrade request is about. The suite's channel-level rule cannot separate them either, because it asks whether a channel is named somewhere a caller COULD reach it and the preload names every channel by construction. VERIFIED: verifyReachability 23 -> 29 checks 0 failures, register 178; 6 of 7 mutations caught - the dispatch rule dropped, its quotes dropped, the grader calling everything strongest, a quoted-path match downgraded, a member graded twice, the alias tier collapsed into chain - the seventh being a tautology (replacing an assertion's condition with `true`) and dropped rather than counted. COST STATED: grading walks every renderer file per member, which put the suite at 17.6s; each verdict is now computed once with the per-namespace file scan cached, giving 6.3s against 3.8s before grading. NEXT: build the CHANNEL-level measure - a channel is surfaced when a renderer file names it or when the bridge member invoking it is reached, anything else is capability with no reader - because until that number exists every tranche choice rests on a figure that counts dead wrappers as missing features. Then triage with it: `browser`'s interactive half (launch, navigate, openPage, closePage, listPages, screenshot, executeJs, runtime, getDownloads, onDownloadProgress) is confirmed unsurfaced by BOTH measures and leads, with the Section 168 gate treatment because executeJs on a live page and a download that writes to disk are egress decisions. NOT VERIFIED: nothing was built in 194.9 - it is a reading of the register, two main-process modules and seven renderer files, and whether the orchestrator or the browser engine WORKS is not tested here, only who asks them to. |
 | 224 | The audit could not see a namespace reached through a service wrapper | done | Section 194. Master: "continue" - the first reachability tranche of Section 192. TRIAGE FOUND A DEFECT BEFORE IT FOUND A TRANCHE: picking the worst namespace meant reading the orphan list, and `auth` sat there with ALL TWENTY members unreached - loginStep1, loginStep2, logout, me, status, createUser, setTier - which this app cannot let anyone in without and which run on every launch. So the LIST was wrong, not the app. `src/services/authClient.js` reaches the bridge through a wrapper that RETURNS the namespace (`const ipc = () => window.rama?.auth` then `ipc().loginStep1()`), and isReached()'s looser rule demanded an ASSIGNMENT (`=\s*window\.rama\.<ns>`), so a wrapper matched nothing. SECOND BLIND SPOT IN THIS MATCHER IN EIGHT TRANCHES after 187.1's optional-chaining-on-every-link, and the same shape both times: the rule encoded the one calling convention I happened to look at. FIXED: the requirement is now only that the namespace is NAMED somewhere and the member is CALLED somewhere - looser on purpose, the trade-off the function's own docblock already blesses, because a false "reached" beats a false orphan when the register exists to catch the NEXT gap and a list carrying 78 untrue rows stops being read; it can only INCREASE reached, so the register can only shrink and cannot redden on arrival (184.2). MEASURED 177 -> 255 of 458 reached, register 281 -> 203: all twenty auth, twelve instance, seven meta, six system, five proposals, five git, four each store/sandbox/vault, two each refresh/session/browser/terminal, one each agents/appearance/selfCare. THE NEW PART IS THAT THE SHAPES ARE NOW ASSERTED RATHER THAN REMEMBERED: both blind spots were found by a human reading a long list and recognising one name, which neither scales nor repeats, so isReached() now takes the renderer code AS A PARAMETER and every calling convention in this renderer is a fixture row - plain chain, optional on every link, destructured, service wrapper, namespace on a module constant. THE COUNTERWEIGHT IS THE POINT: a matcher loosened twice could end by calling EVERYTHING reached, emptying the register by lying rather than by work, so two rows require a member named nowhere and a namespace-named-but-never-called member to stay UNREACHED, and they go red the moment either half of the conjunction is dropped. VERIFIED: verifyReachability 16 -> 23 checks 0 failures with the register at 203; 6 OF 6 MUTATIONS CAUGHT - the assignment requirement reinstated (the defect itself), `?.` normalisation removed (the 187.1 defect), the CALLED half dropped, the NAMED half dropped, the destructure rule dropped, the plain chain dropped - so reinstating either historical defect is a red row rather than a silently longer list. verifyInvariants 170, verifyCommentCensus 121, verifyMatsya 103, verifyCjsLoadable 9 green. CORRECTED IN PLACE, because the wrong number was quoted to master: 192.1 said 281 across 46 namespaces with auth 20 among the worst (real figure 203, auth not on the list at all) and 184.1's ISP row said 177 reached (it is 255). The ISP finding itself stands - 55 namespaces and 458 members handed to every renderer file is still a violation and 203 orphans is still a large debt; a smaller number changes what I am entitled to SAY, not the plan. WHAT THE REGISTER SAYS NOW, which is the actual tranche question: `browser` (launch, navigate, screenshot, executeJs, download - no Browser page exists in src/pages) and `orchestrator` (submit, cancel, status plus events) look like REAL unused capability; marketIntel (32) is still the largest and still gated behind a Python backend that cannot start on master's machine (python 3.14.4 vs numpy==1.26.4, no wheel above 3.12; fix is RAMA_PYTHON at 3.10-3.12). NOT VERIFIED: "reached" is still decided from SOURCE TEXT - a computed-property call reads as an orphan and a member named only in a comment reads as reached, both listed by the suite as held by hand, and stripping comments stays refused for the 187.1 reason because it would REDUCE reached and could redden a long list at once. NEXT: triage `browser` and `orchestrator` against their main-process handlers before building any UI, since an orphan is not automatically a capability. |
@@ -22325,4 +22326,254 @@ reached bridge member, which is true by construction.
 members take their channel at runtime (`invoke`, `on`, `removeListener`, `terminal.onData/onExit`,
 `instance.on`, `proposals.on`) and no static analysis can attribute those, so channels reached only
 through them are invisible to this measure. The exemption is printed on every run and bounded.
+
+
+---
+
+## Section 196 - Securing the architecture and the API
+
+Master: *"secure the entire Architechture and API for all potential threats without losing
+functionality."*
+
+### 196.0 What I will not claim
+
+**"All potential threats" is not a promise anyone can keep, and saying otherwise would be the most
+dangerous sentence in this document.** A new class of attack is discovered against Electron, Node and
+Chromium every month, this app has 417 IPC channels and 1,100 dependencies, and no audit closes what
+has not yet been invented.
+
+What is deliverable, and what this section does:
+
+1. **Enumerate the surface** rather than estimate it — every channel, every window, every outbound
+   route, measured from the code.
+2. **Measure authorisation coverage** — which handlers actually check who is calling.
+3. **Close the gaps that are real**, additively, so nothing that works today stops working.
+4. **Make the policy explicit and checked**, so the next gap fails a suite instead of waiting for an
+   audit that depends on someone remembering.
+
+The honest framing is coverage, not immunity. Where a measurement is an impression, it says so.
+
+### 196.1 What is already right, measured not assumed
+
+Credit where the existing design holds, because a security pass that rewrites working defences is how
+regressions arrive:
+
+| Defence | State |
+|---|---|
+| `contextIsolation` | **true** on all three windows (main, badge, popout) |
+| `nodeIntegration` | **false** on all three |
+| CSP | set on response headers: `default-src 'self'`, `object-src 'none'`, `base-uri 'self'`, `form-action 'none'` |
+| window.open | `setWindowOpenHandler` denies every request and hands the URL to the OS browser |
+| permissions | default handler replaced; only the microphone is granted, and only to our own renderer |
+| the channel shim | `window.ipcRenderer` refuses any channel outside a prefix allowlist |
+| capability matrix | one definition in `shared/capabilities.json`, read by renderer, main and the Express server; **unknown capability means denied** |
+| outbound HTTP | one client (`lib/http.cjs`), invariant I9 |
+| secrets | vault with Argon2, `I-SECRETS` tripwire, `.env` refused by Matsya's egress rules |
+
+### 196.2 The authorisation gap, measured
+
+**370 literal `ipcMain` registrations. 151 enforce a capability check. 219 do not.**
+
+My first measurement said 254 unguarded, and that figure was **wrong** — the pattern looked for
+`capability.*` and missed `denyUnless(...)` and a local `deny(user, cap)`, so `apps:execute` and
+others read as unguarded while they are gated. Corrected by finding the idioms the codebase actually
+uses before counting them. This is the fifth time in this build that a measurement was wrong before
+it was right, and the reason the number is given with its method.
+
+Of the 219, the ones that do something privileged, grouped by what they touch:
+
+| What the handler does | Count |
+|---|---|
+| touches secrets, passphrases or tokens | 35 |
+| modifies this app — proposals, evolution, regen, nucleus, genome | 35 |
+| spawns processes | 3 |
+| writes files | 1 |
+| reaches the network | 1 |
+
+**Not every one is a defect, and the list must be read before it is acted on.** `auth:login-step1`,
+`auth:keygen`, `session:unlock` and `session:is-first-run` are *bootstrap* channels: they have to be
+callable before anyone is authenticated, and their protection is the passphrase, not a capability
+check. Counting them as holes would be the same error as 194.9's dead-wrapper count.
+
+The ones that look like genuine gaps, named so they can be argued with:
+
+- **`proposals:approve` / `apply` / `reject`, `evolution:apply` / `approve`, `regen:apply` /
+  `approve`** — the self-modification path. Approving a change to this application is the highest-
+  privilege act it has, and no capability is required to call it.
+- **`gitAuth:set` / `remove` / `scrub` / `set-expiry`** — credential handling.
+- **`store:get` / `set` / `push` / `update` / `remove` / `find` / `save`** — the data store, eight
+  channels, no check.
+- **`terminal:write` / `resize` / `destroy`** — `terminal:create` requires `terminal.open`, the three
+  that follow require nothing, so a tier that may not open a terminal can write to one that is open.
+- **`instance:spawn`**, **`agents:spawn`**, **`selfcare:heal` / `sweep`**,
+  **`timeline:propose-restore` / `flashback`**, **`vector:bulk-store`**, **`graph:*`**.
+
+### 196.3 Two gaps in the architecture, not the API
+
+**No sender validation anywhere.** Not one handler checks `event.senderFrame`. Every channel trusts
+that the message came from our own window. With `contextIsolation` on and no remote content loaded
+the practical risk today is low, but it is the single assumption that, if it ever breaks, breaks
+everything at once — and it is cheap to remove.
+
+**No `will-navigate` guard and no `will-attach-webview` guard.** `setWindowOpenHandler` covers
+`window.open`; it does not cover a navigation in the existing window. Nothing in the app navigates
+away from its own document, so denying it costs nothing.
+
+**`shell:open-external` accepts any `http`/`https` URL.** Correct in refusing other schemes; it does
+not reject a URL carrying embedded credentials.
+
+### 196.4 DECIDED: a declared policy at the boundary, in observe mode first
+
+**Rejected: retrofitting 219 handlers by hand.** Most take no `user` argument, so each change also
+changes its preload member and every renderer call site. That is a very large diff touching every
+feature, in a project where four wrong diagnoses came from changing more than could be read at once
+(184.2), and the failure mode is a capability check that denies a legitimate user — losing exactly
+the functionality master said not to lose.
+
+**Rejected: a default-deny gate switched on now.** It would be correct and it would break the app on
+the first unclassified channel. A security control that has to be reverted teaches everyone to revert
+security controls.
+
+**Adopted: make the policy a declared table, enforce it at one place, and start by observing.**
+
+1. **`electron/lib/ipcPolicy.cjs`** — one row per channel, generated from the measurement, hand-
+   corrected from there. Each row is a verdict: `self` (the handler enforces its own check, verified),
+   `cap:<name>` (the gate enforces it centrally), `bootstrap` (must work unauthenticated),
+   `public` (deliberately open and not privileged), `observe` (not yet classified — the gate records,
+   enforces nothing).
+2. **`electron/lib/ipcGuard.cjs`** — installed once, wraps `ipcMain.handle`/`on`, and for every call
+   checks the sender first and the policy second. `ipcMain` and the policy are injected, so the whole
+   thing is drivable by a suite with no Electron present.
+3. **Day one changes no verdict.** Everything currently gated stays `self`; everything ungated starts
+   `observe`. The app behaves identically, which is the point: the control ships, then tightens.
+4. **The ratchet:** every registered channel must appear in the table, and the `observe` count may
+   only go DOWN. A new channel with no row fails the suite. That is how this stops being a document
+   and starts being a gate.
+
+**Sender validation is enforced from day one**, because it cannot deny a legitimate caller: every
+legitimate caller is a window this app created.
+
+### 196.5 Order of work
+
+1. This tranche: the policy table, the gate, sender validation, the navigation guards, the
+   `open-external` tightening, and the suite that holds all of it.
+2. Then the `observe` rows come down in tranches, highest privilege first — the self-modification
+   path, then credentials, then the store, then the rest — each one a capability flip with its own
+   check that the UI still works.
+3. **For master:** the enforcement flips change who may do what. The self-modification path is the
+   one I would flip first and it is also the one that could lock him out of approving a proposal if
+   the tier is wrong. That decision is his, not mine.
+
+
+### 196.6 What was already there, and why it changed the design
+
+**`electron/lib/principalBinding.cjs` exists** — Section 150.1 — and it solves the harder half of
+this problem. Every gated channel used to take `user` out of the payload and believe it, so any code
+in a renderer could send `{ tier: 0 }` and be master. That wrapper replaces the claim with the
+account resolved from main's own session table, revalidated on every call.
+
+Finding it changed what to build. The gate must **never read the payload**, and `install()` now
+*refuses to start* without a `principal(event)` resolver rather than falling back to `args[0].user`.
+A gate that read the claim would have reintroduced the 150.1 defect one layer higher, and it would
+have done so while looking like a security control — which is worse than not having one.
+
+The ordering is recorded for the same reason: `principalBinding` installs first, so its wrapper sits
+*outside* the gate and has already replaced any claim. The suite asserts the binding is installed
+**at all** and *then* that it is first.
+
+### 196.7 Built
+
+| File | What it is |
+|---|---|
+| `electron/lib/ipcPolicy.cjs` | 369 rows, one per registered channel: `self` 151, `observe` 192, `bootstrap` 16, `public` 10 |
+| `electron/lib/ipcGuard.cjs` | the gate — sender check, then policy; `ipcMain`, the policy, the capability layer and the principal resolver all injected |
+| `electron/lib/externalUrl.cjs` | pure judgement on what may be handed to the OS browser |
+| `scripts/verifyIpcPolicy.cjs` | 66 checks |
+| `scripts/ipc-policy-baseline.json` | the ceiling on unclassified channels, 192, which may only fall |
+
+**The sender check is enforced from day one and that is safe to say, because it was checked:** the
+app creates exactly three `BrowserWindow`s — main, badge, popout — and no `BrowserView`,
+`WebContentsView` or offscreen contents anywhere. Every legitimate caller is a window in
+`getAllWindows()`, so there is no caller the check can refuse. A frame that is not the main frame of
+such a window is refused, which is the case it exists for.
+
+**Everything else behaves exactly as before.** No channel is centrally enforced yet. 151 keep the
+checks they already had, 192 are recorded and run, and 26 are declared open on purpose.
+
+Hardening added alongside: `will-navigate` denies any navigation off the app's own origin and hands
+the URL to the OS browser instead; `will-attach-webview` refuses outright; `shell:open-external`
+parses rather than prefix-matches.
+
+### 196.8 Two checks of mine that proved nothing, found by mutating them
+
+**The external-URL rows were positional.** They looked for `new URL(` and the words `username` and
+`password` in the handler body. A mutation that replaced the parse with a prefix test left all three
+words in place and **every check passed**. So the judgement moved out of the handler into
+`lib/externalUrl.cjs`, where the suite calls it with `file:`, `javascript:`, `data:`, `ms-msdt:`,
+`vscode:`, `https://user:ghp_secret@github.com`, nonsense, empty and null. Positional checks prove
+where code is; only a call proves what it does.
+
+That module also returns the **parsed** URL rather than the caller's string, and the suite asserts it:
+validating one string and opening another is how a check gets walked past by whatever the difference
+between them is.
+
+**And one row passed *because* the thing it guards was deleted.** It read
+`indexOf('principalBinding.install(ipcMain)') < gateAt`. Remove that line and `indexOf` returns
+`-1`, which is less than any position — so deleting the defence that stops a renderer claiming
+`{ tier: 0 }` **satisfied the check that exists to protect it**. Absence is now tested before order.
+Same shape as 190's `some()` over an empty list and 188's index outliving its array; third time.
+
+### 196.9 Verified
+
+`verifyIpcPolicy` **66 checks, 0 failures**, registered as `npm run verify:ipc-policy` and in the
+chain before `verifyReachability`. Full chain green apart from the two master-owned tripwire rows.
+
+**26 of 26 mutations caught**, across two passes, each applied to a real file and restored:
+
+the sender check no longer refusing · a `cap:` row admitting a denied user · a `cap:` row with no
+capability layer passing silently · an unclassified channel going unreported · a malformed verdict
+treated as fine · installation accepted with no principal resolver · **the gate reading the payload
+to decide who is calling** · listener identity broken so removal silently fails · installing twice ·
+a `self` row kept while its handler loses its check · the table unfrozen · a channel losing its row ·
+the ceiling given slack · `contextIsolation` turned off · the navigation guard removed · the webview
+guard removed · the credential check dropped · the gate installed after handlers register · the gate
+install call disabled while its text remains · the URL judgement reverted to a prefix test · the
+scheme allowlist widened · a third scheme added quietly · the input string returned instead of the
+parsed one · the judgement learning to act · the handler ceasing to obey it · the gate installed
+before principal binding.
+
+**Not verified, and these matter:**
+
+- **Nothing here was run inside Electron.** The gate is driven by a fake `ipcMain` under bare Node.
+  That proves the decision and the wrapping; it does not prove the app still starts. The only real
+  test is master launching it, and the risk concentrates in one place: every IPC call now passes
+  through one more function.
+- **`self` proves a check is *present*, not that it names the right capability.** A handler guarding
+  a destructive action with a trivial capability would satisfy every row here.
+- **`observe` is 192 channels enforcing nothing.** That is the honest starting position, not an
+  achievement.
+- The sender check trusts Electron's own `event.sender`. If that is wrong, nothing above holds and
+  nothing in this process could detect it.
+
+### 196.10 What is still open, and what needs master
+
+**The 192 come down in tranches** (196.5), highest privilege first. The order I would take them:
+
+1. the self-modification path — `proposals:approve` / `apply` / `reject`, `evolution:apply` /
+   `approve`, `regen:apply` / `approve`
+2. credentials — `gitAuth:set` / `remove` / `scrub` / `set-expiry`
+3. the data store — the eight `store:*` channels
+4. `terminal:write` / `resize` / `destroy`, which today a tier that may not open a terminal can still
+   drive
+5. the rest
+
+**FOR MASTER, and this is a decision rather than a task:** flipping a channel from `observe` to
+`cap:<name>` changes who may do a thing. The self-modification path is the one I would do first and
+it is also the one that could lock him out of approving a proposal if the capability chosen is wrong.
+I will not pick those capabilities unilaterally. The question for each is: *is this master-only, or
+may a Superadmin do it too?*
+
+**Also still true and still his:** `shared/capabilities.json` is the one file this gate reads for
+tier answers, and it is the file the loyalty tripwire reports as changed-but-unapproved. The gate is
+only as correct as that matrix.
 
