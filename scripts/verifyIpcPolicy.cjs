@@ -48,22 +48,78 @@ function walk(dir, out = []) {
 const mainFiles = walk(path.join(ROOT, 'electron'))
   .filter((f) => !/preload\.cjs$/i.test(path.basename(f)));
 
-// The idioms this codebase actually uses for an authorisation check. THIS LIST IS THE MEASUREMENT:
-// my first pass looked for `capability.*` only, missed `denyUnless(...)` and a local `deny(user, …)`,
-// and so reported 254 unguarded handlers when the real figure was 219 (196.2). A guard pattern that
-// does not match the code it audits produces a number that is confidently wrong.
-const GUARD_IDIOM = /capability\.deny\(|denyUnless\(|requireCap\(|capability\.can\(|\bdeny\(\s*user|\bgate\(|readGate\(|gateView\(/;
+/*
+ * HOW AN AUTHORISATION CHECK IS RECOGNISED, and this has now been wrong twice.
+ *
+ * First pass: looked for `capability.*` only. It missed `denyUnless(...)` and a local
+ * `deny(user, cap)`, and reported 254 open handlers when the figure was 219 (196.2).
+ *
+ * Second pass: still missed the WRAPPER form. `gitAuth.cjs` registers every one of its seven
+ * channels as `gated('vault.write', fn)` — a closure that calls `capability.deny` before the
+ * handler — and `\bgate\(` does not match `gated(`. So seven fully gated channels were filed as
+ * unclassified, and the table understated the position while reading as if it were measured.
+ *
+ * The lesson is the same both times: a pattern that does not match the code it audits produces a
+ * number that is confidently wrong. So the two forms are separated and the second is DECLARED:
+ *
+ *   DIRECT_IDIOM   the check written in the handler body
+ *   GATE_WRAPPERS  names of closures that perform the check for the handler they wrap
+ *
+ * A declared list can rot, so it is cross-checked below: every name here must really be defined in
+ * a main-process file with a capability check inside it. A wrapper that stops checking stops
+ * counting, and the rows that rest on it go red.
+ */
+const DIRECT_IDIOM = /capability\.deny\(|capability\.can\(|requireCap\(|denyUnless\(|\bdeny\(\s*user/;
+
+/*
+ * Third pass, and the rule is now DERIVED rather than listed. `agents:spawn` reads
+ *
+ *     ipcMain.handle('agents:spawn', async (_e, { user, type, task }) =>
+ *       createAgent({ user, type, task }));
+ *
+ * and `createAgent` checks `agents.spawn` on its first line. A name list would need `createAgent`
+ * added to it, and the next module would need the next name, forever — which is how a list becomes
+ * the thing that is wrong. The general shape is DELEGATION: a handler is guarded when it calls a
+ * function, defined in its own file, that checks. That subsumes the wrapper form (`gated(cap, fn)`)
+ * without naming it and catches the worker form too.
+ *
+ * The window is 400 characters from the definition: enough for every real case here (`gated` checks
+ * on its second line, `createAgent` on its first, `guard` on its third) and short enough that an
+ * unrelated check further down cannot vouch for a function that does nothing.
+ */
+const CHECK_WINDOW = 400;
+
+/** Names defined in `src` whose definition is followed closely by a capability check. */
+function checkingFunctionsIn(src) {
+  const names = new Set();
+  const defs = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=|function\s+([A-Za-z_$][\w$]*)\s*\(/g;
+  for (const m of src.matchAll(defs)) {
+    const name = m[1] || m[2];
+    if (!name) continue;
+    if (DIRECT_IDIOM.test(src.slice(m.index, m.index + CHECK_WINDOW))) names.add(name);
+  }
+  return names;
+}
+
+function isGuarded(body, checkers) {
+  if (DIRECT_IDIOM.test(body)) return true;
+  for (const name of checkers) {
+    if (new RegExp(`\\b${name}\\s*\\(`).test(body)) return true;
+  }
+  return false;
+}
 
 /** @returns {Map<string, {file:string, body:string, guarded:boolean}>} */
 function readRegistrations() {
   const out = new Map();
   for (const f of mainFiles) {
     const src = fs.readFileSync(f, 'utf8');
+    const checkers = checkingFunctionsIn(src);
     const marks = [...src.matchAll(/ipcMain\.(?:handle|handleOnce|on|once)\(\s*['"`]([^'"`]+)['"`]/g)];
     for (let i = 0; i < marks.length; i += 1) {
       const channel = marks[i][1];
       const body = src.slice(marks[i].index, i + 1 < marks.length ? marks[i + 1].index : src.length);
-      const guarded = GUARD_IDIOM.test(body);
+      const guarded = isGuarded(body, checkers);
       const prev = out.get(channel);
       // Registered in two places: keep the guarded reading, so the table can never claim `self` on
       // the strength of one copy while another is open.
@@ -234,8 +290,52 @@ function fakeIpcMain() {
 // ═══ (3) The table is true about the code ══════════════════════════════════
 section('every policy row is true about the handler it describes');
 
+/*
+ * THE DECLARED WRAPPER NAMES ARE CROSS-CHECKED, because a declared list is a claim too.
+ *
+ * Each name must be DEFINED somewhere in the main process with a capability check inside its body.
+ * The window is the 400 characters after the definition, which comfortably covers both real shapes
+ * (`gitAuth`'s `gated` checks on its second line, `tracking`'s `guard` on its third) and is small
+ * enough that an unrelated check further down the file cannot vouch for a wrapper that does nothing.
+ */
+/*
+ * THE DELEGATION RULE IS ITSELF CHECKED, on the two shapes that drove it.
+ *
+ * Nothing declares the checking functions any more, so the thing that can rot is the derivation. If
+ * `checkingFunctionsIn` stops finding them, 39 channels silently return to reading as unclassified
+ * and the measurement understates again — quietly, which is how this went wrong three times.
+ */
+const gitAuthSrc = fs.readFileSync(path.join(ROOT, 'electron/ipc/gitAuth.cjs'), 'utf8');
+const agentsSrc = fs.readFileSync(path.join(ROOT, 'electron/ipc/agentOrchestrator.cjs'), 'utf8');
+check('the wrapper form is recognised: gitAuth\'s gated(cap, fn) counts as a check',
+  checkingFunctionsIn(gitAuthSrc).has('gated'));
+check('and the worker form: agentOrchestrator\'s createAgent counts as one too',
+  checkingFunctionsIn(agentsSrc).has('createAgent'));
+// REDBY: let a function with no check vouch for a handler. `repo()` sits beside `gated` in gitAuth
+// and only reads a property; if the window grew, it would start counting as a gate.
+check('a neighbouring helper that does not check is not mistaken for one',
+  !checkingFunctionsIn(gitAuthSrc).has('repo'),
+  [...checkingFunctionsIn(gitAuthSrc)].join(', '));
+
 const rows = Object.entries(POLICY);
 check('the table is frozen, so nothing can widen it at runtime', Object.isFrozen(POLICY));
+
+/*
+ * A `cap:` ROW MUST NAME A CAPABILITY THAT EXISTS, and this is the row that stops a typo bricking a
+ * feature in the quietest possible way.
+ *
+ * `capability.can()` returns FALSE for an unknown capability — correct, because unknown means denied
+ * — so `cap:self-modfiy.apply` would not throw, would not warn, and would refuse every caller
+ * including master, for as long as it took someone to notice they could no longer approve anything.
+ * Fail-closed is the right default and it is exactly what makes the typo invisible.
+ */
+const matrix = require(path.join(ROOT, 'shared/capabilities.json')).capabilities;
+const unknownCaps = rows
+  .map(([ch, v]) => [ch, guard.capOf(v)])
+  .filter(([, cap]) => cap !== null && !(cap in matrix))
+  .map(([ch, cap]) => `${ch} wants "${cap}"`);
+check('every centrally enforced row names a capability the matrix defines',
+  unknownCaps.length === 0, unknownCaps.join('; '));
 check('every verdict is one the gate understands',
   rows.every(([, v]) => guard.isKnownVerdict(v)),
   rows.filter(([, v]) => !guard.isKnownVerdict(v)).map(([c, v]) => `${c}=${v}`).join(', '));

@@ -1,5 +1,6 @@
 {
   "writtenAt": "2026-11-16",
   "why": "Ceiling for the number of IPC channels with no authorisation check (spec Section 196). It may only go DOWN. Raising it means a new channel was added that trusts whoever calls it, which is the thing this register exists to stop happening quietly.",
-  "maxObserve": 192
+  "maxObserve": 149,
+  "corrected": "Section 196.11. The guard detection was wrong three times and this file carries the result of fixing it. (1) It missed the WRAPPER form - gitAuth and six other modules register every channel through a closure like gated(cap, fn) - so 39 gated channels read as unclassified. (2) A NAME LIST then produced false positives: models:chat defines a local gated(result, extra) that gates claim attribution, not authorisation, so the main chat path read as guarded while checking nothing. (3) The rule is now DELEGATION, derived rather than listed: a handler is guarded when it calls a function, defined in its own file, that checks. That catches both the wrapper and the worker form (agentOrchestrator createAgent) and needs no list to keep up to date."
 }

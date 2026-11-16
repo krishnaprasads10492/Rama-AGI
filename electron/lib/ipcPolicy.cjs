@@ -17,7 +17,7 @@
  *   'public'        deliberately open and not privileged - window chrome, zoom
  *   'observe'       NOT YET CLASSIFIED. The gate records the call and enforces nothing
  *
- * 'observe' IS A DEBT REGISTER, not a verdict, and it may only SHRINK. 192 channels are in it
+ * 'observe' IS A DEBT REGISTER, not a verdict, and it may only SHRINK. 149 channels are in it
  * today. Every one is a handler that trusts whoever called it, and the plan in 196.5 brings them
  * down in tranches, highest privilege first. The suite fails if the count goes up.
  *
@@ -27,7 +27,7 @@
  * behaving identically to today, and tightens one row at a time with the UI exercised each time.
  *
  * Generated from the code as it stood, then corrected by hand. Counts at that moment:
- *   self 151, observe 192, bootstrap 16, public 10
+ *   self 191, observe 149, bootstrap 16, public 10, enforced here 3
  */
 const POLICY = Object.freeze({
   'agents:get': 'observe',
@@ -38,7 +38,7 @@ const POLICY = Object.freeze({
   'agents:kill-all': 'self',  // enforces agents.kill-all
   'agents:list': 'observe',
   'agents:set-governor': 'self',  // enforces agents.governor-config
-  'agents:spawn': 'observe',
+  'agents:spawn': 'self',
   'ai:get-status': 'observe',
   'ai:start-backend': 'observe',
   'ai:stop-backend': 'observe',
@@ -62,7 +62,7 @@ const POLICY = Object.freeze({
   'ast:analyze-repo': 'observe',
   'ast:cache-clear': 'observe',
   'ast:impact-analysis': 'observe',
-  'auth:change-password': 'observe',
+  'auth:change-password': 'self',
   'auth:check-password': 'observe',
   'auth:create-user': 'self',
   'auth:delete-user': 'self',
@@ -90,12 +90,12 @@ const POLICY = Object.freeze({
   'badge:get-enabled': 'observe',
   'badge:set-enabled': 'observe',
   'badge:set-hide-tray': 'observe',
-  'brokerAccounts:detect-ip': 'observe',
-  'brokerAccounts:distributable-remove': 'observe',
-  'brokerAccounts:distributable-save': 'observe',
-  'brokerAccounts:list': 'observe',
-  'brokerAccounts:remove': 'observe',
-  'brokerAccounts:save': 'observe',
+  'brokerAccounts:detect-ip': 'self',
+  'brokerAccounts:distributable-remove': 'self',
+  'brokerAccounts:distributable-save': 'self',
+  'brokerAccounts:list': 'self',
+  'brokerAccounts:remove': 'self',
+  'brokerAccounts:save': 'self',
   'brokers:drift-check': 'self',  // enforces vault.read
   'brokers:fields': 'self',  // enforces vault.read
   'brokers:list': 'self',  // enforces vault.read
@@ -117,9 +117,9 @@ const POLICY = Object.freeze({
   'bus:history': 'observe',
   'bus:status': 'observe',
   'deps:review': 'self',  // enforces self-modify.view
-  'engineSetup:install-python': 'observe',
-  'engineSetup:run': 'observe',
-  'engineSetup:status': 'observe',
+  'engineSetup:install-python': 'self',
+  'engineSetup:run': 'self',
+  'engineSetup:status': 'self',
   'evolution:analyze-and-propose': 'observe',
   'evolution:apply': 'observe',
   'evolution:approve': 'observe',
@@ -159,16 +159,16 @@ const POLICY = Object.freeze({
   'git:pull': 'self',  // enforces git.commit
   'git:push': 'self',  // enforces git.push
   'git:stage': 'self',  // enforces git.commit
-  'git:start-watch': 'observe',
+  'git:start-watch': 'self',
   'git:status': 'self',  // enforces git.read
   'git:stop-watch': 'observe',
-  'gitAuth:expiry': 'observe',
-  'gitAuth:remove': 'observe',
-  'gitAuth:scrub': 'observe',
-  'gitAuth:set': 'observe',
-  'gitAuth:set-expiry': 'observe',
-  'gitAuth:status': 'observe',
-  'gitAuth:test': 'observe',
+  'gitAuth:expiry': 'self',
+  'gitAuth:remove': 'self',
+  'gitAuth:scrub': 'self',
+  'gitAuth:set': 'self',
+  'gitAuth:set-expiry': 'self',
+  'gitAuth:status': 'self',
+  'gitAuth:test': 'self',
   'graph:create-plan': 'observe',
   'graph:get-plan': 'observe',
   'graph:list-plans': 'observe',
@@ -179,21 +179,21 @@ const POLICY = Object.freeze({
   'health:crash-reports': 'observe',
   'health:repair': 'observe',
   'health:startup': 'observe',
-  'instance:audit': 'observe',
+  'instance:audit': 'self',
   'instance:ensure-prime': 'observe',
-  'instance:express': 'observe',
-  'instance:failover': 'observe',
-  'instance:get': 'observe',
-  'instance:list': 'observe',
-  'instance:record': 'observe',
+  'instance:express': 'self',
+  'instance:failover': 'self',
+  'instance:get': 'self',
+  'instance:list': 'self',
+  'instance:record': 'self',
   'instance:restore': 'observe',
-  'instance:resume': 'observe',
-  'instance:spawn': 'observe',
-  'instance:stats': 'observe',
-  'instance:suspend': 'observe',
-  'instance:terminate': 'observe',
+  'instance:resume': 'self',
+  'instance:spawn': 'self',
+  'instance:stats': 'self',
+  'instance:suspend': 'self',
+  'instance:terminate': 'self',
   'intel:analyze': 'observe',
-  'intel:check-source': 'self',
+  'intel:check-source': 'observe',
   'intel:get-session': 'observe',
   'intel:list-sessions': 'observe',
   'ipc-enc:clear': 'observe',
@@ -202,10 +202,10 @@ const POLICY = Object.freeze({
   'ipc-enc:init': 'observe',
   'ipc-enc:status': 'observe',
   'ipc-enc:verify': 'observe',
-  'kiteSession:fetch-bars': 'observe',
-  'kiteSession:login-complete': 'observe',
-  'kiteSession:login-start': 'observe',
-  'kiteSession:logout': 'observe',
+  'kiteSession:fetch-bars': 'self',
+  'kiteSession:login-complete': 'self',
+  'kiteSession:login-start': 'self',
+  'kiteSession:logout': 'self',
   'market:backtest': 'self',  // enforces stockmind.request
   'market:backtest-presets': 'self',  // enforces stockmind.view
   'market:costs-watch': 'self',  // enforces stockmind.request
@@ -235,7 +235,7 @@ const POLICY = Object.freeze({
   'meta:summary': 'self',
   'meta:vectors': 'self',
   'models:add-custom-provider': 'self',  // enforces models.add-key
-  'models:chat': 'self',
+  'models:chat': 'observe',
   'models:check-credentials': 'observe',
   'models:cloud-list': 'observe',
   'models:cloud-status': 'observe',
@@ -274,13 +274,13 @@ const POLICY = Object.freeze({
   'popout:redeem': 'observe',
   'proposals:apply': 'self',  // enforces self-modify.apply
   'proposals:approve': 'observe',
-  'proposals:audit': 'observe',
-  'proposals:create': 'observe',
-  'proposals:flush': 'observe',
-  'proposals:get': 'observe',
-  'proposals:list': 'observe',
+  'proposals:audit': 'self',
+  'proposals:create': 'self',
+  'proposals:flush': 'self',
+  'proposals:get': 'self',
+  'proposals:list': 'self',
   'proposals:reject': 'observe',
-  'proposals:stats': 'observe',
+  'proposals:stats': 'self',
   'publish:preview-notes': 'observe',
   'publish:proposal': 'self',  // enforces release.cut
   'refresh:run': 'self',  // enforces self-modify.view
@@ -340,9 +340,9 @@ const POLICY = Object.freeze({
   'system:start-stream': 'observe',
   'system:stop-stream': 'observe',
   'terminal:create': 'self',  // enforces terminal.open
-  'terminal:destroy': 'observe',
-  'terminal:resize': 'observe',
-  'terminal:write': 'observe',
+  'terminal:destroy': 'cap:terminal.open',
+  'terminal:resize': 'cap:terminal.open',
+  'terminal:write': 'cap:terminal.open',
   'timeline:compare': 'observe',
   'timeline:file-history': 'observe',
   'timeline:flashback': 'observe',
@@ -350,9 +350,9 @@ const POLICY = Object.freeze({
   'timeline:mark': 'observe',
   'timeline:markers': 'observe',
   'timeline:propose-restore': 'observe',
-  'tracking:query': 'observe',
+  'tracking:query': 'self',
   'tracking:shape': 'observe',
-  'tracking:summary': 'observe',
+  'tracking:summary': 'self',
   'update:channel-apply': 'self',  // enforces system.self-update
   'update:channel-publish': 'self',  // enforces system.self-update
   'update:channel-status': 'self',  // enforces stockmind.view
