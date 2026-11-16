@@ -222,14 +222,31 @@ const SPEC = fs.readFileSync(path.join(ROOT, 'RAMA_AGI_MASTER_SPEC.md'), 'utf8')
   // and an earlier version of this check asserted the ORDER of two lines - which passed happily and
   // then broke the moment the write moved into a helper, having proven nothing about behaviour.
   // So: actually run it with the flag off and confirm the disk did not change.
+  /*
+   * THE SNAPSHOT WATCHES WHAT THIS SCRIPT CAN WRITE, AND NOTHING ELSE (Section 195.4).
+   *
+   * It used to include a directory listing of `data/logs`, which `fieldReport.cjs` only ever READS —
+   * its single write is `saveLedger` to `data/field-evidence.json`. Inside the full `verify` chain a
+   * sibling suite added a file under `data/logs`, the listing changed, and this row reported that
+   * running the collector with the flag off had written to disk. It had not. The chain stopped there,
+   * so every suite after it never ran, and the row that failed was not about its own subject.
+   *
+   * A guard that watches more than its subject does not catch more, it reports things that are not
+   * true — the defect this project has paid for most often. So: the ledger file only, and by CONTENT
+   * rather than mtime, which also catches a rewrite that lands within the same millisecond.
+   */
   check('running it with the flag off changes nothing on disk', (() => {
     const { spawnSync } = require('child_process');
-    const dataDir = path.join(ROOT, 'data');
-    const logDir = path.join(dataDir, 'logs');
+    const ledger = path.join(ROOT, 'data', 'field-evidence.json');
+    // BOTH SIGNALS, because each misses what the other catches: content alone would accept a
+    // load-then-save-unchanged, which is a write and is exactly how a sloppy "off" path leaks one;
+    // mtime alone would accept a rewrite landing inside the same millisecond.
     const snap = () => {
-      const list = (d) => { try { return fs.readdirSync(d).sort().join(); } catch { return '<none>'; } };
-      const stamp = (f) => { try { return String(fs.statSync(f).mtimeMs); } catch { return '<none>'; } };
-      return `${list(logDir)}|${stamp(path.join(dataDir, 'field-evidence.json'))}`;
+      try {
+        const raw = fs.readFileSync(ledger);
+        const digest = require('crypto').createHash('sha256').update(raw).digest('hex');
+        return `${fs.statSync(ledger).mtimeMs}:${raw.length}:${digest}`;
+      } catch { return '<absent>'; }
     };
     const before = snap();
     const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts/fieldReport.cjs'), '--mode', 'off'],

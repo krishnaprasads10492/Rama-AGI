@@ -116,9 +116,13 @@ const KNOWN_ORPHAN_CHANNELS = Object.freeze({});
  */
 let KNOWN_ORPHAN_MEMBERS = [];
 const SEED_PATH = path.join(__dirname, 'reachability-baseline.json');
+// The whole seed file is kept, not just the one list, because rule 4 (Section 195) adds a second
+// register to it and a partial read followed by a write would silently drop the other one.
+let seedFile = {};
 if (fs.existsSync(SEED_PATH)) {
-  const seed = JSON.parse(fs.readFileSync(SEED_PATH, 'utf8'));
-  KNOWN_ORPHAN_MEMBERS = Array.isArray(seed.unusedPreloadMembers) ? seed.unusedPreloadMembers : [];
+  seedFile = JSON.parse(fs.readFileSync(SEED_PATH, 'utf8'));
+  KNOWN_ORPHAN_MEMBERS = Array.isArray(seedFile.unusedPreloadMembers)
+    ? seedFile.unusedPreloadMembers : [];
 }
 
 // ═══ (1) Channels registered in the main process ═══════════════════════════
@@ -240,17 +244,49 @@ function parsePreloadMembers(rawSrc) {
       const after = src.slice(i + key[0].length).trimStart();
       if (after.startsWith('{')) {
         stack.push({ name, depth });
-        members.push({ path: name, kind: 'namespace', depth });
+        members.push({ path: name, kind: 'namespace', depth, at: i });
       } else {
         const ns = stack.length ? stack[stack.length - 1].name : null;
-        members.push({ path: ns ? `${ns}.${name}` : name, kind: 'leaf', depth, ns, name });
+        members.push({ path: ns ? `${ns}.${name}` : name, kind: 'leaf', depth, ns, name, at: i });
       }
       i += key[0].length;
       continue;
     }
     i += 1;
   }
+
+  /*
+   * EACH MEMBER'S VALUE TEXT, sliced between it and the next member (Section 195).
+   *
+   * This is what lets the suite say WHICH CHANNEL a bridge member invokes, which is the whole basis
+   * of judging a channel reachable through the bridge rather than only through the shim. The walk
+   * above already visits every key in order, so the bound is exact; a second regex pass over nested
+   * braces is the shape Section 145 paid for when a pattern read comments as keys.
+   *
+   * `src` is the COMMENT-STRIPPED copy, so a channel named only in a docblock cannot be mistaken for
+   * one a member invokes — the same hazard, refused in the same way, one layer down.
+   */
+  for (let k = 0; k < members.length; k += 1) {
+    const end = k + 1 < members.length ? members[k + 1].at : i;
+    members[k].value = src.slice(members[k].at, end);
+  }
   return members;
+}
+
+/**
+ * The channels a bridge member invokes, subscribes to or sends on.
+ *
+ * THE METHOD NAME IS NOT ENUMERATED, and the first version of this listed `invoke|send|on|
+ * removeListener` — which misses `ipcRenderer.sendSync('window:is-maximized')`, because `send` has to
+ * be followed by `(` to match and `sendSync` is not. One member, one channel, reported as capability
+ * with no reader when the titlebar calls it on every window. Any `ipcRenderer.<method>('channel')`
+ * counts: the thing being established is that this member names that channel, not how it sends.
+ */
+function channelsOf(member) {
+  const found = new Set();
+  const text = member.value || '';
+  for (const m of text.matchAll(/ipcRenderer\.\w+\(\s*['"`]([^'"`$]+)['"`]/g)) found.add(m[1]);
+  return found;
 }
 
 const members = parsePreloadMembers(preloadSrc);
@@ -559,7 +595,180 @@ check('every member in the debt register is still unreached, so the register can
     ? `now reached — remove from scripts/reachability-baseline.json: ${fixedMembers.join(', ')}`
     : '');
 
-// ═══ (4) The five surfaces the audit named, asserted BY NAME ═══════════════
+// ═══ (4) CAPABILITY WITH NO READER — the measure the upgrade programme needs ═
+//
+// WHY THIS IS A SEPARATE RULE FROM (1), and it is the finding of Section 194.9.
+//
+// Rule 1 asks whether a registered channel is named by ANY caller surface, and the preload names
+// every channel by construction — so it passes for a channel no page has ever invoked. Rule 3 counts
+// BRIDGE MEMBERS with no caller, which conflates two unrelated things: a dead WRAPPER, where the
+// feature has a page that reaches it by channel, and a dead CAPABILITY, where nothing asks for it.
+//
+// `orchestrator` is the case that exposed it. Thirteen members, every one in the debt register, 742
+// lines of `resourceOrchestrator.cjs` behind them — and `Resources.jsx` has a live panel using
+// `window.ipcRenderer.invoke('orchestrator:status')`, `submit`, `cancel`, `set-limits` and all six
+// event channels. The capability was never missing; the wrappers were surplus. `evolution` is the
+// same story. So "N capabilities built and unreachable" was the wrong sentence, and this is the right
+// one: A CHANNEL IS SURFACED WHEN EITHER ROUTE TO IT IS LIVE.
+//
+//   the shim    a renderer file names the channel string
+//   the bridge  some preload member that invokes it is itself reached (rule 3's own verdict)
+//
+// Both rules stay. Rule 1 catches a channel whose wrapper was deleted or misspelled — "can anything
+// reach it" — and this one asks "does anything". Replacing the first would trade a live guard for a
+// new one, which Section 192's own no-capability-lost constraint forbids.
+console.log('\n  every capability registered in main has a reader in the renderer');
+
+const bridgeRoute = new Map();        // channel -> the reached members that invoke it
+for (const l of leaves) {
+  for (const ch of channelsOf(l)) {
+    if (!bridgeRoute.has(ch)) bridgeRoute.set(ch, []);
+    if (liveRule.get(l)) bridgeRoute.get(ch).push(l.path);
+  }
+}
+
+function namedInRenderer(ch) {
+  return rendererSrc.includes(`'${ch}'`) || rendererSrc.includes(`"${ch}"`)
+    || rendererSrc.includes(`\`${ch}\``);
+}
+
+/**
+ * NOT EVERY CHANNEL IS A RENDERER CAPABILITY, and counting as if it were makes this measure wrong in
+ * the direction that wastes work.
+ *
+ * `app:preload-error` is SENT BY THE PRELOAD's own plumbing when `contextBridge` refuses a value, and
+ * `badge:clicked` is sent by `badgePreload.cjs` from the badge window. No page can reach either and
+ * none should. They appeared in the first run of this rule as capability with no reader, which would
+ * have sent someone looking for a page to build for an error report.
+ *
+ * The test is positional rather than a list of exceptions: a channel named in a preload file but
+ * invoked by no member of `RAMA_API` is preload plumbing, because `RAMA_API` is the entire renderer
+ * surface. A new one is classified correctly without being named here.
+ */
+const anyMemberInvokes = new Set();
+for (const l of leaves) for (const ch of channelsOf(l)) anyMemberInvokes.add(ch);
+function isPreloadInternal(ch) {
+  if (anyMemberInvokes.has(ch)) return false;
+  return allPreloadSrc.includes(`'${ch}'`) || allPreloadSrc.includes(`"${ch}"`)
+    || allPreloadSrc.includes(`\`${ch}\``);
+}
+
+const surfaced = { shim: [], bridge: [], both: [] };
+const preloadInternal = [];
+const unsurfaced = [];
+for (const ch of [...channels].sort()) {
+  const viaShim = namedInRenderer(ch);
+  const viaBridge = (bridgeRoute.get(ch) || []).length > 0;
+  if (viaShim && viaBridge) surfaced.both.push(ch);
+  else if (viaShim) surfaced.shim.push(ch);
+  else if (viaBridge) surfaced.bridge.push(ch);
+  else if (isPreloadInternal(ch)) preloadInternal.push(ch);
+  else unsurfaced.push(ch);
+}
+const reachedChannels = surfaced.shim.length + surfaced.bridge.length + surfaced.both.length;
+console.log(`        ${reachedChannels} of ${channels.size} registered channels have a reader `
+  + `(${unsurfaced.length} do not)`);
+console.log(`          by the shim only ${surfaced.shim.length}, by the bridge only `
+  + `${surfaced.bridge.length}, by both ${surfaced.both.length}`);
+if (preloadInternal.length) {
+  console.log(`        ${preloadInternal.length} are preload plumbing, which no page should reach: `
+    + `${preloadInternal.join(', ')}`);
+}
+
+// REDBY: let "preload plumbing" become a bucket anything can fall into. It must stay small and every
+// member of it must really be named by a preload — otherwise it becomes a way to make the number
+// below look better than it is, which is the failure mode this whole section exists to prevent.
+check('the preload-plumbing class is small and every channel in it is really named by a preload',
+  preloadInternal.length < 5 && preloadInternal.every((ch) => isPreloadInternal(ch)),
+  `${preloadInternal.length}: ${preloadInternal.join(', ')}`);
+
+// THE DEAD WRAPPERS, named rather than counted: the channel has a page, so the bridge member beside
+// it is surplus. This is the number that made rule 3's register read larger than the real gap.
+const deadWrappers = orphanMembers.filter((p) => {
+  const leaf = leaves.find((l) => l.path === p);
+  return leaf && [...channelsOf(leaf)].some((ch) => namedInRenderer(ch));
+});
+console.log(`        ${deadWrappers.length} of the ${orphanMembers.length} members in the debt `
+  + 'register are DEAD WRAPPERS, not dead capability — their channel has a reader by another route');
+
+let KNOWN_UNSURFACED = [];
+if (Array.isArray(seedFile.unsurfacedChannels)) KNOWN_UNSURFACED = seedFile.unsurfacedChannels;
+
+if (KNOWN_UNSURFACED.length === 0 && unsurfaced.length > 0) {
+  // FIRST RUN: seed, loudly. A suite that writes its own passing condition must never do it quietly.
+  const merged = { ...seedFile, unsurfacedChannels: unsurfaced, unsurfacedChannelsWhy:
+    'Baseline for verifyReachability.cjs rule 4 (spec Section 195). Each entry is a channel '
+    + 'registered in the main process that NO renderer file names and whose bridge members all have '
+    + 'no caller - capability with no reader, as opposed to rule 3\'s register which also counts '
+    + 'members whose channel is reached by another route. THIS LIST MAY ONLY SHRINK.' };
+  fs.writeFileSync(SEED_PATH, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
+  KNOWN_UNSURFACED = unsurfaced;
+  console.log(`\n        BASELINE WRITTEN: ${unsurfaced.length} unsurfaced channels recorded in `
+    + `${path.relative(ROOT, SEED_PATH)}. It may only shrink from here.`);
+}
+
+const newUnsurfaced = unsurfaced.filter((c) => !KNOWN_UNSURFACED.includes(c));
+// REDBY: register a handler in main and ship no page that reaches it, by either route.
+check('no NEW capability is registered without a reader',
+  newUnsurfaced.length === 0,
+  newUnsurfaced.length ? newUnsurfaced.join(', ') : '');
+
+const nowRead = KNOWN_UNSURFACED.filter((c) => !unsurfaced.includes(c));
+check('every channel in the capability register still has no reader',
+  nowRead.length === 0,
+  nowRead.length
+    ? `now read — remove from scripts/reachability-baseline.json: ${nowRead.join(', ')}`
+    : '');
+
+/*
+ * THE CHANNEL EXTRACTION MUST NOT FAIL SILENTLY, and this row exists because its absence let a
+ * mutation live.
+ *
+ * Mutation-testing rule 4 put back the enumerated method list that misses `sendSync` — the defect
+ * this section already paid for once — and the suite stayed GREEN. The reason is worse than the
+ * defect: with its channel undetected, `window:is-maximized` is invoked by no member, so
+ * `isPreloadInternal` sees a channel named in a preload and files it as plumbing. The plumbing class
+ * had become somewhere for extraction failures to hide.
+ *
+ * So the extraction is checked against itself: a member whose value text mentions `ipcRenderer` must
+ * yield at least one channel. If the pattern stops matching a form the preload uses, that is a red
+ * row here rather than a quiet reclassification somewhere else.
+ *
+ * A row that was here before this one has been REMOVED rather than kept: it asserted that no
+ * unsurfaced channel has a reached bridge member, which is true by construction — `unsurfaced` is
+ * built by excluding exactly that case — so it could never fail. A check that cannot fail is
+ * decoration, and this file already carries the lesson (183.4) about guards that quietly assert
+ * nothing.
+ */
+/*
+ * SOME MEMBERS HAVE NO STATIC CHANNEL TO FIND, and the first draft of the row below called all seven
+ * of them a failure.
+ *
+ * `invoke`, `on` and `removeListener` take the channel as an ARGUMENT — they are the shim, that is
+ * their whole job. `terminal.onData` and `terminal.onExit` build one per session,
+ * `` `terminal:data:${id}` ``, and `instance.on` and `proposals.on` do the same per event name. No
+ * pattern can read those from source text, because the channel does not exist until runtime.
+ *
+ * They are exempted by SHAPE, not by name: the first argument is an identifier or a template holding
+ * `${`, rather than a plain quoted literal. A new one is handled without editing this file. And the
+ * exemption is printed and bounded, because an unbounded escape hatch is what let the plumbing class
+ * swallow a detection failure six paragraphs ago.
+ */
+const DYNAMIC_CHANNEL = /ipcRenderer\.\w+\(\s*(?:[A-Za-z_$][\w$]*\s*[,)]|[`'"][^`'"]*\$\{)/;
+const dynamicMembers = leaves.filter((l) => DYNAMIC_CHANNEL.test(l.value || ''));
+console.log(`        ${dynamicMembers.length} members take their channel at runtime, so no static `
+  + `channel exists to find: ${dynamicMembers.map((l) => l.path).join(', ')}`);
+check('the runtime-channel exemption stays small and every member in it really has one',
+  dynamicMembers.length < 12 && dynamicMembers.every((l) => DYNAMIC_CHANNEL.test(l.value || '')),
+  String(dynamicMembers.length));
+
+const extractionFailed = leaves.filter((l) => /ipcRenderer\./.test(l.value || '')
+  && channelsOf(l).size === 0 && !DYNAMIC_CHANNEL.test(l.value || ''));
+check('every bridge member with a literal channel yields one this suite can read',
+  extractionFailed.length === 0,
+  extractionFailed.map((l) => l.path).join(', '));
+
+// ═══ (5) The five surfaces the audit named, asserted BY NAME ═══════════════
 //
 // The register above catches the next gap. These rows are about the ones already known: each is a
 // built, tested contract with no producer, and each is named so that closing it is visible as
