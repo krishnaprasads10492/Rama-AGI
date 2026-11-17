@@ -509,6 +509,52 @@ check('principal binding is installed at all', bindAt >= 0);
 check('and before the policy gate, so any renderer claim is already replaced',
   bindAt >= 0 && gateAt > 0 && bindAt < gateAt, `binding at ${bindAt}, gate at ${gateAt}`);
 
+// ═══ (6) The shipped binary's own fuses ════════════════════════════════════
+//
+// WHAT A FUSE IS FOR. Everything above defends the renderer boundary. A fuse defends the BINARY: a
+// packaged Electron executable will, by default, act as a general-purpose Node interpreter when
+// `ELECTRON_RUN_AS_NODE` is set, honour `NODE_OPTIONS`, and accept `--inspect`. None of that is
+// Rāma's behaviour, and all of it is useful to somebody else — a signed, trusted executable already
+// on master's machine is a better place to run code from than anything an attacker could bring.
+//
+// These three are safe to switch off here, and that was CHECKED rather than assumed:
+//   runAsNode                              nothing in the app sets it. `verifyCjsLoadable` does, but
+//                                          against the DEV binary in node_modules; fuses are flipped
+//                                          on the packaged one, so the suite is unaffected.
+//   enableNodeOptionsEnvironmentVariable   `sandboxEngine` does set NODE_OPTIONS — on a spawned
+//                                          SYSTEM `node` (`['node', [tmpFile]]`), not on Electron,
+//                                          so this fuse cannot reach it.
+//   enableNodeCliInspectArguments          debugging happens in dev, where the fuse is not applied.
+console.log('\n  the shipped binary cannot be used as a general-purpose Node runtime');
+
+const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+const fuses = (pkg.build || {}).electronFuses || {};
+
+// REDBY: delete the block, or flip any of the three to true. Each one re-opens a way to execute
+// arbitrary code through an executable the user already trusts.
+eq('the packaged binary refuses to run as Node', fuses.runAsNode, false);
+eq('and ignores NODE_OPTIONS', fuses.enableNodeOptionsEnvironmentVariable, false);
+eq('and refuses --inspect', fuses.enableNodeCliInspectArguments, false);
+
+/*
+ * THE TWO I AM DELIBERATELY NOT SETTING, asserted as absent so that enabling one is a VISIBLE change
+ * rather than a quiet line in a config file.
+ *
+ * `enableEmbeddedAsarIntegrityValidation` and `onlyLoadAppFromAsar` are the fuses that would detect a
+ * tampered bundle, and they are the ones most worth having. They also interact with `asarUnpack`,
+ * which this project needs for `node-pty` and `argon2`, and on Windows that combination has a
+ * history of failing at startup rather than at build time.
+ *
+ * `vite build` runs here but a PACKAGED build does not, so I cannot test the one failure mode that
+ * matters. Enabling a fuse that can only be proven on master's machine, in a project that lost four
+ * tranches to exactly that kind of build problem, would be trading a real risk for a theoretical
+ * gain. They are recommended in 196.14 and left off until there is a test build to prove them.
+ */
+check('the asar-integrity fuses are left off until a packaged build can prove them',
+  fuses.enableEmbeddedAsarIntegrityValidation === undefined
+  && fuses.onlyLoadAppFromAsar === undefined,
+  JSON.stringify(fuses));
+
 console.log('\n  held by hand, listed rather than implied:');
 console.log('    - `self` is cross-referenced against a GUARD IDIOM found in the handler body. It');
 console.log('      proves a check is present, NOT that the check names the right capability. Picking');

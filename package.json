@@ -231,6 +231,11 @@
       "node_modules/node-pty/**/*",
       "node_modules/argon2/**/*"
     ],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false
+    },
     "win": {
       "target": [
         {
