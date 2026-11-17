@@ -132,6 +132,49 @@ for (const rel of MIGRATED) {
 }
 
 /*
+ * ═══ THE OTHER HALF OF THE RELATIONSHIP (Section 199) ═════════════════════
+ *
+ * 198.4 left `aria-controls` out because the panels had no ids. A tablist whose tabs control nothing
+ * announces a relationship it cannot deliver — a screen reader says there is a panel and then cannot
+ * take the user to it — which is worse than a plain row of buttons. These rows hold the pairing:
+ * the strip's id, the panel's id and the `aria-labelledby` that points back at the selected tab must
+ * agree, on every page, and the panel must come after the strip it belongs to.
+ */
+section('each strip controls a panel, and the two agree about which');
+
+for (const rel of MIGRATED) {
+  const src = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+  const tabId = (src.match(/<Tabs id="([^"]+)"/) || [])[1] || null;
+  const panelId = (src.match(/id="([^"]+)-panel" role="tabpanel"/) || [])[1] || null;
+  const labelled = (src.match(/aria-labelledby=\{`([^`]+)`\}/) || [])[1] || null;
+  const order = src.search(/role="tabpanel"/) > src.search(/<Tabs\b/);
+  check(`${path.basename(rel)}: strip, panel and label all name "${tabId}"`,
+    tabId !== null && panelId === tabId && labelled === `${tabId}-tab-\${tab}` && order,
+    `tabs="${tabId}" panel="${panelId}" labelledby="${labelled}" ordered=${order}`);
+}
+
+check('the strip emits aria-controls and per-tab ids, but only when given an id',
+  /aria-controls=\{id \? `\$\{id\}-panel` : undefined\}/.test(tabsSrc)
+  && /id=\{id \? `\$\{id\}-tab-\$\{t\.id\}` : undefined\}/.test(tabsSrc));
+
+/*
+ * REDBY: add `tabIndex={0}` to a panel because a guide said tabpanels should be focusable.
+ *
+ * The WAI-ARIA practice is to make a tabpanel focusable ONLY when it contains no focusable elements
+ * of its own — the point is to give the user somewhere to land. Every panel here is full of buttons,
+ * inputs and tables, so a tab stop before all of them does nothing and is noise dressed as
+ * accessibility. Asserted because it is the plausible-sounding change most likely to be made later.
+ */
+const panelsWithTabIndex = MIGRATED.filter((rel) => {
+  const src = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+  const at = src.search(/role="tabpanel"/);
+  if (at < 0) return false;
+  return /tabIndex/.test(src.slice(Math.max(0, at - 200), at + 200));
+});
+check('no panel is given a tab stop it does not need',
+  panelsWithTabIndex.length === 0, panelsWithTabIndex.join(', '));
+
+/*
  * THE RATCHET. REDBY: paste a tab bar into the next page instead of importing this one. The pattern
  * is specific — a map over labels whose button sets the tab — so it does not fire on unrelated
  * buttons, and `StockMind` is excluded by name because its four bars are a deliberate exception.

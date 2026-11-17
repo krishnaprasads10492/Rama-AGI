@@ -422,9 +422,9 @@ export default function Resources() {
       </div>
 
       {/* Tabs */}
-      <Tabs items={['overview', 'queue', 'api-limits', 'research', 'events', 'configure']} value={tab} onChange={setTab} />
+      <Tabs id="resources" items={['overview', 'queue', 'api-limits', 'research', 'events', 'configure']} value={tab} onChange={setTab} />
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: 20, minHeight: 0 }}>
+      <div id="resources-panel" role="tabpanel" aria-labelledby={`resources-tab-${tab}`} style={{ flex: 1, overflowY: 'auto', padding: 20, minHeight: 0 }}>
 
         {/* ── Overview ── */}
         {tab === 'overview' && s && (

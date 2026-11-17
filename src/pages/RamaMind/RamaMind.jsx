@@ -328,9 +328,9 @@ export default function RamaMind() {
         <button className="btn btn-sm" onClick={() => { refresh(); measure(); }}>↺</button>
       </div>
 
-      <Tabs items={['measured', 'memory', 'world', 'proactive', 'self-revision']} value={tab} onChange={setTab} accent="violet" />
+      <Tabs id="ramamind" items={['measured', 'memory', 'world', 'proactive', 'self-revision']} value={tab} onChange={setTab} accent="violet" />
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>
+      <div id="ramamind-panel" role="tabpanel" aria-labelledby={`ramamind-tab-${tab}`} style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>
         {tab === 'measured' && <MeasuredPanel account={account} unavailable={noBridge} />}
         {tab === 'memory' && <MemoryPanel memory={status?.memory} />}
         {tab === 'world'  && <WorldModelPanel world={status?.world} />}

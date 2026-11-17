@@ -352,9 +352,9 @@ export default function System() {
       </div>
 
       {/* Tabs */}
-      <Tabs items={['overview', 'processes', 'network', 'disk']} value={tab} onChange={setTab} />
+      <Tabs id="system" items={['overview', 'processes', 'network', 'disk']} value={tab} onChange={setTab} />
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>
+      <div id="system-panel" role="tabpanel" aria-labelledby={`system-tab-${tab}`} style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>
         {error && (
           <div className="hud-card" style={{
             padding: '12px 16px', marginBottom: '16px',

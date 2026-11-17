@@ -619,10 +619,10 @@ export default function Models() {
             `models:roles` and `models:role-research` were the only two of 377 registered channels
             that nothing named, and `brokerConnectors.cjs` had no channel at all. Exposing a preload
             member without a page would only move the orphan one layer up. */}
-        <Tabs items={['cloud', 'local', 'custom', 'keys', 'roles', 'brokers']} value={tab} onChange={setTab} style={{ border: 'none', background: 'transparent' }} />
+        <Tabs id="models" items={['cloud', 'local', 'custom', 'keys', 'roles', 'brokers']} value={tab} onChange={setTab} style={{ border: 'none', background: 'transparent' }} />
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>
+      <div id="models-panel" role="tabpanel" aria-labelledby={`models-tab-${tab}`} style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>
         {tab === 'cloud' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {/* THREE STATES, NEVER TWO. "no key stored" and "vault locked" mean opposite things:

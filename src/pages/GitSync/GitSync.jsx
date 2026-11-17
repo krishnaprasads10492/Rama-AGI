@@ -760,9 +760,9 @@ export default function GitSync() {
       ) : (
         <>
           {/* Tabs */}
-          <Tabs items={['status', 'log', 'diff', 'update', 'release', 'token']} value={tab} onChange={setTab} accent="amber" />
+          <Tabs id="gitsync" items={['status', 'log', 'diff', 'update', 'release', 'token']} value={tab} onChange={setTab} accent="amber" />
 
-          <div style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>
+          <div id="gitsync-panel" role="tabpanel" aria-labelledby={`gitsync-tab-${tab}`} style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>
             {tab === 'status' && status && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {/* Changed files */}

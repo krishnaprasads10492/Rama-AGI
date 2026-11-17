@@ -22,9 +22,11 @@ import { normaliseItems, nextTabIndex } from './tabsModel.js';
  *     through every tab in it — which is the behaviour a keyboard user expects and the reason a
  *     `tabIndex={0}` on every button is wrong even though it looks more accessible
  *   - ArrowLeft / ArrowRight to move, with wrap; Home and End to jump
- *   - `aria-controls` is NOT emitted, deliberately: the pages render their panels inline without
- *     stable ids, and pointing at an element that does not exist is worse for a screen reader than
- *     pointing at nothing. Adding it is a per-page change, noted in 198.4 rather than faked here.
+ *   - `aria-controls` and per-tab ids, but ONLY when an `id` is supplied (Section 199). 198.4 left
+ *     them out because the panels had no ids to point at, and a reference to a missing element is
+ *     worse for a screen reader than silence. `TabPanel` now supplies the target; a caller that
+ *     renders its own panel and passes no `id` still gets a correct strip rather than a dangling
+ *     reference.
  *
  * ON "OVERLOADING", which Section 197.0 answered for the main process and applies here too: JS has
  * none, so `items` accepts either shape and normalises —
@@ -48,6 +50,7 @@ export default function Tabs({
   onChange,
   accent = 'accent',
   label = 'Sections',
+  id,
   style,
 }) {
   const tabs = normaliseItems(items);
@@ -90,6 +93,15 @@ export default function Tabs({
             type="button"
             role="tab"
             aria-selected={selected}
+            /*
+             * EMITTED ONLY WHEN THERE IS AN `id`, because `aria-controls` pointing at an element
+             * that does not exist is worse than silence — a screen reader promises a panel and then
+             * cannot reach it. 198.4 left this out for exactly that reason; `TabPanel` now supplies
+             * the target, and a caller that renders its own panel without one still gets a correct
+             * strip rather than a broken reference.
+             */
+            id={id ? `${id}-tab-${t.id}` : undefined}
+            aria-controls={id ? `${id}-panel` : undefined}
             // ROVING TABINDEX — see the docblock. Only the selected tab is reachable by Tab.
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange?.(t.id)}

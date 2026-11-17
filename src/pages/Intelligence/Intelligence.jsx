@@ -197,9 +197,9 @@ export default function Intelligence() {
       </div>
 
       {/* Tabs */}
-      <Tabs items={['query', 'pipeline', 'result', 'history']} value={tab} onChange={setTab} />
+      <Tabs id="intelligence" items={['query', 'pipeline', 'result', 'history']} value={tab} onChange={setTab} />
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: 20, minHeight: 0 }}>
+      <div id="intelligence-panel" role="tabpanel" aria-labelledby={`intelligence-tab-${tab}`} style={{ flex: 1, overflowY: 'auto', padding: 20, minHeight: 0 }}>
 
         {/* ── Query tab ── */}
         {tab === 'query' && (

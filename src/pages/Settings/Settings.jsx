@@ -533,9 +533,9 @@ export default function Settings() {
       </div>
 
       {/* Tabs */}
-      <Tabs items={['ai', 'appearance', 'system', 'security', 'self', 'about']} value={tab} onChange={setTab} />
+      <Tabs id="settings" items={['ai', 'appearance', 'system', 'security', 'self', 'about']} value={tab} onChange={setTab} />
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>
+      <div id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`} style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>
 
         {/* ── AI Settings ── */}
         {tab === 'ai' && (

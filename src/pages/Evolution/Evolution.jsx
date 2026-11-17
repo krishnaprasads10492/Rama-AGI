@@ -383,7 +383,7 @@ export default function Evolution() {
       </div>
 
       {/* Tabs */}
-      <Tabs items={[
+      <Tabs id="evolution" items={[
             'assess', 'scout', 'findings',
             // The pending count rides on the item rather than being drawn by the page, which is the
             // one thing this bar did that the others did not.
@@ -391,7 +391,7 @@ export default function Evolution() {
             'log',
           ]} value={tab} onChange={setTab} accent="violet" />
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: 20, minHeight: 0 }}>
+      <div id="evolution-panel" role="tabpanel" aria-labelledby={`evolution-tab-${tab}`} style={{ flex: 1, overflowY: 'auto', padding: 20, minHeight: 0 }}>
 
         {/* ── Self-assessment ── */}
         {tab === 'assess' && (
