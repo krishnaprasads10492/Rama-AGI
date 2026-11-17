@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import Tabs from '@components/Tabs.jsx';
 import { systemClient }  from '@services/ipcClient.js';
 import { formatBytes }   from '@services/ramaClient.js';
 import { useUserStore }  from '@store/userStore.js';
@@ -351,19 +352,7 @@ export default function System() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: '0', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
-        {['overview', 'processes', 'network', 'disk'].map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            padding: '9px 18px', border: 'none', background: 'transparent',
-            color: tab === t ? 'var(--accent)' : 'var(--muted)',
-            borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
-            cursor: 'pointer', fontSize: FS.chrome, lineHeight: LH.chrome, fontFamily: 'var(--font)', letterSpacing: '0.08em',
-            textTransform: 'uppercase', transition: 'color var(--transition)',
-          }}>
-            {t}
-          </button>
-        ))}
-      </div>
+      <Tabs items={['overview', 'processes', 'network', 'disk']} value={tab} onChange={setTab} />
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>
         {error && (

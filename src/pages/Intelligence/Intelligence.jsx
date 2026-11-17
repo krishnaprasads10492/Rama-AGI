@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import Tabs from '@components/Tabs.jsx';
 import { FS, LH } from '@config/type.js';
 
 const isElectron = typeof window !== 'undefined' && !!window.rama;
@@ -196,16 +197,7 @@ export default function Intelligence() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
-        {['query', 'pipeline', 'result', 'history'].map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            padding: '9px 18px', border: 'none', background: 'transparent',
-            color: tab === t ? 'var(--accent)' : 'var(--muted)',
-            borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
-            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome, textTransform: 'uppercase',
-          }}>{t}</button>
-        ))}
-      </div>
+      <Tabs items={['query', 'pipeline', 'result', 'history']} value={tab} onChange={setTab} />
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 20, minHeight: 0 }}>
 

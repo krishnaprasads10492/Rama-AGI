@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import Tabs from '@components/Tabs.jsx';
 import { gitClient, fsClient } from '@services/ipcClient.js';
 import { useUserStore } from '@store/userStore.js';
 import { FS, LH } from '@config/type.js';
@@ -759,16 +760,7 @@ export default function GitSync() {
       ) : (
         <>
           {/* Tabs */}
-          <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
-            {['status', 'log', 'diff', 'update', 'release', 'token'].map(t => (
-              <button key={t} onClick={() => setTab(t)} style={{
-                padding: '9px 18px', border: 'none', background: 'transparent',
-                color: tab === t ? 'var(--amber)' : 'var(--muted)',
-                borderBottom: tab === t ? '2px solid var(--amber)' : '2px solid transparent',
-                cursor: 'pointer', fontFamily: 'var(--font)', fontSize: '12.5px', textTransform: 'uppercase',
-              }}>{t}</button>
-            ))}
-          </div>
+          <Tabs items={['status', 'log', 'diff', 'update', 'release', 'token']} value={tab} onChange={setTab} accent="amber" />
 
           <div style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>
             {tab === 'status' && status && (

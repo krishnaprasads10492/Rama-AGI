@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import Tabs from '@components/Tabs.jsx';
 import { useUserStore } from '@store/userStore.js';
 import { FS, LH } from '@config/type.js';
 import { useLocation } from 'react-router-dom';
@@ -618,14 +619,7 @@ export default function Models() {
             `models:roles` and `models:role-research` were the only two of 377 registered channels
             that nothing named, and `brokerConnectors.cjs` had no channel at all. Exposing a preload
             member without a page would only move the orphan one layer up. */}
-        {['cloud', 'local', 'custom', 'keys', 'roles', 'brokers'].map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            padding: '9px 18px', border: 'none', background: 'transparent',
-            color: tab === t ? 'var(--accent)' : 'var(--muted)',
-            borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
-            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome, textTransform: 'uppercase',
-          }}>{t}</button>
-        ))}
+        <Tabs items={['cloud', 'local', 'custom', 'keys', 'roles', 'brokers']} value={tab} onChange={setTab} style={{ border: 'none', background: 'transparent' }} />
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>

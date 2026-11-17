@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { emitActivity } from '@components/ActivityStream.jsx';
+import Tabs from '@components/Tabs.jsx';
 import { useUserStore } from '@store/userStore.js';
 import { FS, LH } from '@config/type.js';
 
@@ -382,21 +383,13 @@ export default function Evolution() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
-        {['assess', 'scout', 'findings', 'proposals', 'log'].map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            padding: '9px 16px', border: 'none', background: 'transparent',
-            color: tab === t ? 'var(--violet)' : 'var(--muted)',
-            borderBottom: tab === t ? '2px solid var(--violet)' : '2px solid transparent',
-            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome, textTransform: 'uppercase',
-          }}>
-            {t}{t === 'proposals' && proposals.filter(p => p.status === 'pending').length > 0 &&
-              <span style={{ marginLeft: 4, fontSize: FS.chrome, lineHeight: LH.chrome, color: 'var(--amber)' }}>
-                ({proposals.filter(p => p.status === 'pending').length})
-              </span>}
-          </button>
-        ))}
-      </div>
+      <Tabs items={[
+            'assess', 'scout', 'findings',
+            // The pending count rides on the item rather than being drawn by the page, which is the
+            // one thing this bar did that the others did not.
+            { id: 'proposals', badge: proposals.filter(p => p.status === 'pending').length || undefined },
+            'log',
+          ]} value={tab} onChange={setTab} accent="violet" />
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 20, minHeight: 0 }}>
 

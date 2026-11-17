@@ -4,6 +4,7 @@ import { getRamaStatus, getSelfModel, ramaMemory, ramaWorld,
 import { useUserStore } from '@store/userStore.js';
 import { skillSummary } from '@services/cognition.js';
 import RamaOrb from '@components/RamaOrb.jsx';
+import Tabs from '@components/Tabs.jsx';
 import { FS, LH } from '@config/type.js';
 
 /**
@@ -327,17 +328,7 @@ export default function RamaMind() {
         <button className="btn btn-sm" onClick={() => { refresh(); measure(); }}>↺</button>
       </div>
 
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
-        {['measured', 'memory', 'world', 'proactive', 'self-revision'].map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            padding: '8px 14px', border: 'none', background: 'transparent',
-            color: tab === t ? 'var(--violet)' : 'var(--muted)',
-            borderBottom: tab === t ? '2px solid var(--violet)' : '2px solid transparent',
-            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome,
-            textTransform: 'uppercase', letterSpacing: '0.06em',
-          }}>{t}</button>
-        ))}
-      </div>
+      <Tabs items={['measured', 'memory', 'world', 'proactive', 'self-revision']} value={tab} onChange={setTab} accent="violet" />
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>
         {tab === 'measured' && <MeasuredPanel account={account} unavailable={noBridge} />}

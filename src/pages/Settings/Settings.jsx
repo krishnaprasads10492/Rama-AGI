@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import Tabs from '@components/Tabs.jsx';
 import { useRamaStore } from '@store/ramaStore.js';
 import { useUserStore } from '@store/userStore.js';
 import { getFingerprint } from '@services/authClient.js';
@@ -532,16 +533,7 @@ export default function Settings() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
-        {['ai', 'appearance', 'system', 'security', 'self', 'about'].map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            padding: '9px 18px', border: 'none', background: 'transparent',
-            color: tab === t ? 'var(--accent)' : 'var(--muted)',
-            borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
-            cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.chrome, lineHeight: LH.chrome, textTransform: 'uppercase',
-          }}>{t}</button>
-        ))}
-      </div>
+      <Tabs items={['ai', 'appearance', 'system', 'security', 'self', 'about']} value={tab} onChange={setTab} />
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px', minHeight: 0 }}>
 
