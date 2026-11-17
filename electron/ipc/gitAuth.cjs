@@ -17,6 +17,7 @@
 
 const capability = require('../lib/capability.cjs');
 const principalBinding = require('../lib/principalBinding.cjs');
+const ipcGate = require('../lib/ipcGate.cjs');
 const gitAuth = require('../lib/gitAuth.cjs');
 const tokenExpiry = require('../lib/tokenExpiry.cjs');
 
@@ -32,7 +33,7 @@ function register(ipcMain, injected = {}) {
   if (d.store) gitAuth.useStore(d.store);
 
   const gated = (cap, fn) => async (e, body) => {
-    const denied = capability.deny(principalBinding.getPrincipal(e), cap);
+    const denied = ipcGate.denyEvent(e, cap);
     if (denied) return denied;
     try { return await fn(body || {}); }
     catch (err) { return { ok: false, error: gitAuth.redact(err.message) }; }

@@ -13,6 +13,7 @@
 
 const capability = require('../lib/capability.cjs');
 const principalBinding = require('../lib/principalBinding.cjs');
+const ipcGate = require('../lib/ipcGate.cjs');
 const accounts = require('../lib/brokerAccounts.cjs');
 const egressIp = require('../lib/egressIp.cjs');
 
@@ -42,7 +43,7 @@ function defaults() {
 function register(ipcMain, injected = {}) {
   const d = { ...defaults(), ...injected };
   const gated = (cap, fn) => async (e, body) => {
-    const denied = capability.deny(principalBinding.getPrincipal(e), cap);
+    const denied = ipcGate.denyEvent(e, cap);
     if (denied) return denied;
     if (!d.unlocked()) return { ok: false, error: 'The store is locked. Sign in again.' };
     try { return await fn(body || {}, e); }

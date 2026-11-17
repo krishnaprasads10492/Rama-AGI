@@ -491,7 +491,7 @@ const candle = (iso, o, h, l, c, v = 1000) => [iso, o, h, l, c, v];
   check('it sends no `user`, and no member can read a token', !/user\b/.test(blk.replace(/\/\/.*$/gm, '')) && !/token|secret/i.test(blk.replace(/\/\/.*$/gm, '')));
   const ks = code('electron/ipc/kiteSession.cjs');
   check('the channel module never calls HTTP itself: every Kite call goes through kiteClient', !/\bhttp\.request\(|\bnet\.(get|post|request)\(|https?\.request\(|fetch\(/.test(ks) && /kite\.(exchangeToken|resolveToken|fetchCandles|logout)\(d\.http/.test(ks));
-  check('the gate is the validated principal on brokers.accounts.write', /principalBinding\.getPrincipal\(e\)/.test(ks) && /const CAP = 'brokers\.accounts\.write'/.test(ks) && !/\{\s*user\b/.test(ks));
+  check('the gate is the validated principal on brokers.accounts.write', /principalBinding\.getPrincipal\(e\)|ipcGate\.denyEvent\(e/.test(ks) && /const CAP = 'brokers\.accounts\.write'/.test(ks) && !/\{\s*user\b/.test(ks));
   const holders = ['electron/lib', 'electron/ipc'].flatMap((dir) => fs.readdirSync(path.join(ROOT, dir)).filter((f) => f.endsWith('.cjs')).map((f) => `${dir}/${f}`))
     .filter((f) => /api\.kite\.trade/.test(fs.readFileSync(path.join(ROOT, f), 'utf8')) && !/brokerConnectors/.test(f));
   check('api.kite.trade appears in exactly one source file, the client with the allowlist', holders.length === 1 && holders[0] === 'electron/lib/kiteClient.cjs', holders.join());

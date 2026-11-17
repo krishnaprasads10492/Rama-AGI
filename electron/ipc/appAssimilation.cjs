@@ -19,14 +19,16 @@ const auditLog   = [];        // All assimilation actions
 // apps.execute-all=0) — none of them were enforced before this, so any
 // caller reaching these channels at all had unrestricted access regardless
 // of tier. See RAMA_AGI_MASTER_SPEC.md Section 44.
-function denyUnless(user, cap) {
-  const capability = require('../lib/capability.cjs');
-  if (!capability.can(user, cap)) {
-    const who = capability.TIER_LABELS[String(user?.tier)] ?? 'This account';
-    return { ok: false, error: `${who} may not do this (needs "${cap}")` };
-  }
-  return null;
-}
+// WAS A VERBATIM RE-IMPLEMENTATION of capability.deny — same check, same wording, same return shape
+// (Section 197). The eight call sites below are unchanged; only the second copy of the body is gone,
+// so the denial message for this module can no longer drift away from every other module's.
+//
+// The module is required at the top rather than inside the function, which is both this codebase's
+// normal idiom and one fewer `require()` per call. The first version of this line kept the inline
+// require it inherited, and `verifyIpcPolicy` refused it — correctly: a delegation it cannot see is
+// a delegation it cannot vouch for, and these seven channels read as unguarded until it could.
+const capability = require('../lib/capability.cjs');
+const denyUnless = (user, cap) => capability.deny(user, cap);
 
 function register(ipcMain) {
 

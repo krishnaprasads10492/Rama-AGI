@@ -15,6 +15,7 @@
 const path = require('path');
 const capability = require('../lib/capability.cjs');
 const principalBinding = require('../lib/principalBinding.cjs');
+const ipcGate = require('../lib/ipcGate.cjs');
 const bootstrap = require('../lib/engineBootstrap.cjs');
 
 function defaults() {
@@ -30,7 +31,7 @@ function defaults() {
 function register(ipcMain, injected = {}) {
   const d = { ...defaults(), ...injected };
   const gated = (cap, fn) => async (e) => {
-    const denied = capability.deny(principalBinding.getPrincipal(e), cap);
+    const denied = ipcGate.denyEvent(e, cap);
     if (denied) return denied;
     try { return await fn(); }
     catch (err) { return { ok: false, error: err.message }; }

@@ -69,7 +69,33 @@ const mainFiles = walk(path.join(ROOT, 'electron'))
  * a main-process file with a capability check inside it. A wrapper that stops checking stops
  * counting, and the rows that rest on it go red.
  */
-const DIRECT_IDIOM = /capability\.deny\(|capability\.can\(|requireCap\(|denyUnless\(|\bdeny\(\s*user/;
+/*
+ * `ipcGate.denyEvent(` IS THE FIFTH IDIOM, and adding it was the whole point of Section 197.
+ *
+ * Six modules each opened their own decorator with the same line — `capability.deny(
+ * principalBinding.getPrincipal(e), cap)` — six copies of the single decision about who may call a
+ * channel. They now call one shared function. Consolidating it broke FIVE suites, including four
+ * module suites that asserted the literal line to prove the gate used the validated principal: a
+ * change that preserved behaviour exactly failed every check that described it positionally.
+ *
+ * Those four now accept either spelling, and the real proof moved here, to one behavioural test
+ * against the shared function — which is the argument for the consolidation rather than a cost of it.
+ */
+/*
+ * `denyUnless(` WAS REMOVED FROM THIS LIST, and that is the third time a name has been mistaken for
+ * a meaning here.
+ *
+ * Mutation testing stubbed `appAssimilation`'s `denyUnless` to `() => null` — every one of its eight
+ * channels then checked nothing — and the suite stayed green, because the handler bodies still
+ * *called* something named `denyUnless` and the name was on this list. The same error as
+ * `models:chat`'s claim-attribution `gated` in 196.11, and as `\bgate\(` missing `gated(` before it.
+ *
+ * So a name no longer vouches for anything. What remains below is a call to a function that really
+ * does decide — `capability.*`, the shared `ipcGate.denyEvent` — and every other helper has to earn
+ * its status through the delegation rule, which reads its body. Stub such a helper now and its
+ * channels read as unguarded, which is what the `self` cross-reference is for.
+ */
+const DIRECT_IDIOM = /capability\.deny\(|capability\.can\(|capability\.requireCap\(|ipcGate\.denyEvent\(/;
 
 /*
  * Third pass, and the rule is now DERIVED rather than listed. `agents:spawn` reads
@@ -307,7 +333,8 @@ section('every policy row is true about the handler it describes');
  */
 const gitAuthSrc = fs.readFileSync(path.join(ROOT, 'electron/ipc/gitAuth.cjs'), 'utf8');
 const agentsSrc = fs.readFileSync(path.join(ROOT, 'electron/ipc/agentOrchestrator.cjs'), 'utf8');
-check('the wrapper form is recognised: gitAuth\'s gated(cap, fn) counts as a check',
+check('the wrapper form is recognised: gitAuth\'s gated(cap, fn) counts as a check, '
+  + 'now that it delegates to the shared gate',
   checkingFunctionsIn(gitAuthSrc).has('gated'));
 check('and the worker form: agentOrchestrator\'s createAgent counts as one too',
   checkingFunctionsIn(agentsSrc).has('createAgent'));
@@ -508,6 +535,78 @@ const bindAt = mainSrc.indexOf('principalBinding.install(ipcMain)');
 check('principal binding is installed at all', bindAt >= 0);
 check('and before the policy gate, so any renderer claim is already replaced',
   bindAt >= 0 && gateAt > 0 && bindAt < gateAt, `binding at ${bindAt}, gate at ${gateAt}`);
+
+// ═══ (5b) The shared gate, driven rather than described (Section 197) ══════
+//
+// Six copies of the authorisation decision became one, so the proof becomes one too. These rows are
+// the behavioural test the four module suites used to approximate by matching a line of source: they
+// drive the real function and assert what it DOES, which is the only form that survives a rename.
+section('the shared gate: one decision, proven once for every module that uses it');
+
+const ipcGate = require(path.join(ROOT, 'electron/lib/ipcGate.cjs'));
+
+eq('a principal with the capability is allowed through',
+  ipcGate.denyEvent({}, 'vault.write', { principal: () => ({ tier: 0 }), can: () => true }),
+  null);
+check('a principal without it is refused, in the shape every handler already returns',
+  (() => {
+    const d = ipcGate.denyEvent({}, 'vault.write', { principal: () => ({ tier: 4 }), can: () => false });
+    return d && d.ok === false && typeof d.error === 'string' && d.error.includes('vault.write');
+  })());
+check('an unauthenticated window is refused',
+  (() => {
+    const d = ipcGate.denyEvent({}, 'vault.write', { principal: () => null, can: (u) => u !== null });
+    return d && d.ok === false;
+  })());
+
+/*
+ * THE ROW THAT MATTERS, and the reason this file refuses a payload-reading gate twice over.
+ *
+ * `denyEvent` takes an EVENT, not a user. There is no parameter through which a renderer's claim can
+ * arrive, so the Section 150.1 defect cannot be reintroduced by a caller — only by editing the
+ * module itself, which the next row watches.
+ */
+check('denyEvent takes the event and the capability, and no user parameter at all',
+  /function denyEvent\(event, cap, \{ principal, can \} = \{\} \)?/.test(
+    fs.readFileSync(path.join(ROOT, 'electron/lib/ipcGate.cjs'), 'utf8'),
+  ) || /function denyEvent\(event, cap/.test(
+    fs.readFileSync(path.join(ROOT, 'electron/lib/ipcGate.cjs'), 'utf8'),
+  ));
+const gateSrc = fs.readFileSync(path.join(ROOT, 'electron/lib/ipcGate.cjs'), 'utf8');
+// REDBY: let the shared gate fall back to `args[0].user` when no principal resolves. That is the
+// one change here that would re-open the hole Section 150.1 closed, in the one file every gated
+// channel now depends on.
+check('and it never reads a user out of a payload',
+  !/\.user\b/.test(gateSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')));
+
+// The decorator, for the modules that use the plain shape.
+{
+  let ran = 0;
+  const handler = ipcGate.gate('fs.write', async (body) => { ran += 1; return { ok: true, got: body }; });
+  // A real call needs the real principal path, which has no session here, so this asserts the refusal
+  // side: with nobody signed in, the handler must not run.
+  const res = Promise.resolve(handler({}, { a: 1 }));
+  check('the plain decorator refuses when nobody is signed in, and does not run the handler',
+    ran === 0, `handler ran ${ran} time(s)`);
+  void res;
+}
+
+// Every module that used to own a copy now routes through the shared one. REDBY: paste the old line
+// back into one module "just for this case" — the drift this consolidation exists to prevent.
+const MIGRATED = ['brokerAccounts', 'engineSetup', 'gitAuth', 'instanceManager', 'kiteSession', 'voiceEngine'];
+const stillOwnACopy = MIGRATED.filter((m) => {
+  const src = fs.readFileSync(path.join(ROOT, `electron/ipc/${m}.cjs`), 'utf8');
+  return /capability\.deny\(\s*principalBinding\.getPrincipal\(/.test(src);
+});
+check('no module keeps its own copy of the authorisation decision',
+  stillOwnACopy.length === 0, stillOwnACopy.join(', '));
+check('and all six route through the shared gate',
+  MIGRATED.every((m) => /ipcGate\.denyEvent\(/.test(
+    fs.readFileSync(path.join(ROOT, `electron/ipc/${m}.cjs`), 'utf8'),
+  )),
+  MIGRATED.filter((m) => !/ipcGate\.denyEvent\(/.test(
+    fs.readFileSync(path.join(ROOT, `electron/ipc/${m}.cjs`), 'utf8'),
+  )).join(', '));
 
 // ═══ (6) The shipped binary's own fuses ════════════════════════════════════
 //

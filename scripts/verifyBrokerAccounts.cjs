@@ -310,7 +310,7 @@ const leaks = (v, s = SECRET) => JSON.stringify(v).includes(s) || JSON.stringify
     check(`${ch} is gated on brokers.accounts.write (view and write share tier 1 today, so only the source can tell them apart)`, gateOf(ch) === 'brokers.accounts.write', String(gateOf(ch)));
   }
   check('brokerAccounts:list is gated on brokers.accounts.view', gateOf('brokerAccounts:list') === 'brokers.accounts.view');
-  check('the channels gate on the validated principal, not on a sent user', /principalBinding\.getPrincipal\(e\)/.test(ipcSrc) && !/\{\s*user\b/.test(ipcSrc));
+  check('the channels gate on the validated principal, not on a sent user', /principalBinding\.getPrincipal\(e\)|ipcGate\.denyEvent\(e/.test(ipcSrc) && !/\{\s*user\b/.test(ipcSrc));
   const all = ipcSrc + fs.readFileSync(path.join(ROOT, 'electron/lib/brokerAccounts.cjs'), 'utf8') + fs.readFileSync(path.join(ROOT, 'electron/lib/egressIp.cjs'), 'utf8');
   check('nothing here can place an order (Section 95)', !/place_?order|placeOrder|submitOrder|\/orders?\b|kite\.place/i.test(all));
   check('and no timer: the IP check is never scheduled', !/setInterval|setTimeout/.test(ipcSrc + fs.readFileSync(path.join(ROOT, 'electron/lib/egressIp.cjs'), 'utf8')));

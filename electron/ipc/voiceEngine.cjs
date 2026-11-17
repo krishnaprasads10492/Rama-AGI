@@ -377,6 +377,7 @@ async function transcribe(clip = {}) {
 // ─── IPC ──────────────────────────────────────────────────────────────────────
 function register(ipcMain) {
   const principalBinding = require('../lib/principalBinding.cjs');
+  const ipcGate = require('../lib/ipcGate.cjs');
   const capability = require('../lib/capability.cjs');
 
   ipcMain.handle('voice:capabilities', async () => ({ ok: true, data: capabilities() }));
@@ -413,7 +414,7 @@ function register(ipcMain) {
     // A SESSION IS REQUIRED for any transcription, local or cloud (Section 150.3). This channel had no
     // check at all. `chat.send` is the weakest declared chat capability: what is being gated is "may this
     // account talk to Rāma", and voice is another way of doing that.
-    const denied = capability.deny(principalBinding.getPrincipal(e), 'chat.send');
+    const denied = ipcGate.denyEvent(e, 'chat.send');
     if (denied) return denied;
     const res = await transcribe(clip || {});
 

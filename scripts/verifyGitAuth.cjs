@@ -448,7 +448,7 @@ const b64 = (t) => Buffer.from('x-access-token:' + t, 'utf8').toString('base64')
   check('git push, pull and clone go through gitAuth.open', (gitSrc.match(/gitAuth\.open\(/g) || []).length === 3);
   check('releaseChannel and publishProposal push through it too', /gitAuth\.open\(/.test(release) && /gitAuth\.open\(/.test(propose));
   check('every error reply in git.cjs is redacted', !/error:\s*err\.message/.test(gitSrc) && (gitSrc.match(/gitAuth\.redact\(err\.message\)/g) || []).length >= 12);
-  check('the gate is the validated principal, never a payload user', /principalBinding\.getPrincipal\(e\)/.test(ipcSrc) && !/\{\s*user\b/.test(ipcSrc));
+  check('the gate is the validated principal, never a payload user', /principalBinding\.getPrincipal\(e\)|ipcGate\.denyEvent\(e/.test(ipcSrc) && !/\{\s*user\b/.test(ipcSrc));
   check('set, remove and set-expiry are vault.write; expiry is vault.read; status, test and scrub are git.push', (ipcSrc.match(/gated\('vault\.write'/g) || []).length === 3 && (ipcSrc.match(/gated\('vault\.read'/g) || []).length === 1 && (ipcSrc.match(/gated\('git\.push'/g) || []).length === 3);
   check('the token is never written to a URL, file or environment variable', !/writeFileSync|appendFile|process\.env\[|process\.env\./.test(lib + ipcSrc) && !/remote\(\['(add|set-url)'[^)]*token/i.test(lib + ipcSrc));
   check('there is no console.log', !/console\.log/.test(lib + ipcSrc));

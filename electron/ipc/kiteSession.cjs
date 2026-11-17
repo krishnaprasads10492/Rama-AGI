@@ -19,6 +19,7 @@
 const crypto = require('crypto');
 const capability = require('../lib/capability.cjs');
 const principalBinding = require('../lib/principalBinding.cjs');
+const ipcGate = require('../lib/ipcGate.cjs');
 const accounts = require('../lib/brokerAccounts.cjs');
 const kite = require('../lib/kiteClient.cjs');
 
@@ -53,7 +54,7 @@ function register(ipcMain, injected = {}) {
   const busy = new Set();             // accountId with a fetch running
 
   const gated = (fn) => async (e, body) => {
-    const denied = capability.deny(principalBinding.getPrincipal(e), CAP);
+    const denied = ipcGate.denyEvent(e, CAP);
     if (denied) return denied;
     if (!d.unlocked()) return { ok: false, error: 'The store is locked. Sign in again.' };
     try { return await fn(body || {}); }

@@ -336,7 +336,7 @@ const ver = (v) => ({ code: 0, stdout: `Python ${v}\n`, stderr: '' });
   const setupSrc = code('electron/ipc/engineSetup.cjs') + code('electron/lib/engineBootstrap.cjs');
   check('no timer starts a setup', !/setInterval|setTimeout\(\s*\(\)\s*=>\s*(run|installPython)/.test(setupSrc));
   check('nothing starts a setup from status', !/status[^]{0,400}bootstrap\.run\(/.test(code('electron/ipc/engineSetup.cjs').split("'engineSetup:run'")[0]));
-  check('the gates are on the validated principal', /principalBinding\.getPrincipal\(e\)/.test(setupSrc) && !/\{\s*user\b/.test(setupSrc));
+  check('the gates are on the validated principal', /principalBinding\.getPrincipal\(e\)|ipcGate\.denyEvent\(e/.test(setupSrc) && !/\{\s*user\b/.test(setupSrc));
   check('write channels need stockmind.config and the read needs stockmind.view', /handle\('engineSetup:status', gated\('stockmind\.view'/.test(setupSrc) && /handle\('engineSetup:run', gated\('stockmind\.config'/.test(setupSrc) && /handle\('engineSetup:install-python', gated\('stockmind\.config'/.test(setupSrc));
   check('no shell is used to start a process', !/shell:\s*true|exec\(|execSync/.test(setupSrc.replace(/d\.exec\(|exec: bootstrap|realExec|\.exec\b/g, '')));
   const mi = code('electron/ipc/marketIntel.cjs');

@@ -404,9 +404,10 @@ function register(ipcMain) {
   // a tier. `ensure-prime` and `restore` stay open to a signed-in session: the app calls both at start-up
   // for every tier.
   const principalBinding = require('../lib/principalBinding.cjs');
+  const ipcGate = require('../lib/ipcGate.cjs');
   const capability = require('../lib/capability.cjs');
   const gated = (cap, fn) => async (e, ...args) => {
-    const denied = capability.deny(principalBinding.getPrincipal(e), cap);
+    const denied = ipcGate.denyEvent(e, cap);
     return denied || fn(e, ...args);
   };
   const signedIn = (fn) => async (e, ...args) => {
