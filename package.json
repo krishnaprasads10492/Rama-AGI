@@ -117,7 +117,8 @@
     "rebuild": "node scripts/rebuildNatives.cjs",
     "doctor:toolchain": "node scripts/toolchainProbe.cjs",
     "start": "electron .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "smoke:ipc-gate": "electron scripts/smokeIpcGate.cjs --no-sandbox"
   },
   "dependencies": {
     "argon2": "0.43.0",
