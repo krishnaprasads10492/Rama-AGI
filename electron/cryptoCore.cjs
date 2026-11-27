@@ -119,8 +119,29 @@ function lock() {
 }
 
 // ─── Encrypt buffer (v3: AAD + optional gzip) ────────────────────────────────
-function encryptBuffer(plaintext, aad = '') {
-  if (!_unlocked) throw new Error('CryptoCore: not unlocked');
+/**
+ * `keys` IS OPTIONAL AND ADDITIVE (Section 202).
+ *
+ * Omitted — which is every existing caller — this behaves exactly as before: the vault must be
+ * unlocked and the module's own key material is used.
+ *
+ * Supplied as `{ encKey, hmacKey, salt }`, this envelope is used with a key that is not the vault's.
+ * Matsya needs that: its backups are encrypted from master's written-down recovery phrase, not from
+ * his passcode, because a backup has to open on a machine that has never seen this one (192.5). The
+ * alternative was a SECOND AES-256-GCM-plus-HMAC implementation inside Matsya, and two envelopes in
+ * one codebase is how one of them quietly becomes the weaker one. So the audited envelope stays the
+ * only envelope and the key becomes a parameter.
+ */
+function encryptBuffer(plaintext, aad = '', keys = null) {
+  const encKey  = keys ? keys.encKey  : _encKey;
+  const hmacKey = keys ? keys.hmacKey : _hmacKey;
+  const salt    = keys ? keys.salt    : _salt;
+  if (!keys && !_unlocked) throw new Error('CryptoCore: not unlocked');
+  if (keys && !(Buffer.isBuffer(encKey) && encKey.length === 32
+    && Buffer.isBuffer(hmacKey) && hmacKey.length === 64
+    && Buffer.isBuffer(salt) && salt.length === SALT_BYTES)) {
+    throw new Error('CryptoCore: injected keys must be { encKey:32, hmacKey:64, salt:32 }');
+  }
 
   let payload = Buffer.isBuffer(plaintext) ? plaintext : Buffer.from(plaintext, 'utf8');
   let flags   = 0x00;
@@ -134,7 +155,7 @@ function encryptBuffer(plaintext, aad = '') {
   }
 
   const iv     = crypto.randomBytes(IV_BYTES);
-  const cipher = crypto.createCipheriv('aes-256-gcm', _encKey, iv);
+  const cipher = crypto.createCipheriv('aes-256-gcm', encKey, iv);
   if (aad) cipher.setAAD(Buffer.from(aad, 'utf8'));
 
   const enc     = Buffer.concat([cipher.update(payload), cipher.final()]);
@@ -142,17 +163,35 @@ function encryptBuffer(plaintext, aad = '') {
 
   const core = Buffer.concat([
     Buffer.from([VERSION_V3, flags]),
-    _salt,
+    salt,
     iv, authTag, enc,
   ]);
 
-  const mac = crypto.createHmac('sha512', _hmacKey).update(core).digest();
+  const mac = crypto.createHmac('sha512', hmacKey).update(core).digest();
   return Buffer.concat([core, mac]);
 }
 
+/**
+ * The salt out of a ciphertext header, without a key.
+ *
+ * A restore has a chicken-and-egg problem: the key is derived from the phrase AND a salt, and the
+ * salt lives in the blob. Section 193 claimed the ciphertext is "self-describing and restorable on a
+ * machine that has never seen this one", and this is the function that makes that true rather than
+ * aspirational — read the salt, derive the key, then decrypt.
+ *
+ * Returns null for anything too short to contain one, so a truncated file reads as unopenable rather
+ * than as a header of zeroes.
+ */
+function saltOf(cipherBuf) {
+  if (!Buffer.isBuffer(cipherBuf) || cipherBuf.length < 2 + SALT_BYTES) return null;
+  return cipherBuf.slice(2, 2 + SALT_BYTES);
+}
+
 // ─── Decrypt buffer ───────────────────────────────────────────────────────────
-function decryptBuffer(cipherBuf, aad = '') {
-  if (!_unlocked) throw new Error('CryptoCore: not unlocked');
+function decryptBuffer(cipherBuf, aad = '', keys = null) {
+  const encKey  = keys ? keys.encKey  : _encKey;
+  const hmacKey = keys ? keys.hmacKey : _hmacKey;
+  if (!keys && !_unlocked) throw new Error('CryptoCore: not unlocked');
   if (cipherBuf.length < 2 + SALT_BYTES + IV_BYTES + AUTHTAG_BYTES + HMAC_BYTES) {
     throw new Error('CryptoCore: ciphertext too short');
   }
@@ -160,7 +199,7 @@ function decryptBuffer(cipherBuf, aad = '') {
   // Split HMAC from end
   const mac      = cipherBuf.slice(cipherBuf.length - HMAC_BYTES);
   const core     = cipherBuf.slice(0, cipherBuf.length - HMAC_BYTES);
-  const expected = crypto.createHmac('sha512', _hmacKey).update(core).digest();
+  const expected = crypto.createHmac('sha512', hmacKey).update(core).digest();
   if (!crypto.timingSafeEqual(mac, expected)) {
     throw new Error('CryptoCore: HMAC verification failed — tampered or wrong password');
   }
@@ -173,7 +212,7 @@ function decryptBuffer(cipherBuf, aad = '') {
   const authTag = core.slice(offset, offset + AUTHTAG_BYTES); offset += AUTHTAG_BYTES;
   const enc     = core.slice(offset);
 
-  const decipher = crypto.createDecipheriv('aes-256-gcm', _encKey, iv);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', encKey, iv);
   decipher.setAuthTag(authTag);
   if (aad) decipher.setAAD(Buffer.from(aad, 'utf8'));
 
@@ -303,7 +342,7 @@ function rewriteVerifier(dataDir) {
 }
 
 module.exports = {
-  unlock, lock, encryptBuffer, decryptBuffer,
+  unlock, lock, encryptBuffer, decryptBuffer, saltOf,
   encryptToFile, decryptFromFile, secureDelete,
   encryptString, decryptString, isFirstRun,
   hasVerifier, writeVerifier, verifyPasscode, rewriteVerifier,
