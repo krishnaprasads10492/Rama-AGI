@@ -31,8 +31,19 @@
  * handler's business, and pretending otherwise would spread one responsibility across two files.
  */
 
-/** The verdicts a policy row may carry. Anything else is a malformed table. */
-const VERDICTS = Object.freeze(['self', 'bootstrap', 'public', 'observe']);
+/**
+ * The verdicts a policy row may carry. Anything else is a malformed table.
+ *
+ * `signed-in` was added in Section 201 for `autonomy:stop`, and the reason is worth keeping: master
+ * asked that **anyone signed in** be able to stop the system's autonomy, because that control is a
+ * BRAKE. The module's only capability is `system.suspend-autonomy` at tier 0, so the mechanical flip
+ * would have made stopping Rāma master-only — 196.15 refused it for exactly that reason.
+ *
+ * Expressing "authenticated, no particular power" by borrowing a tier-5 capability would have worked
+ * and lied: the row would claim the channel is about chat. A verdict that says what it means costs
+ * four lines and reads correctly in the table forever.
+ */
+const VERDICTS = Object.freeze(['self', 'bootstrap', 'public', 'observe', 'signed-in']);
 
 /** Installing twice would double-count every call and wrap every wrapper. */
 const INSTALLED = Symbol.for('rama.ipcGuard.installed');
@@ -89,6 +100,12 @@ function decide({ channel, senderTrusted, verdict, user, can }) {
     return { allow: true, reason: null, record: null };
   }
   if (verdict === 'observe') return { allow: true, reason: null, record: 'observed' };
+  if (verdict === 'signed-in') {
+    // Authentication, not authorisation: any real account passes, nobody-at-all does not. The
+    // principal comes from main's session table, so this cannot be satisfied by a payload claim.
+    if (user) return { allow: true, reason: null, record: null };
+    return { allow: false, reason: `Sign in first: "${channel}" needs an account`, record: 'denied' };
+  }
   return { allow: true, reason: null, record: null };
 }
 
@@ -134,8 +151,9 @@ function install({ ipcMain, policy, can, isOurSender, principal, report } = {}) 
   const guard = (channel, kind, run) => (event, ...args) => {
     const verdict = policy[channel];
     // The session table is only consulted when the verdict actually needs it, so a `public` or
-    // `observe` channel costs nothing extra on every call.
-    const needsUser = capOf(verdict) !== null;
+    // `observe` channel costs nothing extra on every call. `signed-in` needs it too: knowing whether
+    // anyone is signed in is the whole question it asks.
+    const needsUser = capOf(verdict) !== null || verdict === 'signed-in';
     const outcome = decide({
       channel,
       senderTrusted: isOurSender(event),

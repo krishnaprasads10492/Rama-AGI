@@ -50,6 +50,7 @@ app.whenReady().then(async () => {
         'smoke:self': 'self',
         'smoke:needs-vault': 'cap:vault.write',   // tier 0 only
         'smoke:needs-chat': 'cap:chat.send',      // tier 5 and above, i.e. anyone signed in
+        'smoke:signed-in': 'signed-in',           // authentication, no particular power (Section 201)
         'smoke:listener': 'cap:vault.write',
       },
       can: capability.can,
@@ -70,6 +71,7 @@ app.whenReady().then(async () => {
     ipcMain.handle('smoke:needs-vault', () => { ran += 1; return { ok: true, who: 'vault' }; });
     ipcMain.handle('smoke:needs-chat', () => { ran += 1; return { ok: true, who: 'chat' }; });
     ipcMain.handle('smoke:unclassified', () => { ran += 1; return { ok: true, who: 'new' }; });
+    ipcMain.handle('smoke:signed-in', () => { ran += 1; return { ok: true, who: 'signedin' }; });
 
     let heard = 0;
     const listener = () => { heard += 1; };
@@ -116,6 +118,18 @@ app.whenReady().then(async () => {
     principal = { id: 'm', username: 'master', tier: 0 };
     const asMaster = await invoke('smoke:needs-vault');
     check('master may', asMaster && asMaster.ok === true);
+
+    /*
+     * The `signed-in` verdict over real IPC (Section 201). This is the brake: `autonomy:stop` must
+     * work for anyone with an account, which is what a brake means, and must not work for nobody.
+     */
+    principal = null;
+    const brakeAnon = await invoke('smoke:signed-in');
+    check('the brake is refused when nobody is signed in', brakeAnon && brakeAnon.ok === false);
+    principal = { id: 'g', username: 'guest', tier: 5 };
+    const brakeGuest = await invoke('smoke:signed-in');
+    check('and works for the lowest tier there is, because that is what a brake is for',
+      brakeGuest && brakeGuest.ok === true && brakeGuest.who === 'signedin');
 
     // REDBY: cache the principal. A tier change or a revoked session must take effect on the NEXT
     // call, which is the guarantee `principalBinding` was built for and the gate must not undo.

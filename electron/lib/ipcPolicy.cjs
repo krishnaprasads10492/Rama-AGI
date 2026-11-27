@@ -17,7 +17,7 @@
  *   'public'        deliberately open and not privileged - window chrome, zoom
  *   'observe'       NOT YET CLASSIFIED. The gate records the call and enforces nothing
  *
- * 'observe' IS A DEBT REGISTER, not a verdict, and it may only SHRINK. 149 channels are in it
+ * 'observe' IS A DEBT REGISTER, not a verdict, and it may only SHRINK. 135 channels are in it
  * today. Every one is a handler that trusts whoever called it, and the plan in 196.5 brings them
  * down in tranches, highest privilege first. The suite fails if the count goes up.
  *
@@ -27,7 +27,7 @@
  * behaving identically to today, and tightens one row at a time with the UI exercised each time.
  *
  * Generated from the code as it stood, then corrected by hand. Counts at that moment:
- *   self 191, observe 149, bootstrap 16, public 10, enforced here 3
+ *   self 191, observe 135, bootstrap 16, public 10, signed-in 2, enforced here 15
  */
 const POLICY = Object.freeze({
   'agents:get': 'observe',
@@ -82,9 +82,9 @@ const POLICY = Object.freeze({
   'auth:set-active': 'self',
   'auth:set-tier': 'self',
   'auth:status': 'self',
-  'autonomy:resume': 'observe',
-  'autonomy:status': 'observe',
-  'autonomy:stop': 'observe',
+  'autonomy:resume': 'cap:system.suspend-autonomy',
+  'autonomy:status': 'signed-in',
+  'autonomy:stop': 'signed-in',
   'badge:bring-to-front': 'observe',
   'badge:clicked': 'public',
   'badge:get-enabled': 'observe',
@@ -235,7 +235,7 @@ const POLICY = Object.freeze({
   'meta:summary': 'self',
   'meta:vectors': 'self',
   'models:add-custom-provider': 'self',  // enforces models.add-key
-  'models:chat': 'observe',
+  'models:chat': 'cap:chat.send',
   'models:check-credentials': 'observe',
   'models:cloud-list': 'observe',
   'models:cloud-status': 'observe',
@@ -273,13 +273,13 @@ const POLICY = Object.freeze({
   'popout:dock': 'observe',
   'popout:redeem': 'observe',
   'proposals:apply': 'self',  // enforces self-modify.apply
-  'proposals:approve': 'observe',
+  'proposals:approve': 'cap:self-modify.apply',
   'proposals:audit': 'self',
   'proposals:create': 'self',
   'proposals:flush': 'self',
   'proposals:get': 'self',
   'proposals:list': 'self',
-  'proposals:reject': 'observe',
+  'proposals:reject': 'cap:self-modify.apply',
   'proposals:stats': 'self',
   'publish:preview-notes': 'observe',
   'publish:proposal': 'self',  // enforces release.cut
@@ -321,14 +321,14 @@ const POLICY = Object.freeze({
   'session:unlock': 'bootstrap',
   'shell:open-external': 'observe',
   'store:export-backup': 'observe',
-  'store:find': 'observe',
-  'store:get': 'observe',
-  'store:push': 'observe',
-  'store:remove': 'observe',
-  'store:save': 'observe',
-  'store:set': 'observe',
-  'store:status': 'observe',
-  'store:update': 'observe',
+  'store:find': 'cap:knowledge.read',
+  'store:get': 'cap:knowledge.read',
+  'store:push': 'cap:knowledge.write',
+  'store:remove': 'cap:knowledge.delete',
+  'store:save': 'cap:knowledge.write',
+  'store:set': 'cap:knowledge.write',
+  'store:status': 'cap:knowledge.read',
+  'store:update': 'cap:knowledge.write',
   'system:clean-temp': 'self',  // enforces os.temp-clean
   'system:get-disk-usage': 'observe',
   'system:get-metrics': 'observe',

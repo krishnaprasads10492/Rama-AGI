@@ -181,8 +181,30 @@ eq('a self-checking channel runs, because its handler does the checking',
   guard.decide({ channel: 'fs:read-file', senderTrusted: true, verdict: 'self', user: null, can: () => false }).allow,
   true);
 eq('an observed channel runs and is recorded as observed',
-  guard.decide({ channel: 'store:get', senderTrusted: true, verdict: 'observe', user: null, can: allow }).record,
+  guard.decide({ channel: 'x:y', senderTrusted: true, verdict: 'observe', user: null, can: allow }).record,
   'observed');
+
+/*
+ * `signed-in` — AUTHENTICATION WITHOUT AUTHORISATION (Section 201).
+ *
+ * Added for `autonomy:stop`, which master decided any signed-in account must be able to reach,
+ * because that control is a BRAKE. The module's only capability is `system.suspend-autonomy` at tier
+ * 0, so the mechanical flip would have made stopping Rāma master-only — 196.15 refused it for that
+ * reason, and this verdict is what refusing it cost.
+ */
+eq('a signed-in channel admits any real account, whatever its tier',
+  guard.decide({ channel: 'autonomy:stop', senderTrusted: true, verdict: 'signed-in', user: { tier: 5 }, can: () => false }).allow,
+  true);
+eq('and refuses nobody-at-all',
+  guard.decide({ channel: 'autonomy:stop', senderTrusted: true, verdict: 'signed-in', user: null, can: allow }).allow,
+  false);
+eq('the refusal tells the caller to sign in rather than naming a capability',
+  /Sign in/.test(guard.decide({ channel: 'autonomy:stop', senderTrusted: true, verdict: 'signed-in', user: null, can: allow }).reason || ''),
+  true);
+check('it is a verdict the gate understands', guard.isKnownVerdict('signed-in'));
+// REDBY: express "signed in" by borrowing a tier-5 capability. It would work and it would lie: the
+// row would claim the channel is about chat.
+eq('and it is NOT a capability, so it cannot be confused with one', guard.capOf('signed-in'), null);
 
 // THE CENTRALLY ENFORCED CASE, both ways round.
 eq('a cap: channel runs when the capability layer says yes',
@@ -292,6 +314,39 @@ function fakeIpcMain() {
   check('installing twice is refused, so no call is counted or wrapped twice',
     first !== null && second === null);
   first.uninstall();
+}
+
+/*
+ * `signed-in` DRIVEN THROUGH install(), not just through decide() — and this row exists because its
+ * absence let a mutation live.
+ *
+ * `install()` only resolves the principal when the verdict needs it, which is a real optimisation:
+ * a `public` or `observe` channel should not touch the session table on every call. Removing
+ * `signed-in` from that condition makes the gate hand `user: null` to a verdict whose entire question
+ * is "is anyone signed in", so **every** signed-in caller is refused — `autonomy:stop` would never
+ * work for anybody. The rows above all call `decide()` with an explicit user, so none of them could
+ * see it. The real-Electron smoke test caught it; the chain did not, and the chain is what runs.
+ */
+{
+  const ipcMain = fakeIpcMain();
+  let ran = 0;
+  const gate = guard.install({
+    ipcMain,
+    policy: { 'brake:stop': 'signed-in' },
+    can: () => false,                       // no capability at all: authentication is the only test
+    isOurSender: () => true,
+    principal: (e) => e?.who || null,
+    report: () => {},
+  });
+  ipcMain.handle('brake:stop', () => { ran += 1; return { ok: true }; });
+
+  eq('through install(), a signed-in caller reaches a signed-in channel',
+    ipcMain._invoke('brake:stop', { who: { tier: 5 } })?.ok, true);
+  check('and the handler really ran', ran === 1, `ran ${ran}`);
+  eq('while an unauthenticated one is refused',
+    ipcMain._invoke('brake:stop', { who: null })?.ok, false);
+  check('and that one did not run the handler', ran === 1, `ran ${ran}`);
+  gate.uninstall();
 }
 
 // A cap: row must consult the principal, NOT the arguments. Driven by handing the gate a principal
@@ -409,7 +464,44 @@ const tally = rows.reduce((acc, [, v]) => {
   return acc;
 }, {});
 console.log(`        self ${tally.self || 0}, observe ${tally.observe || 0}, bootstrap `
-  + `${tally.bootstrap || 0}, public ${tally.public || 0}, enforced here ${tally.enforced || 0}`);
+  + `${tally.bootstrap || 0}, public ${tally.public || 0}, signed-in ${tally['signed-in'] || 0}, `
+  + `enforced here ${tally.enforced || 0}`);
+
+/*
+ * THE DECISIONS MASTER MADE, PINNED BY NAME (Section 201).
+ *
+ * These are not derived from anything — they are his answers, and the point of writing them as rows
+ * is that loosening one later becomes a failing check rather than an edit nobody reviews. The
+ * self-modification path is the one that matters most: `proposals:approve` is the highest-privilege
+ * act this application has.
+ */
+section("master's enforcement decisions, pinned so they cannot be loosened quietly");
+const DECIDED = {
+  'models:chat': 'cap:chat.send',
+  'autonomy:stop': 'signed-in',
+  'autonomy:status': 'signed-in',
+  'autonomy:resume': 'cap:system.suspend-autonomy',
+  'proposals:approve': 'cap:self-modify.apply',
+  'proposals:reject': 'cap:self-modify.apply',
+  'store:get': 'cap:knowledge.read',
+  'store:find': 'cap:knowledge.read',
+  'store:status': 'cap:knowledge.read',
+  'store:set': 'cap:knowledge.write',
+  'store:push': 'cap:knowledge.write',
+  'store:update': 'cap:knowledge.write',
+  'store:save': 'cap:knowledge.write',
+  'store:remove': 'cap:knowledge.delete',
+};
+const drifted = Object.entries(DECIDED).filter(([ch, want]) => POLICY[ch] !== want)
+  .map(([ch, want]) => `${ch} is "${POLICY[ch]}", decided "${want}"`);
+check('every channel master ruled on still carries the verdict he chose',
+  drifted.length === 0, drifted.join('; '));
+
+// Left in `observe` on purpose, and said so: exporting the whole store is more sensitive than
+// reading one key, no capability for it exists, and inventing one means editing
+// shared/capabilities.json — master's protected file, not mine.
+eq('store:export-backup is still unclassified, pending a capability that does not exist yet',
+  POLICY['store:export-backup'], 'observe');
 
 let baseline = null;
 if (fs.existsSync(BASELINE)) {
@@ -636,23 +728,26 @@ eq('and ignores NODE_OPTIONS', fuses.enableNodeOptionsEnvironmentVariable, false
 eq('and refuses --inspect', fuses.enableNodeCliInspectArguments, false);
 
 /*
- * THE TWO I AM DELIBERATELY NOT SETTING, asserted as absent so that enabling one is a VISIBLE change
- * rather than a quiet line in a config file.
+ * THE TWO TAMPER FUSES, now ON — master approved them in Section 201 with "after one test build".
  *
- * `enableEmbeddedAsarIntegrityValidation` and `onlyLoadAppFromAsar` are the fuses that would detect a
- * tampered bundle, and they are the ones most worth having. They also interact with `asarUnpack`,
- * which this project needs for `node-pty` and `argon2`, and on Windows that combination has a
- * history of failing at startup rather than at build time.
+ * `enableEmbeddedAsarIntegrityValidation` makes Electron verify the asar against a header hash, and
+ * `onlyLoadAppFromAsar` refuses to load the app from anywhere else. Together they are what detects a
+ * tampered bundle, which is the strongest thing on this list.
  *
- * `vite build` runs here but a PACKAGED build does not, so I cannot test the one failure mode that
- * matters. Enabling a fuse that can only be proven on master's machine, in a project that lost four
- * tranches to exactly that kind of build problem, would be trading a real risk for a theoretical
- * gain. They are recommended in 196.14 and left off until there is a test build to prove them.
+ * 196.14 left them off because they interact with `asarUnpack` — needed here for `node-pty` and
+ * `argon2` — and on Windows that combination has a history of failing at STARTUP rather than at
+ * build time, which this workspace cannot test. That is still true. What changed is the decision:
+ * master's next packaged build IS the test, and the cost of being wrong is one build rather than a
+ * shipped installer, because removing two lines reverts it.
+ *
+ * ASSERTED ON, so that silently dropping them back out is a failing row rather than a quiet edit —
+ * the same treatment their absence had.
  */
-check('the asar-integrity fuses are left off until a packaged build can prove them',
-  fuses.enableEmbeddedAsarIntegrityValidation === undefined
-  && fuses.onlyLoadAppFromAsar === undefined,
-  JSON.stringify(fuses));
+eq('the bundle is verified against its own hash', fuses.enableEmbeddedAsarIntegrityValidation, true);
+eq('and the app will not load from anywhere but the asar', fuses.onlyLoadAppFromAsar, true);
+console.log('        NOT PROVEN HERE: a packaged build cannot run in this workspace, so these two');
+console.log('        are declared and untested. Master\'s next build is the test, and if the app');
+console.log('        fails to start, removing these two lines is the whole revert.');
 
 console.log('\n  held by hand, listed rather than implied:');
 console.log('    - `self` is cross-referenced against a GUARD IDIOM found in the handler body. It');
