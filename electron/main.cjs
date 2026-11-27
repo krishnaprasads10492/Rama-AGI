@@ -1802,10 +1802,34 @@ app.whenReady().then(async () => {
   // fatally incomplete installation is reported by Rāma rather than discovered by
   // master when a feature silently does nothing. See spec Section 49.
   const doctor = require('./lib/startupDoctor.cjs');
+  /*
+   * WHAT RĀMA KNOWS ABOUT ITS OWN BACKUPS, gathered before the diagnosis so it can be reported in it
+   * (Section 204). Total by construction — `gather` degrades every failure to "cannot tell" — so a
+   * backup check can never be the reason the health report fails to appear.
+   */
+  let backupState = null;
+  try {
+    const matsyaState = require('./lib/matsyaState.cjs');
+    const matsyaReadiness = require('./lib/matsyaReadiness.cjs');
+    const facts = matsyaState.gather({
+      dataDir:          path.join(app.getPath('userData')),
+      phraseRecordPath: path.join(app.getPath('userData'), 'system', 'matsya-phrase.json'),
+      exists:   (p) => fs.existsSync(p),
+      statfs:   (p) => fs.statfsSync(p),
+      readDir:  (p) => fs.readdirSync(p),
+      readText: (p) => fs.readFileSync(p, 'utf8'),
+    });
+    backupState = matsyaReadiness.assess(facts);
+    console.warn(`[matsya] ${matsyaReadiness.summary(backupState, facts.destination)}`);
+  } catch (err) {
+    console.warn(`[matsya] backup state could not be read: ${err.message}`);
+  }
+
   startupHealth = doctor.diagnose({
     safeRequireFailures: loadFailures(),
     crashReports:        crashGuard.recentReports(3),
     appRoot:             path.join(__dirname, '..'),
+    backup:              backupState,
   });
 
   console.warn(`[doctor] startup ${doctor.summarise(startupHealth)}`);

@@ -127,6 +127,31 @@ function checkingFunctionsIn(src) {
   return names;
 }
 
+/**
+ * A handler's body ends where the handler ends — at its own `});` — not at the next registration.
+ *
+ * "From this registration to the next" is correct for every handler except the LAST one in a file,
+ * where it means "to the end of the file". `notify` is the final `ipcMain.handle` in `main.cjs`, so
+ * its body was the remaining 436 lines: the whole of `whenReady`, every subsystem registration, the
+ * quit handlers. Section 204 added a `matsyaReadiness.summary(...)` call inside that span, `summary`
+ * is a name the delegation rule reads as a checking function, and `notify` abruptly reported itself
+ * as guarded — while the channel itself had not changed at all.
+ *
+ * So the end is found: the first line at or left of the registration's own indentation that closes a
+ * call. Overshooting is the dangerous direction, because it OVERSTATES what is guarded, which is the
+ * lie this suite exists to prevent; stopping early understates it, which fails loudly instead.
+ */
+function handlerBody(src, start, hardEnd) {
+  const lineStart = src.lastIndexOf('\n', start) + 1;
+  const indent = start - lineStart;
+  const closer = new RegExp(`^[ \\t]{0,${Math.max(indent, 0)}}\\}\\s*\\)\\s*;?\\s*$`);
+  const lines = src.slice(start, hardEnd).split('\n');
+  for (let n = 1; n < lines.length; n += 1) {
+    if (closer.test(lines[n])) return lines.slice(0, n + 1).join('\n');
+  }
+  return lines.join('\n');
+}
+
 function isGuarded(body, checkers) {
   if (DIRECT_IDIOM.test(body)) return true;
   for (const name of checkers) {
@@ -144,7 +169,23 @@ function readRegistrations() {
     const marks = [...src.matchAll(/ipcMain\.(?:handle|handleOnce|on|once)\(\s*['"`]([^'"`]+)['"`]/g)];
     for (let i = 0; i < marks.length; i += 1) {
       const channel = marks[i][1];
-      const body = src.slice(marks[i].index, i + 1 < marks.length ? marks[i + 1].index : src.length);
+      /*
+       * THE BODY IS CAPPED, because "to the next registration" means "to the end of the file" for the
+       * LAST handler in it — and that was wrong in a way that only showed up when the file changed.
+       *
+       * `notify` is the final `ipcMain.handle` in `main.cjs`, so its body was the remaining 436
+       * lines: the whole of `whenReady`, every subsystem registration, the quit handlers. Section 204
+       * added a `matsyaReadiness.summary(...)` call inside that span, `summary` happens to be a name
+       * the delegation rule reads as a checking function, and `notify` abruptly reported itself as
+       * guarded. The channel had not changed at all.
+       *
+       * So the span is bounded. A handler longer than this is an outlier worth its own look, and a
+       * cap that occasionally reads too little is far safer here than one that reads an entire file:
+       * reading too little understates what is guarded, which fails loudly, while reading too much
+       * overstates it, which is the lie this suite exists to prevent.
+       */
+      const hardEnd = i + 1 < marks.length ? marks[i + 1].index : src.length;
+      const body = handlerBody(src, marks[i].index, hardEnd);
       const guarded = isGuarded(body, checkers);
       const prev = out.get(channel);
       // Registered in two places: keep the guarded reading, so the table can never claim `self` on

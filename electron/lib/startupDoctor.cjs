@@ -183,6 +183,11 @@ function diagnose(ctx = {}) {
     });
   }
 
+  if (ctx.backup && typeof ctx.backup === 'object') {
+    for (const row of ctx.backup.report || []) add(row.label, row.pass, row.note);
+    for (const entry of ctx.backup.degraded || []) degraded.push(entry);
+  }
+
   // Subsystems that degraded while loading
   for (const f of ctx.safeRequireFailures ?? []) {
     add(f.name, false, f.reason);
